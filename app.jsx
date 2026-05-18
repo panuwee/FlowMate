@@ -81,6 +81,20 @@ function App() {
       if (!alive) return;
       if (realUser) {
         setAuthState({ status: "signed-in", user: realUser });
+
+        // If we just completed Sign in (sessionStorage flag set by
+        // flowmateSignInWithGoogle), navigate to the requested post-login
+        // route. The OAuth callback puts the user back at the origin with
+        // an `#access_token=...` hash that Supabase clears — without this
+        // step the user would land on the default "my-work" tab.
+        let postLoginHash = null;
+        try { postLoginHash = sessionStorage.getItem("flowmate:postLoginHash"); } catch (e) {}
+        if (postLoginHash) {
+          try { sessionStorage.removeItem("flowmate:postLoginHash"); } catch (e) {}
+          if (TITLE_MAP[postLoginHash]) {
+            window.location.hash = postLoginHash;
+          }
+        }
       }
     });
 

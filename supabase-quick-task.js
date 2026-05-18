@@ -346,10 +346,15 @@ async function flowmateSignInWithGoogle() {
     throw new Error("Supabase client is not ready.");
   }
   // Portable redirect: works for `http://localhost:3000/`, GitHub Pages
-  // (`https://panuwee.github.io/FlowMate/`), or any other deploy target —
-  // wherever the user is, they come back to the same origin/pathname plus
-  // `#board` so they land on the kanban board after login.
-  const redirectTo = window.location.origin + window.location.pathname + "#board";
+  // (`https://panuwee.github.io/FlowMate/`), or any other deploy target.
+  // IMPORTANT: redirectTo MUST NOT contain a hash. Supabase appends
+  // `#access_token=...` to the URL, and our own `#board` route fragment
+  // would collide ("#board#access_token=...") and break token parsing.
+  // We stash the post-login route in sessionStorage and the App component
+  // restores it after auth init completes.
+  try { sessionStorage.setItem("flowmate:postLoginHash", "board"); } catch (e) {}
+
+  const redirectTo = window.location.origin + window.location.pathname;
   const { error } = await window.flowmateSupabase.auth.signInWithOAuth({
     provider: "google",
     options: {
