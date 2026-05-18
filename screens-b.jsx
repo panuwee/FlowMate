@@ -390,7 +390,14 @@ function BoardScreen({ onOpen }) {
                       draggable={draggable}
                       onDragStart={(e) => handleDragStart(e, w)}
                       onDragEnd={handleDragEnd}
-                      onClick={() => { if (!isDragging) onOpen(w.id); }}
+                      onClick={() => {
+                        if (isDragging) return;
+                        // Pass the full row through the global so DetailScreen
+                        // can render Supabase-only items that aren't in the
+                        // static WORK_BY_ID mock (e.g. QT-0214).
+                        window.flowmateSelectedWorkItem = w;
+                        onOpen(w.id);
+                      }}
                       style={{
                         cursor: draggable ? (isDragging ? "grabbing" : "grab") : "pointer",
                         opacity: isDragging ? 0.4 : 1,

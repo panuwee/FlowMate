@@ -5,8 +5,12 @@ const { useState, useEffect } = React;
    MY WORK
    ============================================================ */
 function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
-  // From the perspective of "Pond" (a hybrid-skill member)
-  const meIds = ["m-pond", "10000000-0000-0000-0000-000000000001"];
+  // Identify "me" from the current mock-auth user. When Google SSO lands,
+  // window.FLOWMATE_CURRENT_USER is the seam — meIds derives from it.
+  const currentUser = window.FLOWMATE_CURRENT_USER || {};
+  const myMember = (window.MEMBERS || []).find(m => m.id === currentUser.team_member_id)
+    || (window.MEMBERS || []).find(m => m.name && currentUser.name && m.name.toLowerCase() === currentUser.name.toLowerCase());
+  const meIds = [currentUser.team_member_id, currentUser.id, myMember && myMember.id].filter(Boolean);
   const [sourceRows, setSourceRows] = useState(WORK);
   const [loadState, setLoadState] = useState({ status: "loading", message: "Loading Supabase data..." });
 
@@ -237,7 +241,7 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                   {w.type !== "quick" && w.status === "in_progress" && <button className="btn btn--xs btn--primary" onClick={() => onCreativeTransition && onCreativeTransition(w, "review")}><Icon name="send" size={11} /> Submit review</button>}
                   {w.type !== "quick" && w.status === "review" && <button className="btn btn--xs btn--ghost" disabled>Awaiting requester</button>}
                   {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && <button className="btn btn--xs btn--danger" onClick={() => onCreativeTransition && onCreativeTransition(w, "blocked")}>Block</button>}
-                  {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--danger" disabled title="Resolve block workflow is planned for MVP 1.1">Resolve block (MVP 1.1)</button>}
+                  {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Resume</button>}
                 </td>
               </tr>
             ))}
@@ -368,30 +372,47 @@ function CreateScreen({ onNav }) {
     dueDate: "2026-05-18",
     priority: "normal",
   });
+  const [creativeDraft, setCreativeDraft] = useState({
+    title: "",
+    requesterTeam: "Marketing",
+    campaignName: "",
+    assetType: "static-graphic",
+    assetSubtype: "Standard banner / complex social content",
+    platforms: "Instagram",
+    sizeFormat: "1080x1080",
+    briefLink: "",
+    referenceLink: "",
+    priority: "normal",
+    urgentReason: "",
+    dueDate: "2026-05-22",
+    launchDate: "2026-05-25",
+  });
 
   async function handleSubmit() {
     setIsSubmitting(true);
-    if (mode === "quick") {
-      try {
+    try {
+      if (mode === "quick") {
         const created = await window.createFlowMateQuickTask(quickDraft);
         setResult({ kind: "quick_created", id: created.display_id || created.id });
-      } catch (error) {
-        console.error("[FlowMate Create] Quick task failed:", error);
-        setResult({ kind: "error", id: "Not saved", message: error.message || "Quick task could not be created." });
-      } finally {
-        setIsSubmitting(false);
+      } else {
+        const created = await window.createFlowMateCreativeRequest(creativeDraft);
+        const assignment = created.assignment || {};
+        const result = assignment.result || "queued";
+        setResult({
+          kind: result === "assigned" ? "assigned" : result === "need_brief" ? "need_brief" : "queued",
+          id: created.display_id || created.id,
+          owner: assignment.owner_code ? `m-${assignment.owner_code}` : null,
+          effort: assignment.effort || null,
+          reason: assignment.reason || "",
+        });
       }
-    } else {
-      setResult({
-        kind: "assigned",
-        id: "CR-1057",
-        owner: "m-eye",
-        effort: 4,
-        reason: "Auto: static graphic assigned to Eye by skill, WIP (1/3), and remaining capacity through May 22.",
-      });
+    } catch (error) {
+      console.error("[FlowMate Create] submit failed:", error);
+      setResult({ kind: "error", id: "Not saved", message: error.message || "Submit failed." });
+    } finally {
       setIsSubmitting(false);
+      setSubmitted(true);
     }
-    setSubmitted(true);
   }
 
   if (submitted) return <CreateResultScreen result={result} onAgain={() => { setSubmitted(false); setResult(null); }} onNav={onNav} />;
@@ -432,7 +453,9 @@ function CreateScreen({ onNav }) {
           <span className="card__sub">{mode === "creative" ? "All fields with * are required for assignment." : "Only title and due date are required."}</span>
         </div>
         <div className="card__body">
-          {mode === "quick" ? <QuickTaskForm value={quickDraft} onChange={setQuickDraft} /> : <CreativeRequestForm />}
+          {mode === "quick"
+            ? <QuickTaskForm value={quickDraft} onChange={setQuickDraft} />
+            : <CreativeRequestForm value={creativeDraft} onChange={setCreativeDraft} />}
         </div>
       </div>
 
@@ -496,26 +519,27 @@ function QuickTaskForm({ value, onChange }) {
     </div>
   );
 }
-function CreativeRequestForm() {
-  const [assetType, setAssetType] = useState("static-graphic");
-  const [priority, setPriority] = useState("normal");
+function CreativeRequestForm({ value, onChange }) {
+  function update(field, next) { onChange({ ...value, [field]: next }); }
   return (
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" placeholder="e.g. AOV ranked season - IG carousel set (6 frames)" />
+        <input className="input" value={value.title} onChange={e => update("title", e.target.value)} placeholder="e.g. AOV ranked season - IG carousel set (6 frames)" />
       </div>
       <div className="field">
         <label className="field__label">Requester team <span className="req">*</span></label>
-        <select className="select"><option>Marketing</option><option>Esport Ops</option><option>Community</option><option>Sales</option><option>Product</option></select>
+        <select className="select" value={value.requesterTeam} onChange={e => update("requesterTeam", e.target.value)}>
+          <option>Marketing</option><option>Esport Ops</option><option>Community</option><option>Sales</option><option>Product</option><option>Operations</option>
+        </select>
       </div>
       <div className="field">
         <label className="field__label">Campaign <span className="req">*</span></label>
-        <input className="input" placeholder="e.g. AOV S24 Launch" />
+        <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. AOV S24 Launch" />
       </div>
       <div className="field">
         <label className="field__label">Asset type <span className="req">*</span></label>
-        <select className="select" value={assetType} onChange={e => setAssetType(e.target.value)}>
+        <select className="select" value={value.assetType} onChange={e => update("assetType", e.target.value)}>
           <option value="static-graphic">Static graphic</option>
           <option value="general-video">General video</option>
           <option value="motion">Motion</option>
@@ -525,7 +549,7 @@ function CreativeRequestForm() {
       </div>
       <div className="field">
         <label className="field__label">Asset subtype <span className="req">*</span></label>
-        <select className="select">
+        <select className="select" value={value.assetSubtype} onChange={e => update("assetSubtype", e.target.value)}>
           <option>Simple banner / ad visual</option>
           <option>Standard banner / complex social content</option>
           <option>Esport graphic pack - minor</option>
@@ -538,41 +562,41 @@ function CreativeRequestForm() {
       </div>
       <div className="field">
         <label className="field__label">Platform <span className="req">*</span></label>
-        <input className="input" placeholder="Instagram, TikTok, YouTube, Web..." />
+        <input className="input" value={value.platforms} onChange={e => update("platforms", e.target.value)} placeholder="Instagram, TikTok, YouTube, Web..." />
       </div>
       <div className="field">
         <label className="field__label">Size / format <span className="req">*</span></label>
-        <input className="input" placeholder="e.g. 1080x1350, 1080x1920" />
+        <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="e.g. 1080x1350, 1080x1920" />
       </div>
       <div className="field">
         <label className="field__label">Brief link <span className="req">*</span></label>
-        <input className="input" placeholder="https://docs.google.com/..." />
+        <input className="input" value={value.briefLink} onChange={e => update("briefLink", e.target.value)} placeholder="https://docs.google.com/..." />
       </div>
       <div className="field">
         <label className="field__label">Reference link</label>
-        <input className="input" placeholder="Optional - Figma / mood board / past asset" />
+        <input className="input" value={value.referenceLink} onChange={e => update("referenceLink", e.target.value)} placeholder="Optional - Figma / mood board / past asset" />
       </div>
       <div className="field">
         <label className="field__label">Priority <span className="req">*</span></label>
-        <select className="select" value={priority} onChange={e => setPriority(e.target.value)}>
+        <select className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>
           <option value="low">Low</option><option value="normal">Normal</option>
           <option value="high">High</option><option value="urgent">Urgent</option>
         </select>
       </div>
       <div className="field">
-        <label className="field__label">Urgent reason {priority === "urgent" && <span className="req">*</span>}</label>
-        <input className="input" disabled={priority !== "urgent"} placeholder={priority === "urgent" ? "Why urgent? (visible to supervisor)" : "Only required when priority is Urgent"} />
+        <label className="field__label">Urgent reason {value.priority === "urgent" && <span className="req">*</span>}</label>
+        <input className="input" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} disabled={value.priority !== "urgent"} placeholder={value.priority === "urgent" ? "Why urgent? (visible to supervisor)" : "Only required when priority is Urgent"} />
       </div>
       <div className="field">
         <label className="field__label">Due date <span className="req">*</span></label>
-        <input className="input" type="date" defaultValue="2026-05-22" />
+        <input className="input" type="date" value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />
       </div>
       <div className="field">
         <label className="field__label">Launch date <span className="req">*</span></label>
-        <input className="input" type="date" defaultValue="2026-05-25" />
+        <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />
       </div>
 
-      {assetType === "hybrid" && (
+      {value.assetType === "hybrid" && (
         <div className="field field--full">
           <div className="reason-box reason-box--queued">
             <strong>Heads up - hybrid requests are queued automatically.</strong> Static and video work are split into separate requests so the assignment engine can route by skill. Effort will be set to 8 with <span className="mono">needs_split = true</span>.
@@ -589,7 +613,7 @@ function CreativeRequestForm() {
 }
 
 function CreateResultScreen({ result, onAgain, onNav }) {
-  const m = result.kind === "assigned" ? MEMBERS_BY_ID[result.owner] : null;
+  const m = result.kind === "assigned" && result.owner ? MEMBERS_BY_ID[result.owner] : null;
   return (
     <div className="page" style={{ maxWidth: 760 }}>
       <div className="card">
@@ -604,7 +628,7 @@ function CreateResultScreen({ result, onAgain, onNav }) {
           <span className="card__sub mono">{result.id}</span>
         </div>
         <div className="card__body">
-          {result.kind === "assigned" && (
+          {result.kind === "assigned" && m && (
             <div className="col" style={{ gap: 12 }}>
               <div className="row" style={{ gap: 12 }}>
                 <Avatar memberId={result.owner} size="avatar--xl" />
@@ -617,6 +641,24 @@ function CreateResultScreen({ result, onAgain, onNav }) {
                 <span className="muted" style={{ fontSize: 12 }}>effort points</span>
               </div>
               <div className="reason-box">{result.reason}</div>
+            </div>
+          )}
+          {result.kind === "queued" && (
+            <div className="col" style={{ gap: 12 }}>
+              <div className="muted">No eligible owner right now — request sits in the Central queue until capacity opens.</div>
+              {result.effort != null && (
+                <div className="row" style={{ gap: 6, alignItems: "center" }}>
+                  <Effort value={result.effort} lg />
+                  <span className="muted" style={{ fontSize: 12 }}>effort points</span>
+                </div>
+              )}
+              <div className="reason-box reason-box--queued">{result.reason}</div>
+            </div>
+          )}
+          {result.kind === "need_brief" && (
+            <div className="col" style={{ gap: 12 }}>
+              <div className="muted">Required brief fields are missing. Engine will not run until brief is complete.</div>
+              <div className="reason-box reason-box--need">{result.reason}</div>
             </div>
           )}
           {result.kind === "quick_created" && (
@@ -645,8 +687,99 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const selected = window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === id
     ? window.flowmateSelectedWorkItem
     : null;
-  const w = selected || WORK_BY_ID[id] || WORK_BY_ID["CR-1051"];
+  // Do NOT fall back to a hard-coded "CR-1051" when the id can't be resolved
+  // — that produced the bug where clicking QT-0214 in Board showed CR-1051's
+  // detail. If we genuinely have nothing, render an empty state below.
+  const w = selected || WORK_BY_ID[id] || null;
+
+  if (!w) {
+    return (
+      <div className="page" style={{ maxWidth: 640 }}>
+        <div className="row" style={{ marginBottom: 12, fontSize: 12 }}>
+          <button className="btn btn--ghost btn--xs" onClick={() => onNav("my-work")}><Icon name="chevron" size={11} style={{ transform: "rotate(180deg)" }} /> My work</button>
+          <span className="muted">/</span>
+          <span className="mono muted">{id}</span>
+        </div>
+        <div className="card">
+          <div className="card__head"><span className="card__title">Work item not loaded</span></div>
+          <div className="card__body">
+            <div className="reason-box reason-box--need">
+              We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Central queue</strong> so the full row is fetched from Supabase.
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <button className="btn btn--secondary" onClick={() => onNav("list")}><Icon name="list" /> Open list view</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const owner = MEMBERS_BY_ID[w.assignee];
+  const [actionMsg, setActionMsg] = useState(null);
+  const [pending, setPending] = useState(false);
+
+  async function runCreativeTransition(nextStatus) {
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This is mock data — connect to Supabase to mutate." });
+      return;
+    }
+    const options = {};
+    if (nextStatus === "review") {
+      const link = window.prompt("Delivery link is required");
+      if (!link) return;
+      options.deliveryLink = link;
+    }
+    if (nextStatus === "blocked") {
+      const reason = window.prompt("Blocked reason is required");
+      if (!reason) return;
+      options.blockedReason = reason;
+    }
+    setPending(true);
+    try {
+      await window.transitionFlowMateCreativeStatus(w.id, nextStatus, options);
+      setActionMsg({ tone: "ok", text: `${w.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}. Refresh the list to see the update.` });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Status change failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function runRerunAssignment() {
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This is mock data — connect to Supabase to rerun." });
+      return;
+    }
+    setPending(true);
+    try {
+      const data = await window.rerunFlowMateAssignment(w.id);
+      const r = data && data.result;
+      setActionMsg({ tone: "ok", text: `Rerun result: ${r || "ok"} — refresh to see latest.` });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Rerun failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function runCancel() {
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This is mock data — connect to Supabase to cancel." });
+      return;
+    }
+    const reason = window.prompt("Cancel reason is required");
+    if (!reason) return;
+    setPending(true);
+    try {
+      await window.cancelFlowMateWorkItem(w, reason);
+      setActionMsg({ tone: "ok", text: `${w.id} cancelled.` });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Cancel failed." });
+    } finally {
+      setPending(false);
+    }
+  }
 
   return (
     <div className="page">
@@ -669,15 +802,49 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="page__sub" style={{ marginTop: 4 }}>{w.requesterTeam || "No team"} - {w.campaign || "No campaign"} - requested by {w.requester || "-"}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--ghost" disabled title="Detail overflow menu is planned for MVP 1.1"><Icon name="more" /> More (MVP 1.1)</button>
-          <button className="btn btn--danger" disabled title="Detail status actions are planned for MVP 1.1"><Icon name="block" /> Block (MVP 1.1)</button>
-          <button className="btn btn--secondary" disabled title="Brief link opening is planned for MVP 1.1"><Icon name="link" /> Open brief (MVP 1.1)</button>
-          {w.status === "in_progress" && <button className="btn btn--primary" disabled title="Detail status actions are planned for MVP 1.1"><Icon name="send" /> Submit review (MVP 1.1)</button>}
-          {w.status === "assigned" && <button className="btn btn--primary" disabled title="Detail status actions are planned for MVP 1.1"><Icon name="play" /> Start work (MVP 1.1)</button>}
-          {w.status === "review" && <button className="btn btn--primary" disabled title="Requester approval is planned for MVP 1.1"><Icon name="check" /> Approve delivered (MVP 1.1)</button>}
-          {w.status === "queued" && <button className="btn btn--primary" disabled title="Assignment rerun is planned for MVP 1.1"><Icon name="rerun" /> Rerun assignment (MVP 1.1)</button>}
+          {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && (
+            <button className="btn btn--danger" onClick={() => runCreativeTransition("blocked")} disabled={pending}><Icon name="block" /> Block</button>
+          )}
+          {w.type !== "quick" && !["delivered", "cancelled"].includes(w.status) && (
+            <button className="btn btn--ghost" onClick={runCancel} disabled={pending}><Icon name="x" /> Cancel</button>
+          )}
+          {w.type !== "quick" && w.status === "assigned" && (
+            <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Start work</button>
+          )}
+          {w.type !== "quick" && w.status === "in_progress" && (
+            <button className="btn btn--primary" onClick={() => runCreativeTransition("review")} disabled={pending}><Icon name="send" /> Submit review</button>
+          )}
+          {w.type !== "quick" && w.status === "review" && (
+            <>
+              <button className="btn btn--secondary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}>Request changes</button>
+              <button className="btn btn--primary" onClick={() => runCreativeTransition("delivered")} disabled={pending}><Icon name="check" /> Approve delivered</button>
+            </>
+          )}
+          {w.type !== "quick" && w.status === "blocked" && (
+            <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Resume</button>
+          )}
+          {w.type !== "quick" && w.status === "queued" && (
+            <button className="btn btn--primary" onClick={runRerunAssignment} disabled={pending}><Icon name="rerun" /> Rerun assignment</button>
+          )}
+          {w.type !== "quick" && w.status === "need_brief" && (
+            <button className="btn btn--primary" onClick={async () => {
+              setPending(true);
+              try {
+                const data = await window.recheckFlowMateBrief(w.id);
+                setActionMsg({ tone: "ok", text: `Brief rechecked: ${data && data.result || "ok"}.` });
+              } catch (error) {
+                setActionMsg({ tone: "bad", text: error.message || "Recheck failed." });
+              } finally { setPending(false); }
+            }} disabled={pending}><Icon name="rerun" /> Recheck brief</button>
+          )}
         </div>
       </div>
+
+      {actionMsg && (
+        <div className={`reason-box ${actionMsg.tone === "bad" ? "reason-box--need" : actionMsg.tone === "warn" ? "reason-box--queued" : ""}`} style={{ marginBottom: 12 }}>
+          {actionMsg.text}
+        </div>
+      )}
 
       <div className="detail">
         <div className="detail__main">
