@@ -170,3 +170,76 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
 }
 
 window.transitionFlowMateCreativeStatus = transitionFlowMateCreativeStatus;
+
+// ===========================================================================
+// Google Workspace SSO via Supabase Auth
+// แทนที่ mock FLOWMATE_CURRENT_USER ด้านบนเมื่อ Supabase auth พร้อมใช้งาน
+// ===========================================================================
+async function flowmateInitAuth() {
+  if (!window.flowmateSupabase) return null;
+
+  const { data: { session } } = await window.flowmateSupabase.auth.getSession();
+  if (!session) return null;
+
+  const { data: profile, error } = await window.flowmateSupabase
+    .from("users")
+    .select("id, email, display_name, requester_team, is_active")
+    .eq("id", session.user.id)
+    .single();
+
+  if (error || !profile) {
+    console.error("[FlowMate Auth] profile load failed:", error);
+    return null;
+  }
+
+  if (!profile.is_active) {
+    await window.flowmateSupabase.auth.signOut();
+    window.alert("Account is inactive. Please contact admin.");
+    return null;
+  }
+
+  const { data: member } = await window.flowmateSupabase
+    .from("team_members")
+    .select("id")
+    .eq("user_id", profile.id)
+    .maybeSingle();
+
+  // overwrite mock identity ด้วย user จริง
+  window.FLOWMATE_CURRENT_USER = {
+    id: profile.id,
+    name: profile.display_name,
+    email: profile.email,
+    team_member_id: member ? member.id : null,
+  };
+  return window.FLOWMATE_CURRENT_USER;
+}
+
+async function flowmateSignInWithGoogle() {
+  const { error } = await window.flowmateSupabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: window.location.origin + window.location.pathname,
+      queryParams: { hd: "garena.com" },
+    },
+  });
+  if (error) throw error;
+}
+
+async function flowmateSignOut() {
+  await window.flowmateSupabase.auth.signOut();
+  window.FLOWMATE_CURRENT_USER = null;
+  window.location.reload();
+}
+
+window.flowmateInitAuth = flowmateInitAuth;
+window.flowmateSignInWithGoogle = flowmateSignInWithGoogle;
+window.flowmateSignOut = flowmateSignOut;
+
+if (window.flowmateSupabase) {
+  window.flowmateSupabase.auth.onAuthStateChange((event) => {
+    if (event === "SIGNED_OUT") {
+      window.FLOWMATE_CURRENT_USER = null;
+      window.location.reload();
+    }
+  });
+}
