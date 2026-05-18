@@ -1,4 +1,4 @@
-﻿// FlowMate โ€” Screens part C: Workload, KPI, Team Settings
+﻿// FlowMate - Screens part C: Workload, KPI, Team Settings
 const { useState: useStateC, useEffect: useEffectC } = React;
 
 /* ============================================================
@@ -84,8 +84,8 @@ function WorkloadScreen({ onOpen }) {
           <div className="page__sub">Per-member effort across the next 5 working days - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}><option>This week (5d)</option><option>Next week</option><option>Custom range</option></select>
-          <button className="btn btn--secondary"><Icon name="download" /> Export</button>
+          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }} disabled title="Workload date range selector is planned for MVP 1.1"><option>This week (5d) - MVP 1.1</option><option>Next week</option><option>Custom range</option></select>
+          <button className="btn btn--secondary" disabled title="Workload export is planned for MVP 1.1"><Icon name="download" /> Export (MVP 1.1)</button>
         </div>
       </div>
 
@@ -128,7 +128,7 @@ function WorkloadScreen({ onOpen }) {
                 <React.Fragment key={r.m.id}>
                   <tr className="workload-row" onClick={() => toggle(r.m.id)}>
                     <td>
-                      <button className="iconbtn"><Icon name="chevron" size={12} style={{ transform: isOpen ? "rotate(90deg)" : "none" }} /></button>
+                      <button className="iconbtn" onClick={(e) => { e.stopPropagation(); toggle(r.m.id); }}><Icon name="chevron" size={12} style={{ transform: isOpen ? "rotate(90deg)" : "none" }} /></button>
                     </td>
                     <td className="col-name">
                       <span className="row" style={{ gap: 8 }}><Avatar memberId={r.m.id} size="avatar--lg" />
@@ -143,7 +143,7 @@ function WorkloadScreen({ onOpen }) {
                     <td>
                       <span className={`avail avail--${r.m.availability}`}><span className="avail__dot"></span>
                         {r.m.availability === "available" && "Available"}
-                        {r.m.availability === "partial" && (r.m.capacityOverride ? `Partial ยท ${r.m.capacityOverride}/d` : "Partial ยท no override")}
+                        {r.m.availability === "partial" && (r.m.capacityOverride ? `Partial - ${r.m.capacityOverride}/d` : "Partial - no override")}
                         {r.m.availability === "leave" && "On leave"}
                       </span>
                     </td>
@@ -175,13 +175,16 @@ function WorkloadScreen({ onOpen }) {
                       <td></td>
                       <td colSpan="13" style={{ padding: "12px 14px" }}>
                         <div className="muted" style={{ fontSize: 11, marginBottom: 8, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
-                          Active creative work ยท {r.items.length}
+                          Active creative work - {r.items.length}
                         </div>
                         {r.items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>No assigned creative work.</div> : (
                           <table className="tbl" style={{ fontSize: 12 }}>
                             <tbody>
                               {r.items.map(w => (
-                                <tr key={w.id} onClick={() => !w.isSupabaseRow && onOpen(w.id)}>
+                                <tr key={w.id} onClick={() => {
+                                  window.flowmateSelectedWorkItem = w;
+                                  onOpen(w.id);
+                                }}>
                                   <td className="col-id mono" style={{ width: 80 }}>{w.id}</td>
                                   <td className="col-title">{w.title}</td>
                                   <td><StatusBadge status={w.status} /></td>
@@ -258,11 +261,11 @@ function KpiScreen() {
       <div className="page__header">
         <div>
           <h1 className="page__title">KPI</h1>
-          <div className="page__sub">Operational health ยท rolling 4 weeks ยท Apr 19โ€“May 15, 2026</div>
+          <div className="page__sub">Operational health - rolling 4 weeks - Apr 19-May 15, 2026</div>
         </div>
         <div className="page__actions">
-          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}><option>Last 4 weeks</option><option>Last 8 weeks</option><option>This quarter</option></select>
-          <button className="btn btn--secondary"><Icon name="download" /> Export</button>
+          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }} disabled title="KPI date range selector is planned for MVP 1.1"><option>Last 4 weeks - MVP 1.1</option><option>Last 8 weeks</option><option>This quarter</option></select>
+          <button className="btn btn--secondary" disabled title="KPI export is planned for MVP 1.1"><Icon name="download" /> Export (MVP 1.1)</button>
         </div>
       </div>
 
@@ -270,19 +273,19 @@ function KpiScreen() {
         <div className="kpi">
           <div className="kpi__lbl">Delivered effort</div>
           <div className="kpi__num mono">312<span style={{ fontSize: 14, color: "var(--garena-grey)", marginLeft: 4, fontWeight: 400 }}>pt</span></div>
-          <div className="kpi__delta kpi__delta--up">โ–ฒ 8% vs prior 4w</div>
+          <div className="kpi__delta kpi__delta--up">Up 8% vs prior 4w</div>
           <div style={{ marginTop: 8 }}><Spark data={[55,62,71,69,74,78,82,84]} /></div>
         </div>
         <div className="kpi">
           <div className="kpi__lbl">Throughput</div>
           <div className="kpi__num mono">74<span style={{ fontSize: 14, color: "var(--garena-grey)", marginLeft: 4, fontWeight: 400 }}>delivered</span></div>
-          <div className="kpi__delta kpi__delta--up">โ–ฒ 6 vs prior</div>
+          <div className="kpi__delta kpi__delta--up">Up 6 vs prior</div>
           <div style={{ marginTop: 8 }}><Spark data={[12,16,18,15,17,19,18,20]} /></div>
         </div>
         <div className="kpi">
           <div className="kpi__lbl">On-time rate</div>
           <div className="kpi__num mono">88<span style={{ fontSize: 14, color: "var(--garena-grey)", marginLeft: 4, fontWeight: 400 }}>%</span></div>
-          <div className="kpi__delta kpi__delta--down">โ–ผ 2pp vs prior</div>
+          <div className="kpi__delta kpi__delta--down">Down 2pp vs prior</div>
           <div style={{ marginTop: 8 }}><Spark data={[92,91,90,89,87,88,89,88]} color="var(--garena-orange)" /></div>
         </div>
         <div className="kpi">
@@ -296,15 +299,15 @@ function KpiScreen() {
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="kpi"><div className="kpi__lbl">Blocked</div><div className="kpi__num mono">{4}</div><div className="kpi__delta">2 over 3 days</div></div>
         <div className="kpi"><div className="kpi__lbl">Queued</div><div className="kpi__num mono">{4}</div><div className="kpi__delta">18 pt waiting</div></div>
-        <div className="kpi"><div className="kpi__lbl">Need brief</div><div className="kpi__num mono">{1}</div><div className="kpi__delta">Community AMA ยท 3d</div></div>
-        <div className="kpi"><div className="kpi__lbl">Quick tasks closed</div><div className="kpi__num mono">31</div><div className="kpi__delta kpi__delta--up">โ–ฒ 12 vs prior</div></div>
+        <div className="kpi"><div className="kpi__lbl">Need brief</div><div className="kpi__num mono">{1}</div><div className="kpi__delta">Community AMA - 3d</div></div>
+        <div className="kpi"><div className="kpi__lbl">Quick tasks closed</div><div className="kpi__num mono">31</div><div className="kpi__delta kpi__delta--up">Up 12 vs prior</div></div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
         <div className="card">
           <div className="card__head">
             <span className="card__title">Per member</span>
-            <span className="card__sub">delivered effort ยท on-time ยท avg review</span>
+            <span className="card__sub">delivered effort - on-time - avg review</span>
           </div>
           <div className="card__body" style={{ padding: 0 }}>
             <table className="tbl">
@@ -365,10 +368,10 @@ function KpiScreen() {
       </div>
 
       <div style={{ marginTop: 16 }} className="reason-box">
-        Productivity index is calculated as <span className="mono">delivered_effort ร— on_time_factor ร— rework_factor</span> and is intentionally <strong>not displayed as a personal ranking</strong> in MVP โ€” see PRD ยง12.
+        Productivity index is calculated as <span className="mono">delivered_effort x on_time_factor x rework_factor</span> and is intentionally <strong>not displayed as a personal ranking</strong> in MVP - see PRD section 12.
       </div>
 
-      <Source>FlowMate audit_events &amp; work_items ยท rolling 4 weeks ยท May 15, 2026</Source>
+      <Source>FlowMate audit_events &amp; work_items - rolling 4 weeks - May 15, 2026</Source>
     </div>
   );
 }
@@ -385,15 +388,15 @@ function SettingsScreen() {
           <div className="page__sub">Members, skills, capacity, and WIP limits used by the assignment engine.</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary"><Icon name="plus" /> Add member</button>
+          <button className="btn btn--secondary" disabled title="Team member editing is planned for MVP 1.1"><Icon name="plus" /> Add member (MVP 1.1)</button>
         </div>
       </div>
 
       <div className="filterbar">
-        <button className="chip is-active">All members</button>
-        <button className="chip">Active</button>
-        <button className="chip">Partial</button>
-        <button className="chip">On leave</button>
+        <button className="chip is-active" disabled title="Team settings filters are planned for MVP 1.1">All members (MVP 1.1)</button>
+        <button className="chip" disabled title="Team settings filters are planned for MVP 1.1">Active (MVP 1.1)</button>
+        <button className="chip" disabled title="Team settings filters are planned for MVP 1.1">Partial (MVP 1.1)</button>
+        <button className="chip" disabled title="Team settings filters are planned for MVP 1.1">On leave (MVP 1.1)</button>
         <span className="spacer"></span>
         <span className="muted" style={{ fontSize: 12 }}>{MEMBERS.length} members</span>
       </div>
@@ -409,7 +412,7 @@ function SettingsScreen() {
                 <div className={`avail avail--${m.availability}`} style={{ marginTop: 4 }}>
                   <span className="avail__dot"></span>
                   {m.availability === "available" && "Available"}
-                  {m.availability === "partial" && (m.capacityOverride ? `Partial ยท ${m.capacityOverride} pt/d override` : "Partial ยท no override")}
+                  {m.availability === "partial" && (m.capacityOverride ? `Partial - ${m.capacityOverride} pt/d override` : "Partial - no override")}
                   {m.availability === "leave" && "On leave"}
                 </div>
               </div>
@@ -419,7 +422,7 @@ function SettingsScreen() {
               <div className="muted" style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>Skills</div>
               <div className="skill-tags">
                 {m.skills.map(s => <span key={s} className="tag">{ASSET_LABEL[s.replace("-backup","")] || s}{s.endsWith("backup") && " (backup)"}</span>)}
-                <button className="btn btn--xs btn--ghost"><Icon name="plus" size={11} /> Add skill</button>
+                <button className="btn btn--xs btn--ghost" disabled title="Skill editing is planned for MVP 1.1"><Icon name="plus" size={11} /> Add skill (MVP 1.1)</button>
               </div>
               <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
                 Linked user: <span className="strong" style={{ color: "var(--garena-iron)" }}>{m.name.toLowerCase()}@garena.com</span>
@@ -436,7 +439,7 @@ function SettingsScreen() {
                   <div className="member-card__cap-num mono">{m.wipLimit}</div>
                   <div className="member-card__cap-lbl">WIP limit</div>
                 </div>
-                <button className="iconbtn"><Icon name="pencil" /></button>
+                <button className="btn btn--xs btn--secondary" disabled title="Capacity editing is planned for MVP 1.1"><Icon name="pencil" /> Edit (MVP 1.1)</button>
               </div>
             </div>
           </div>
@@ -444,7 +447,7 @@ function SettingsScreen() {
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
-        <strong>Routing rules</strong> are configured at the team level โ€” not per member. Edits here change skill eligibility and capacity inputs to the assignment engine. Changing capacity reruns assignment for queued items in the background.
+        <strong>Routing rules</strong> are configured at the team level - not per member. Edits here change skill eligibility and capacity inputs to the assignment engine. Changing capacity reruns assignment for queued items in the background.
       </div>
     </div>
   );

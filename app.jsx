@@ -1,4 +1,4 @@
-﻿// FlowMate โ€” app shell + routing
+﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
 const NAV = [
@@ -71,8 +71,8 @@ function App() {
         </div>
         <span className="topbar__spacer"></span>
         <button className="topbar__btn" onClick={() => nav("create")}><Icon name="plus" /> Create</button>
-        <button className="iconbtn" style={{ position: "relative" }} disabled title="Notifications are planned for MVP 1.1">
-          <Icon name="bell" />
+        <button className="topbar__btn" disabled title="Notifications are planned for MVP 1.1">
+          <Icon name="bell" /> Notifications (MVP 1.1)
         </button>
         <div className="topbar__user" title="Mock login: Pond">
           <Avatar memberId="m-pond" size="" />

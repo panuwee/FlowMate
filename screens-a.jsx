@@ -1,4 +1,4 @@
-﻿// FlowMate โ€” Screens part A: My Work, Create, Detail
+﻿// FlowMate - Screens part A: My Work, Create, Detail
 const { useState, useEffect } = React;
 
 /* ============================================================
@@ -165,10 +165,10 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
         <div>
           <h1 className="page__title">My work</h1>
           <div className="page__sub">{loadState.message}</div>
-          <div className="page__sub">Hi Pond โ€” here's what's open as of {TODAY}, 09:42 SGT.</div>
+          <div className="page__sub">Hi Pond - here's what's open as of {TODAY}, 09:42 SGT.</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary"><Icon name="calendar" /> This week</button>
+          <button className="btn btn--secondary" disabled title="Calendar range selector is planned for MVP 1.1"><Icon name="calendar" /> This week (MVP 1.1)</button>
           <button className="btn btn--primary" onClick={() => onNav("create")}><Icon name="plus" /> New</button>
         </div>
       </div>
@@ -217,7 +217,10 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
           </thead>
           <tbody>
             {items.map(w => (
-              <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => !w.isSupabaseRow && onOpen(w.id)}>
+              <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => {
+                window.flowmateSelectedWorkItem = w;
+                onOpen(w.id);
+              }}>
                 <td className="col-id mono">{w.id}</td>
                 <td className="col-title">{w.title}</td>
                 <td><TypePill type={w.type} /></td>
@@ -232,9 +235,9 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                   )}
                   {w.type !== "quick" && w.status === "assigned" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Start</button>}
                   {w.type !== "quick" && w.status === "in_progress" && <button className="btn btn--xs btn--primary" onClick={() => onCreativeTransition && onCreativeTransition(w, "review")}><Icon name="send" size={11} /> Submit review</button>}
-                  {w.type !== "quick" && w.status === "review" && <button className="btn btn--xs btn--ghost">Awaiting requester</button>}
+                  {w.type !== "quick" && w.status === "review" && <button className="btn btn--xs btn--ghost" disabled>Awaiting requester</button>}
                   {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && <button className="btn btn--xs btn--danger" onClick={() => onCreativeTransition && onCreativeTransition(w, "blocked")}>Block</button>}
-                  {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--danger">Resolve block</button>}
+                  {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--danger" disabled title="Resolve block workflow is planned for MVP 1.1">Resolve block (MVP 1.1)</button>}
                 </td>
               </tr>
             ))}
@@ -350,7 +353,7 @@ function QuickTaskChecklist({ work, onAdd, onToggle, onCommentAdd, onCommentEdit
 }
 
 /* ============================================================
-   CREATE โ€” Quick Task + Creative Request
+   CREATE - Quick Task + Creative Request
    ============================================================ */
 function CreateScreen({ onNav }) {
   const [mode, setMode] = useState("creative");
@@ -398,7 +401,7 @@ function CreateScreen({ onNav }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Create</h1>
-          <div className="page__sub">Pick the right entry point โ€” Quick task is notebook-style, Creative request enters the assignment engine.</div>
+          <div className="page__sub">Pick the right entry point - Quick task is notebook-style, Creative request enters the assignment engine.</div>
         </div>
       </div>
 
@@ -414,10 +417,10 @@ function CreateScreen({ onNav }) {
         </button>
         <button className={`choice-card ${mode === "creative" ? "is-active" : ""}`} onClick={() => setMode("creative")}>
           <div className="choice-card__title"><Icon name="layers" /> Creative request</div>
-          <div className="choice-card__sub">Structured request for production creative โ€” banner, video, motion, esport pack.</div>
+          <div className="choice-card__sub">Structured request for production creative - banner, video, motion, esport pack.</div>
           <ul className="choice-card__list">
             <li>Brief validation, auto effort point, auto routing</li>
-            <li>Owner is decided by the engine โ€” no preferred owner</li>
+            <li>Owner is decided by the engine - no preferred owner</li>
             <li>Hybrid stays Queued and must be split</li>
           </ul>
         </button>
@@ -435,7 +438,7 @@ function CreateScreen({ onNav }) {
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <button className="btn btn--ghost" onClick={() => onNav("my-work")}>Cancel</button>
-        <button className="btn btn--secondary">Save draft</button>
+        <button className="btn btn--secondary" disabled title="Draft saving is planned for MVP 1.1">Save draft (MVP 1.1)</button>
         <button className="btn btn--primary" onClick={handleSubmit} disabled={isSubmitting}>
           <Icon name="send" /> {isSubmitting ? "Saving..." : mode === "quick" ? "Create quick task" : "Submit request"}
         </button>
@@ -500,7 +503,7 @@ function CreativeRequestForm() {
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" placeholder="e.g. AOV ranked season โ€” IG carousel set (6 frames)" />
+        <input className="input" placeholder="e.g. AOV ranked season - IG carousel set (6 frames)" />
       </div>
       <div className="field">
         <label className="field__label">Requester team <span className="req">*</span></label>
@@ -525,8 +528,8 @@ function CreativeRequestForm() {
         <select className="select">
           <option>Simple banner / ad visual</option>
           <option>Standard banner / complex social content</option>
-          <option>Esport graphic pack โ€” minor</option>
-          <option>Esport graphic pack โ€” full set</option>
+          <option>Esport graphic pack - minor</option>
+          <option>Esport graphic pack - full set</option>
           <option>Short-form (TikTok / Reels)</option>
           <option>Standard video / YouTube vlog</option>
           <option>High-retention short video</option>
@@ -535,19 +538,19 @@ function CreativeRequestForm() {
       </div>
       <div className="field">
         <label className="field__label">Platform <span className="req">*</span></label>
-        <input className="input" placeholder="Instagram, TikTok, YouTube, Webโ€ฆ" />
+        <input className="input" placeholder="Instagram, TikTok, YouTube, Web..." />
       </div>
       <div className="field">
         <label className="field__label">Size / format <span className="req">*</span></label>
-        <input className="input" placeholder="e.g. 1080ร—1350, 1080ร—1920" />
+        <input className="input" placeholder="e.g. 1080x1350, 1080x1920" />
       </div>
       <div className="field">
         <label className="field__label">Brief link <span className="req">*</span></label>
-        <input className="input" placeholder="https://docs.google.com/โ€ฆ" />
+        <input className="input" placeholder="https://docs.google.com/..." />
       </div>
       <div className="field">
         <label className="field__label">Reference link</label>
-        <input className="input" placeholder="Optional โ€” Figma / mood board / past asset" />
+        <input className="input" placeholder="Optional - Figma / mood board / past asset" />
       </div>
       <div className="field">
         <label className="field__label">Priority <span className="req">*</span></label>
@@ -572,13 +575,13 @@ function CreativeRequestForm() {
       {assetType === "hybrid" && (
         <div className="field field--full">
           <div className="reason-box reason-box--queued">
-            <strong>Heads up โ€” hybrid requests are queued automatically.</strong> Static and video work are split into separate requests so the assignment engine can route by skill. Effort will be set to 8 with <span className="mono">needs_split = true</span>.
+            <strong>Heads up - hybrid requests are queued automatically.</strong> Static and video work are split into separate requests so the assignment engine can route by skill. Effort will be set to 8 with <span className="mono">needs_split = true</span>.
           </div>
         </div>
       )}
       <div className="field field--full">
         <div className="reason-box">
-          <strong>Note โ€” fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
+          <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
         </div>
       </div>
     </div>
@@ -592,9 +595,9 @@ function CreateResultScreen({ result, onAgain, onNav }) {
       <div className="card">
         <div className="card__head">
           <span className="card__title">
-            {result.kind === "assigned" && "Request submitted โ€” assigned"}
-            {result.kind === "queued" && "Request submitted โ€” queued"}
-            {result.kind === "need_brief" && "Request submitted โ€” needs brief"}
+            {result.kind === "assigned" && "Request submitted - assigned"}
+            {result.kind === "queued" && "Request submitted - queued"}
+            {result.kind === "need_brief" && "Request submitted - needs brief"}
             {result.kind === "quick_created" && "Quick task created"}
             {result.kind === "error" && "Could not save"}
           </span>
@@ -607,7 +610,7 @@ function CreateResultScreen({ result, onAgain, onNav }) {
                 <Avatar memberId={result.owner} size="avatar--xl" />
                 <div>
                   <div className="strong" style={{ fontSize: 16 }}>{m.name}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{m.discipline} ยท capacity {m.capacityPerDay} pt/day</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{m.discipline} - capacity {m.capacityPerDay} pt/day</div>
                 </div>
                 <div className="spacer"></div>
                 <Effort value={result.effort} lg />
@@ -628,7 +631,7 @@ function CreateResultScreen({ result, onAgain, onNav }) {
         <button className="btn btn--secondary" onClick={onAgain}>Create another</button>
         <button className="btn btn--ghost" onClick={() => onNav("list")}>Open list view</button>
         <span className="spacer"></span>
-        <button className="btn btn--primary" onClick={() => onNav("detail")}>Open detail <Icon name="arrow" /></button>
+        <button className="btn btn--primary" disabled title="Opening the newly created detail directly is planned for MVP 1.1">Open detail (MVP 1.1) <Icon name="arrow" /></button>
       </div>
     </div>
   );
@@ -666,13 +669,13 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="page__sub" style={{ marginTop: 4 }}>{w.requesterTeam || "No team"} - {w.campaign || "No campaign"} - requested by {w.requester || "-"}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--ghost"><Icon name="more" /></button>
-          <button className="btn btn--danger"><Icon name="block" /> Block</button>
-          <button className="btn btn--secondary"><Icon name="link" /> Open brief</button>
-          {w.status === "in_progress" && <button className="btn btn--primary"><Icon name="send" /> Submit for review</button>}
-          {w.status === "assigned" && <button className="btn btn--primary"><Icon name="play" /> Start work</button>}
-          {w.status === "review" && <button className="btn btn--primary"><Icon name="check" /> Approve delivered</button>}
-          {w.status === "queued" && <button className="btn btn--primary"><Icon name="rerun" /> Rerun assignment</button>}
+          <button className="btn btn--ghost" disabled title="Detail overflow menu is planned for MVP 1.1"><Icon name="more" /> More (MVP 1.1)</button>
+          <button className="btn btn--danger" disabled title="Detail status actions are planned for MVP 1.1"><Icon name="block" /> Block (MVP 1.1)</button>
+          <button className="btn btn--secondary" disabled title="Brief link opening is planned for MVP 1.1"><Icon name="link" /> Open brief (MVP 1.1)</button>
+          {w.status === "in_progress" && <button className="btn btn--primary" disabled title="Detail status actions are planned for MVP 1.1"><Icon name="send" /> Submit review (MVP 1.1)</button>}
+          {w.status === "assigned" && <button className="btn btn--primary" disabled title="Detail status actions are planned for MVP 1.1"><Icon name="play" /> Start work (MVP 1.1)</button>}
+          {w.status === "review" && <button className="btn btn--primary" disabled title="Requester approval is planned for MVP 1.1"><Icon name="check" /> Approve delivered (MVP 1.1)</button>}
+          {w.status === "queued" && <button className="btn btn--primary" disabled title="Assignment rerun is planned for MVP 1.1"><Icon name="rerun" /> Rerun assignment (MVP 1.1)</button>}
         </div>
       </div>
 
@@ -685,9 +688,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 Vertical 15-second teaser announcing the CODM World Championship grand finals (June 8). Hook with the trophy reveal in the first 1.5s, hold on top-3 team logos through second 8, and close with date plate + sponsor lockup. Music brief and beat-marker timeline are in the linked doc.
               </p>
               <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-                <a href="#"><Icon name="file" size={12} /> Brief โ€” CODM Worlds Teaser.gdoc</a>
-                <a href="#"><Icon name="file" size={12} /> Reference reel โ€” last year.mp4</a>
-                <a href="#"><Icon name="link" size={12} /> Music brief.doc</a>
+                <span className="muted"><Icon name="file" size={12} /> Brief - CODM Worlds Teaser.gdoc (MVP 1.1)</span>
+                <span className="muted"><Icon name="file" size={12} /> Reference reel - last year.mp4 (MVP 1.1)</span>
+                <span className="muted"><Icon name="link" size={12} /> Music brief.doc (MVP 1.1)</span>
               </div>
             </div>
           </div>
@@ -705,20 +708,20 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="card">
             <div className="card__head">
               <span className="card__title">Checklist <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{w.checklist?.done}/{w.checklist?.total}</span></span>
-              <button className="btn btn--xs btn--ghost"><Icon name="plus" size={11} /> Add item</button>
+              <button className="btn btn--xs btn--ghost" disabled title="Detail checklist editing is planned for MVP 1.1"><Icon name="plus" size={11} /> Add item (MVP 1.1)</button>
             </div>
             <div className="card__body checklist">
               {[
                 { txt: "Storyboard locked with esport ops", done: true },
-                { txt: "Trophy reveal shot โ€” color graded", done: true },
-                { txt: "Team logo plates โ€” animated", done: true },
+                { txt: "Trophy reveal shot - color graded", done: true },
+                { txt: "Team logo plates - animated", done: true },
                 { txt: "Date plate + sponsor lockup", done: false },
-                { txt: "Sound mix v1 โ€” handoff to audio", done: false },
+                { txt: "Sound mix v1 - handoff to audio", done: false },
               ].map((c, i) => (
                 <div key={i} className={`check-item ${c.done ? "is-checked" : ""}`}>
                   <span className={`check-box ${c.done ? "is-checked" : ""}`}>{c.done && <Icon name="check" size={11} />}</span>
                   <span className="check-item__lbl">{c.txt}</span>
-                  <span className="muted" style={{ fontSize: 11 }}>{c.done ? "Vee ยท May 14" : ""}</span>
+                  <span className="muted" style={{ fontSize: 11 }}>{c.done ? "Vee - May 14" : ""}</span>
                 </div>
               ))}
             </div>
@@ -733,7 +736,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <Avatar memberId="m-vee" size="avatar--lg" />
                 <div className="comment__body">
                   <div className="comment__head"><span className="comment__author">Vee</span><span className="comment__time">May 14, 17:20</span></div>
-                  <div className="comment__text">First cut ready. Holding on team logo plate longer than spec โ€” Mira wanted a beat to read names. Let me know if that breaks the music sync.</div>
+                  <div className="comment__text">First cut ready. Holding on team logo plate longer than spec - Mira wanted a beat to read names. Let me know if that breaks the music sync.</div>
                 </div>
               </div>
               <div className="comment">
@@ -752,8 +755,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               </div>
               <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
                 <Avatar memberId="m-pond" size="avatar--lg" />
-                <input className="input" placeholder="Write a commentโ€ฆ" />
-                <button className="btn btn--primary"><Icon name="send" size={12} /> Send</button>
+                <input className="input" placeholder="Detail comments are planned for MVP 1.1" disabled />
+                <button className="btn btn--primary" disabled title="Detail comments are planned for MVP 1.1"><Icon name="send" size={12} /> Send (MVP 1.1)</button>
               </div>
             </div>
           </div>
@@ -778,7 +781,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">Review round</div>
-                <div className="meta-row__val">{w.reviewRound ?? 0} <span className="muted" style={{ fontSize: 11 }}>(incremented only on requested changes)</span></div>
+                <div className="meta-row__val">{w.reviewRound - 0} <span className="muted" style={{ fontSize: 11 }}>(incremented only on requested changes)</span></div>
               </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">Due</div>
@@ -797,7 +800,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               <div className="reason-box">
                 Auto: esport video assigned to <strong>Vee</strong> by skill, WIP (1/2), and remaining capacity through May 16.
               </div>
-              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>Backup eligible: Pond (esport video backup) โ€” not selected, requester priority was urgent and Vee had capacity.</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>Backup eligible: Pond (esport video backup) - not selected, requester priority was urgent and Vee had capacity.</div>
             </div>
           </div>
 
@@ -819,7 +822,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 </div>
                 <div className="tl-item">
                   <div className="tl-item__time">May 13, 11:20</div>
-                  <div className="tl-item__text">Assigned to <strong>Vee</strong> ยท effort 7</div>
+                  <div className="tl-item__text">Assigned to <strong>Vee</strong> - effort 7</div>
                 </div>
                 <div className="tl-item">
                   <div className="tl-item__time">May 13, 11:20</div>

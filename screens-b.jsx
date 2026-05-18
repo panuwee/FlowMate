@@ -1,4 +1,4 @@
-﻿// FlowMate โ€” Screens part B: List, Board, Central Queue
+﻿// FlowMate - Screens part B: List, Board, Central Queue
 const { useState: useStateB, useEffect: useEffectB } = React;
 
 function exportRowsCsv(rows) {
@@ -173,8 +173,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
                     <span className="row" style={{ gap: 6 }}><Avatar memberId={w.assignee} /> <span>{MEMBERS_BY_ID[w.assignee].name}</span></span>
                   ) : <span className="muted">Unassigned</span>}
                 </td>
-                <td><div style={{ fontSize: 12 }}>{w.requester || "โ€”"}</div><div className="muted" style={{ fontSize: 11 }}>{w.requesterTeam}</div></td>
-                <td><span className="muted" style={{ fontSize: 12 }}>{ASSET_LABEL[w.assetType] || "โ€”"}</span></td>
+                <td><div style={{ fontSize: 12 }}>{w.requester || "-"}</div><div className="muted" style={{ fontSize: 11 }}>{w.requesterTeam}</div></td>
+                <td><span className="muted" style={{ fontSize: 12 }}>{ASSET_LABEL[w.assetType] || "-"}</span></td>
                 <td><Effort value={w.effort} /></td>
                 <td><PriorityBadge level={w.priority} /></td>
                 <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
@@ -214,21 +214,21 @@ function BoardScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Board</h1>
-          <div className="page__sub">Drag to change status โ€” backend validates each transition.</div>
+          <div className="page__sub">Drag to change status - backend validates each transition.</div>
         </div>
         <div className="page__actions">
-          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}><option>All members</option>{MEMBERS.map(m => <option key={m.id}>{m.name}</option>)}</select>
-          <button className="btn btn--secondary"><Icon name="filter" /> Filters</button>
+          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }} disabled title="Board owner filter is planned for MVP 1.1"><option>All members (MVP 1.1)</option>{MEMBERS.map(m => <option key={m.id}>{m.name}</option>)}</select>
+          <button className="btn btn--secondary" disabled title="Board filters are planned for MVP 1.1"><Icon name="filter" /> Filters (MVP 1.1)</button>
         </div>
       </div>
 
       <div className="filterbar">
-        <button className="chip is-active">My items</button>
-        <button className="chip">Static</button>
-        <button className="chip">Motion</button>
-        <button className="chip">Esport video</button>
-        <button className="chip">Due soon</button>
-        <button className="chip">Overdue</button>
+        <button className="chip is-active" disabled title="Board filters are planned for MVP 1.1">My items (MVP 1.1)</button>
+        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Static (MVP 1.1)</button>
+        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Motion (MVP 1.1)</button>
+        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Esport video (MVP 1.1)</button>
+        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Due soon (MVP 1.1)</button>
+        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Overdue (MVP 1.1)</button>
       </div>
 
       <div className="kanban">
@@ -391,22 +391,22 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
                   {w.queueReason}
                 </div>
               </td>
-              <td className="mono muted" style={{ fontSize: 11 }}>{w.status === "need_brief" ? "โ€”" : "May 15, 09:00"}</td>
+              <td className="mono muted" style={{ fontSize: 11 }}>{w.status === "need_brief" ? "-" : "May 15, 09:00"}</td>
               <td className="col-right" onClick={(e) => e.stopPropagation()}>
                 <div style={{ display: "inline-flex", gap: 4 }}>
                   {w.needsSplit && (
                     <button className="btn btn--xs btn--secondary" disabled title="Planned for MVP 1.1 after split-task API is added">
-                      Create split
+                      Create split (MVP 1.1)
                     </button>
                   )}
                   {w.status === "need_brief" && (
                     <button className="btn btn--xs btn--primary" disabled title="Planned for MVP 1.1 after requester-notification API is added">
-                      Request brief
+                      Request brief (MVP 1.1)
                     </button>
                   )}
                   {w.status === "queued" && !w.needsSplit && (
                     <button className="btn btn--xs btn--secondary" disabled title="Planned for MVP 1.1 after assignment-write API is added">
-                      <Icon name="rerun" size={11} /> Rerun
+                      <Icon name="rerun" size={11} /> Rerun (MVP 1.1)
                     </button>
                   )}
                 </div>
