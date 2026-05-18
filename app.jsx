@@ -351,10 +351,10 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                   fill="var(--sienna)" stroke="var(--ink)" strokeWidth="0.7"/>
           </svg>
         </div>
-        <nav className="wha-header__nav" aria-label="grimoire">
-          <a href="#atelier" className="wha-nav-link">Atelier</a>
-          <a href="#grimoire" className="wha-nav-link">Grimoire</a>
-          <a href="#threshold" className="wha-nav-link">Threshold</a>
+        <nav className="wha-header__nav" aria-label="flowmate">
+          <a href="#atelier" className="wha-nav-link">Task</a>
+          <a href="#grimoire" className="wha-nav-link">Request</a>
+          <a href="#threshold" className="wha-nav-link">Workload</a>
         </nav>
       </header>
 
@@ -368,7 +368,8 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                        fill="var(--glass-blue)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
               <polygon points="250,130 390,250 250,370 110,250"
                        fill="var(--glass-teal)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
-              <polygon points="250,180 340,250 250,320 160,250"
+              <polygon className="wha-glass__amber"
+                       points="250,180 340,250 250,320 160,250"
                        fill="var(--glass-amber)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
               <line x1="250" y1="90"  x2="250" y2="410" stroke="var(--ink)" strokeWidth="1.5"/>
               <line x1="120" y1="170" x2="380" y2="170" stroke="var(--ink)" strokeWidth="1"/>
@@ -384,7 +385,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
             <defs>
               <path id="wha-rune-arc" d="M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"/>
             </defs>
-            {/* outer ring — rotates CW */}
+            {/* outer ring + rune text — both rotate CW together */}
             <g className="wha-sigil__outer">
               <circle cx="250" cy="250" r="200" fill="none" stroke="var(--ink)" strokeWidth="0.5" strokeDasharray="1 5"/>
               <circle cx="250" cy="250" r="190" fill="none" stroke="var(--ink)" strokeWidth="1.5"
@@ -403,13 +404,16 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                         fill="var(--sienna)"
                         transform={`rotate(${deg} 250 250)`}/>
               ))}
+              {/* Sigil glyph ring — 8 hand-drawn marks at 45° intervals */}
+              <g className="wha-sigil__glyphs" aria-hidden="true">
+                {[0, 45, 90, 135, 180, 225, 270, 315].map((angle, i) => (
+                  <g key={angle}
+                     transform={`translate(250 250) rotate(${angle}) translate(0 -165)`}>
+                    <SigilGlyph kind={i} />
+                  </g>
+                ))}
+              </g>
             </g>
-            {/* rune text on circular path */}
-            <text className="wha-sigil__runes" aria-hidden="true">
-              <textPath href="#wha-rune-arc" startOffset="0">
-                ✦ NON · NISI · PER · CALAMUM · ✦ · TRANS · LIMEN · INTRA · ✦ · ARS · LONGA · MANUS · BREVIS · ✦
-              </textPath>
-            </text>
             {/* pentagram — rotates CCW */}
             <g className="wha-sigil__penta">
               <path d="M 250,120 L 326,355 L 126,210 L 374,210 L 174,355 Z"
@@ -428,7 +432,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
           </svg>
         </div>
 
-        <p className="wha-runes wha-runes--hero">· TRANS · LIMEN · INTRA ·</p>
+        <p className="wha-runes wha-runes--hero">· Garena · FCO · Thailand ·</p>
 
         {authError && (
           <div className="wha-error wha-reveal" role="alert">
@@ -452,9 +456,9 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
       {/* CARDS -------------------------------------------------------- */}
       <section className="wha-cards" id="atelier">
         {[
-          { glyph: "quill",   title: "Quill & Vellum",  phrase: "Where intent meets parchment, and the work begins." },
-          { glyph: "glass",   title: "Hourglass",       phrase: "Hours tallied by craft, never by guesswork." },
-          { glyph: "compass", title: "Sigil Circle",    phrase: "Every task finds its rightful hand." },
+          { glyph: "quill",   title: "Brief Gate",       phrase: "Every request begins with clarity." },
+          { glyph: "glass",   title: "Capacity Oracle",  phrase: "Work flows by skill, effort, and load." },
+          { glyph: "compass", title: "Team Compass",     phrase: "Every task finds the right owner." },
         ].map((c, i) => (
           <article key={c.title} className="wha-card wha-reveal" style={{ transitionDelay: (0.18 * i) + "s" }}>
             <div className="wha-card__hatch" aria-hidden="true"></div>
@@ -496,6 +500,88 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
       </footer>
     </div>
   );
+}
+
+function SigilGlyph({ kind }) {
+  // 8 hand-drawn sigil designs (sienna ink). Each is drawn around (0,0) inside
+  // a ~22px square. They sit on the rotating outer ring so they revolve with it.
+  const stroke = "var(--sienna)";
+  const sw = 1.1;
+  switch (kind % 8) {
+    case 0: // Pine triangle with side crosses
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M 0,-9 L 8,7 L -8,7 Z"/>
+          <line x1="-10" y1="-1" x2="-5" y2="2"/>
+          <line x1="10"  y1="-1" x2="5"  y2="2"/>
+          <line x1="0" y1="7" x2="0" y2="11"/>
+        </g>
+      );
+    case 1: // Twin serpent S-curves
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round">
+          <path d="M -5,-9 Q -10,-4 -7,0 Q -4,4 -7,9"/>
+          <path d="M 5,-9 Q 10,-4 7,0 Q 4,4 7,9"/>
+          <circle cx="-5" cy="-9" r="0.9" fill={stroke}/>
+          <circle cx="5"  cy="-9" r="0.9" fill={stroke}/>
+          <circle cx="-7" cy="9" r="0.9" fill={stroke}/>
+          <circle cx="7"  cy="9" r="0.9" fill={stroke}/>
+        </g>
+      );
+    case 2: // Crowned diamond with dot eyes
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round">
+          <line x1="-8" y1="-7" x2="8" y2="-7"/>
+          <line x1="0" y1="-7" x2="0" y2="-3"/>
+          <path d="M 0,-3 L 7,3 L 0,9 L -7,3 Z"/>
+          <circle cx="-10" cy="3" r="1.2" fill={stroke}/>
+          <circle cx="10"  cy="3" r="1.2" fill={stroke}/>
+        </g>
+      );
+    case 3: // Bound S with four rays
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinecap="round">
+          <line x1="-10" y1="-4" x2="-5" y2="-2"/>
+          <line x1="-10" y1="4"  x2="-5" y2="2"/>
+          <line x1="10"  y1="-4" x2="5"  y2="-2"/>
+          <line x1="10"  y1="4"  x2="5"  y2="2"/>
+          <path d="M -3,-8 Q 5,-3 0,0 Q -5,3 3,8"/>
+        </g>
+      );
+    case 4: // Boxed cross — square with inscribed diamond, cardinal lines
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinejoin="round">
+          <rect x="-5" y="-5" width="10" height="10"/>
+          <path d="M 0,-3 L 3,0 L 0,3 L -3,0 Z"/>
+          <line x1="0" y1="-9" x2="0" y2="-5"/>
+          <line x1="0" y1="5"  x2="0" y2="9"/>
+          <line x1="-9" y1="0" x2="-5" y2="0"/>
+          <line x1="5"  y1="0" x2="9"  y2="0"/>
+        </g>
+      );
+    case 5: // Five-point star (pentagram)
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinejoin="round">
+          <path d="M 0,-9 L 5.29,7.28 L -8.56,-2.81 L 8.56,-2.81 L -5.29,7.28 Z"/>
+        </g>
+      );
+    case 6: // Mystical eye
+      return (
+        <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinejoin="round">
+          <path d="M -10,0 Q 0,-7 10,0 Q 0,7 -10,0 Z"/>
+          <circle cx="0" cy="0" r="2.6" fill={stroke}/>
+          <circle cx="0" cy="0" r="0.9" fill="var(--cream)"/>
+        </g>
+      );
+    case 7: // Crescent moon
+    default:
+      return (
+        <g stroke={stroke} strokeWidth={sw * 0.7}>
+          <path d="M 5,-9 Q -5,-5 -5,0 Q -5,5 5,9 Q -1,5 -1,0 Q -1,-5 5,-9 Z"
+                fill={stroke}/>
+        </g>
+      );
+  }
 }
 
 function InkDivider() {
@@ -732,6 +818,19 @@ const WHA_STYLES = `
   width: 100%; height: 100%;
   filter: drop-shadow(0 12px 24px rgba(28,43,74,0.22));
   animation: wha-glass-in 1.4s cubic-bezier(0.16,1,0.3,1) 0.9s both;
+  perspective: 1200px;
+}
+
+/* Innermost amber diamond — flips clockwise around the vertical axis. */
+.wha-glass__amber {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: wha-amber-flip 7s ease-in-out infinite 2.4s;
+}
+@keyframes wha-amber-flip {
+  0%, 8%    { transform: rotateY(0deg); }
+  50%, 58%  { transform: rotateY(180deg); }
+  100%      { transform: rotateY(360deg); }
 }
 @keyframes wha-glass-in {
   from { opacity: 0; transform: scale(0.85); }
@@ -758,11 +857,28 @@ const WHA_STYLES = `
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
 .wha-sigil__outer    { animation: wha-spin 40s linear infinite; transform-origin: center; }
 .wha-sigil__penta    { animation: wha-spin-rev 60s linear infinite; transform-origin: center; }
-.wha-sigil__runes {
-  font-family: 'Almendra SC', serif; font-style: normal;
-  font-size: 13.5px; letter-spacing: 0.32em;
-  fill: var(--sienna);
-  animation: wha-fade 1.2s ease-out 1.6s both;
+.wha-sigil__glyphs {
+  /* The glyphs ride along the outer rotating group, so they revolve with
+     the ring. They draw themselves in after the ink ring strokes finish. */
+  animation: wha-fade 1.4s ease-out 1.4s both;
+}
+.wha-sigil__glyphs g g {
+  /* Subtle individual glyph staggered breath — pulse opacity to mimic
+     candle-lit ink that brightens unevenly. */
+  animation: wha-glyph-breath 6s ease-in-out infinite;
+  transform-box: fill-box;
+}
+.wha-sigil__glyphs g:nth-child(1) g { animation-delay: 0s; }
+.wha-sigil__glyphs g:nth-child(2) g { animation-delay: 0.7s; }
+.wha-sigil__glyphs g:nth-child(3) g { animation-delay: 1.4s; }
+.wha-sigil__glyphs g:nth-child(4) g { animation-delay: 2.1s; }
+.wha-sigil__glyphs g:nth-child(5) g { animation-delay: 2.8s; }
+.wha-sigil__glyphs g:nth-child(6) g { animation-delay: 3.5s; }
+.wha-sigil__glyphs g:nth-child(7) g { animation-delay: 4.2s; }
+.wha-sigil__glyphs g:nth-child(8) g { animation-delay: 4.9s; }
+@keyframes wha-glyph-breath {
+  0%, 100% { opacity: 0.65; }
+  50%      { opacity: 1; }
 }
 .wha-sigil__core { animation: wha-fade 0.9s ease-out 1.4s both; }
 .wha-ink-draw {
