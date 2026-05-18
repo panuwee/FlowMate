@@ -288,33 +288,35 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     }
   }, []);
 
-  // Bioluminescent orb spawner — JS-driven so they feel alive, not staged
+  // Bioluminescent orb spawner — JS-driven so they feel alive, not staged.
+  // Larger / brighter than before so they show up on big desktop monitors
+  // where small subtle orbs disappear against the warm parchment.
   useEffectApp(() => {
     const stage = document.getElementById("wha-orb-stage");
     if (!stage) return;
     const colors = [
-      "rgba(40,80,160,0.55)",   // cobalt
-      "rgba(30,100,60,0.55)",   // forest
-      "rgba(196,114,42,0.6)",   // amber
-      "rgba(120,50,150,0.5)",   // violet
+      "rgba(40,80,160,0.85)",    // cobalt
+      "rgba(30,100,60,0.85)",    // forest
+      "rgba(196,114,42,0.9)",    // amber
+      "rgba(120,50,150,0.8)",    // violet
     ];
     function spawn() {
       const orb = document.createElement("span");
       orb.className = "wha-orb";
-      const size = 8 + Math.random() * 12;
+      const size = 14 + Math.random() * 18;          // 14–32px (was 8–20)
       const c = colors[Math.floor(Math.random() * colors.length)];
       orb.style.width = orb.style.height = size + "px";
-      orb.style.left = (5 + Math.random() * 90) + "%";
+      orb.style.left = (3 + Math.random() * 94) + "%";
       orb.style.background = `radial-gradient(circle, ${c} 0%, transparent 70%)`;
-      orb.style.animationDuration = (10 + Math.random() * 8) + "s";
-      orb.style.setProperty("--wha-drift", (Math.random() * 80 - 40) + "px");
+      orb.style.animationDuration = (9 + Math.random() * 7) + "s";  // 9–16s
+      orb.style.setProperty("--wha-drift", (Math.random() * 120 - 60) + "px");
       stage.appendChild(orb);
-      setTimeout(() => orb.remove(), 19000);
+      setTimeout(() => orb.remove(), 17000);
     }
     const startTimer = setTimeout(() => {
-      for (let i = 0; i < 6; i++) setTimeout(spawn, i * 350);
-    }, 2200);
-    const intervalId = setInterval(spawn, 1300);
+      for (let i = 0; i < 8; i++) setTimeout(spawn, i * 250);   // initial burst of 8
+    }, 1800);
+    const intervalId = setInterval(spawn, 800);                 // every 0.8s (was 1.3s)
     return () => { clearTimeout(startTimer); clearInterval(intervalId); };
   }, []);
 
@@ -496,16 +498,24 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
             <defs>
               <path id="wha-footer-arc" d="M 60,60 m -42,0 a 42,42 0 1,1 84,0 a 42,42 0 1,1 -84,0"/>
             </defs>
-            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ink)" strokeWidth="0.8"/>
-            <circle cx="60" cy="60" r="42" fill="none" stroke="var(--sienna)" strokeWidth="0.4" strokeDasharray="2 3"/>
-            <text className="wha-footer__runes">
-              <textPath href="#wha-footer-arc">⚝ INSCRIBED · BY · HAND · MMXXVI · ⚝ · TRANS · LIMEN · ⚝</textPath>
-            </text>
+            {/* Rotating sub-group via SMIL — reliable across desktop browsers
+                where CSS transform-origin on SVG root is flaky. */}
+            <g>
+              <animateTransform attributeName="transform" attributeType="XML"
+                type="rotate" from="0 60 60" to="360 60 60"
+                dur="60s" repeatCount="indefinite"/>
+              <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ink)" strokeWidth="0.8"/>
+              <circle cx="60" cy="60" r="42" fill="none" stroke="var(--sienna)" strokeWidth="0.4" strokeDasharray="2 3"/>
+              <text className="wha-footer__runes">
+                <textPath href="#wha-footer-arc">⚝ INSCRIBED · BY · HAND · PANU · ⚝ · GARENA · FCO · ⚝</textPath>
+              </text>
+            </g>
+            {/* Center star stays still */}
             <text x="60" y="68" textAnchor="middle" fontFamily="Cinzel Decorative" fontSize="24"
                   fontWeight="700" fill="var(--ink)">⚝</text>
           </svg>
         </div>
-        <p className="wha-footer__credit">Inscribed by hand · MMXXVI</p>
+        <p className="wha-footer__credit">Inscribed by hand · Panu</p>
       </footer>
     </div>
   );
@@ -748,12 +758,15 @@ const WHA_STYLES = `
 .wha-orb-stage {
   position: fixed; inset: 0;
   pointer-events: none; overflow: hidden;
-  z-index: 0;
+  /* Above the parchment vignette but below interactive content. On big
+     desktop monitors a z-index of 0 hides them behind cards/header. */
+  z-index: 3;
 }
 .wha-orb {
-  position: absolute; bottom: -30px;
+  position: absolute; bottom: -40px;
   border-radius: 50%;
-  filter: blur(2px);
+  filter: blur(3px);
+  mix-blend-mode: multiply;
   opacity: 0;
   animation-name: wha-orb-rise;
   animation-timing-function: ease-out;
@@ -761,10 +774,10 @@ const WHA_STYLES = `
   --wha-drift: 0px;
 }
 @keyframes wha-orb-rise {
-  0%   { opacity: 0; transform: translate(0, 0); }
-  10%  { opacity: 1; }
-  85%  { opacity: 0.55; }
-  100% { opacity: 0; transform: translate(var(--wha-drift), -110vh); }
+  0%   { opacity: 0;    transform: translate(0, 0); }
+  8%   { opacity: 0.9;  }
+  60%  { opacity: 0.75; }
+  100% { opacity: 0;    transform: translate(var(--wha-drift), -110vh); }
 }
 
 /* HEADER --------------------------------------------------------------- */
@@ -1064,7 +1077,8 @@ const WHA_STYLES = `
 .wha-footer__ring {
   width: 90px; height: 90px; margin: 0 auto 10px;
 }
-.wha-footer__ring svg { width: 100%; height: 100%; animation: wha-spin 60s linear infinite; }
+.wha-footer__ring svg { width: 100%; height: 100%; }
+/* footer ring rotation handled by SMIL animateTransform inside the SVG */
 .wha-footer__runes {
   font-family: 'Almendra SC', serif; font-style: normal;
   font-size: 8.5px; letter-spacing: 0.3em;
