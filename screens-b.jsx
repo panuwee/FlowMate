@@ -207,67 +207,227 @@ function BoardScreen({ onOpen }) {
     { key: "blocked",     label: "Blocked" },
     { key: "delivered",   label: "Delivered" },
   ];
-  const byCol = Object.fromEntries(columns.map(c => [c.key, WORK.filter(w => w.status === c.key)]));
+  const [sourceRows, setSourceRows] = useStateB(WORK);
+  const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
+  const [draggingId, setDraggingId] = useStateB(null);
+  const [hoverCol, setHoverCol] = useStateB(null);
+  const [busy, setBusy] = useStateB(false);
+  const [flash, setFlash] = useStateB(null);
+
+  async function loadRows() {
+    if (!window.loadFlowMateListRows) {
+      setLoadState({ status: "fallback", message: "Using mock data: Supabase list loader is not ready." });
+      return;
+    }
+    try {
+      const rows = await window.loadFlowMateListRows();
+      setSourceRows(rows);
+      setLoadState({ status: "live", message: "Live Supabase data" });
+    } catch (error) {
+      console.error("[FlowMate Board] Supabase load failed:", error);
+      setSourceRows(WORK);
+      setLoadState({ status: "fallback", message: `Using mock data: ${error.message || "Supabase query failed."}` });
+    }
+  }
+
+  useEffectB(() => { loadRows(); }, []);
+
+  const byCol = Object.fromEntries(columns.map(c => [c.key, sourceRows.filter(w => w.status === c.key)]));
+
+  function handleDragStart(e, w) {
+    if (!w.isSupabaseRow) {
+      // Mock rows: nothing to mutate against, prevent the drag from
+      // misleading the user.
+      e.preventDefault();
+      setFlash({ tone: "warn", text: "Drag-drop only works on live Supabase data." });
+      return;
+    }
+    setDraggingId(w.id);
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      try { e.dataTransfer.setData("text/plain", w.id); } catch (err) {}
+    }
+  }
+
+  function handleDragEnd() {
+    setDraggingId(null);
+    setHoverCol(null);
+  }
+
+  function handleDragOver(e, colKey) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    if (hoverCol !== colKey) setHoverCol(colKey);
+  }
+
+  function handleDragLeave(colKey) {
+    if (hoverCol === colKey) setHoverCol(null);
+  }
+
+  async function handleDrop(e, targetStatus) {
+    e.preventDefault();
+    setHoverCol(null);
+    const id = draggingId || (e.dataTransfer && e.dataTransfer.getData("text/plain"));
+    setDraggingId(null);
+    if (!id) return;
+
+    const row = sourceRows.find(r => r.id === id);
+    if (!row) return;
+    if (row.status === targetStatus) return;
+    if (!row.isSupabaseRow) {
+      setFlash({ tone: "warn", text: "Drag-drop only works on live Supabase data." });
+      return;
+    }
+
+    // Quick tasks: only a couple of board transitions make sense in MVP.
+    if (row.type === "quick") {
+      if (targetStatus === "delivered") {
+        await runMutate(() => window.completeFlowMateQuickTask(row.id),
+                        `${row.id} marked done.`);
+      } else if (targetStatus === "cancelled") {
+        const reason = window.prompt("Cancel reason is required");
+        if (!reason) return;
+        await runMutate(() => window.cancelFlowMateWorkItem(row, reason),
+                        `${row.id} cancelled.`);
+      } else {
+        setFlash({ tone: "warn", text: "Quick tasks can only be moved to Delivered or Cancelled on the board." });
+      }
+      return;
+    }
+
+    // Creative requests — collect required reason / link based on target.
+    const options = {};
+    if (targetStatus === "review") {
+      const link = window.prompt("Delivery link is required to submit for review");
+      if (!link) return;
+      options.deliveryLink = link;
+    }
+    if (targetStatus === "blocked") {
+      const reason = window.prompt("Blocked reason is required");
+      if (!reason) return;
+      options.blockedReason = reason;
+    }
+    if (targetStatus === "cancelled") {
+      const reason = window.prompt("Cancel reason is required");
+      if (!reason) return;
+      options.cancelReason = reason;
+    }
+
+    await runMutate(
+      () => window.transitionFlowMateCreativeStatus(row.id, targetStatus, options),
+      `${row.id} → ${STATUS_LABEL[targetStatus] || targetStatus}`,
+    );
+  }
+
+  async function runMutate(fn, successText) {
+    setBusy(true);
+    try {
+      await fn();
+      await loadRows();
+      setFlash({ tone: "ok", text: successText });
+    } catch (error) {
+      console.error("[FlowMate Board] transition failed:", error);
+      setFlash({ tone: "bad", text: error.message || "Transition rejected by backend." });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="page">
       <div className="page__header">
         <div>
           <h1 className="page__title">Board</h1>
-          <div className="page__sub">Drag to change status - backend validates each transition.</div>
+          <div className="page__sub">
+            Drag a card to a new column to change status — backend validates each transition.
+            <span style={{ marginLeft: 8, opacity: 0.75 }}>{loadState.message}</span>
+          </div>
         </div>
         <div className="page__actions">
-          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }} disabled title="Board owner filter is planned for MVP 1.1"><option>All members (MVP 1.1)</option>{MEMBERS.map(m => <option key={m.id}>{m.name}</option>)}</select>
-          <button className="btn btn--secondary" disabled title="Board filters are planned for MVP 1.1"><Icon name="filter" /> Filters (MVP 1.1)</button>
+          <button className="btn btn--secondary" onClick={loadRows} disabled={busy}>
+            <Icon name="rerun" /> Refresh
+          </button>
         </div>
       </div>
 
-      <div className="filterbar">
-        <button className="chip is-active" disabled title="Board filters are planned for MVP 1.1">My items (MVP 1.1)</button>
-        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Static (MVP 1.1)</button>
-        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Motion (MVP 1.1)</button>
-        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Esport video (MVP 1.1)</button>
-        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Due soon (MVP 1.1)</button>
-        <button className="chip" disabled title="Board filters are planned for MVP 1.1">Overdue (MVP 1.1)</button>
-      </div>
+      {flash && (
+        <div className={`reason-box ${flash.tone === "bad" ? "reason-box--need" : flash.tone === "warn" ? "reason-box--queued" : ""}`}
+             style={{ marginBottom: 12 }}>
+          {flash.text}
+          <button className="btn btn--xs btn--ghost" style={{ marginLeft: 8 }} onClick={() => setFlash(null)}>Dismiss</button>
+        </div>
+      )}
 
       <div className="kanban">
-        {columns.map(c => (
-          <div className="kcol" key={c.key}>
-            <div className="kcol__head">
-              <span className="kcol__title">{c.label}</span>
-              <span className="kcol__count">{byCol[c.key].length}</span>
-            </div>
-            <div className="kcol__body">
-              {byCol[c.key].map(w => (
-                <div key={w.id} className="kcard" onClick={() => onOpen(w.id)}>
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <span className="kcard__id mono">{w.id}</span>
-                    <PriorityBadge level={w.priority} />
-                  </div>
-                  <div className="kcard__title">{w.title}</div>
-                  <div className="kcard__row">
-                    <Avatar memberId={w.assignee} />
-                    <Effort value={w.effort} />
-                    <Progress {...(w.checklist || { done: 0, total: 0 })} />
-                    <span className="spacer"></span>
-                    <DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} />
-                  </div>
-                  {w.blockReason && (
-                    <div className="kcard__row kcard__row--meta" style={{ color: "var(--garena-red)" }}>
-                      <Icon name="alert" size={11} /> {w.blockReason}
+        {columns.map(c => {
+          const isHover = hoverCol === c.key;
+          return (
+            <div
+              className="kcol"
+              key={c.key}
+              onDragOver={(e) => handleDragOver(e, c.key)}
+              onDragLeave={() => handleDragLeave(c.key)}
+              onDrop={(e) => handleDrop(e, c.key)}
+              style={isHover ? {
+                outline: "2px dashed var(--garena-deep-blue, #2E546D)",
+                outlineOffset: -4,
+                background: "rgba(46, 84, 109, 0.04)",
+                transition: "outline 80ms, background 80ms",
+              } : { transition: "outline 80ms, background 80ms" }}
+            >
+              <div className="kcol__head">
+                <span className="kcol__title">{c.label}</span>
+                <span className="kcol__count">{byCol[c.key].length}</span>
+              </div>
+              <div className="kcol__body">
+                {byCol[c.key].map(w => {
+                  const isDragging = draggingId === w.id;
+                  const draggable = Boolean(w.isSupabaseRow) && !busy;
+                  return (
+                    <div
+                      key={w.id}
+                      className="kcard"
+                      draggable={draggable}
+                      onDragStart={(e) => handleDragStart(e, w)}
+                      onDragEnd={handleDragEnd}
+                      onClick={() => { if (!isDragging) onOpen(w.id); }}
+                      style={{
+                        cursor: draggable ? (isDragging ? "grabbing" : "grab") : "pointer",
+                        opacity: isDragging ? 0.4 : 1,
+                        transition: "opacity 120ms, transform 120ms",
+                        transform: isDragging ? "scale(0.98)" : "none",
+                      }}
+                      title={draggable ? "Drag to a column to change status" : "Live data only — connect to Supabase to drag"}
+                    >
+                      <div className="row" style={{ justifyContent: "space-between" }}>
+                        <span className="kcard__id mono">{w.id}</span>
+                        <PriorityBadge level={w.priority} />
+                      </div>
+                      <div className="kcard__title">{w.title}</div>
+                      <div className="kcard__row">
+                        <Avatar memberId={w.assignee} />
+                        <Effort value={w.effort} />
+                        <Progress {...(w.checklist || { done: 0, total: 0 })} />
+                        <span className="spacer"></span>
+                        <DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} />
+                      </div>
+                      {w.blockReason && (
+                        <div className="kcard__row kcard__row--meta" style={{ color: "var(--garena-red)" }}>
+                          <Icon name="alert" size={11} /> {w.blockReason}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
-              {byCol[c.key].length === 0 && (
-                <div className="muted" style={{ fontSize: 12, padding: 12, textAlign: "center" }}>
-                  {c.key === "blocked" ? "No blocked items." : "Empty."}
-                </div>
-              )}
+                  );
+                })}
+                {byCol[c.key].length === 0 && (
+                  <div className="muted" style={{ fontSize: 12, padding: 12, textAlign: "center" }}>
+                    {isHover ? "Drop to move here" : (c.key === "blocked" ? "No blocked items." : "Empty.")}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -324,8 +484,18 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
           <div className="page__sub">Requests the engine could not assign - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary" disabled title="Planned for MVP 1.1 after assignment-write API is added">
-            <Icon name="rerun" /> Rerun all (MVP 1.1)
+          <button className="btn btn--secondary" onClick={async () => {
+            const targets = queued.filter(w => w.isSupabaseRow && (w.status === "queued" || w.status === "need_brief") && !w.needsSplit);
+            if (!targets.length) { window.alert("Nothing to rerun."); return; }
+            for (const w of targets) {
+              try {
+                if (w.status === "need_brief") await window.recheckFlowMateBrief(w.id);
+                else                            await window.rerunFlowMateAssignment(w.id);
+              } catch (error) { console.error("[FlowMate Queue] rerun failed for", w.id, error); }
+            }
+            window.location.reload();
+          }}>
+            <Icon name="rerun" /> Rerun all
           </button>
         </div>
       </div>
@@ -395,18 +565,24 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
               <td className="col-right" onClick={(e) => e.stopPropagation()}>
                 <div style={{ display: "inline-flex", gap: 4 }}>
                   {w.needsSplit && (
-                    <button className="btn btn--xs btn--secondary" disabled title="Planned for MVP 1.1 after split-task API is added">
-                      Create split (MVP 1.1)
+                    <button className="btn btn--xs btn--secondary" disabled title="Hybrid split is intentionally manual — create two requests instead.">
+                      Create split (manual)
                     </button>
                   )}
-                  {w.status === "need_brief" && (
-                    <button className="btn btn--xs btn--primary" disabled title="Planned for MVP 1.1 after requester-notification API is added">
-                      Request brief (MVP 1.1)
+                  {w.status === "need_brief" && w.isSupabaseRow && (
+                    <button className="btn btn--xs btn--primary" onClick={async () => {
+                      try { await window.recheckFlowMateBrief(w.id); window.location.reload(); }
+                      catch (error) { window.alert(error.message || "Recheck failed."); }
+                    }}>
+                      Recheck brief
                     </button>
                   )}
-                  {w.status === "queued" && !w.needsSplit && (
-                    <button className="btn btn--xs btn--secondary" disabled title="Planned for MVP 1.1 after assignment-write API is added">
-                      <Icon name="rerun" size={11} /> Rerun (MVP 1.1)
+                  {w.status === "queued" && !w.needsSplit && w.isSupabaseRow && (
+                    <button className="btn btn--xs btn--secondary" onClick={async () => {
+                      try { await window.rerunFlowMateAssignment(w.id); window.location.reload(); }
+                      catch (error) { window.alert(error.message || "Rerun failed."); }
+                    }}>
+                      <Icon name="rerun" size={11} /> Rerun
                     </button>
                   )}
                 </div>
