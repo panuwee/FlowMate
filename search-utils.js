@@ -3,6 +3,10 @@ function flowmateSearchText(row) {
     ? window.MEMBERS_BY_ID[row.assignee].name
     : "";
 
+  const platformText = Array.isArray(row.platforms)
+    ? row.platforms.join(" ")
+    : (row.platform || "");
+
   return [
     row.id,
     row.title,
@@ -10,6 +14,9 @@ function flowmateSearchText(row) {
     row.status,
     row.priority,
     row.assetType,
+    platformText,
+    row.size,
+    row.dueLabel,
     row.requester,
     row.requesterTeam,
     row.campaign,

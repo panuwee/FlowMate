@@ -98,13 +98,7 @@ function App() {
           </div>
         ))}
 
-        <div style={{ padding: "16px 24px", marginTop: 24, borderTop: "1px solid var(--garena-light-grey)" }}>
-          <div className="muted" style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Live</div>
-          <div className="row" style={{ gap: 6, fontSize: 12, color: "var(--garena-iron)" }}>
-            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--garena-positive)" }}></span>
-            <span>Synced 12s ago - 5 online</span>
-          </div>
-        </div>
+        <LiveStatus />
       </nav>
 
       <main className="app__main" key={route + (focusId || "")}>
@@ -118,6 +112,38 @@ function App() {
         {route === "kpi"      && <KpiScreen />}
         {route === "settings" && <SettingsScreen />}
       </main>
+    </div>
+  );
+}
+
+function LiveStatus() {
+  const [tick, setTick] = useStateApp(0);
+  const [lastSyncedAt, setLastSyncedAt] = useStateApp(() => Date.now());
+
+  useEffectApp(() => {
+    function onSynced() { setLastSyncedAt(Date.now()); }
+    window.addEventListener("flowmate:synced", onSynced);
+    const id = setInterval(() => setTick(t => t + 1), 15000);
+    return () => { window.removeEventListener("flowmate:synced", onSynced); clearInterval(id); };
+  }, []);
+
+  // Refresh on browser tab focus (PRD section 9 minimum behaviour).
+  useEffectApp(() => {
+    function onFocus() { window.dispatchEvent(new CustomEvent("flowmate:refresh-request")); }
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  const seconds = Math.max(0, Math.floor((Date.now() - lastSyncedAt) / 1000));
+  const label = seconds < 5 ? "just now" : seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)}m ago`;
+  void tick;
+  return (
+    <div style={{ padding: "16px 24px", marginTop: 24, borderTop: "1px solid var(--garena-light-grey)" }}>
+      <div className="muted" style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Live</div>
+      <div className="row" style={{ gap: 6, fontSize: 12, color: "var(--garena-iron)" }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--garena-positive)" }}></span>
+        <span>Synced {label}</span>
+      </div>
     </div>
   );
 }

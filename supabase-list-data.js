@@ -10,10 +10,13 @@ function flowmateDateLabel(dateValue) {
 
 function flowmateDueDelta(dateValue) {
   if (!dateValue) return null;
-  const dueDate = new Date(`${dateValue}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((dueDate.getTime() - today.getTime()) / 86400000);
+  // Compare in UTC to keep behaviour identical to the database's `current_date`
+  // (which is in the server's timezone) — both treat the date as a calendar day.
+  const [y, m, d] = dateValue.split("-").map(Number);
+  const dueUtc = Date.UTC(y, (m || 1) - 1, d || 1);
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((dueUtc - todayUtc) / 86400000);
 }
 
 async function loadFlowMateListRows() {
@@ -37,7 +40,7 @@ async function loadFlowMateListRows() {
       .select("id,user_id,display_name,initials,color"),
     window.flowmateSupabase
       .from("creative_request_details")
-      .select("work_item_id,asset_type"),
+      .select("work_item_id,asset_type,platforms,size_format"),
     window.flowmateSupabase
       .from("checklist_items")
       .select("id,work_item_id,title,is_done,sort_order")
@@ -116,6 +119,9 @@ async function loadFlowMateListRows() {
       dueLabel: flowmateDateLabel(item.due_date),
       dueDelta: flowmateDueDelta(item.due_date),
       assetType: flowmateToKebab(detailsByWorkItemId[item.id]?.asset_type),
+      platforms: detailsByWorkItemId[item.id]?.platforms || [],
+      platform: (detailsByWorkItemId[item.id]?.platforms || []).join(", "),
+      size: detailsByWorkItemId[item.id]?.size_format || "",
       requesterTeam: item.requester_team || requester.requester_team || "No team",
       assignee: owner ? owner.id : null,
       requester: requester.display_name || "-",
