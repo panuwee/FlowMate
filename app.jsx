@@ -277,85 +277,217 @@ function GoogleLogo() {
 
 function LoginScreen({ onSignIn, isSigningIn }) {
   return (
-    <div style={{
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 24,
-      background: "linear-gradient(135deg, #F5F7FA 0%, #E4ECF2 100%)",
-      fontFamily: "inherit",
-    }}>
-      <div style={{
-        width: "100%",
-        maxWidth: 440,
-        background: "#fff",
-        borderRadius: 14,
-        padding: "44px 40px 32px",
-        boxShadow: "0 10px 40px rgba(46, 84, 109, 0.12), 0 2px 8px rgba(46, 84, 109, 0.06)",
-        textAlign: "center",
-        boxSizing: "border-box",
-      }}>
-        <img
-          src="garena/logo_horizontal.png"
-          alt="Garena"
-          style={{ height: 28, marginBottom: 28, opacity: 0.9 }}
-        />
-        <div style={{
-          fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase",
-          color: "#8A99A6", fontWeight: 700, marginBottom: 6,
-        }}>
-          GD / VE creative workflow
-        </div>
-        <h1 style={{
-          fontSize: 34, fontWeight: 700, margin: "0 0 12px",
-          color: "var(--garena-deep-blue, #2E546D)", letterSpacing: "-0.02em",
-        }}>
-          FlowMate
-        </h1>
-        <p style={{
-          fontSize: 13.5, lineHeight: 1.55, color: "#6B7C8A",
-          margin: "0 auto 32px", maxWidth: 320,
-        }}>
-          Fair assignment, real-time capacity visibility, and lightweight task tracking — built for the Garena creative team.
+    <div className="flowmate-login">
+      <style>{`
+        .flowmate-login {
+          position: fixed; inset: 0;
+          display: flex; align-items: center; justify-content: center;
+          padding: 24px;
+          box-sizing: border-box;
+          font-family: inherit;
+          overflow: hidden;
+          background:
+            radial-gradient(ellipse 80% 60% at 20% 0%,   rgba(192, 80, 77, 0.28), transparent 60%),
+            radial-gradient(ellipse 70% 50% at 80% 100%, rgba(46, 84, 109, 0.42), transparent 60%),
+            radial-gradient(ellipse 60% 80% at 50% 50%,  rgba(80, 40, 100, 0.22), transparent 70%),
+            linear-gradient(135deg, #08101f 0%, #131830 45%, #1a1530 100%);
+          background-size: 200% 200%;
+          animation: flow-bg-pan 22s ease-in-out infinite;
+        }
+
+        /* Floating gradient orbs — Garena palette */
+        .flowmate-login__orb { position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; mix-blend-mode: screen; }
+        .flowmate-login__orb--1 {
+          width: 520px; height: 520px; top: -10%; left: -12%; opacity: 0.55;
+          background: radial-gradient(circle, #c0504d 0%, transparent 70%);
+          animation: flow-orb-1 26s ease-in-out infinite;
+        }
+        .flowmate-login__orb--2 {
+          width: 600px; height: 600px; bottom: -14%; right: -14%; opacity: 0.5;
+          background: radial-gradient(circle, #2E546D 0%, transparent 70%);
+          animation: flow-orb-2 30s ease-in-out infinite;
+        }
+        .flowmate-login__orb--3 {
+          width: 380px; height: 380px; top: 55%; left: 38%; opacity: 0.35;
+          background: radial-gradient(circle, #BF6B00 0%, transparent 70%);
+          animation: flow-orb-3 24s ease-in-out infinite;
+        }
+
+        /* Drifting grid lines for tech feel */
+        .flowmate-login__grid {
+          position: absolute; inset: 0; pointer-events: none; opacity: 0.06;
+          background-image:
+            linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px);
+          background-size: 48px 48px;
+          mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+          -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
+          animation: flow-grid-drift 40s linear infinite;
+        }
+
+        /* Glass card */
+        .flowmate-login__card {
+          position: relative; z-index: 1;
+          width: 100%; max-width: 460px;
+          background: rgba(20, 28, 50, 0.55);
+          backdrop-filter: blur(28px) saturate(140%);
+          -webkit-backdrop-filter: blur(28px) saturate(140%);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 22px;
+          padding: 52px 44px 36px;
+          box-shadow:
+            0 24px 80px rgba(0, 0, 0, 0.55),
+            0 2px 10px rgba(0, 0, 0, 0.35),
+            inset 0 1px 0 rgba(255, 255, 255, 0.12);
+          box-sizing: border-box;
+          text-align: center;
+          animation: flow-card-in 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
+        }
+
+        .flowmate-login__logo {
+          height: 26px; opacity: 0.9;
+          display: block; margin: 0 auto 28px;
+          filter: brightness(0) invert(1);
+          animation: flow-fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
+        }
+
+        .flowmate-login__title {
+          font-size: 58px; font-weight: 800; line-height: 1;
+          letter-spacing: -0.035em;
+          margin: 0 0 18px;
+          background: linear-gradient(90deg,
+            #ffffff 0%, #d5e3f0 30%, #ffffff 50%, #d5e3f0 70%, #ffffff 100%);
+          background-size: 200% auto;
+          -webkit-background-clip: text; background-clip: text;
+          -webkit-text-fill-color: transparent; color: transparent;
+          animation:
+            flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both,
+            flow-shimmer 6s linear infinite 1.2s;
+        }
+
+        .flowmate-login__tagline {
+          font-size: 13.5px; line-height: 1.65;
+          color: rgba(255, 255, 255, 0.7);
+          margin: 0 auto 32px; max-width: 340px;
+          animation: flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both;
+        }
+
+        .flowmate-login__btn {
+          width: 100%; padding: 13px 18px;
+          font-size: 14.5px; font-weight: 600; font-family: inherit;
+          color: #1f2937; background: #ffffff;
+          border: 1px solid rgba(255, 255, 255, 0.5);
+          border-radius: 10px;
+          cursor: pointer;
+          display: flex; align-items: center; justify-content: center; gap: 12px;
+          transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+                      box-shadow 220ms ease;
+          animation:
+            flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both,
+            flow-btn-glow 3.4s ease-in-out infinite 1.6s;
+          position: relative;
+        }
+        .flowmate-login__btn:not(:disabled):hover {
+          transform: translateY(-2px);
+          box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4),
+                      0 0 32px rgba(255, 255, 255, 0.18);
+        }
+        .flowmate-login__btn:not(:disabled):active { transform: translateY(0); }
+        .flowmate-login__btn:disabled { cursor: not-allowed; opacity: 0.75; }
+
+        .flowmate-login__footer {
+          margin-top: 28px; padding-top: 22px;
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          font-size: 11.5px; line-height: 1.6;
+          color: rgba(255, 255, 255, 0.5);
+          animation: flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both;
+        }
+        .flowmate-login__footer strong {
+          color: rgba(255, 255, 255, 0.88); font-weight: 600;
+        }
+
+        /* Keyframes ------------------------------------------------------ */
+        @keyframes flow-bg-pan {
+          0%, 100% { background-position: 0% 50%; }
+          50%      { background-position: 100% 50%; }
+        }
+        @keyframes flow-orb-1 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33%      { transform: translate(60px, -40px) scale(1.15); }
+          66%      { transform: translate(-40px, 50px) scale(0.92); }
+        }
+        @keyframes flow-orb-2 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          50%      { transform: translate(-70px, -50px) scale(1.1); }
+        }
+        @keyframes flow-orb-3 {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33%      { transform: translate(-40px, -60px) scale(0.95); }
+          66%      { transform: translate(50px, 30px) scale(1.08); }
+        }
+        @keyframes flow-grid-drift {
+          from { background-position: 0 0, 0 0; }
+          to   { background-position: 96px 96px, 96px 96px; }
+        }
+        @keyframes flow-card-in {
+          from { opacity: 0; transform: translateY(28px) scale(0.96); filter: blur(4px); }
+          to   { opacity: 1; transform: translateY(0)    scale(1);    filter: blur(0);    }
+        }
+        @keyframes flow-fade-up {
+          from { opacity: 0; transform: translateY(14px); }
+          to   { opacity: 1; transform: translateY(0);    }
+        }
+        @keyframes flow-shimmer {
+          0%   { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        @keyframes flow-btn-glow {
+          0%, 100% { box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 0    rgba(255,255,255,0); }
+          50%      { box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 32px rgba(255,255,255,0.22); }
+        }
+
+        @media (max-width: 480px) {
+          .flowmate-login__card  { padding: 40px 28px 28px; border-radius: 18px; }
+          .flowmate-login__title { font-size: 46px; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .flowmate-login,
+          .flowmate-login__orb,
+          .flowmate-login__grid,
+          .flowmate-login__card,
+          .flowmate-login__logo,
+          .flowmate-login__title,
+          .flowmate-login__tagline,
+          .flowmate-login__btn,
+          .flowmate-login__footer { animation: none !important; }
+        }
+      `}</style>
+
+      <div className="flowmate-login__orb flowmate-login__orb--1" />
+      <div className="flowmate-login__orb flowmate-login__orb--2" />
+      <div className="flowmate-login__orb flowmate-login__orb--3" />
+      <div className="flowmate-login__grid" />
+
+      <div className="flowmate-login__card">
+        <img src="garena/logo_horizontal.png" alt="Garena" className="flowmate-login__logo" />
+        <h1 className="flowmate-login__title">FlowMate</h1>
+        <p className="flowmate-login__tagline">
+          real-time capacity visibility, and lightweight task tracking — built for the Garena team.
         </p>
 
         <button
+          type="button"
           onClick={onSignIn}
           disabled={isSigningIn}
-          style={{
-            width: "100%",
-            padding: "12px 18px",
-            fontSize: 14.5,
-            fontWeight: 600,
-            color: "#3C4043",
-            background: "#fff",
-            border: "1px solid #DADCE0",
-            borderRadius: 8,
-            cursor: isSigningIn ? "not-allowed" : "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 12,
-            transition: "background 120ms, box-shadow 120ms, border-color 120ms",
-            opacity: isSigningIn ? 0.7 : 1,
-            fontFamily: "inherit",
-          }}
-          onMouseOver={(e) => { if (!isSigningIn) { e.currentTarget.style.background = "#F8F9FA"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(60,64,67,0.08)"; } }}
-          onMouseOut={(e) => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.boxShadow = "none"; }}
+          className="flowmate-login__btn"
         >
           <GoogleLogo />
           <span>{isSigningIn ? "Redirecting to Google…" : "Sign in with Google"}</span>
         </button>
 
-        <div style={{
-          marginTop: 28, paddingTop: 20,
-          borderTop: "1px solid #EDF0F3",
-          fontSize: 11.5, color: "#9BA8B3", lineHeight: 1.55,
-        }}>
-          Use your <strong style={{ color: "#6B7C8A" }}>@garena.com</strong> Workspace account.
-          <br />
-          Access requires an active GD/VE team profile.
+        <div className="flowmate-login__footer">
+          Use your <strong>@garena.com</strong> Workspace account
         </div>
       </div>
     </div>
