@@ -288,36 +288,49 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     }
   }, []);
 
-  // Bioluminescent orb spawner — JS-driven so they feel alive, not staged.
-  // Larger / brighter than before so they show up on big desktop monitors
-  // where small subtle orbs disappear against the warm parchment.
+  // Bioluminescent orb spawner — uses the Web Animations API rather than
+  // CSS keyframes + custom properties. Some desktop Chrome builds refuse
+  // to interpolate var(--wha-drift) inside a keyframe, leaving the orbs
+  // stuck below the viewport so they were never visible on PC.
   useEffectApp(() => {
     const stage = document.getElementById("wha-orb-stage");
     if (!stage) return;
     const colors = [
-      "rgba(40,80,160,0.85)",    // cobalt
-      "rgba(30,100,60,0.85)",    // forest
-      "rgba(196,114,42,0.9)",    // amber
-      "rgba(120,50,150,0.8)",    // violet
+      "rgba(40,80,160,0.90)",    // cobalt
+      "rgba(30,100,60,0.90)",    // forest
+      "rgba(196,114,42,0.92)",   // amber
+      "rgba(120,50,150,0.85)",   // violet
     ];
+
     function spawn() {
       const orb = document.createElement("span");
       orb.className = "wha-orb";
-      const size = 14 + Math.random() * 18;          // 14–32px (was 8–20)
-      const c = colors[Math.floor(Math.random() * colors.length)];
+      const size  = 18 + Math.random() * 20;                  // 18–38px
+      const c     = colors[Math.floor(Math.random() * colors.length)];
+      const drift = Math.random() * 160 - 80;                 // ±80px
+      const duration = 9000 + Math.random() * 7000;           // 9–16s
+
       orb.style.width = orb.style.height = size + "px";
-      orb.style.left = (3 + Math.random() * 94) + "%";
+      orb.style.left  = (3 + Math.random() * 94) + "%";
       orb.style.background = `radial-gradient(circle, ${c} 0%, transparent 70%)`;
-      orb.style.animationDuration = (9 + Math.random() * 7) + "s";  // 9–16s
-      orb.style.setProperty("--wha-drift", (Math.random() * 120 - 60) + "px");
       stage.appendChild(orb);
-      setTimeout(() => orb.remove(), 17000);
+
+      const anim = orb.animate(
+        [
+          { opacity: 0,    transform: "translate(0, 0)" },
+          { opacity: 0.95, offset: 0.08, transform: `translate(${drift * 0.1}px, -8vh)` },
+          { opacity: 0.78, offset: 0.55, transform: `translate(${drift * 0.6}px, -60vh)` },
+          { opacity: 0,    transform: `translate(${drift}px, -115vh)` },
+        ],
+        { duration: duration, easing: "ease-out", fill: "forwards" },
+      );
+      anim.onfinish = () => orb.remove();
     }
-    const startTimer = setTimeout(() => {
-      for (let i = 0; i < 8; i++) setTimeout(spawn, i * 250);   // initial burst of 8
-    }, 1800);
-    const intervalId = setInterval(spawn, 800);                 // every 0.8s (was 1.3s)
-    return () => { clearTimeout(startTimer); clearInterval(intervalId); };
+
+    // Immediate burst so first impression already has motion
+    for (let i = 0; i < 10; i++) setTimeout(spawn, i * 180);
+    const intervalId = setInterval(spawn, 700);
+    return () => clearInterval(intervalId);
   }, []);
 
   // IntersectionObserver for scroll reveals
@@ -758,26 +771,16 @@ const WHA_STYLES = `
 .wha-orb-stage {
   position: fixed; inset: 0;
   pointer-events: none; overflow: hidden;
-  /* Above the parchment vignette but below interactive content. On big
-     desktop monitors a z-index of 0 hides them behind cards/header. */
-  z-index: 3;
+  /* Above all decorative content. Animation timing/transform is now driven
+     entirely by the Web Animations API (see useEffect in LoginScreen). */
+  z-index: 50;
 }
 .wha-orb {
-  position: absolute; bottom: -40px;
+  position: absolute;
+  bottom: -40px;
   border-radius: 50%;
-  filter: blur(3px);
-  mix-blend-mode: multiply;
-  opacity: 0;
-  animation-name: wha-orb-rise;
-  animation-timing-function: ease-out;
-  animation-fill-mode: forwards;
-  --wha-drift: 0px;
-}
-@keyframes wha-orb-rise {
-  0%   { opacity: 0;    transform: translate(0, 0); }
-  8%   { opacity: 0.9;  }
-  60%  { opacity: 0.75; }
-  100% { opacity: 0;    transform: translate(var(--wha-drift), -110vh); }
+  filter: blur(2.5px) saturate(110%);
+  will-change: transform, opacity;
 }
 
 /* HEADER --------------------------------------------------------------- */
