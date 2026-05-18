@@ -352,7 +352,7 @@ async function flowmateSignInWithGoogle() {
   // would collide ("#board#access_token=...") and break token parsing.
   // We stash the post-login route in sessionStorage and the App component
   // restores it after auth init completes.
-  try { sessionStorage.setItem("flowmate:postLoginHash", "board"); } catch (e) {}
+  try { sessionStorage.setItem("flowmate:postLoginHash", "my-work"); } catch (e) {}
 
   const redirectTo = window.location.origin + window.location.pathname;
   const { error } = await window.flowmateSupabase.auth.signInWithOAuth({
