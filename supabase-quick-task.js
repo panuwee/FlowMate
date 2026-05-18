@@ -305,11 +305,18 @@ async function flowmateInitAuth() {
     return null;
   }
   if (!profile) {
-    // Auth user exists but the SQL trigger `handle_new_auth_user` has not
-    // synced them into public.users yet. Sign out so they retry after the
-    // trigger is installed.
-    console.warn("[FlowMate Auth] No public.users row for", session.user.email,
-                 "— check that the auth-sync trigger is installed.");
+    // No matching row in public.users. Two common causes:
+    //   (a) The email is NOT on the access whitelist — handle_new_auth_user
+    //       intentionally refused to create a profile.
+    //   (b) The auth-sync trigger has not been installed yet (dev only).
+    // Either way, sign the auth user out and surface a clear message to the
+    // user. The LoginScreen reads window.flowmateAuthError to display this.
+    const msg = "Your email (" + (session.user.email || "unknown")
+              + ") is not on the FlowMate access whitelist. "
+              + "Please contact panuwee.w@garena.com to request access.";
+    console.warn("[FlowMate Auth]", msg);
+    window.flowmateAuthError = msg;
+    try { sessionStorage.removeItem("flowmate:postLoginHash"); } catch (e) {}
     await window.flowmateSupabase.auth.signOut();
     return null;
   }
@@ -345,6 +352,9 @@ async function flowmateSignInWithGoogle() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
+  // Clear any prior auth error so the LoginScreen doesn't keep showing it
+  // after the user retries.
+  window.flowmateAuthError = null;
   // Portable redirect: works for `http://localhost:3000/`, GitHub Pages
   // (`https://panuwee.github.io/FlowMate/`), or any other deploy target.
   // IMPORTANT: redirectTo MUST NOT contain a hash. Supabase appends

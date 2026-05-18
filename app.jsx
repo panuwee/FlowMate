@@ -128,7 +128,7 @@ function App() {
     return <LoadingScreen />;
   }
   if (authState.status === "signed-out") {
-    return <LoginScreen onSignIn={handleSignIn} isSigningIn={isSigningIn} />;
+    return <LoginScreen onSignIn={handleSignIn} isSigningIn={isSigningIn} authError={window.flowmateAuthError || null} />;
   }
 
   // Signed-in from here. Defensive accessors avoid optional chaining so
@@ -275,7 +275,7 @@ function GoogleLogo() {
   );
 }
 
-function LoginScreen({ onSignIn, isSigningIn }) {
+function LoginScreen({ onSignIn, isSigningIn, authError }) {
   return (
     <div className="flowmate-login">
       <style>{`
@@ -475,6 +475,22 @@ function LoginScreen({ onSignIn, isSigningIn }) {
         <p className="flowmate-login__tagline">
           real-time capacity visibility, and lightweight task tracking — built for the Garena team.
         </p>
+
+        {authError && (
+          <div style={{
+            background: "rgba(192, 80, 77, 0.16)",
+            border: "1px solid rgba(192, 80, 77, 0.35)",
+            color: "#ffd8d6",
+            borderRadius: 10,
+            padding: "12px 14px",
+            fontSize: 12.5,
+            lineHeight: 1.55,
+            textAlign: "left",
+            marginBottom: 20,
+          }}>
+            {authError}
+          </div>
+        )}
 
         <button
           type="button"
