@@ -200,6 +200,7 @@ const ASSET_LABEL = {
 function Avatar({ memberId, size = "" }) {
   if (!memberId) return <span className={`avatar avatar--unassigned ${size}`}><Icon name="users" size={11} /></span>;
   const m = MEMBERS_BY_ID[memberId];
+  if (!m) return <span className={`avatar avatar--unassigned ${size}`}><Icon name="users" size={11} /></span>;
   return <span className={`avatar ${size}`} style={{ background: m.color }}>{m.initials}</span>;
 }
 

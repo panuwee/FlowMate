@@ -8,6 +8,10 @@ body { margin: 0; background: var(--garena-white); font-size: 14px; line-height:
 
 button { font: inherit; cursor: pointer; }
 input, textarea, select { font: inherit; color: inherit; }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 
 /* ---------- Top-level shell ---------- */
 .app {
@@ -98,6 +102,7 @@ input, textarea, select { font: inherit; color: inherit; }
   background: transparent;
 }
 .topbar__btn:hover { background: var(--garena-badge-bg); }
+.topbar__btn:disabled:hover { background: transparent; }
 .topbar__btn .icon { width: 16px; height: 16px; }
 .topbar__user {
   display: inline-flex; align-items: center; gap: 8px;
@@ -192,6 +197,7 @@ input, textarea, select { font: inherit; color: inherit; }
   color: var(--garena-iron);
 }
 .btn--secondary:hover { border-color: var(--garena-iron); color: var(--garena-black); }
+.btn:disabled:hover { border-color: var(--garena-light-grey); color: inherit; background: inherit; }
 
 .btn--ghost { color: var(--garena-iron); }
 .btn--ghost:hover { background: var(--garena-badge-bg); color: var(--garena-black); }

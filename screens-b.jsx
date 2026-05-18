@@ -1,6 +1,35 @@
 ﻿// FlowMate โ€” Screens part B: List, Board, Central Queue
 const { useState: useStateB, useEffect: useEffectB } = React;
 
+function exportRowsCsv(rows) {
+  const columns = ["ID", "Title", "Type", "Status", "Owner", "Requester", "Team", "Asset", "Effort", "Priority", "Due"];
+  const csvRows = rows.map((w) => [
+    w.id,
+    w.title,
+    w.type,
+    STATUS_LABEL[w.status] || w.status,
+    w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned",
+    w.requester || "",
+    w.requesterTeam || "",
+    ASSET_LABEL[w.assetType] || w.assetType || "",
+    w.effort || "",
+    w.priority || "",
+    w.dueLabel || "",
+  ]);
+  const csv = [columns, ...csvRows]
+    .map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `flowmate-list-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 /* ============================================================
    LIST VIEW
    ============================================================ */
@@ -69,8 +98,12 @@ function ListScreen({ onOpen, searchQuery = "" }) {
           <div className="page__sub">{sourceRows.length} items across all statuses - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary"><Icon name="filter" /> Saved views</button>
-          <button className="btn btn--secondary"><Icon name="download" /> Export</button>
+          <button className="btn btn--secondary" disabled title="Saved views are planned for MVP 1.1">
+            <Icon name="filter" /> Saved views (MVP 1.1)
+          </button>
+          <button className="btn btn--secondary" onClick={() => exportRowsCsv(rows)}>
+            <Icon name="download" /> Export
+          </button>
         </div>
       </div>
 
@@ -127,7 +160,10 @@ function ListScreen({ onOpen, searchQuery = "" }) {
           </thead>
           <tbody>
             {rows.map(w => (
-              <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => !w.isSupabaseRow && onOpen(w.id)}>
+              <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => {
+                window.flowmateSelectedWorkItem = w;
+                onOpen(w.id);
+              }}>
                 <td className="col-id mono">{w.id}</td>
                 <td className="col-title">{w.title}</td>
                 <td><TypePill type={w.type} /></td>
@@ -337,7 +373,10 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
         </thead>
         <tbody>
           {items.map(w => (
-            <tr key={w.id} onClick={() => !w.isSupabaseRow && onOpen(w.id)}>
+            <tr key={w.id} onClick={() => {
+              window.flowmateSelectedWorkItem = w;
+              onOpen(w.id);
+            }}>
               <td className="col-id mono">{w.id}</td>
               <td className="col-title">
                 <div>{w.title}</div>

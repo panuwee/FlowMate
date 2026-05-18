@@ -68,18 +68,15 @@ function App() {
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by ID, title, campaign, requester, assignee..."
           />
-          <kbd>โK</kbd>
         </div>
         <span className="topbar__spacer"></span>
-        <button className="topbar__btn"><Icon name="plus" /> Create</button>
-        <button className="iconbtn" style={{ position: "relative" }}>
+        <button className="topbar__btn" onClick={() => nav("create")}><Icon name="plus" /> Create</button>
+        <button className="iconbtn" style={{ position: "relative" }} disabled title="Notifications are planned for MVP 1.1">
           <Icon name="bell" />
-          <span style={{ position: "absolute", top: 4, right: 4, width: 6, height: 6, borderRadius: "50%", background: "var(--garena-red)" }}></span>
         </button>
-        <div className="topbar__user">
+        <div className="topbar__user" title="Mock login: Pond">
           <Avatar memberId="m-pond" size="" />
           <span className="topbar__user-name">Pond</span>
-          <Icon name="chevron" size={11} style={{ transform: "rotate(90deg)", color: "var(--garena-grey)" }} />
         </div>
       </div>
 
@@ -105,7 +102,7 @@ function App() {
           <div className="muted" style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Live</div>
           <div className="row" style={{ gap: 6, fontSize: 12, color: "var(--garena-iron)" }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--garena-positive)" }}></span>
-            <span>Synced 12s ago ยท 5 online</span>
+            <span>Synced 12s ago - 5 online</span>
           </div>
         </div>
       </nav>

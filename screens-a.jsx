@@ -639,7 +639,10 @@ function CreateResultScreen({ result, onAgain, onNav }) {
    ============================================================ */
 function DetailScreen({ onNav, onOpen, focusId }) {
   const id = focusId || "CR-1051";
-  const w = WORK_BY_ID[id] || WORK_BY_ID["CR-1051"];
+  const selected = window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === id
+    ? window.flowmateSelectedWorkItem
+    : null;
+  const w = selected || WORK_BY_ID[id] || WORK_BY_ID["CR-1051"];
   const owner = MEMBERS_BY_ID[w.assignee];
 
   return (
@@ -660,7 +663,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             <DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} />
           </div>
           <h1 className="page__title" style={{ fontSize: 22 }}>{w.title}</h1>
-          <div className="page__sub" style={{ marginTop: 4 }}>{w.requesterTeam} ยท {w.campaign} ยท requested by {w.requester}</div>
+          <div className="page__sub" style={{ marginTop: 4 }}>{w.requesterTeam || "No team"} - {w.campaign || "No campaign"} - requested by {w.requester || "-"}</div>
         </div>
         <div className="page__actions">
           <button className="btn btn--ghost"><Icon name="more" /></button>
@@ -692,9 +695,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="card">
             <div className="card__head"><span className="card__title">Creative details</span></div>
             <div className="card__body">
-              <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType]}{w.subtype && ` โ€” ${w.subtype}`}</div></div>
-              <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform}</div></div>
-              <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "โ€”"}</div></div>
+              <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType] || w.assetType || "-"}{w.subtype && ` - ${w.subtype}`}</div></div>
+              <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
+              <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
               <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">Jun 6, 2026</div></div>
             </div>
           </div>
@@ -762,12 +765,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               <div className="meta-row">
                 <div className="meta-row__lbl">Owner</div>
                 <div className="meta-row__val row" style={{ gap: 6 }}>
-                  <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "โ€”"}</span>
+                  <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
                 </div>
               </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">Requester</div>
-                <div className="meta-row__val">{w.requester} <span className="muted">ยท {w.requesterTeam}</span></div>
+                <div className="meta-row__val">{w.requester || "-"} <span className="muted">- {w.requesterTeam || "No team"}</span></div>
               </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">Effort</div>
