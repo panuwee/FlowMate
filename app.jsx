@@ -385,8 +385,14 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
             <defs>
               <path id="wha-rune-arc" d="M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"/>
             </defs>
-            {/* outer ring + rune text — both rotate CW together */}
+            {/* outer ring + sigil glyphs — both rotate CW together via SMIL.
+                We use animateTransform rather than CSS transform because
+                transform-origin on SVG <g> is unreliable across browsers
+                and was leaving the group rotating around (0,0). */}
             <g className="wha-sigil__outer">
+              <animateTransform attributeName="transform" attributeType="XML"
+                type="rotate" from="0 250 250" to="360 250 250"
+                dur="40s" repeatCount="indefinite"/>
               <circle cx="250" cy="250" r="200" fill="none" stroke="var(--ink)" strokeWidth="0.5" strokeDasharray="1 5"/>
               <circle cx="250" cy="250" r="190" fill="none" stroke="var(--ink)" strokeWidth="1.5"
                       pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.4s" }}/>
@@ -414,8 +420,11 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                 ))}
               </g>
             </g>
-            {/* pentagram — rotates CCW */}
+            {/* pentagram — rotates CCW via SMIL animateTransform */}
             <g className="wha-sigil__penta">
+              <animateTransform attributeName="transform" attributeType="XML"
+                type="rotate" from="0 250 250" to="-360 250 250"
+                dur="60s" repeatCount="indefinite"/>
               <path d="M 250,120 L 326,355 L 126,210 L 374,210 L 174,355 Z"
                     fill="none" stroke="var(--sienna)" strokeWidth="1.6" strokeLinejoin="round"
                     pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.9s" }}/>
@@ -855,8 +864,10 @@ const WHA_STYLES = `
   transition: filter 700ms ease;
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
-.wha-sigil__outer    { animation: wha-spin 40s linear infinite; transform-origin: center; }
-.wha-sigil__penta    { animation: wha-spin-rev 60s linear infinite; transform-origin: center; }
+/* Rotation now driven by SMIL <animateTransform> inside the SVG so the
+   spin is reliable regardless of transform-origin quirks. */
+.wha-sigil__outer { }
+.wha-sigil__penta { }
 .wha-sigil__glyphs {
   /* The glyphs ride along the outer rotating group, so they revolve with
      the ring. They draw themselves in after the ink ring strokes finish. */
