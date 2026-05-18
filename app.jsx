@@ -143,15 +143,9 @@ function App() {
             </button>
           </>
         ) : (
-          <>
-            <div className="topbar__user" title="Mock login (dev fallback) — not authenticated">
-              <Avatar memberId={avatarMemberId} size="" />
-              <span className="topbar__user-name">{currentUserName} (mock)</span>
-            </div>
-            <button className="topbar__btn" onClick={handleSignIn} title="Sign in with Google Workspace">
-              <Icon name="users" /> Sign in with Google
-            </button>
-          </>
+          <button className="topbar__btn" onClick={handleSignIn} title="Sign in with Google Workspace">
+            <Icon name="users" /> Sign in with Google
+          </button>
         )}
       </div>
 

@@ -345,10 +345,15 @@ async function flowmateSignInWithGoogle() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
+  // Portable redirect: works for `http://localhost:3000/`, GitHub Pages
+  // (`https://panuwee.github.io/FlowMate/`), or any other deploy target —
+  // wherever the user is, they come back to the same origin/pathname plus
+  // `#board` so they land on the kanban board after login.
+  const redirectTo = window.location.origin + window.location.pathname + "#board";
   const { error } = await window.flowmateSupabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: window.location.origin + window.location.pathname,
+      redirectTo: redirectTo,
       // Hint Google to show only Garena Workspace accounts. Final domain
       // enforcement still happens in the SQL trigger `enforce_garena_domain`.
       queryParams: { hd: "garena.com" },
