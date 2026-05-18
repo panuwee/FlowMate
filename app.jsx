@@ -276,238 +276,701 @@ function GoogleLogo() {
 }
 
 function LoginScreen({ onSignIn, isSigningIn, authError }) {
+  // Inject Google Fonts once
+  useEffectApp(() => {
+    const id = "wha-fonts";
+    if (!document.getElementById(id)) {
+      const link = document.createElement("link");
+      link.id = id;
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Cormorant+Garamond:ital,wght@0,300;1,300;1,400&family=Almendra+SC&display=swap";
+      document.head.appendChild(link);
+    }
+  }, []);
+
+  // Bioluminescent orb spawner — JS-driven so they feel alive, not staged
+  useEffectApp(() => {
+    const stage = document.getElementById("wha-orb-stage");
+    if (!stage) return;
+    const colors = [
+      "rgba(40,80,160,0.55)",   // cobalt
+      "rgba(30,100,60,0.55)",   // forest
+      "rgba(196,114,42,0.6)",   // amber
+      "rgba(120,50,150,0.5)",   // violet
+    ];
+    function spawn() {
+      const orb = document.createElement("span");
+      orb.className = "wha-orb";
+      const size = 8 + Math.random() * 12;
+      const c = colors[Math.floor(Math.random() * colors.length)];
+      orb.style.width = orb.style.height = size + "px";
+      orb.style.left = (5 + Math.random() * 90) + "%";
+      orb.style.background = `radial-gradient(circle, ${c} 0%, transparent 70%)`;
+      orb.style.animationDuration = (10 + Math.random() * 8) + "s";
+      orb.style.setProperty("--wha-drift", (Math.random() * 80 - 40) + "px");
+      stage.appendChild(orb);
+      setTimeout(() => orb.remove(), 19000);
+    }
+    const startTimer = setTimeout(() => {
+      for (let i = 0; i < 6; i++) setTimeout(spawn, i * 350);
+    }, 2200);
+    const intervalId = setInterval(spawn, 1300);
+    return () => { clearTimeout(startTimer); clearInterval(intervalId); };
+  }, []);
+
+  // IntersectionObserver for scroll reveals
+  useEffectApp(() => {
+    const els = document.querySelectorAll(".wha-reveal");
+    if (!els.length) return;
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting) {
+          e.target.classList.add("wha-revealed");
+          obs.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.18 });
+    els.forEach((el) => obs.observe(el));
+    return () => obs.disconnect();
+  }, []);
+
   return (
-    <div className="flowmate-login">
-      <style>{`
-        .flowmate-login {
-          position: fixed; inset: 0;
-          display: flex; align-items: center; justify-content: center;
-          padding: 24px;
-          box-sizing: border-box;
-          font-family: inherit;
-          overflow: hidden;
-          background:
-            radial-gradient(ellipse 80% 60% at 20% 0%,   rgba(192, 80, 77, 0.28), transparent 60%),
-            radial-gradient(ellipse 70% 50% at 80% 100%, rgba(46, 84, 109, 0.42), transparent 60%),
-            radial-gradient(ellipse 60% 80% at 50% 50%,  rgba(80, 40, 100, 0.22), transparent 70%),
-            linear-gradient(135deg, #08101f 0%, #131830 45%, #1a1530 100%);
-          background-size: 200% 200%;
-          animation: flow-bg-pan 22s ease-in-out infinite;
-        }
+    <div className="wha">
+      <style>{WHA_STYLES}</style>
 
-        /* Floating gradient orbs — Garena palette */
-        .flowmate-login__orb { position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; mix-blend-mode: screen; }
-        .flowmate-login__orb--1 {
-          width: 520px; height: 520px; top: -10%; left: -12%; opacity: 0.55;
-          background: radial-gradient(circle, #c0504d 0%, transparent 70%);
-          animation: flow-orb-1 26s ease-in-out infinite;
-        }
-        .flowmate-login__orb--2 {
-          width: 600px; height: 600px; bottom: -14%; right: -14%; opacity: 0.5;
-          background: radial-gradient(circle, #2E546D 0%, transparent 70%);
-          animation: flow-orb-2 30s ease-in-out infinite;
-        }
-        .flowmate-login__orb--3 {
-          width: 380px; height: 380px; top: 55%; left: 38%; opacity: 0.35;
-          background: radial-gradient(circle, #BF6B00 0%, transparent 70%);
-          animation: flow-orb-3 24s ease-in-out infinite;
-        }
+      {/* Floating orb stage */}
+      <div id="wha-orb-stage" className="wha-orb-stage" aria-hidden="true" />
 
-        /* Drifting grid lines for tech feel */
-        .flowmate-login__grid {
-          position: absolute; inset: 0; pointer-events: none; opacity: 0.06;
-          background-image:
-            linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px);
-          background-size: 48px 48px;
-          mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-          -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 75%);
-          animation: flow-grid-drift 40s linear infinite;
-        }
+      {/* HEADER ------------------------------------------------------- */}
+      <header className="wha-header">
+        <div className="wha-header__mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40">
+            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--ink)" strokeWidth="1.2"/>
+            <circle cx="20" cy="20" r="11" fill="none" stroke="var(--sienna)" strokeWidth="0.6" strokeDasharray="2 3"/>
+            <path d="M 20,7 L 25,18 L 33,18 L 27,25 L 30,33 L 20,28 L 10,33 L 13,25 L 7,18 L 15,18 Z"
+                  fill="var(--sienna)" stroke="var(--ink)" strokeWidth="0.7"/>
+          </svg>
+        </div>
+        <nav className="wha-header__nav" aria-label="grimoire">
+          <a href="#atelier" className="wha-nav-link">Atelier</a>
+          <a href="#grimoire" className="wha-nav-link">Grimoire</a>
+          <a href="#threshold" className="wha-nav-link">Threshold</a>
+        </nav>
+      </header>
 
-        /* Glass card */
-        .flowmate-login__card {
-          position: relative; z-index: 1;
-          width: 100%; max-width: 460px;
-          background: rgba(20, 28, 50, 0.55);
-          backdrop-filter: blur(28px) saturate(140%);
-          -webkit-backdrop-filter: blur(28px) saturate(140%);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          border-radius: 22px;
-          padding: 52px 44px 36px;
-          box-shadow:
-            0 24px 80px rgba(0, 0, 0, 0.55),
-            0 2px 10px rgba(0, 0, 0, 0.35),
-            inset 0 1px 0 rgba(255, 255, 255, 0.12);
-          box-sizing: border-box;
-          text-align: center;
-          animation: flow-card-in 0.95s cubic-bezier(0.16, 1, 0.3, 1) both;
-        }
+      {/* HERO --------------------------------------------------------- */}
+      <main className="wha-hero" id="threshold">
+        <div className="wha-sigil-stage" aria-hidden="true">
+          {/* Stained-glass accent (behind) */}
+          <svg className="wha-glass" viewBox="0 0 500 500">
+            <g>
+              <polygon points="250,90 380,170 380,330 250,410 120,330 120,170"
+                       fill="var(--glass-blue)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+              <polygon points="250,130 390,250 250,370 110,250"
+                       fill="var(--glass-teal)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+              <polygon points="250,180 340,250 250,320 160,250"
+                       fill="var(--glass-amber)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+              <line x1="250" y1="90"  x2="250" y2="410" stroke="var(--ink)" strokeWidth="1.5"/>
+              <line x1="120" y1="170" x2="380" y2="170" stroke="var(--ink)" strokeWidth="1"/>
+              <line x1="120" y1="330" x2="380" y2="330" stroke="var(--ink)" strokeWidth="1"/>
+            </g>
+          </svg>
 
-        .flowmate-login__logo {
-          height: 26px; opacity: 0.9;
-          display: block; margin: 0 auto 28px;
-          filter: brightness(0) invert(1);
-          animation: flow-fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
-        }
+          {/* Lantern flicker glow (mid layer) */}
+          <div className="wha-lantern" />
 
-        .flowmate-login__title {
-          font-size: 58px; font-weight: 800; line-height: 1;
-          letter-spacing: -0.035em;
-          margin: 0 0 18px;
-          background: linear-gradient(90deg,
-            #ffffff 0%, #d5e3f0 30%, #ffffff 50%, #d5e3f0 70%, #ffffff 100%);
-          background-size: 200% auto;
-          -webkit-background-clip: text; background-clip: text;
-          -webkit-text-fill-color: transparent; color: transparent;
-          animation:
-            flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both,
-            flow-shimmer 6s linear infinite 1.2s;
-        }
+          {/* Big animated sigil */}
+          <svg className="wha-sigil" viewBox="0 0 500 500">
+            <defs>
+              <path id="wha-rune-arc" d="M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"/>
+            </defs>
+            {/* outer ring — rotates CW */}
+            <g className="wha-sigil__outer">
+              <circle cx="250" cy="250" r="200" fill="none" stroke="var(--ink)" strokeWidth="0.5" strokeDasharray="1 5"/>
+              <circle cx="250" cy="250" r="190" fill="none" stroke="var(--ink)" strokeWidth="1.5"
+                      pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.4s" }}/>
+              <circle cx="250" cy="250" r="160" fill="none" stroke="var(--sienna)" strokeWidth="0.6"
+                      pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.7s" }}/>
+              {[0,30,60,90,120,150,180,210,240,270,300,330].map((deg) => (
+                <line key={deg}
+                      x1="250" y1="55" x2="250" y2={deg % 90 === 0 ? "80" : "70"}
+                      stroke="var(--ink)" strokeWidth={deg % 90 === 0 ? "1.6" : "1"}
+                      transform={`rotate(${deg} 250 250)`}/>
+              ))}
+              {[15,75,105,165,195,255,285,345].map((deg) => (
+                <circle key={deg}
+                        cx="250" cy="70" r="2.4"
+                        fill="var(--sienna)"
+                        transform={`rotate(${deg} 250 250)`}/>
+              ))}
+            </g>
+            {/* rune text on circular path */}
+            <text className="wha-sigil__runes" aria-hidden="true">
+              <textPath href="#wha-rune-arc" startOffset="0">
+                ✦ NON · NISI · PER · CALAMUM · ✦ · TRANS · LIMEN · INTRA · ✦ · ARS · LONGA · MANUS · BREVIS · ✦
+              </textPath>
+            </text>
+            {/* pentagram — rotates CCW */}
+            <g className="wha-sigil__penta">
+              <path d="M 250,120 L 326,355 L 126,210 L 374,210 L 174,355 Z"
+                    fill="none" stroke="var(--sienna)" strokeWidth="1.6" strokeLinejoin="round"
+                    pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.9s" }}/>
+              <circle cx="250" cy="250" r="42" fill="none" stroke="var(--ink)" strokeWidth="1"
+                      pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "1.1s" }}/>
+            </g>
+            {/* central sigil mark */}
+            <g className="wha-sigil__core">
+              <circle cx="250" cy="250" r="26" fill="var(--cream)" stroke="var(--ink)" strokeWidth="1.4"/>
+              <path d="M 250,230 L 264,250 L 250,270 L 236,250 Z"
+                    fill="var(--sienna)" stroke="var(--ink)" strokeWidth="1"/>
+              <circle cx="250" cy="250" r="3.5" fill="var(--ink)"/>
+            </g>
+          </svg>
+        </div>
 
-        .flowmate-login__tagline {
-          font-size: 13.5px; line-height: 1.65;
-          color: rgba(255, 255, 255, 0.7);
-          margin: 0 auto 32px; max-width: 340px;
-          animation: flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both;
-        }
-
-        .flowmate-login__btn {
-          width: 100%; padding: 13px 18px;
-          font-size: 14.5px; font-weight: 600; font-family: inherit;
-          color: #1f2937; background: #ffffff;
-          border: 1px solid rgba(255, 255, 255, 0.5);
-          border-radius: 10px;
-          cursor: pointer;
-          display: flex; align-items: center; justify-content: center; gap: 12px;
-          transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-                      box-shadow 220ms ease;
-          animation:
-            flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both,
-            flow-btn-glow 3.4s ease-in-out infinite 1.6s;
-          position: relative;
-        }
-        .flowmate-login__btn:not(:disabled):hover {
-          transform: translateY(-2px);
-          box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4),
-                      0 0 32px rgba(255, 255, 255, 0.18);
-        }
-        .flowmate-login__btn:not(:disabled):active { transform: translateY(0); }
-        .flowmate-login__btn:disabled { cursor: not-allowed; opacity: 0.75; }
-
-        .flowmate-login__footer {
-          margin-top: 28px; padding-top: 22px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          font-size: 11.5px; line-height: 1.6;
-          color: rgba(255, 255, 255, 0.5);
-          animation: flow-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both;
-        }
-        .flowmate-login__footer strong {
-          color: rgba(255, 255, 255, 0.88); font-weight: 600;
-        }
-
-        /* Keyframes ------------------------------------------------------ */
-        @keyframes flow-bg-pan {
-          0%, 100% { background-position: 0% 50%; }
-          50%      { background-position: 100% 50%; }
-        }
-        @keyframes flow-orb-1 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33%      { transform: translate(60px, -40px) scale(1.15); }
-          66%      { transform: translate(-40px, 50px) scale(0.92); }
-        }
-        @keyframes flow-orb-2 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50%      { transform: translate(-70px, -50px) scale(1.1); }
-        }
-        @keyframes flow-orb-3 {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33%      { transform: translate(-40px, -60px) scale(0.95); }
-          66%      { transform: translate(50px, 30px) scale(1.08); }
-        }
-        @keyframes flow-grid-drift {
-          from { background-position: 0 0, 0 0; }
-          to   { background-position: 96px 96px, 96px 96px; }
-        }
-        @keyframes flow-card-in {
-          from { opacity: 0; transform: translateY(28px) scale(0.96); filter: blur(4px); }
-          to   { opacity: 1; transform: translateY(0)    scale(1);    filter: blur(0);    }
-        }
-        @keyframes flow-fade-up {
-          from { opacity: 0; transform: translateY(14px); }
-          to   { opacity: 1; transform: translateY(0);    }
-        }
-        @keyframes flow-shimmer {
-          0%   { background-position: 0% 50%; }
-          100% { background-position: 200% 50%; }
-        }
-        @keyframes flow-btn-glow {
-          0%, 100% { box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 0    rgba(255,255,255,0); }
-          50%      { box-shadow: 0 6px 22px rgba(0,0,0,0.35), 0 0 32px rgba(255,255,255,0.22); }
-        }
-
-        @media (max-width: 480px) {
-          .flowmate-login__card  { padding: 40px 28px 28px; border-radius: 18px; }
-          .flowmate-login__title { font-size: 46px; }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .flowmate-login,
-          .flowmate-login__orb,
-          .flowmate-login__grid,
-          .flowmate-login__card,
-          .flowmate-login__logo,
-          .flowmate-login__title,
-          .flowmate-login__tagline,
-          .flowmate-login__btn,
-          .flowmate-login__footer { animation: none !important; }
-        }
-      `}</style>
-
-      <div className="flowmate-login__orb flowmate-login__orb--1" />
-      <div className="flowmate-login__orb flowmate-login__orb--2" />
-      <div className="flowmate-login__orb flowmate-login__orb--3" />
-      <div className="flowmate-login__grid" />
-
-      <div className="flowmate-login__card">
-        <img src="garena/logo_horizontal.png" alt="Garena" className="flowmate-login__logo" />
-        <h1 className="flowmate-login__title">FlowMate</h1>
-        <p className="flowmate-login__tagline">
-          real-time capacity visibility, and lightweight task tracking — built for the Garena team.
-        </p>
+        <p className="wha-runes wha-runes--hero">· TRANS · LIMEN · INTRA ·</p>
 
         {authError && (
-          <div style={{
-            background: "rgba(192, 80, 77, 0.16)",
-            border: "1px solid rgba(192, 80, 77, 0.35)",
-            color: "#ffd8d6",
-            borderRadius: 10,
-            padding: "12px 14px",
-            fontSize: 12.5,
-            lineHeight: 1.55,
-            textAlign: "left",
-            marginBottom: 20,
-          }}>
-            {authError}
+          <div className="wha-error wha-reveal" role="alert">
+            <strong>⚠</strong> {authError}
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={onSignIn}
-          disabled={isSigningIn}
-          className="flowmate-login__btn"
-        >
-          <GoogleLogo />
-          <span>{isSigningIn ? "Redirecting to Google…" : "Sign in with Google"}</span>
+        <button type="button" onClick={onSignIn} disabled={isSigningIn} className="wha-cta">
+          <span className="wha-cta__glyph" aria-hidden="true"><GoogleLogo /></span>
+          <span className="wha-cta__label">
+            {isSigningIn ? "Crossing the threshold…" : "Sign in with Google"}
+          </span>
         </button>
 
-        <div className="flowmate-login__footer">
-          Use your <strong>@garena.com</strong> Workspace account
+        <p className="wha-runes wha-runes--small">⚝ Garena Workspace only ⚝</p>
+      </main>
+
+      {/* INK DIVIDER */}
+      <InkDivider />
+
+      {/* CARDS -------------------------------------------------------- */}
+      <section className="wha-cards" id="atelier">
+        {[
+          { glyph: "quill",   title: "Quill & Vellum",  phrase: "Where intent meets parchment, and the work begins." },
+          { glyph: "glass",   title: "Hourglass",       phrase: "Hours tallied by craft, never by guesswork." },
+          { glyph: "compass", title: "Sigil Circle",    phrase: "Every task finds its rightful hand." },
+        ].map((c, i) => (
+          <article key={c.title} className="wha-card wha-reveal" style={{ transitionDelay: (0.18 * i) + "s" }}>
+            <div className="wha-card__hatch" aria-hidden="true"></div>
+            <div className="wha-card__glyph" aria-hidden="true">
+              <CardGlyph kind={c.glyph} />
+            </div>
+            <h3 className="wha-card__title">{c.title}</h3>
+            <p className="wha-card__phrase">{c.phrase}</p>
+            <div className="wha-card__seal" aria-hidden="true">✦</div>
+          </article>
+        ))}
+      </section>
+
+      {/* INK DIVIDER */}
+      <InkDivider />
+
+      {/* BOTANICAL SHELF --------------------------------------------- */}
+      <section className="wha-shelf wha-reveal" id="grimoire" aria-hidden="true">
+        <ShelfRow />
+      </section>
+
+      {/* FOOTER ------------------------------------------------------- */}
+      <footer className="wha-footer wha-reveal">
+        <div className="wha-footer__ring">
+          <svg viewBox="0 0 120 120">
+            <defs>
+              <path id="wha-footer-arc" d="M 60,60 m -42,0 a 42,42 0 1,1 84,0 a 42,42 0 1,1 -84,0"/>
+            </defs>
+            <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ink)" strokeWidth="0.8"/>
+            <circle cx="60" cy="60" r="42" fill="none" stroke="var(--sienna)" strokeWidth="0.4" strokeDasharray="2 3"/>
+            <text className="wha-footer__runes">
+              <textPath href="#wha-footer-arc">⚝ INSCRIBED · BY · HAND · MMXXVI · ⚝ · TRANS · LIMEN · ⚝</textPath>
+            </text>
+            <text x="60" y="68" textAnchor="middle" fontFamily="Cinzel Decorative" fontSize="24"
+                  fontWeight="700" fill="var(--ink)">⚝</text>
+          </svg>
         </div>
-      </div>
+        <p className="wha-footer__credit">Inscribed by hand · MMXXVI</p>
+      </footer>
     </div>
   );
 }
+
+function InkDivider() {
+  return (
+    <svg className="wha-divider" viewBox="0 0 1200 40" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M 0,20 Q 150,5 300,20 T 600,20 T 900,20 T 1200,20"
+            fill="none" stroke="var(--ink)" strokeWidth="0.8" strokeLinecap="round"/>
+      <polygon points="600,11 612,20 600,29 588,20"
+               fill="var(--sienna)" stroke="var(--ink)" strokeWidth="0.8"/>
+      <circle cx="540" cy="20" r="1.5" fill="var(--ink)"/>
+      <circle cx="660" cy="20" r="1.5" fill="var(--ink)"/>
+    </svg>
+  );
+}
+
+function CardGlyph({ kind }) {
+  if (kind === "quill") {
+    return (
+      <svg viewBox="0 0 60 60">
+        <path d="M 12,48 L 44,16" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+        <path d="M 30,30 Q 42,16 52,8 Q 54,22 42,32 Q 35,33 30,30 Z"
+              fill="currentColor" stroke="currentColor" strokeWidth="0.5"/>
+        <path d="M 32,32 L 36,28 M 36,30 L 40,26 M 40,28 L 44,24"
+              stroke="var(--cream)" strokeWidth="0.6"/>
+        <line x1="14" y1="46" x2="9" y2="51" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <circle cx="9" cy="51" r="1.6" fill="currentColor"/>
+      </svg>
+    );
+  }
+  if (kind === "glass") {
+    return (
+      <svg viewBox="0 0 60 60">
+        <line x1="12" y1="8"  x2="48" y2="8"  stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+        <line x1="12" y1="52" x2="48" y2="52" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+        <path d="M 15,8 L 45,8 L 30,30 L 45,52 L 15,52 L 30,30 Z"
+              fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+        <path d="M 22,14 L 38,14 L 30,25 Z" fill="currentColor" opacity="0.45"/>
+        <path d="M 22,46 L 38,46 L 30,35 Z" fill="currentColor" opacity="0.2"/>
+        <circle cx="30" cy="30" r="0.9" fill="currentColor"/>
+      </svg>
+    );
+  }
+  // compass
+  return (
+    <svg viewBox="0 0 60 60">
+      <circle cx="30" cy="30" r="22" fill="none" stroke="currentColor" strokeWidth="1.4"/>
+      <circle cx="30" cy="30" r="17" fill="none" stroke="currentColor" strokeWidth="0.6" strokeDasharray="2 3"/>
+      <line x1="30" y1="4"  x2="30" y2="56" stroke="currentColor" strokeWidth="0.8"/>
+      <line x1="4"  y1="30" x2="56" y2="30" stroke="currentColor" strokeWidth="0.8"/>
+      <path d="M 30,10 L 36,30 L 30,26 L 24,30 Z" fill="currentColor"/>
+      <path d="M 30,50 L 24,30 L 30,34 L 36,30 Z" fill="currentColor" opacity="0.55"/>
+      <circle cx="30" cy="30" r="2.5" fill="var(--cream)" stroke="currentColor" strokeWidth="1"/>
+    </svg>
+  );
+}
+
+function ShelfRow() {
+  // Hanging herb bundle, repeated, with a potion and quill in the mix.
+  function Herb({ x }) {
+    return (
+      <g transform={`translate(${x},0)`}>
+        <line x1="0" y1="0" x2="0" y2="14" stroke="var(--ink)" strokeWidth="0.6"/>
+        <line x1="0" y1="14" x2="0" y2="62" stroke="var(--ink)" strokeWidth="1"/>
+        <line x1="-8" y1="14" x2="8" y2="14" stroke="var(--ink)" strokeWidth="0.7"/>
+        <ellipse cx="-5" cy="28" rx="4" ry="9" fill="var(--forest)" opacity="0.85" transform="rotate(-18 -5 28)" stroke="var(--ink)" strokeWidth="0.4"/>
+        <ellipse cx="6"  cy="34" rx="4" ry="10" fill="var(--forest)" opacity="0.85" transform="rotate(15 6 34)"  stroke="var(--ink)" strokeWidth="0.4"/>
+        <ellipse cx="-4" cy="46" rx="4" ry="9"  fill="var(--forest)" opacity="0.85" transform="rotate(-12 -4 46)" stroke="var(--ink)" strokeWidth="0.4"/>
+        <ellipse cx="5"  cy="54" rx="3.5" ry="8" fill="var(--forest)" opacity="0.85" transform="rotate(20 5 54)"  stroke="var(--ink)" strokeWidth="0.4"/>
+        <path d="M -3,60 Q 0,68 3,60" fill="none" stroke="var(--sienna)" strokeWidth="0.8"/>
+      </g>
+    );
+  }
+  function Potion({ x }) {
+    return (
+      <g transform={`translate(${x},0)`}>
+        <line x1="-12" y1="0" x2="12" y2="0" stroke="var(--ink)" strokeWidth="0.6"/>
+        <line x1="0" y1="0" x2="0" y2="10" stroke="var(--ink)" strokeWidth="0.8"/>
+        <rect x="-7" y="10" width="14" height="6" fill="var(--sienna)" stroke="var(--ink)" strokeWidth="0.7"/>
+        <path d="M -5,16 L -5,30 Q -16,38 -14,55 Q -10,68 0,68 Q 10,68 14,55 Q 16,38 5,30 L 5,16 Z"
+              fill="var(--glass-teal)" stroke="var(--ink)" strokeWidth="1"/>
+        <path d="M -10,48 Q -6,42 -2,46 Q 2,50 6,46 Q 10,42 12,48"
+              fill="none" stroke="var(--ink)" strokeWidth="0.5" opacity="0.5"/>
+        <circle cx="-5" cy="52" r="1.5" fill="var(--cream)" opacity="0.5"/>
+        <circle cx="3"  cy="58" r="1"   fill="var(--cream)" opacity="0.4"/>
+      </g>
+    );
+  }
+  function Quill({ x }) {
+    return (
+      <g transform={`translate(${x},0)`}>
+        <line x1="0" y1="0" x2="0" y2="8" stroke="var(--ink)" strokeWidth="0.6"/>
+        <line x1="-16" y1="62" x2="16" y2="14" stroke="var(--ink)" strokeWidth="1.4" strokeLinecap="round"/>
+        <path d="M 4,26 Q 16,14 22,6 Q 24,18 16,28 Q 9,30 4,26 Z"
+              fill="var(--ink)" stroke="var(--ink)" strokeWidth="0.4"/>
+        <path d="M 6,28 L 10,24 M 10,26 L 14,22 M 14,24 L 18,20"
+              stroke="var(--cream)" strokeWidth="0.5"/>
+        <circle cx="-16" cy="62" r="1.6" fill="var(--sienna)"/>
+      </g>
+    );
+  }
+  return (
+    <svg viewBox="0 0 1200 90" preserveAspectRatio="none">
+      {/* shelf line */}
+      <line x1="40" y1="2" x2="1160" y2="2" stroke="var(--ink)" strokeWidth="1.2"/>
+      <Herb x={100}/>
+      <Herb x={220}/>
+      <Potion x={370}/>
+      <Herb x={520}/>
+      <Quill x={660}/>
+      <Herb x={800}/>
+      <Potion x={930}/>
+      <Herb x={1080}/>
+    </svg>
+  );
+}
+
+const WHA_STYLES = `
+:root {
+  --ink:        #1a1410;
+  --sienna:     #7a3b1e;
+  --forest:     #2d5a3d;
+  --cobalt:     #1c2b4a;
+  --parchment:  #e8d5a3;
+  --cream:      #f5ead0;
+  --amber:      #c4722a;
+  --glass-blue: rgba(40,80,160,0.5);
+  --glass-teal: rgba(30,100,60,0.5);
+  --glass-amber:rgba(180,100,20,0.5);
+}
+
+.wha {
+  position: fixed; inset: 0;
+  overflow-y: auto; overflow-x: hidden;
+  color: var(--ink);
+  font-family: 'Cormorant Garamond', 'EB Garamond', 'Garamond', 'Times New Roman', serif;
+  font-weight: 300; font-style: italic;
+  background-color: var(--parchment);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.07'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at center, transparent 35%, rgba(122,59,30,0.22) 100%);
+  animation: wha-page-in 0.8s ease-out;
+}
+@keyframes wha-page-in {
+  from { filter: sepia(1) brightness(1.3); }
+  to   { filter: sepia(0) brightness(1); }
+}
+.wha h1, .wha h2, .wha h3, .wha .wha-cta__label {
+  font-family: 'Cinzel Decorative', 'Trajan Pro', serif;
+  font-weight: 700; font-style: normal;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+}
+
+/* Orb stage ------------------------------------------------------------- */
+.wha-orb-stage {
+  position: fixed; inset: 0;
+  pointer-events: none; overflow: hidden;
+  z-index: 0;
+}
+.wha-orb {
+  position: absolute; bottom: -30px;
+  border-radius: 50%;
+  filter: blur(2px);
+  opacity: 0;
+  animation-name: wha-orb-rise;
+  animation-timing-function: ease-out;
+  animation-fill-mode: forwards;
+  --wha-drift: 0px;
+}
+@keyframes wha-orb-rise {
+  0%   { opacity: 0; transform: translate(0, 0); }
+  10%  { opacity: 1; }
+  85%  { opacity: 0.55; }
+  100% { opacity: 0; transform: translate(var(--wha-drift), -110vh); }
+}
+
+/* HEADER --------------------------------------------------------------- */
+.wha-header {
+  position: relative; z-index: 2;
+  max-width: 1280px; margin: 0 auto;
+  padding: 26px 48px 14px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.wha-header__mark {
+  width: 40px; height: 40px;
+  animation: wha-mark-in 1.2s cubic-bezier(0.16,1,0.3,1) 0.2s both;
+}
+@keyframes wha-mark-in {
+  from { opacity: 0; transform: rotate(-25deg) scale(0.6); }
+  to   { opacity: 1; transform: rotate(0)      scale(1);   }
+}
+.wha-header__nav { display: flex; gap: 38px; }
+.wha-nav-link {
+  position: relative;
+  font-family: 'Almendra SC', 'Cinzel', serif;
+  font-style: normal; font-size: 12.5px;
+  letter-spacing: 0.28em; text-transform: uppercase;
+  color: var(--sienna); text-decoration: none;
+  padding: 4px 2px;
+  animation: wha-nav-in 0.6s ease-out backwards;
+}
+.wha-header__nav .wha-nav-link:nth-child(1) { animation-delay: 0.5s; }
+.wha-header__nav .wha-nav-link:nth-child(2) { animation-delay: 0.6s; }
+.wha-header__nav .wha-nav-link:nth-child(3) { animation-delay: 0.7s; }
+@keyframes wha-nav-in {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+.wha-nav-link::after {
+  content: ""; position: absolute; bottom: -1px; left: 0;
+  width: 0; height: 1px; background: var(--ink);
+  transition: width 420ms cubic-bezier(0.34,1.56,0.64,1);
+}
+.wha-nav-link:hover { color: var(--ink); }
+.wha-nav-link:hover::after { width: 100%; }
+
+/* HERO ----------------------------------------------------------------- */
+.wha-hero {
+  position: relative; z-index: 1;
+  min-height: 78vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 30px 24px 60px;
+  text-align: center;
+}
+.wha-sigil-stage {
+  position: relative;
+  width: 460px; height: 460px;
+  max-width: 86vw; max-height: 86vw;
+  margin: 0 auto 28px;
+}
+.wha-glass {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  filter: drop-shadow(0 12px 24px rgba(28,43,74,0.22));
+  animation: wha-glass-in 1.4s cubic-bezier(0.16,1,0.3,1) 0.9s both;
+}
+@keyframes wha-glass-in {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 0.85; transform: scale(1); }
+}
+.wha-lantern {
+  position: absolute; inset: 6%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(196,114,42,0.55) 0%, rgba(196,114,42,0.18) 35%, transparent 65%);
+  filter: blur(24px);
+  z-index: 1;
+  animation: wha-flicker 3s ease-in-out infinite, wha-glass-in 1.4s ease-out 1.2s both;
+}
+@keyframes wha-flicker {
+  0%, 100% { opacity: 0.7; }
+  50%      { opacity: 0.95; }
+}
+.wha-sigil {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  z-index: 2;
+  transition: filter 700ms ease;
+}
+.wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
+.wha-sigil__outer    { animation: wha-spin 40s linear infinite; transform-origin: center; }
+.wha-sigil__penta    { animation: wha-spin-rev 60s linear infinite; transform-origin: center; }
+.wha-sigil__runes {
+  font-family: 'Almendra SC', serif; font-style: normal;
+  font-size: 13.5px; letter-spacing: 0.32em;
+  fill: var(--sienna);
+  animation: wha-fade 1.2s ease-out 1.6s both;
+}
+.wha-sigil__core { animation: wha-fade 0.9s ease-out 1.4s both; }
+.wha-ink-draw {
+  stroke-dasharray: 1000; stroke-dashoffset: 1000;
+  animation: wha-ink 2s ease-out forwards;
+}
+@keyframes wha-ink   { to { stroke-dashoffset: 0; } }
+@keyframes wha-spin  { to { transform: rotate(360deg); } }
+@keyframes wha-spin-rev { to { transform: rotate(-360deg); } }
+@keyframes wha-fade  { from { opacity: 0; } to { opacity: 1; } }
+
+.wha-runes {
+  font-family: 'Almendra SC', serif; font-style: normal;
+  letter-spacing: 0.4em; color: var(--sienna);
+  margin: 0;
+}
+.wha-runes--hero {
+  font-size: 13.5px;
+  margin-bottom: 26px;
+  animation: wha-fade-up 0.6s ease-out 1.6s both;
+}
+.wha-runes--small {
+  font-size: 10.5px; opacity: 0.7;
+  margin-top: 22px; letter-spacing: 0.42em;
+  animation: wha-fade-up 0.5s ease-out 2.1s both;
+}
+@keyframes wha-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+/* CTA ------------------------------------------------------------------ */
+.wha-cta {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 14px;
+  padding: 16px 38px;
+  font-family: 'Cinzel Decorative', serif;
+  font-size: 13.5px; font-weight: 700; font-style: normal;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink);
+  background: var(--cream);
+  border: 1.5px solid var(--ink);
+  border-radius: 0;
+  cursor: pointer;
+  transition:
+    background 300ms ease,
+    border-color 300ms ease,
+    box-shadow 300ms ease,
+    transform 220ms cubic-bezier(0.34,1.56,0.64,1);
+  animation: wha-fade-up 0.7s cubic-bezier(0.16,1,0.3,1) 1.9s both;
+}
+.wha-cta::before, .wha-cta::after {
+  content: "✦"; position: absolute; top: 50%; transform: translateY(-50%);
+  color: var(--sienna); font-size: 10px; font-family: serif;
+}
+.wha-cta::before { left: 14px; }
+.wha-cta::after  { right: 14px; }
+.wha-cta__glyph {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  background: var(--parchment);
+  border: 1px solid var(--ink);
+  border-radius: 50%;
+  padding: 2px;
+  box-sizing: border-box;
+}
+.wha-cta__label { display: inline-block; }
+.wha-cta:hover:not(:disabled) {
+  border-color: var(--amber);
+  box-shadow:
+    inset 0 0 24px rgba(196,114,42,0.28),
+    0 8px 28px rgba(122,59,30,0.28);
+  transform: translateY(-2px);
+}
+.wha-cta:active:not(:disabled) { transform: translateY(0); }
+.wha-cta:disabled { cursor: not-allowed; opacity: 0.65; }
+
+/* Error box */
+.wha-error {
+  max-width: 540px;
+  margin: 0 auto 22px;
+  padding: 13px 18px;
+  background: rgba(122,59,30,0.10);
+  border: 1px solid var(--sienna);
+  color: var(--ink);
+  font-size: 14px; line-height: 1.55;
+  text-align: left;
+}
+.wha-error strong { color: var(--sienna); margin-right: 6px; }
+
+/* Divider -------------------------------------------------------------- */
+.wha-divider {
+  display: block; width: 100%; height: 40px;
+  margin: 16px 0 24px;
+}
+
+/* CARDS ---------------------------------------------------------------- */
+.wha-cards {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 28px;
+  max-width: 1180px;
+  margin: 40px auto;
+  padding: 0 48px;
+}
+.wha-card {
+  position: relative;
+  background: var(--cream);
+  border: 1.5px solid var(--ink);
+  clip-path: polygon(0% 100%, 0% 22%, 6% 8%, 50% 0%, 94% 8%, 100% 22%, 100% 100%);
+  padding: 88px 30px 30px;
+  min-height: 320px;
+  opacity: 0; transform: translateY(30px);
+  transition:
+    opacity 700ms ease-out,
+    transform 700ms cubic-bezier(0.34,1.56,0.64,1),
+    box-shadow 400ms ease;
+}
+.wha-card.wha-revealed { opacity: 1; transform: translateY(0); }
+.wha-card:hover { transform: translateY(-6px); box-shadow: 0 20px 44px rgba(122,59,30,0.28); }
+.wha-card__hatch {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M 0,8 L 8,0' stroke='%231a1410' stroke-width='0.5'/%3E%3C/svg%3E");
+  opacity: 0.1;
+  clip-path: inherit;
+}
+.wha-card__glyph {
+  width: 64px; height: 64px;
+  margin: 0 auto 18px;
+  color: var(--sienna);
+  position: relative; z-index: 1;
+}
+.wha-card__title {
+  font-size: 15px; letter-spacing: 0.24em;
+  margin: 0 0 14px; text-align: center;
+  text-transform: uppercase;
+  position: relative; z-index: 1;
+}
+.wha-card__phrase {
+  font-size: 15.5px; line-height: 1.65;
+  text-align: center; color: var(--ink); opacity: 0.88;
+  margin: 0; max-width: 240px; margin-left: auto; margin-right: auto;
+  position: relative; z-index: 1;
+}
+.wha-card__seal {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  font-family: serif; font-size: 12px; color: var(--sienna);
+}
+
+/* SHELF ---------------------------------------------------------------- */
+.wha-shelf {
+  position: relative; z-index: 1;
+  width: 100%;
+  padding: 30px 48px 10px;
+  max-width: 1280px; margin: 0 auto;
+  opacity: 0; transform: translateY(20px);
+  transition: opacity 800ms ease-out, transform 800ms ease-out;
+}
+.wha-shelf.wha-revealed { opacity: 1; transform: translateY(0); }
+.wha-shelf svg { width: 100%; height: auto; max-height: 130px; display: block; }
+
+/* FOOTER --------------------------------------------------------------- */
+.wha-footer {
+  position: relative; z-index: 1;
+  text-align: center;
+  padding: 30px 24px 60px;
+  opacity: 0; transform: translateY(16px);
+  transition: opacity 700ms ease-out, transform 700ms ease-out;
+}
+.wha-footer.wha-revealed { opacity: 1; transform: translateY(0); }
+.wha-footer__ring {
+  width: 90px; height: 90px; margin: 0 auto 10px;
+}
+.wha-footer__ring svg { width: 100%; height: 100%; animation: wha-spin 60s linear infinite; }
+.wha-footer__runes {
+  font-family: 'Almendra SC', serif; font-style: normal;
+  font-size: 8.5px; letter-spacing: 0.3em;
+  fill: var(--sienna);
+}
+.wha-footer__credit {
+  font-family: 'Almendra SC', serif; font-style: normal;
+  font-size: 11.5px; letter-spacing: 0.32em;
+  color: var(--sienna); text-transform: uppercase;
+  margin: 0;
+}
+
+/* Responsive ----------------------------------------------------------- */
+@media (max-width: 720px) {
+  .wha-header { padding: 18px 22px 8px; }
+  .wha-header__nav { gap: 20px; }
+  .wha-nav-link { font-size: 10.5px; letter-spacing: 0.18em; }
+  .wha-sigil-stage { width: 320px; height: 320px; }
+  .wha-cards { grid-template-columns: 1fr; padding: 0 22px; gap: 22px; }
+  .wha-card { min-height: 280px; padding: 70px 24px 24px; }
+  .wha-cta { padding: 14px 28px; font-size: 12.5px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wha, .wha *, .wha-orb {
+    animation: none !important;
+    transition: none !important;
+  }
+  .wha-card  { opacity: 1; transform: none; }
+  .wha-shelf { opacity: 1; transform: none; }
+  .wha-footer{ opacity: 1; transform: none; }
+  .wha-ink-draw { stroke-dashoffset: 0; }
+}
+`;
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
