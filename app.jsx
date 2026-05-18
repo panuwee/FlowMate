@@ -25,12 +25,23 @@ const TITLE_MAP = {
 };
 
 function App() {
-  const [route, setRoute] = useStateApp(() => {
-    const h = window.location.hash.replace("#", "");
-    return h && TITLE_MAP[h.split("/")[0]] ? h.split("/")[0] : "my-work";
-  });
-  const [focusId, setFocusId] = useStateApp(null);
-  const [searchQuery, setSearchQuery] = useStateApp("");
+  // ... โค้ดเดิม useState ทั้งหมด
+
+  const [authReady, setAuthReady] = useStateApp(false);
+
+  useEffectApp(() => {
+    (async () => {
+      await window.flowmateInitAuth();   // overwrite mock user ถ้ามี session
+      setAuthReady(true);
+    })();
+  }, []);
+
+  if (!authReady) {
+    return <div style={{ padding: 32 }}>Loading…</div>;
+  }
+
+  // ... โค้ดเดิม return <div className="app"> ...
+}
 
   function nav(key) {
     setRoute(key);
