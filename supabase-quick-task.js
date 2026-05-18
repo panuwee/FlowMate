@@ -6,6 +6,22 @@ const FLOWMATE_MOCK_USERS = {
   vee: "00000000-0000-0000-0000-000000000005",
 };
 
+// MVP mock-auth: a single "logged-in" user identity used by every RPC.
+// Real Google Workspace SSO is tracked as B-004 — see docs/QA report.
+// Until then, switching this constant (or reading it from a header / URL
+// param) is the seam where real auth will plug in.
+window.FLOWMATE_CURRENT_USER = window.FLOWMATE_CURRENT_USER || {
+  id: FLOWMATE_MOCK_USERS.pond,
+  name: "Pond",
+  email: "pond@garena.com",
+  team_member_id: "10000000-0000-0000-0000-000000000001",
+};
+
+function flowmateActorId() {
+  return (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id) || FLOWMATE_MOCK_USERS.pond;
+}
+window.flowmateActorId = flowmateActorId;
+
 async function createFlowMateQuickTask(input) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -18,7 +34,7 @@ async function createFlowMateQuickTask(input) {
   if (!dueDate) throw new Error("Due date is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("create_quick_task", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_title: title,
     p_due_date: dueDate,
     p_note: input.note || null,
@@ -42,7 +58,7 @@ async function completeFlowMateQuickTask(displayId) {
   if (!displayId) throw new Error("Work item ID is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("complete_quick_task", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_display_id: displayId,
   });
 
@@ -62,7 +78,7 @@ async function addFlowMateQuickTaskChecklistItem(displayId, title) {
   if (!trimmedTitle) throw new Error("Checklist title is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("add_quick_task_checklist_item", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_display_id: displayId,
     p_title: trimmedTitle,
   });
@@ -79,7 +95,7 @@ async function toggleFlowMateQuickTaskChecklistItem(checklistItemId, isDone) {
   if (!checklistItemId) throw new Error("Checklist item ID is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("toggle_quick_task_checklist_item", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_checklist_item_id: checklistItemId,
     p_is_done: Boolean(isDone),
   });
@@ -101,7 +117,7 @@ async function addFlowMateWorkItemComment(displayId, body) {
   if (!trimmedBody) throw new Error("Comment is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("add_work_item_comment", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_display_id: displayId,
     p_body: trimmedBody,
   });
@@ -120,7 +136,7 @@ async function updateFlowMateOwnComment(commentId, body) {
   if (!trimmedBody) throw new Error("Comment is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("update_own_work_item_comment", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_comment_id: commentId,
     p_body: trimmedBody,
   });
@@ -137,7 +153,7 @@ async function deleteFlowMateOwnComment(commentId) {
   if (!commentId) throw new Error("Comment ID is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("delete_own_work_item_comment", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_comment_id: commentId,
   });
 
@@ -158,11 +174,12 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
   if (!nextStatus) throw new Error("Next status is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("transition_creative_work_status", {
-    p_actor_user_id: FLOWMATE_MOCK_USERS.pond,
+    p_actor_user_id: flowmateActorId(),
     p_display_id: displayId,
     p_next_status: nextStatus,
     p_delivery_link: options.deliveryLink || null,
     p_blocked_reason: options.blockedReason || null,
+    p_cancel_reason: options.cancelReason || null,
   });
 
   if (error) throw error;
@@ -171,30 +188,132 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
 
 window.transitionFlowMateCreativeStatus = transitionFlowMateCreativeStatus;
 
+// ---------------------------------------------------------------------------
+// Creative request creation -- backend computes effort, owner, queue reason.
+// ---------------------------------------------------------------------------
+async function createFlowMateCreativeRequest(input) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+  if (!input || !input.title || !input.title.trim()) throw new Error("Title is required.");
+  if (!input.dueDate) throw new Error("Due date is required.");
+
+  const platforms = Array.isArray(input.platforms)
+    ? input.platforms
+    : (input.platforms || "").split(",").map((p) => p.trim()).filter(Boolean);
+
+  const { data, error } = await window.flowmateSupabase.rpc("create_creative_request", {
+    p_actor_user_id:    flowmateActorId(),
+    p_title:            input.title.trim(),
+    p_requester_team:   input.requesterTeam || null,
+    p_campaign_name:    input.campaignName || null,
+    p_asset_type:       input.assetType,
+    p_asset_subtype:    input.assetSubtype || "",
+    p_platforms:        platforms,
+    p_size_format:      input.sizeFormat || "",
+    p_brief_link:       input.briefLink || "",
+    p_reference_link:   input.referenceLink || null,
+    p_priority:         input.priority || "normal",
+    p_urgent_reason:    input.urgentReason || null,
+    p_due_date:         input.dueDate,
+    p_launch_date:      input.launchDate || null,
+  });
+  if (error) throw error;
+  return data;
+}
+window.createFlowMateCreativeRequest = createFlowMateCreativeRequest;
+
+async function rerunFlowMateAssignment(displayId) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!displayId) throw new Error("Work item ID is required.");
+  const { data, error } = await window.flowmateSupabase.rpc("rerun_assignment", {
+    p_actor_user_id: flowmateActorId(),
+    p_display_id: displayId,
+  });
+  if (error) throw error;
+  return data;
+}
+window.rerunFlowMateAssignment = rerunFlowMateAssignment;
+
+async function recheckFlowMateBrief(displayId) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!displayId) throw new Error("Work item ID is required.");
+  const { data, error } = await window.flowmateSupabase.rpc("recheck_brief", {
+    p_actor_user_id: flowmateActorId(),
+    p_display_id: displayId,
+  });
+  if (error) throw error;
+  return data;
+}
+window.recheckFlowMateBrief = recheckFlowMateBrief;
+
+async function cancelFlowMateWorkItem(work, reason) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!work || !work.id) throw new Error("Work item is required.");
+  const trimmed = (reason || "").trim();
+  if (!trimmed) throw new Error("Cancel reason is required.");
+
+  if (work.type === "quick") {
+    const { data, error } = await window.flowmateSupabase.rpc("cancel_quick_task", {
+      p_actor_user_id: flowmateActorId(),
+      p_display_id: work.id,
+      p_cancel_reason: trimmed,
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  return transitionFlowMateCreativeStatus(work.id, "cancelled", { cancelReason: trimmed });
+}
+window.cancelFlowMateWorkItem = cancelFlowMateWorkItem;
+
 // ===========================================================================
-// Google Workspace SSO via Supabase Auth
-// แทนที่ mock FLOWMATE_CURRENT_USER ด้านบนเมื่อ Supabase auth พร้อมใช้งาน
+// Google Workspace SSO (Supabase Auth + Google provider)
 // ===========================================================================
+// `flowmateInitAuth` is called once on App mount. If a Supabase session
+// exists, it overwrites the mock `FLOWMATE_CURRENT_USER` with the real
+// signed-in user. If no session, the mock identity stays as a dev fallback
+// so the app keeps working before SSO is fully configured.
 async function flowmateInitAuth() {
   if (!window.flowmateSupabase) return null;
 
-  const { data: { session } } = await window.flowmateSupabase.auth.getSession();
-  if (!session) return null;
+  let session = null;
+  try {
+    const result = await window.flowmateSupabase.auth.getSession();
+    session = result && result.data ? result.data.session : null;
+  } catch (error) {
+    console.warn("[FlowMate Auth] getSession failed:", error && error.message);
+    return null;
+  }
+  if (!session || !session.user) return null;
 
-  const { data: profile, error } = await window.flowmateSupabase
+  const { data: profile, error: profileError } = await window.flowmateSupabase
     .from("users")
     .select("id, email, display_name, requester_team, is_active")
     .eq("id", session.user.id)
-    .single();
+    .maybeSingle();
 
-  if (error || !profile) {
-    console.error("[FlowMate Auth] profile load failed:", error);
+  if (profileError) {
+    console.warn("[FlowMate Auth] profile lookup failed:", profileError.message);
+    return null;
+  }
+  if (!profile) {
+    // Auth user exists but the SQL trigger `handle_new_auth_user` has not
+    // synced them into public.users yet. Sign out so they retry after the
+    // trigger is installed.
+    console.warn("[FlowMate Auth] No public.users row for", session.user.email,
+                 "— check that the auth-sync trigger is installed.");
+    await window.flowmateSupabase.auth.signOut();
     return null;
   }
 
-  if (!profile.is_active) {
+  // UAT-002: inactive users must not mutate. We block read access too by
+  // signing them out client-side. The DB still re-checks on every RPC.
+  if (profile.is_active === false) {
     await window.flowmateSupabase.auth.signOut();
-    window.alert("Account is inactive. Please contact admin.");
+    if (typeof window.alert === "function") {
+      window.alert("Account is inactive. Please contact admin.");
+    }
     return null;
   }
 
@@ -204,21 +323,27 @@ async function flowmateInitAuth() {
     .eq("user_id", profile.id)
     .maybeSingle();
 
-  // overwrite mock identity ด้วย user จริง
   window.FLOWMATE_CURRENT_USER = {
     id: profile.id,
     name: profile.display_name,
     email: profile.email,
     team_member_id: member ? member.id : null,
+    requester_team: profile.requester_team || null,
+    is_authenticated: true,
   };
   return window.FLOWMATE_CURRENT_USER;
 }
 
 async function flowmateSignInWithGoogle() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
   const { error } = await window.flowmateSupabase.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo: window.location.origin + window.location.pathname,
+      // Hint Google to show only Garena Workspace accounts. Final domain
+      // enforcement still happens in the SQL trigger `enforce_garena_domain`.
       queryParams: { hd: "garena.com" },
     },
   });
@@ -226,16 +351,18 @@ async function flowmateSignInWithGoogle() {
 }
 
 async function flowmateSignOut() {
+  if (!window.flowmateSupabase) return;
   await window.flowmateSupabase.auth.signOut();
+  // Drop the cached identity so the mock fallback re-applies on reload.
   window.FLOWMATE_CURRENT_USER = null;
   window.location.reload();
 }
 
-window.flowmateInitAuth = flowmateInitAuth;
+window.flowmateInitAuth         = flowmateInitAuth;
 window.flowmateSignInWithGoogle = flowmateSignInWithGoogle;
-window.flowmateSignOut = flowmateSignOut;
+window.flowmateSignOut          = flowmateSignOut;
 
-if (window.flowmateSupabase) {
+if (window.flowmateSupabase && window.flowmateSupabase.auth) {
   window.flowmateSupabase.auth.onAuthStateChange((event) => {
     if (event === "SIGNED_OUT") {
       window.FLOWMATE_CURRENT_USER = null;

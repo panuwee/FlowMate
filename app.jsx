@@ -25,23 +25,13 @@ const TITLE_MAP = {
 };
 
 function App() {
-  // ... โค้ดเดิม useState ทั้งหมด
-
-  const [authReady, setAuthReady] = useStateApp(false);
-
-  useEffectApp(() => {
-    (async () => {
-      await window.flowmateInitAuth();   // overwrite mock user ถ้ามี session
-      setAuthReady(true);
-    })();
-  }, []);
-
-  if (!authReady) {
-    return <div style={{ padding: 32 }}>Loading…</div>;
-  }
-
-  // ... โค้ดเดิม return <div className="app"> ...
-}
+  const [route, setRoute] = useStateApp(() => {
+    const h = window.location.hash.replace("#", "");
+    return h && TITLE_MAP[h.split("/")[0]] ? h.split("/")[0] : "my-work";
+  });
+  const [focusId, setFocusId] = useStateApp(null);
+  const [searchQuery, setSearchQuery] = useStateApp("");
+  const [authState, setAuthState] = useStateApp({ status: "loading", user: null });
 
   function nav(key) {
     setRoute(key);
@@ -64,6 +54,62 @@ function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  // Initialise Supabase Auth. If a Google session exists, overwrite the
+  // mock FLOWMATE_CURRENT_USER. Otherwise stay on the mock Pond identity
+  // so the app remains usable while SSO is being rolled out.
+  useEffectApp(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const realUser = window.flowmateInitAuth ? await window.flowmateInitAuth() : null;
+        if (!alive) return;
+        if (realUser) {
+          setAuthState({ status: "signed-in", user: realUser });
+        } else {
+          setAuthState({
+            status: "signed-out",
+            user: window.FLOWMATE_CURRENT_USER || null,
+          });
+        }
+      } catch (error) {
+        console.error("[FlowMate Auth] init failed:", error);
+        if (alive) setAuthState({ status: "signed-out", user: window.FLOWMATE_CURRENT_USER || null });
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  async function handleSignIn() {
+    try {
+      await window.flowmateSignInWithGoogle();
+    } catch (error) {
+      console.error("[FlowMate Auth] sign-in failed:", error);
+      window.alert("Sign-in failed: " + (error.message || "unknown error"));
+    }
+  }
+
+  async function handleSignOut() {
+    try { await window.flowmateSignOut(); }
+    catch (error) {
+      console.error("[FlowMate Auth] sign-out failed:", error);
+    }
+  }
+
+  // While auth is initialising, show a tiny splash so we don't flash mock data
+  // and immediately swap it out under the user.
+  if (authState.status === "loading") {
+    return (
+      <div style={{ padding: 40, textAlign: "center", color: "var(--garena-iron)" }}>
+        Loading FlowMate…
+      </div>
+    );
+  }
+
+  const currentUserName  = authState.user?.name  || "Pond";
+  const currentUserEmail = authState.user?.email || "pond@garena.com";
+  const isSignedIn       = authState.status === "signed-in";
+  const avatarMemberId   = authState.user?.team_member_id || "m-pond";
+
   return (
     <div className="app">
       <div className="app__brand">
@@ -85,10 +131,27 @@ function App() {
         <button className="topbar__btn" disabled title="Notifications are planned for MVP 1.1">
           <Icon name="bell" /> Notifications (MVP 1.1)
         </button>
-        <div className="topbar__user" title="Mock login: Pond">
-          <Avatar memberId="m-pond" size="" />
-          <span className="topbar__user-name">Pond</span>
-        </div>
+        {isSignedIn ? (
+          <>
+            <div className="topbar__user" title={`Signed in as ${currentUserEmail}`}>
+              <Avatar memberId={avatarMemberId} size="" />
+              <span className="topbar__user-name">{currentUserName}</span>
+            </div>
+            <button className="topbar__btn" onClick={handleSignOut} title="Sign out">
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="topbar__user" title="Mock login (dev fallback) — not authenticated">
+              <Avatar memberId={avatarMemberId} size="" />
+              <span className="topbar__user-name">{currentUserName} (mock)</span>
+            </div>
+            <button className="topbar__btn" onClick={handleSignIn} title="Sign in with Google Workspace">
+              <Icon name="users" /> Sign in with Google
+            </button>
+          </>
+        )}
       </div>
 
       <nav className="app__sidebar">
