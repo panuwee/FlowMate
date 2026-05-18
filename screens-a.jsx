@@ -146,6 +146,9 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const review = mine.filter(w => w.status === "review" && !dueSoon.includes(w));
   const quick = mine.filter(w => w.type === "quick");
   const blocked = mine.filter(w => w.status === "blocked");
+  function scrollToOverdue() {
+    document.getElementById("my-work-overdue")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div className="page">
@@ -154,7 +157,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
           <Icon name="alert" size={18} />
           <span><strong>{overdue.length} overdue {overdue.length === 1 ? "item" : "items"}</strong> &nbsp;needs your attention before new work is assigned.</span>
           <span className="overdue-banner__spacer"></span>
-          <button className="btn btn--sm btn--danger">View overdue</button>
+          <button className="btn btn--sm btn--danger" onClick={scrollToOverdue}>View overdue</button>
         </div>
       )}
 
@@ -190,7 +193,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
 function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, onChecklistAdd, onChecklistToggle, onCommentAdd, onCommentEdit, onCommentDelete, tone, compact }) {
   return (
-    <div className="section">
+    <div className="section" id={tone === "overdue" ? "my-work-overdue" : undefined}>
       <div className={`section__head${tone === "overdue" ? " section__head--overdue" : ""}`}>
         <span className="section__title">{title}</span>
         <span className="section__count">{items.length}</span>

@@ -7,6 +7,10 @@ const { useState: useStateB, useEffect: useEffectB } = React;
 function ListScreen({ onOpen, searchQuery = "" }) {
   const [filterStatus, setFilterStatus] = useStateB("all");
   const [filterFlag, setFilterFlag] = useStateB("all");
+  const [filterOwner, setFilterOwner] = useStateB("all");
+  const [filterTeam, setFilterTeam] = useStateB("all");
+  const [filterAsset, setFilterAsset] = useStateB("all");
+  const [filterType, setFilterType] = useStateB("all");
   const [sourceRows, setSourceRows] = useStateB(WORK);
   const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
 
@@ -39,11 +43,23 @@ function ListScreen({ onOpen, searchQuery = "" }) {
   const rows = sourceRows.filter(w => {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     if (filterStatus !== "all" && w.status !== filterStatus) return false;
+    if (filterOwner !== "all" && (w.assignee || "unassigned") !== filterOwner) return false;
+    if (filterTeam !== "all" && w.requesterTeam !== filterTeam) return false;
+    if (filterAsset !== "all" && (w.assetType || "none") !== filterAsset) return false;
+    if (filterType !== "all" && w.type !== filterType) return false;
     if (filterFlag === "overdue" && !w.overdue) return false;
     if (filterFlag === "duesoon" && !(w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 2)) return false;
     if (filterFlag === "blocked" && w.status !== "blocked") return false;
     return true;
   });
+  const ownerOptions = Array.from(new Map(sourceRows.map(w => {
+    const id = w.assignee || "unassigned";
+    const label = w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned";
+    return [id, label];
+  })).entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  const teamOptions = Array.from(new Set(sourceRows.map(w => w.requesterTeam).filter(Boolean))).sort();
+  const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
+  const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
 
   return (
     <div className="page">
@@ -63,10 +79,22 @@ function ListScreen({ onOpen, searchQuery = "" }) {
           <option value="all">All statuses</option>
           {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select className="select"><option>All owners</option>{MEMBERS.map(m => <option key={m.id}>{m.name}</option>)}</select>
-        <select className="select"><option>All teams</option>{TEAMS.map(t => <option key={t}>{t}</option>)}</select>
-        <select className="select"><option>All asset types</option><option>Static</option><option>General video</option><option>Motion</option><option>Esport video</option><option>Hybrid</option></select>
-        <select className="select"><option>All types</option><option>Creative</option><option>Quick task</option></select>
+        <select className="select" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
+          <option value="all">All owners</option>
+          {ownerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        <select className="select" value={filterTeam} onChange={e => setFilterTeam(e.target.value)}>
+          <option value="all">All teams</option>
+          {teamOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select className="select" value={filterAsset} onChange={e => setFilterAsset(e.target.value)}>
+          <option value="all">All asset types</option>
+          {assetOptions.map(a => <option key={a} value={a}>{ASSET_LABEL[a] || a}</option>)}
+        </select>
+        <select className="select" value={filterType} onChange={e => setFilterType(e.target.value)}>
+          <option value="all">All types</option>
+          {typeOptions.map(t => <option key={t} value={t}>{t === "creative" ? "Creative" : "Quick task"}</option>)}
+        </select>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
           <button className={`chip ${filterFlag === "overdue" ? "is-active" : ""}`} onClick={() => setFilterFlag(filterFlag === "overdue" ? "all" : "overdue")}>
             Overdue only
@@ -260,7 +288,9 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
           <div className="page__sub">Requests the engine could not assign - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary"><Icon name="rerun" /> Rerun all</button>
+          <button className="btn btn--secondary" disabled title="Planned for MVP 1.1 after assignment-write API is added">
+            <Icon name="rerun" /> Rerun all (MVP 1.1)
+          </button>
         </div>
       </div>
 
@@ -325,9 +355,21 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
               <td className="mono muted" style={{ fontSize: 11 }}>{w.status === "need_brief" ? "โ€”" : "May 15, 09:00"}</td>
               <td className="col-right" onClick={(e) => e.stopPropagation()}>
                 <div style={{ display: "inline-flex", gap: 4 }}>
-                  {w.needsSplit && <button className="btn btn--xs btn--secondary">Create split</button>}
-                  {w.status === "need_brief" && <button className="btn btn--xs btn--primary">Request brief</button>}
-                  {w.status === "queued" && !w.needsSplit && <button className="btn btn--xs btn--secondary"><Icon name="rerun" size={11} /> Rerun</button>}
+                  {w.needsSplit && (
+                    <button className="btn btn--xs btn--secondary" disabled title="Planned for MVP 1.1 after split-task API is added">
+                      Create split
+                    </button>
+                  )}
+                  {w.status === "need_brief" && (
+                    <button className="btn btn--xs btn--primary" disabled title="Planned for MVP 1.1 after requester-notification API is added">
+                      Request brief
+                    </button>
+                  )}
+                  {w.status === "queued" && !w.needsSplit && (
+                    <button className="btn btn--xs btn--secondary" disabled title="Planned for MVP 1.1 after assignment-write API is added">
+                      <Icon name="rerun" size={11} /> Rerun
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>
