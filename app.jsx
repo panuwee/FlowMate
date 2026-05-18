@@ -31,7 +31,13 @@ function App() {
   });
   const [focusId, setFocusId] = useStateApp(null);
   const [searchQuery, setSearchQuery] = useStateApp("");
-  const [authState, setAuthState] = useStateApp({ status: "loading", user: null });
+  // Default to "signed-out" so the UI renders immediately with the mock
+  // Pond identity, even if Supabase auth init hangs or fails. The effect
+  // below upgrades to "signed-in" once flowmateInitAuth returns a real user.
+  const [authState, setAuthState] = useStateApp({
+    status: "signed-out",
+    user: (typeof window !== "undefined" && window.FLOWMATE_CURRENT_USER) || null,
+  });
 
   function nav(key) {
     setRoute(key);
@@ -54,28 +60,30 @@ function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
-  // Initialise Supabase Auth. If a Google session exists, overwrite the
-  // mock FLOWMATE_CURRENT_USER. Otherwise stay on the mock Pond identity
-  // so the app remains usable while SSO is being rolled out.
+  // Initialise Supabase Auth in the background. If a Google session exists,
+  // upgrade the topbar to "signed-in". Never blocks initial render so a
+  // hanging or failing auth call cannot leave the page blank.
   useEffectApp(() => {
     let alive = true;
-    (async () => {
-      try {
-        const realUser = window.flowmateInitAuth ? await window.flowmateInitAuth() : null;
-        if (!alive) return;
-        if (realUser) {
-          setAuthState({ status: "signed-in", user: realUser });
-        } else {
-          setAuthState({
-            status: "signed-out",
-            user: window.FLOWMATE_CURRENT_USER || null,
-          });
-        }
-      } catch (error) {
+    if (!window.flowmateInitAuth) return;
+
+    // 5s safety timeout — if the network/Supabase is unreachable we still
+    // keep the mock-Pond fallback rather than hanging.
+    const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 5000));
+
+    Promise.race([
+      Promise.resolve().then(() => window.flowmateInitAuth()).catch((error) => {
         console.error("[FlowMate Auth] init failed:", error);
-        if (alive) setAuthState({ status: "signed-out", user: window.FLOWMATE_CURRENT_USER || null });
+        return null;
+      }),
+      timeoutPromise,
+    ]).then((realUser) => {
+      if (!alive) return;
+      if (realUser) {
+        setAuthState({ status: "signed-in", user: realUser });
       }
-    })();
+    });
+
     return () => { alive = false; };
   }, []);
 
@@ -95,20 +103,13 @@ function App() {
     }
   }
 
-  // While auth is initialising, show a tiny splash so we don't flash mock data
-  // and immediately swap it out under the user.
-  if (authState.status === "loading") {
-    return (
-      <div style={{ padding: 40, textAlign: "center", color: "var(--garena-iron)" }}>
-        Loading FlowMate…
-      </div>
-    );
-  }
-
-  const currentUserName  = authState.user?.name  || "Pond";
-  const currentUserEmail = authState.user?.email || "pond@garena.com";
-  const isSignedIn       = authState.status === "signed-in";
-  const avatarMemberId   = authState.user?.team_member_id || "m-pond";
+  // Defensive accessors — never use optional chaining on the render path
+  // so older Babel transpiles can't trip on it.
+  const user = authState && authState.user ? authState.user : null;
+  const currentUserName  = (user && user.name)  || "Pond";
+  const currentUserEmail = (user && user.email) || "pond@garena.com";
+  const isSignedIn       = authState && authState.status === "signed-in";
+  const avatarMemberId   = (user && user.team_member_id) || "m-pond";
 
   return (
     <div className="app">

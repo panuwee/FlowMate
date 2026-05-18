@@ -275,7 +275,11 @@ window.cancelFlowMateWorkItem = cancelFlowMateWorkItem;
 // signed-in user. If no session, the mock identity stays as a dev fallback
 // so the app keeps working before SSO is fully configured.
 async function flowmateInitAuth() {
-  if (!window.flowmateSupabase) return null;
+  if (!window.flowmateSupabase || !window.flowmateSupabase.auth
+      || typeof window.flowmateSupabase.auth.getSession !== "function") {
+    console.info("[FlowMate Auth] Supabase auth client not available — staying on mock identity.");
+    return null;
+  }
 
   let session = null;
   try {
@@ -285,7 +289,10 @@ async function flowmateInitAuth() {
     console.warn("[FlowMate Auth] getSession failed:", error && error.message);
     return null;
   }
-  if (!session || !session.user) return null;
+  if (!session || !session.user) {
+    console.info("[FlowMate Auth] No active session — mock fallback in effect.");
+    return null;
+  }
 
   const { data: profile, error: profileError } = await window.flowmateSupabase
     .from("users")
@@ -362,11 +369,16 @@ window.flowmateInitAuth         = flowmateInitAuth;
 window.flowmateSignInWithGoogle = flowmateSignInWithGoogle;
 window.flowmateSignOut          = flowmateSignOut;
 
-if (window.flowmateSupabase && window.flowmateSupabase.auth) {
-  window.flowmateSupabase.auth.onAuthStateChange((event) => {
-    if (event === "SIGNED_OUT") {
-      window.FLOWMATE_CURRENT_USER = null;
-      window.location.reload();
-    }
-  });
+try {
+  if (window.flowmateSupabase && window.flowmateSupabase.auth
+      && typeof window.flowmateSupabase.auth.onAuthStateChange === "function") {
+    window.flowmateSupabase.auth.onAuthStateChange(function (event) {
+      if (event === "SIGNED_OUT") {
+        window.FLOWMATE_CURRENT_USER = null;
+        window.location.reload();
+      }
+    });
+  }
+} catch (error) {
+  console.warn("[FlowMate Auth] onAuthStateChange wiring failed:", error && error.message);
 }
