@@ -282,8 +282,10 @@ describe("B-003/B-006 security hardening SQL", () => {
 
     for (const sql of [quickTaskSql, assignmentSql]) {
       expect(sql).toContain("create or replace function public.flowmate_actor_user_id()");
+      expect(sql).toContain("create or replace function public.flowmate_assert_actor_matches(");
       expect(sql).toContain("v_user_id := auth.uid()");
       expect(sql).toContain("v_actor_id := public.flowmate_actor_user_id()");
+      expect(sql).toContain("perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id)");
       expect(sql).not.toMatch(/where id = p_actor_user_id\b/i);
       expect(sql).not.toMatch(/requester_user_id,\s*\n\s*p_actor_user_id\b/i);
       expect(sql).not.toMatch(/actor_user_id,\s*\n\s*p_actor_user_id\b/i);

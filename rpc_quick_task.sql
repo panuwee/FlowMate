@@ -36,6 +36,24 @@ $$;
 
 grant execute on function public.flowmate_actor_user_id() to anon, authenticated;
 
+create or replace function public.flowmate_assert_actor_matches(
+  p_requested_actor_user_id uuid,
+  p_authenticated_user_id uuid
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_requested_actor_user_id is not null
+     and p_requested_actor_user_id <> p_authenticated_user_id then
+    raise exception 'Actor mismatch: request actor does not match authenticated user';
+  end if;
+end;
+$$;
+
+grant execute on function public.flowmate_assert_actor_matches(uuid, uuid) to anon, authenticated;
+
 create or replace function public.create_quick_task(
   p_actor_user_id uuid,
   p_title text,
@@ -59,6 +77,7 @@ declare
   v_work_item_id uuid;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select *
   into v_actor
   from public.users
@@ -175,6 +194,7 @@ declare
   v_prev_status public.work_status;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select *
   into v_actor
   from public.users
@@ -271,6 +291,7 @@ declare
   v_sort_order integer;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
 
   if v_actor.id is null or v_actor.is_active = false then
@@ -362,6 +383,7 @@ declare
   v_work public.work_items%rowtype;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
 
   if v_actor.id is null or v_actor.is_active = false then
@@ -447,6 +469,7 @@ declare
   v_comment_id uuid;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
 
   if v_actor.id is null or v_actor.is_active = false then
@@ -525,6 +548,7 @@ declare
   v_comment public.comments%rowtype;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
 
   if v_actor.id is null or v_actor.is_active = false then
@@ -596,6 +620,7 @@ declare
   v_comment public.comments%rowtype;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
 
   if v_actor.id is null or v_actor.is_active = false then
@@ -670,6 +695,7 @@ declare
   v_wip_limit int;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
 
   if v_actor.id is null or v_actor.is_active = false then
@@ -911,6 +937,7 @@ declare
   v_from_status public.work_status;
 begin
   v_actor_id := public.flowmate_actor_user_id();
+  perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
   select * into v_actor from public.users where id = v_actor_id;
   if v_actor.id is null or v_actor.is_active = false then
     raise exception 'Actor user is inactive or not found';
