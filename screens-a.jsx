@@ -904,6 +904,10 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   }
 
   const owner = MEMBERS_BY_ID[w.assignee];
+  const isLiveDetail = Boolean(w.isSupabaseRow);
+  const visibleChecklistItems = w.checklistItems || [];
+  const visibleComments = w.comments || [];
+  const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
 
@@ -1036,96 +1040,70 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
       <div className="detail">
         <div className="detail__main">
-          <div className="card">
-            <div className="card__head"><span className="card__title">Brief</span></div>
-            <div className="card__body" style={{ lineHeight: 1.6, color: "var(--garena-iron)", fontSize: 14 }}>
-              <p style={{ marginBottom: 12 }}>
-                Vertical 15-second teaser announcing the CODM World Championship grand finals (June 8). Hook with the trophy reveal in the first 1.5s, hold on top-3 team logos through second 8, and close with date plate + sponsor lockup. Music brief and beat-marker timeline are in the linked doc.
-              </p>
-              <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-                <span className="muted"><Icon name="file" size={12} /> Brief - CODM Worlds Teaser.gdoc (MVP 1.1)</span>
-                <span className="muted"><Icon name="file" size={12} /> Reference reel - last year.mp4 (MVP 1.1)</span>
-                <span className="muted"><Icon name="link" size={12} /> Music brief.doc (MVP 1.1)</span>
+          {hasCreativeDetails && (
+            <div className="card">
+              <div className="card__head"><span className="card__title">Creative details</span></div>
+              <div className="card__body">
+                <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType] || w.assetType || "-"}{w.subtype && ` - ${w.subtype}`}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchLabel || "-"}</div></div>
               </div>
             </div>
-          </div>
+          )}
 
-          <div className="card">
-            <div className="card__head"><span className="card__title">Creative details</span></div>
-            <div className="card__body">
-              <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType] || w.assetType || "-"}{w.subtype && ` - ${w.subtype}`}</div></div>
-              <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
-              <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
-              <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">Jun 6, 2026</div></div>
+          {visibleChecklistItems.length > 0 && (
+            <div className="card">
+              <div className="card__head">
+                <span className="card__title">Checklist <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{w.checklist?.done}/{w.checklist?.total}</span></span>
+              </div>
+              <div className="card__body checklist">
+                {visibleChecklistItems.map((item) => (
+                  <div key={item.id} className={`check-item ${item.is_done ? "is-checked" : ""}`}>
+                    <span className={`check-box ${item.is_done ? "is-checked" : ""}`}>{item.is_done && <Icon name="check" size={11} />}</span>
+                    <span className="check-item__lbl">{item.title}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          <div className="card">
-            <div className="card__head">
-              <span className="card__title">Checklist <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{w.checklist?.done}/{w.checklist?.total}</span></span>
-              <button className="btn btn--xs btn--ghost" disabled title="Detail checklist editing is planned for MVP 1.1"><Icon name="plus" size={11} /> Add item (MVP 1.1)</button>
+          {visibleComments.length > 0 && (
+            <div className="card">
+              <div className="card__head">
+                <span className="card__title">Comments <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{visibleComments.length}</span></span>
+              </div>
+              <div className="card__body">
+                {visibleComments.map((comment) => (
+                  <div className="comment" key={comment.id}>
+                    <Avatar memberId={comment.author_user_id} size="avatar--lg" />
+                    <div className="comment__body">
+                      <div className="comment__head"><span className="comment__author">{comment.authorName || "Unknown"}</span></div>
+                      <div className="comment__text">{comment.body}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="card__body checklist">
-              {[
-                { txt: "Storyboard locked with esport ops", done: true },
-                { txt: "Trophy reveal shot - color graded", done: true },
-                { txt: "Team logo plates - animated", done: true },
-                { txt: "Date plate + sponsor lockup", done: false },
-                { txt: "Sound mix v1 - handoff to audio", done: false },
-              ].map((c, i) => (
-                <div key={i} className={`check-item ${c.done ? "is-checked" : ""}`}>
-                  <span className={`check-box ${c.done ? "is-checked" : ""}`}>{c.done && <Icon name="check" size={11} />}</span>
-                  <span className="check-item__lbl">{c.txt}</span>
-                  <span className="muted" style={{ fontSize: 11 }}>{c.done ? "Vee - May 14" : ""}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
 
-          <div className="card">
-            <div className="card__head">
-              <span className="card__title">Comments <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>3</span></span>
-            </div>
-            <div className="card__body">
-              <div className="comment">
-                <Avatar memberId="m-vee" size="avatar--lg" />
-                <div className="comment__body">
-                  <div className="comment__head"><span className="comment__author">Vee</span><span className="comment__time">May 14, 17:20</span></div>
-                  <div className="comment__text">First cut ready. Holding on team logo plate longer than spec - Mira wanted a beat to read names. Let me know if that breaks the music sync.</div>
+          {!isLiveDetail && (
+            <div className="card">
+              <div className="card__head"><span className="card__title">Activity</span></div>
+              <div className="card__body">
+                <div className="timeline">
+                  <div className="tl-item">
+                    <div className="tl-item__text">Sample activity is shown only for mock data.</div>
+                  </div>
                 </div>
-              </div>
-              <div className="comment">
-                <Avatar memberId={null} size="avatar--lg" />
-                <div className="comment__body">
-                  <div className="comment__head"><span className="comment__author">Mira Santos</span><span className="comment__time">May 14, 17:42</span></div>
-                  <div className="comment__text">Beat held looks good. Sponsor plate needs +0.5s to read cleanly on TikTok preview.</div>
-                </div>
-              </div>
-              <div className="comment">
-                <Avatar memberId="m-vee" size="avatar--lg" />
-                <div className="comment__body">
-                  <div className="comment__head"><span className="comment__author">Vee</span><span className="comment__time">May 15, 09:10</span></div>
-                  <div className="comment__text">Adjusting now. v2 by EOD.</div>
-                </div>
-              </div>
-              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                <Avatar memberId="m-pond" size="avatar--lg" />
-                <input className="input" placeholder="Detail comments are planned for MVP 1.1" disabled />
-                <button className="btn btn--primary" disabled title="Detail comments are planned for MVP 1.1"><Icon name="send" size={12} /> Send (MVP 1.1)</button>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="detail__side">
           <div className="card">
             <div className="card__body">
-              <div className="meta-row">
-                <div className="meta-row__lbl">Owner</div>
-                <div className="meta-row__val row" style={{ gap: 6 }}>
-                  <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
-                </div>
-              </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">Requester</div>
                 <div className="meta-row__val">{w.requester || "-"} <span className="muted">- {w.requesterTeam || "No team"}</span></div>
@@ -1139,6 +1117,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row__val">{w.reviewRound - 0} <span className="muted" style={{ fontSize: 11 }}>(incremented only on requested changes)</span></div>
               </div>
               <div className="meta-row">
+                <div className="meta-row__lbl">Assignee</div>
+                <div className="meta-row__val row" style={{ gap: 6 }}>
+                  <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
+                </div>
+              </div>
+              <div className="meta-row">
                 <div className="meta-row__lbl">Due</div>
                 <div className="meta-row__val">{w.dueLabel}, 2026</div>
               </div>
@@ -1149,47 +1133,14 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card__head"><span className="card__title">Assignment reason</span></div>
-            <div className="card__body">
-              <div className="reason-box">
-                Auto: esport video assigned to <strong>Vee</strong> by skill, WIP (1/2), and remaining capacity through May 16.
-              </div>
-              <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>Backup eligible: Pond (esport video backup) - not selected, requester priority was urgent and Vee had capacity.</div>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card__head"><span className="card__title">Activity</span></div>
-            <div className="card__body">
-              <div className="timeline">
-                <div className="tl-item tl-item--brand">
-                  <div className="tl-item__time">May 15, 09:10</div>
-                  <div className="tl-item__text"><strong>Vee</strong> commented</div>
-                </div>
-                <div className="tl-item">
-                  <div className="tl-item__time">May 14, 17:42</div>
-                  <div className="tl-item__text"><strong>Mira Santos</strong> commented</div>
-                </div>
-                <div className="tl-item">
-                  <div className="tl-item__time">May 13, 14:05</div>
-                  <div className="tl-item__text">Status moved to <strong>In Progress</strong></div>
-                </div>
-                <div className="tl-item">
-                  <div className="tl-item__time">May 13, 11:20</div>
-                  <div className="tl-item__text">Assigned to <strong>Vee</strong> - effort 7</div>
-                </div>
-                <div className="tl-item">
-                  <div className="tl-item__time">May 13, 11:20</div>
-                  <div className="tl-item__text">Brief check passed</div>
-                </div>
-                <div className="tl-item">
-                  <div className="tl-item__time">May 12, 16:48</div>
-                  <div className="tl-item__text">Created by <strong>Mira Santos</strong></div>
-                </div>
+          {w.queueReason && (
+            <div className="card">
+              <div className="card__head"><span className="card__title">Assignment reason</span></div>
+              <div className="card__body">
+                <div className="reason-box">{w.queueReason}</div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
