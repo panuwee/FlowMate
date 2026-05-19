@@ -141,6 +141,12 @@ function loadGithubSearchUtils() {
   return sandbox.window as {
     getFlowMateCreatedDisplayId: (created: unknown) => string;
     findFlowMateWorkItemById: <T extends { id?: string }>(rows: T[], id: string) => T | null;
+    filterFlowMateAssigneeOptions: <T extends { name?: string }>(options: T[], query: string) => T[];
+    buildFlowMateTemplateTitle: (input: {
+      launchDate?: string;
+      requesterTeam?: string;
+      projectName?: string;
+    }) => string;
   };
 }
 
@@ -273,6 +279,113 @@ describe("UAT-101/UAT-102 created item detail target helpers", () => {
     const row = { id: "CR-2010", title: "New request" };
     expect(utils.findFlowMateWorkItemById([{ id: "QT-0301" }, row], "CR-2010")).toBe(row);
     expect(utils.findFlowMateWorkItemById([{ id: "QT-0301" }], "CR-2010")).toBeNull();
+  });
+});
+
+describe("create form title helper", () => {
+  const utils = loadGithubSearchUtils();
+
+  it("builds [DD-MM-YYYY][Function][Project Name] from launch date, function, and project", () => {
+    expect(utils.buildFlowMateTemplateTitle({
+      launchDate: "2026-05-25",
+      requesterTeam: "Marketing",
+      projectName: "FCO S24 Launch",
+    })).toBe("[25-05-2026][Marketing][FCO S24 Launch]");
+  });
+});
+
+describe("quick task Other assignee SQL support", () => {
+  it("schema and RPC store Other assignee names without trusting client actor ids", () => {
+    const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
+    const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
+
+    expect(schemaSql).toContain("assignee_other_name text");
+    expect(quickTaskSql).toContain("p_assignee_other_name text default null");
+    expect(quickTaskSql).toContain("v_assignee_other_name");
+    expect(quickTaskSql).toContain("p_assignee_other_name");
+    expect(quickTaskSql).toContain("assignee_other_name");
+    expect(quickTaskSql).toContain("perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id)");
+    expect(quickTaskSql).not.toMatch(/where id = p_actor_user_id\b/i);
+  });
+});
+
+describe("full assignee roster", () => {
+  const assigneeCodes = [
+    "gear", "panu", "big", "mark", "po", "aof", "folk", "mac", "no", "may",
+    "boss", "mag", "real", "pointer", "pond", "jo", "tong", "eye", "vee",
+    "pluem", "net", "ben", "peak",
+  ];
+
+  it("seeds every assignee as a team member", () => {
+    const seedSql = readFileSync(join(process.cwd(), "supabase", "seed.sql"), "utf8");
+    for (const code of assigneeCodes) {
+      expect(seedSql).toContain(`'${code}'`);
+    }
+  });
+
+  it("links every whitelisted assignee to a team_member_code", () => {
+    const whitelistSql = readFileSync(join(process.cwd(), "supabase", "whitelist_access.sql"), "utf8");
+    for (const code of assigneeCodes) {
+      expect(whitelistSql).toMatch(new RegExp(`'(admin|member)',\\s*'${code}'`));
+    }
+  });
+
+  it("frontend exposes a Supabase assignee loader", () => {
+    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    expect(listDataJs).toContain("async function loadFlowMateAssignees()");
+    expect(listDataJs).toContain("window.loadFlowMateAssignees = loadFlowMateAssignees");
+  });
+
+  it("quick task assignee picker contains the full roster and no Other option", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    for (const name of [
+      "Gear", "Panu", "Big", "Mark", "Po", "Aof", "Folk", "Mac", "No", "May",
+      "Boss", "Mag", "Real", "Pointer", "Pond", "Joe", "Tong", "Eye", "Vee",
+      "Pluem", "Net", "Ben", "Peak",
+    ]) {
+      expect(createScreenJsx).toContain(`name: "${name}"`);
+    }
+    expect(createScreenJsx).toContain("window.loadFlowMateAssignees()");
+    expect(createScreenJsx).not.toContain('<option value="other">Other</option>');
+  });
+
+  it("filters assignee suggestions by names that start with the typed text", () => {
+    const utils = loadGithubSearchUtils();
+    const options = [
+      { name: "Panu" },
+      { name: "Pointer" },
+      { name: "Pond" },
+      { name: "Pluem" },
+      { name: "Peak" },
+      { name: "Gear" },
+      { name: "Aof" },
+    ];
+
+    expect(utils.filterFlowMateAssigneeOptions(options, "P").map((option) => option.name)).toEqual([
+      "Panu",
+      "Pointer",
+      "Pond",
+      "Pluem",
+      "Peak",
+    ]);
+    expect(utils.filterFlowMateAssigneeOptions(options, "po").map((option) => option.name)).toEqual([
+      "Pointer",
+      "Pond",
+    ]);
+  });
+
+  it("quick task assignee picker uses a searchable text input instead of a select", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
+    expect(quickTaskFormSource).toContain("assigneeQuery");
+    expect(quickTaskFormSource).toContain("filterFlowMateAssigneeOptions");
+    expect(quickTaskFormSource).not.toContain("<select className=\"select\" value={value.assigneeUserId}");
+  });
+
+  it("list owner filter includes all synced team members", () => {
+    const listScreenJsx = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    expect(listScreenJsx).toContain("...(window.MEMBERS || []).map");
+    expect(listScreenJsx).toContain("ownerOptionRows");
   });
 });
 

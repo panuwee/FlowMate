@@ -54,6 +54,16 @@ $$;
 
 grant execute on function public.flowmate_assert_actor_matches(uuid, uuid) to anon, authenticated;
 
+drop function if exists public.create_quick_task(
+  uuid,
+  text,
+  date,
+  text,
+  text,
+  uuid,
+  public.priority_level
+);
+
 create or replace function public.create_quick_task(
   p_actor_user_id uuid,
   p_title text,
@@ -61,6 +71,7 @@ create or replace function public.create_quick_task(
   p_note text default null,
   p_project_name text default null,
   p_assignee_user_id uuid default null,
+  p_assignee_other_name text default null,
   p_priority public.priority_level default 'normal'
 )
 returns jsonb
@@ -72,6 +83,8 @@ declare
   v_actor_id uuid;
   v_actor public.users%rowtype;
   v_assignee public.users%rowtype;
+  v_assignee_user_id uuid;
+  v_assignee_other_name text;
   v_next_number integer;
   v_display_id text;
   v_work_item_id uuid;
@@ -95,13 +108,24 @@ begin
     raise exception 'Quick task due date is required';
   end if;
 
-  select *
-  into v_assignee
-  from public.users
-  where id = coalesce(p_assignee_user_id, v_actor_id);
+  v_assignee_user_id := p_assignee_user_id;
+  v_assignee_other_name := nullif(trim(coalesce(p_assignee_other_name, '')), '');
 
-  if v_assignee.id is null or v_assignee.is_active = false then
-    raise exception 'Assignee user is inactive or not found';
+  if v_assignee_user_id is null and v_assignee_other_name is null then
+    v_assignee_user_id := v_actor_id;
+  end if;
+
+  if v_assignee_user_id is not null then
+    v_assignee_other_name := null;
+
+    select *
+    into v_assignee
+    from public.users
+    where id = v_assignee_user_id;
+
+    if v_assignee.id is null or v_assignee.is_active = false then
+      raise exception 'Assignee user is inactive or not found';
+    end if;
   end if;
 
   perform pg_advisory_xact_lock(hashtext('flowmate_quick_task_display_id'));
@@ -122,6 +146,7 @@ begin
     requester_user_id,
     requester_team,
     assignee_user_id,
+    assignee_other_name,
     status,
     priority,
     due_date
@@ -134,7 +159,8 @@ begin
     nullif(trim(coalesce(p_project_name, '')), ''),
     v_actor_id,
     coalesce(v_actor.requester_team, 'GD/VE Internal'),
-    v_assignee.id,
+    v_assignee_user_id,
+    v_assignee_other_name,
     'assigned',
     coalesce(p_priority, 'normal'),
     p_due_date
@@ -156,7 +182,8 @@ begin
     jsonb_build_object(
       'source', 'static_mvp',
       'work_type', 'quick_task',
-      'assignee_user_id', v_assignee.id
+      'assignee_user_id', v_assignee_user_id,
+      'assignee_other_name', v_assignee_other_name
     )
   );
 
@@ -175,6 +202,7 @@ grant execute on function public.create_quick_task(
   text,
   text,
   uuid,
+  text,
   public.priority_level
 ) to anon, authenticated;
 

@@ -27,7 +27,7 @@ async function loadFlowMateListRows() {
   const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,work_type,status,priority,due_date,effort_point,requester_user_id,requester_team,assignee_user_id,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason")
+      .select("id,display_id,title,work_type,status,priority,due_date,effort_point,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason")
       .order("due_date", { ascending: true }),
     window.flowmateSupabase
       .from("work_item_flags_v")
@@ -37,7 +37,7 @@ async function loadFlowMateListRows() {
       .select("id,display_name,requester_team"),
     window.flowmateSupabase
       .from("team_members")
-      .select("id,user_id,display_name,initials,color"),
+      .select("id,user_id,display_name,initials,color,discipline_short,active"),
     window.flowmateSupabase
       .from("creative_request_details")
       .select("work_item_id,asset_type,platforms,size_format"),
@@ -92,14 +92,7 @@ async function loadFlowMateListRows() {
     });
   });
 
-  (membersResult.data || []).forEach((member) => {
-    window.MEMBERS_BY_ID[member.id] = {
-      id: member.id,
-      name: member.display_name,
-      initials: member.initials,
-      color: member.color || "#2E546D",
-    };
-  });
+  syncFlowMateMembers(membersResult.data || []);
 
   return (workItemsResult.data || []).map((item) => {
     const flags = flagsByWorkItemId[item.id] || {};
@@ -108,6 +101,22 @@ async function loadFlowMateListRows() {
       (item.final_owner_member_id && membersById[item.final_owner_member_id]) ||
       (item.assignee_user_id && membersByUserId[item.assignee_user_id]) ||
       null;
+    const assigneeOtherName = (item.assignee_other_name || "").trim();
+    const otherAssigneeId = assigneeOtherName ? `other:${assigneeOtherName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : null;
+    if (otherAssigneeId && !window.MEMBERS_BY_ID[otherAssigneeId]) {
+      window.MEMBERS_BY_ID[otherAssigneeId] = {
+        id: otherAssigneeId,
+        name: assigneeOtherName,
+        initials: assigneeOtherName
+          .split(/\s+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((part) => part[0])
+          .join("")
+          .toUpperCase() || "?",
+        color: "#6B7280",
+      };
+    }
 
     return {
       id: item.display_id,
@@ -123,7 +132,8 @@ async function loadFlowMateListRows() {
       platform: (detailsByWorkItemId[item.id]?.platforms || []).join(", "),
       size: detailsByWorkItemId[item.id]?.size_format || "",
       requesterTeam: item.requester_team || requester.requester_team || "No team",
-      assignee: owner ? owner.id : null,
+      assignee: owner ? owner.id : otherAssigneeId,
+      assigneeOtherName,
       requester: requester.display_name || "-",
       reviewRound: item.review_round || 0,
       needsSplit: Boolean(item.needs_split),
@@ -142,4 +152,64 @@ async function loadFlowMateListRows() {
   });
 }
 
+function normalizeFlowMateMember(member) {
+  return {
+    id: member.id,
+    name: member.display_name,
+    initials: member.initials,
+    color: member.color || "#2E546D",
+    discipline: member.discipline_short || "FCO",
+  };
+}
+
+function syncFlowMateMembers(members) {
+  window.MEMBERS_BY_ID = window.MEMBERS_BY_ID || {};
+  const liveMembersById = {};
+
+  (members || []).forEach((member) => {
+    const normalized = normalizeFlowMateMember(member);
+    window.MEMBERS_BY_ID[normalized.id] = normalized;
+    liveMembersById[normalized.id] = normalized;
+  });
+
+  if (Array.isArray(window.MEMBERS)) {
+    const merged = new Map(window.MEMBERS.map((member) => [member.id, member]));
+    Object.values(liveMembersById).forEach((member) => {
+      merged.set(member.id, { ...(merged.get(member.id) || {}), ...member });
+    });
+    window.MEMBERS.splice(
+      0,
+      window.MEMBERS.length,
+      ...Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }
+}
+
+async function loadFlowMateAssignees() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const { data, error } = await window.flowmateSupabase
+    .from("team_members")
+    .select("id,user_id,display_name,initials,color,discipline_short,active")
+    .eq("active", true)
+    .not("user_id", "is", null)
+    .order("display_name", { ascending: true });
+
+  if (error) throw error;
+
+  syncFlowMateMembers(data || []);
+  return (data || [])
+    .filter((member) => member.user_id)
+    .map((member) => ({
+      userId: member.user_id,
+      memberId: member.id,
+      name: member.display_name,
+      initials: member.initials,
+      color: member.color || "#2E546D",
+    }));
+}
+
 window.loadFlowMateListRows = loadFlowMateListRows;
+window.loadFlowMateAssignees = loadFlowMateAssignees;

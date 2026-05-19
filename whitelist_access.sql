@@ -40,29 +40,29 @@ end $$;
 -- the real Google account signs in, handle_new_auth_user can re-link the
 -- existing seeded team_member row to the real user.id.
 insert into public.user_whitelist (email, display_name, role, team_member_code) values
-  ('panuwee.w@garena.com',        'Panu',    'admin',  null),
-  ('sasin.cha@garena.com',        'Gear',    'member', null),
-  ('nithidol.k@garena.com',       'Big',     'member', null),
-  ('tanadech.s@garena.com',       'Mark',    'member', null),
-  ('sakdarin@garena.com',         'Po',      'member', null),
-  ('fco.thanayoot@garena.com',    'Aof',     'member', null),
-  ('fco.koravit@garena.com',      'Folk',    'member', null),
-  ('weerayut@garena.com',         'Mac',     'member', null),
-  ('chayodom.a@garena.com',       'No',      'member', null),
-  ('kwanchanok.s@garena.com',     'May',     'member', null),
-  ('fco.rittichai@garena.com',    'Boss',    'member', null),
-  ('fco.thanatbhum@garena.com',   'Mag',     'member', null),
-  ('fco.punyakon@garena.com',     'Real',    'member', null),
-  ('fco.run@garena.com',          'Pointer', 'member', null),
+  ('panuwee.w@garena.com',        'Panu',    'admin',  'panu'),
+  ('sasin.cha@garena.com',        'Gear',    'member', 'gear'),
+  ('nithidol.k@garena.com',       'Big',     'member', 'big'),
+  ('tanadech.s@garena.com',       'Mark',    'member', 'mark'),
+  ('sakdarin@garena.com',         'Po',      'member', 'po'),
+  ('fco.thanayoot@garena.com',    'Aof',     'member', 'aof'),
+  ('fco.koravit@garena.com',      'Folk',    'member', 'folk'),
+  ('weerayut@garena.com',         'Mac',     'member', 'mac'),
+  ('chayodom.a@garena.com',       'No',      'member', 'no'),
+  ('kwanchanok.s@garena.com',     'May',     'member', 'may'),
+  ('fco.rittichai@garena.com',    'Boss',    'member', 'boss'),
+  ('fco.thanatbhum@garena.com',   'Mag',     'member', 'mag'),
+  ('fco.punyakon@garena.com',     'Real',    'member', 'real'),
+  ('fco.run@garena.com',          'Pointer', 'member', 'pointer'),
   ('kasidet.y@garena.com',        'Pond',    'member', 'pond'),
   ('nattaporn.j@garena.com',      'Joe',     'member', 'jo'),
   ('fco.krittidech@garena.com',   'Tong',    'member', 'tong'),
   ('fco.janyarat@garena.com',     'Eye',     'member', 'eye'),
   ('fco.thanadon@garena.com',     'Vee',     'member', 'vee'),
-  ('napol.a@garena.com',          'Pluem',   'member', null),
-  ('fco.piyapat@garena.com',      'Net',     'member', null),
-  ('fco.kittipoj@garena.com',     'Ben',     'member', null),
-  ('fco.pheerati@garena.com',     'Peak',    'member', null)
+  ('napol.a@garena.com',          'Pluem',   'member', 'pluem'),
+  ('fco.piyapat@garena.com',      'Net',     'member', 'net'),
+  ('fco.kittipoj@garena.com',     'Ben',     'member', 'ben'),
+  ('fco.pheerati@garena.com',     'Peak',    'member', 'peak')
 on conflict (email) do update set
   display_name     = excluded.display_name,
   role             = excluded.role,
@@ -143,7 +143,7 @@ begin
     is_active      = true;
 
   -- Re-link the seeded team_member row to the real auth user when the
-  -- whitelist row pins a team_member_code (Pond / Joe / Tong / Eye / Vee).
+  -- whitelist row pins a team_member_code.
   if v_wl.team_member_code is not null then
     update public.team_members
        set user_id = new.id, updated_at = now()

@@ -127,6 +127,7 @@ create table if not exists public.work_items (
   requester_user_id uuid not null references public.users(id),
   requester_team text,
   assignee_user_id uuid references public.users(id),
+  assignee_other_name text,
   final_owner_member_id uuid references public.team_members(id),
   status public.work_status not null default 'new',
   priority public.priority_level not null default 'normal',
@@ -178,6 +179,9 @@ create table if not exists public.work_items (
     work_type <> 'quick_task' or effort_point is null
   )
 );
+
+alter table public.work_items
+add column if not exists assignee_other_name text;
 
 create table if not exists public.creative_request_details (
   id uuid primary key default gen_random_uuid(),

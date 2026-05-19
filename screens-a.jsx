@@ -359,16 +359,51 @@ function QuickTaskChecklist({ work, onAdd, onToggle, onCommentAdd, onCommentEdit
 /* ============================================================
    CREATE - Quick Task + Creative Request
    ============================================================ */
+const FLOWMATE_ASSIGNEE_FALLBACK = [
+  { userId: "00000000-0000-0000-0000-000000001001", name: "Gear" },
+  { userId: "00000000-0000-0000-0000-000000001002", name: "Panu" },
+  { userId: "00000000-0000-0000-0000-000000001003", name: "Big" },
+  { userId: "00000000-0000-0000-0000-000000001004", name: "Mark" },
+  { userId: "00000000-0000-0000-0000-000000001005", name: "Po" },
+  { userId: "00000000-0000-0000-0000-000000001006", name: "Aof" },
+  { userId: "00000000-0000-0000-0000-000000001007", name: "Folk" },
+  { userId: "00000000-0000-0000-0000-000000001008", name: "Mac" },
+  { userId: "00000000-0000-0000-0000-000000001009", name: "No" },
+  { userId: "00000000-0000-0000-0000-000000001010", name: "May" },
+  { userId: "00000000-0000-0000-0000-000000001011", name: "Boss" },
+  { userId: "00000000-0000-0000-0000-000000001012", name: "Mag" },
+  { userId: "00000000-0000-0000-0000-000000001013", name: "Real" },
+  { userId: "00000000-0000-0000-0000-000000001014", name: "Pointer" },
+  { userId: "00000000-0000-0000-0000-000000001015", name: "Pond" },
+  { userId: "00000000-0000-0000-0000-000000001016", name: "Joe" },
+  { userId: "00000000-0000-0000-0000-000000001017", name: "Tong" },
+  { userId: "00000000-0000-0000-0000-000000001018", name: "Eye" },
+  { userId: "00000000-0000-0000-0000-000000001019", name: "Vee" },
+  { userId: "00000000-0000-0000-0000-000000001020", name: "Pluem" },
+  { userId: "00000000-0000-0000-0000-000000001021", name: "Net" },
+  { userId: "00000000-0000-0000-0000-000000001022", name: "Ben" },
+  { userId: "00000000-0000-0000-0000-000000001023", name: "Peak" },
+];
+
+function getDefaultQuickAssignee(options = FLOWMATE_ASSIGNEE_FALLBACK) {
+  const currentUserId = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id;
+  return options.find((option) => option.userId === currentUserId)
+    || options.find((option) => option.name === "Pond")
+    || options[0];
+}
+
 function CreateScreen({ onNav, onOpen }) {
   const [mode, setMode] = useState("creative");
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
   const [quickDraft, setQuickDraft] = useState({
     title: "",
     note: "",
-    projectName: "Internal - GD/VE",
-    assigneeUserId: window.FLOWMATE_MOCK_USERS?.pond || "00000000-0000-0000-0000-000000000001",
+    projectName: "",
+    assigneeUserId: getDefaultQuickAssignee().userId,
+    assigneeOtherName: "",
     dueDate: "2026-05-18",
     priority: "normal",
   });
@@ -387,6 +422,26 @@ function CreateScreen({ onNav, onOpen }) {
     dueDate: "2026-05-22",
     launchDate: "2026-05-25",
   });
+
+  useEffect(() => {
+    let alive = true;
+    if (!window.loadFlowMateAssignees) return () => {};
+
+    window.loadFlowMateAssignees()
+      .then((options) => {
+        if (!alive || !options.length) return;
+        setAssigneeOptions(options);
+        setQuickDraft((draft) => {
+          if (options.some((option) => option.userId === draft.assigneeUserId)) return draft;
+          return { ...draft, assigneeUserId: getDefaultQuickAssignee(options).userId, assigneeOtherName: "" };
+        });
+      })
+      .catch((error) => {
+        console.warn("[FlowMate Create] assignee load failed:", error);
+      });
+
+    return () => { alive = false; };
+  }, []);
 
   async function openCreatedDetail(created, id) {
     const detailId = id || window.getFlowMateCreatedDisplayId(created);
@@ -457,6 +512,15 @@ function CreateScreen({ onNav, onOpen }) {
 
   if (submitted) return <CreateResultScreen result={result} onAgain={() => { setSubmitted(false); setResult(null); }} onNav={onNav} />;
 
+  function updateCreativeDraft(nextDraft) {
+    const title = window.buildFlowMateTemplateTitle({
+      launchDate: nextDraft.launchDate,
+      requesterTeam: nextDraft.requesterTeam,
+      projectName: nextDraft.campaignName,
+    });
+    setCreativeDraft({ ...nextDraft, title });
+  }
+
   return (
     <div className="page" style={{ maxWidth: 1100 }}>
       <div className="page__header">
@@ -494,8 +558,8 @@ function CreateScreen({ onNav, onOpen }) {
         </div>
         <div className="card__body">
           {mode === "quick"
-            ? <QuickTaskForm value={quickDraft} onChange={setQuickDraft} />
-            : <CreativeRequestForm value={creativeDraft} onChange={setCreativeDraft} />}
+            ? <QuickTaskForm value={quickDraft} onChange={setQuickDraft} assigneeOptions={assigneeOptions} />
+            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} />}
         </div>
       </div>
 
@@ -510,9 +574,36 @@ function CreateScreen({ onNav, onOpen }) {
   );
 }
 
-function QuickTaskForm({ value, onChange }) {
+function QuickTaskForm({ value, onChange, assigneeOptions }) {
+  const options = assigneeOptions || FLOWMATE_ASSIGNEE_FALLBACK;
+  const selectedAssignee = options.find((option) => option.userId === value.assigneeUserId) || null;
+  const [assigneeQuery, setAssigneeQuery] = useState(selectedAssignee ? selectedAssignee.name : "");
+  const [assigneeFocused, setAssigneeFocused] = useState(false);
+  const assigneeMatches = window.filterFlowMateAssigneeOptions
+    ? window.filterFlowMateAssigneeOptions(options, assigneeQuery)
+    : options.filter((option) => option.name.toLowerCase().startsWith((assigneeQuery || "").trim().toLowerCase()));
+  const exactAssignee = selectedAssignee && assigneeQuery.trim().toLowerCase() === selectedAssignee.name.toLowerCase();
+
+  useEffect(() => {
+    setAssigneeQuery(selectedAssignee ? selectedAssignee.name : "");
+  }, [selectedAssignee && selectedAssignee.userId]);
+
   function update(field, nextValue) {
-    onChange({ ...value, [field]: nextValue });
+    const next = { ...value, [field]: nextValue };
+    if (field === "assigneeUserId") next.assigneeOtherName = "";
+    onChange(next);
+  }
+
+  function updateAssigneeQuery(nextQuery) {
+    setAssigneeQuery(nextQuery);
+    const exactMatch = options.find((option) => option.name.toLowerCase() === nextQuery.trim().toLowerCase());
+    update("assigneeUserId", exactMatch ? exactMatch.userId : "");
+  }
+
+  function selectAssignee(option) {
+    setAssigneeQuery(option.name);
+    setAssigneeFocused(false);
+    update("assigneeUserId", option.userId);
   }
 
   return (
@@ -527,22 +618,51 @@ function QuickTaskForm({ value, onChange }) {
       </div>
       <div className="field">
         <label className="field__label">Project / campaign</label>
-        <select className="select" value={value.projectName} onChange={(e) => update("projectName", e.target.value)}>
-          <option value="Internal - GD/VE">Internal - GD/VE</option>
-          <option value="FF May Drop">FF May Drop</option>
-          <option value="FFPL Finals">FFPL Finals</option>
-          <option value="">None</option>
-        </select>
+        <input className="input" value={value.projectName} onChange={(e) => update("projectName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
       </div>
       <div className="field">
         <label className="field__label">Assignee</label>
-        <select className="select" value={value.assigneeUserId} onChange={(e) => update("assigneeUserId", e.target.value)}>
-          <option value={window.FLOWMATE_MOCK_USERS?.pond}>Me (Pond)</option>
-          <option value={window.FLOWMATE_MOCK_USERS?.jo}>Jo</option>
-          <option value={window.FLOWMATE_MOCK_USERS?.tong}>Tong</option>
-          <option value={window.FLOWMATE_MOCK_USERS?.eye}>Eye</option>
-          <option value={window.FLOWMATE_MOCK_USERS?.vee}>Vee</option>
-        </select>
+        <div style={{ position: "relative" }}>
+          <input
+            className="input"
+            value={assigneeQuery}
+            onChange={(e) => updateAssigneeQuery(e.target.value)}
+            onFocus={() => setAssigneeFocused(true)}
+            onBlur={() => window.setTimeout(() => setAssigneeFocused(false), 120)}
+            placeholder="Type a name, e.g. P"
+            autoComplete="off"
+          />
+          {assigneeFocused && assigneeMatches.length > 0 && !exactAssignee && (
+            <div
+              className="card"
+              style={{
+                position: "absolute",
+                zIndex: 20,
+                top: "calc(100% + 4px)",
+                left: 0,
+                right: 0,
+                maxHeight: 220,
+                overflowY: "auto",
+                padding: 4,
+              }}
+            >
+              {assigneeMatches.map((option) => (
+                <button
+                  key={option.userId}
+                  className="btn btn--ghost"
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    selectAssignee(option);
+                  }}
+                  style={{ width: "100%", justifyContent: "flex-start" }}
+                >
+                  {option.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <div className="field">
         <label className="field__label">Due date <span className="req">*</span></label>
@@ -565,17 +685,17 @@ function CreativeRequestForm({ value, onChange }) {
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} onChange={e => update("title", e.target.value)} placeholder="e.g. AOV ranked season - IG carousel set (6 frames)" />
+        <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch date, Requester Team / Function, and Project / campaign" />
       </div>
       <div className="field">
-        <label className="field__label">Requester team <span className="req">*</span></label>
+        <label className="field__label">Requester Team / Function <span className="req">*</span></label>
         <select className="select" value={value.requesterTeam} onChange={e => update("requesterTeam", e.target.value)}>
           <option>Marketing</option><option>Esport Ops</option><option>Community</option><option>Sales</option><option>Product</option><option>Operations</option>
         </select>
       </div>
       <div className="field">
-        <label className="field__label">Campaign <span className="req">*</span></label>
-        <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. AOV S24 Launch" />
+        <label className="field__label">Project / campaign <span className="req">*</span></label>
+        <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
       </div>
       <div className="field">
         <label className="field__label">Asset type <span className="req">*</span></label>
@@ -598,6 +718,7 @@ function CreativeRequestForm({ value, onChange }) {
           <option>Standard video / YouTube vlog</option>
           <option>High-retention short video</option>
           <option>Promotional esport / highlight reel</option>
+          <option>Web Assets</option>
         </select>
       </div>
       <div className="field">

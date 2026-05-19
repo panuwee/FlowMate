@@ -43,6 +43,31 @@ function findFlowMateWorkItemById(rows, id) {
   return rows.find((row) => row && row.id === id) || null;
 }
 
+function flowmateDateToDdMmYyyy(dateValue) {
+  if (!dateValue) return "";
+  const parts = dateValue.split("-");
+  if (parts.length !== 3) return "";
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
+}
+
+function buildFlowMateTemplateTitle(input) {
+  const datePart = flowmateDateToDdMmYyyy(input && input.launchDate);
+  const functionPart = ((input && input.requesterTeam) || "").trim();
+  const projectPart = ((input && input.projectName) || "").trim();
+  if (!datePart || !functionPart || !projectPart) return "";
+  return `[${datePart}][${functionPart}][${projectPart}]`;
+}
+
+function filterFlowMateAssigneeOptions(options, query) {
+  const normalizedQuery = (query || "").trim().toLowerCase();
+  if (!normalizedQuery) return options || [];
+  return (options || []).filter((option) =>
+    ((option && option.name) || "").toLowerCase().startsWith(normalizedQuery)
+  );
+}
+
 window.matchesFlowMateSearch = matchesFlowMateSearch;
 window.getFlowMateCreatedDisplayId = getFlowMateCreatedDisplayId;
 window.findFlowMateWorkItemById = findFlowMateWorkItemById;
+window.buildFlowMateTemplateTitle = buildFlowMateTemplateTitle;
+window.filterFlowMateAssigneeOptions = filterFlowMateAssigneeOptions;

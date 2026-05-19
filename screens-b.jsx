@@ -81,11 +81,15 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     if (filterFlag === "blocked" && w.status !== "blocked") return false;
     return true;
   });
-  const ownerOptions = Array.from(new Map(sourceRows.map(w => {
+  const ownerOptionRows = [
+    ...(window.MEMBERS || []).map(member => [member.id, member.name]),
+    ...sourceRows.map(w => {
     const id = w.assignee || "unassigned";
     const label = w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned";
     return [id, label];
-  })).entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    }),
+  ];
+  const ownerOptions = Array.from(new Map(ownerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
   const teamOptions = Array.from(new Set(sourceRows.map(w => w.requesterTeam).filter(Boolean))).sort();
   const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
   const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
