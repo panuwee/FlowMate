@@ -6,7 +6,8 @@ delete from public.work_items
 where id::text like '20000000-0000-0000-0000-0000000010%'
    or id::text like '30000000-0000-0000-0000-0000000002%';
 
-delete from public.users
+update public.users
+set is_active = false
 where google_subject like 'mock-%';
 
 insert into public.users (id, email, display_name, requester_team, google_subject, is_active)
