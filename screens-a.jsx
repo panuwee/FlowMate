@@ -696,7 +696,6 @@ function CreateScreen({ onNav, onOpen }) {
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <button className="btn btn--ghost" onClick={() => onNav("my-work")}>Cancel</button>
-        <button className="btn btn--secondary" onClick={() => saveFlowMateCreateDraft(mode, mode === "quick" ? quickDraft : creativeDraft)}>Save draft</button>
         <button className="btn btn--primary" onClick={handleSubmit} disabled={isSubmitting}>
           <Icon name="send" /> {isSubmitting ? "Saving..." : mode === "quick" ? "Create quick task" : "Submit request"}
         </button>
