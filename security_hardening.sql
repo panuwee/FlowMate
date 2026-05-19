@@ -205,3 +205,6 @@ create policy "admins can write whitelist"
 on public.user_whitelist for all
 using (public.is_admin_app_user())
 with check (public.is_admin_app_user());
+
+grant select on public.user_whitelist to anon, authenticated;
+revoke insert, update, delete on public.user_whitelist from anon, authenticated;

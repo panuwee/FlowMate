@@ -200,8 +200,160 @@ create policy "admins can write whitelist"
   using (public.is_admin_app_user())
   with check (public.is_admin_app_user());
 
+-- 8. Admin RPCs for whitelist UI -------------------------------------------
+-- The browser should not write public.user_whitelist directly. These functions
+-- resolve the actor from auth.uid() and then require that actor to be an active
+-- FlowMate admin.
+create or replace function public.flowmate_admin_upsert_whitelist_user(
+  p_email text,
+  p_display_name text,
+  p_role text default 'member',
+  p_team_member_code text default null
+)
+returns public.user_whitelist
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_email text;
+  v_display_name text;
+  v_team_member_code text;
+  v_row public.user_whitelist%rowtype;
+begin
+  v_actor_id := auth.uid();
+
+  if not public.is_admin_app_user() then
+    raise exception 'Only FlowMate admins can manage the whitelist'
+      using errcode = '42501';
+  end if;
+
+  v_email := lower(trim(p_email));
+  v_display_name := nullif(trim(coalesce(p_display_name, '')), '');
+  v_team_member_code := nullif(trim(coalesce(p_team_member_code, '')), '');
+
+  if v_email is null or v_email !~* '^[^@\s]+@garena\.com$' then
+    raise exception 'Whitelist email must be a @garena.com address'
+      using errcode = '22023';
+  end if;
+
+  if v_display_name is null then
+    raise exception 'Display name is required'
+      using errcode = '22023';
+  end if;
+
+  if p_role is null or p_role not in ('admin', 'member') then
+    raise exception 'Whitelist role must be admin or member'
+      using errcode = '22023';
+  end if;
+
+  if v_team_member_code is not null and not exists (
+    select 1 from public.team_members tm
+    where tm.member_code = v_team_member_code
+  ) then
+    raise exception 'Unknown team_member_code: %', v_team_member_code
+      using errcode = '23503';
+  end if;
+
+  insert into public.user_whitelist (
+    email,
+    display_name,
+    role,
+    team_member_code,
+    added_by
+  )
+  values (
+    v_email,
+    v_display_name,
+    p_role,
+    v_team_member_code,
+    v_actor_id
+  )
+  on conflict (email) do update set
+    display_name = excluded.display_name,
+    role = excluded.role,
+    team_member_code = excluded.team_member_code,
+    added_by = v_actor_id
+  returning * into v_row;
+
+  update public.users
+     set display_name = v_display_name,
+         role = p_role,
+         is_active = true,
+         updated_at = now()
+   where lower(email) = v_email;
+
+  if v_team_member_code is not null then
+    update public.team_members
+       set user_id = (
+             select u.id
+               from public.users u
+              where lower(u.email) = v_email
+              limit 1
+           ),
+           updated_at = now()
+     where member_code = v_team_member_code
+       and exists (
+         select 1 from public.users u
+         where lower(u.email) = v_email
+       );
+  end if;
+
+  return v_row;
+end;
+$$;
+
+create or replace function public.flowmate_admin_delete_whitelist_user(
+  p_email text
+)
+returns public.user_whitelist
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_email text;
+  v_row public.user_whitelist%rowtype;
+begin
+  v_actor_id := auth.uid();
+
+  if not public.is_admin_app_user() then
+    raise exception 'Only FlowMate admins can manage the whitelist'
+      using errcode = '42501';
+  end if;
+
+  v_email := lower(trim(p_email));
+
+  if v_email is null or v_email !~* '^[^@\s]+@garena\.com$' then
+    raise exception 'Whitelist email must be a @garena.com address'
+      using errcode = '22023';
+  end if;
+
+  delete from public.user_whitelist
+   where email = v_email
+   returning * into v_row;
+
+  update public.users
+     set is_active = false,
+         updated_at = now()
+   where lower(email) = v_email;
+
+  return v_row;
+end;
+$$;
+
 grant select on public.user_whitelist to anon, authenticated;
-grant insert, update, delete on public.user_whitelist to authenticated;
+revoke insert, update, delete on public.user_whitelist from anon, authenticated;
+grant execute on function public.flowmate_admin_upsert_whitelist_user(
+  text,
+  text,
+  text,
+  text
+) to authenticated;
+grant execute on function public.flowmate_admin_delete_whitelist_user(text)
+to authenticated;
 
 -- ===========================================================================
 -- Maintenance examples

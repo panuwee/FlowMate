@@ -1,6 +1,6 @@
 # FlowMate Supabase Setup
 
-This folder contains the SQL needed to prepare the Supabase backend for FlowMate MVP 1.0.
+This folder contains the SQL needed to prepare the Supabase backend for FlowMate.
 
 ## Files
 
@@ -11,6 +11,7 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `rpc_quick_task.sql` | Quick-task / checklist / comment / status-transition / cancel RPCs |
 | `rpc_assignment.sql` | Assignment engine: `create_creative_request`, `recheck_brief`, `rerun_assignment`, plus effort + brief-completeness helpers |
 | `whitelist_access.sql` | Restricts Google sign-in to a fixed list of `@garena.com` emails. Run AFTER the auth-sync triggers from the SSO setup step. |
+| `security_hardening.sql` | Re-applies auth-based RLS helpers, policies, and final grants/revokes after RPC + whitelist setup |
 
 ## Before Running
 
@@ -29,15 +30,17 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
 2. Select the FlowMate project.
 3. Go to SQL Editor.
 4. Create a new query.
-5. Paste all contents of `supabase/schema.sql`.
-6. Run it.
-7. Create another new query.
-8. Paste all contents of `supabase/seed.sql`.
-9. Run it.
+5. Run these files in this exact order, one SQL Editor query at a time:
+   1. `supabase/schema.sql`
+   2. `supabase/seed.sql`
+   3. `supabase/rpc_quick_task.sql`
+   4. `supabase/rpc_assignment.sql`
+   5. `supabase/whitelist_access.sql`
+   6. `supabase/security_hardening.sql`
 
 ## Expected Tables
 
-After `schema.sql`, these tables should exist:
+After the full run order, these tables should exist:
 
 - `users`
 - `team_members`
@@ -49,6 +52,7 @@ After `schema.sql`, these tables should exist:
 - `checklist_items`
 - `notifications`
 - `capacity_overrides`
+- `user_whitelist`
 
 ## Expected Views
 
