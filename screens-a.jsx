@@ -565,7 +565,7 @@ function CreateScreen({ onNav, onOpen }) {
       <div className="card">
         <div className="card__head">
           <span className="card__title">{mode === "quick" ? "New quick task" : "New creative request"}</span>
-          <span className="card__sub">{mode === "creative" ? "All fields with * are required for assignment." : "Only title and due date are required."}</span>
+          <span className="card__sub">{mode === "creative" ? "All fields with * are required for assignment." : "All fields with * are required"}</span>
         </div>
         <div className="card__body">
           {mode === "quick"
@@ -707,7 +707,8 @@ function CreativeRequestForm({ value, onChange }) {
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch date, Requester Team / Function, and Project / campaign" />
+        <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
       </div>
       <div className="field">
         <label className="field__label">Requester Team / Function <span className="req">*</span></label>
