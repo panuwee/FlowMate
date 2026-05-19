@@ -5,6 +5,7 @@ const { useState: useStateC, useEffect: useEffectC } = React;
    WORKLOAD VIEW
    ============================================================ */
 function WorkloadScreen({ onOpen }) {
+  const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
     const openCreative = mine.filter(w => w.type === "creative" && ["assigned","in_progress","review","blocked"].includes(w.status));
@@ -33,6 +34,7 @@ function WorkloadScreen({ onOpen }) {
   const [queuedEffort, setQueuedEffort] = useStateC(WORK.filter(w => w.status === "queued").reduce((s, w) => s + (w.effort || 0), 0));
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
   const [workloadTab, setWorkloadTab] = useStateC("standard");
+  const [teamFilter, setTeamFilter] = useStateC("All");
 
   useEffectC(() => {
     let alive = true;
@@ -75,10 +77,12 @@ function WorkloadScreen({ onOpen }) {
     statusCounts: r.statusCounts || { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 },
     items: r.items || [],
   }));
-  const visibleRows = safeRows.filter(r => {
+  const tabRows = safeRows.filter(r => {
     const isGdVe = window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(r.m) : false;
     return workloadTab === "gdve" ? isGdVe : !isGdVe;
   });
+  const teamFilteredRows = tabRows.filter(r => teamFilter === "All" || r.m.discipline === teamFilter);
+  const visibleRows = workloadTab === "gdve" ? tabRows : teamFilteredRows;
   const statusTotals = visibleRows.reduce((totals, r) => {
     totals.assigned += r.statusCounts.assigned || 0;
     totals.in_progress += r.statusCounts.in_progress || 0;
@@ -118,6 +122,14 @@ function WorkloadScreen({ onOpen }) {
       <div className="filterbar">
         <button className={`chip ${workloadTab === "standard" ? "is-active" : ""}`} onClick={() => setWorkloadTab("standard")}>Workload</button>
         <button className={`chip ${workloadTab === "gdve" ? "is-active" : ""}`} onClick={() => setWorkloadTab("gdve")}>Workload - GD/VE</button>
+        {workloadTab === "standard" && (
+          <>
+            <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>Filter by team</span>
+            {WORKLOAD_TEAM_FILTERS.map(team => (
+              <button key={team} className={`chip ${teamFilter === team ? "is-active" : ""}`} onClick={() => setTeamFilter(team)}>{team}</button>
+            ))}
+          </>
+        )}
       </div>
 
       {workloadTab === "standard" ? (
