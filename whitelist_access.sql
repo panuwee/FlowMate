@@ -41,13 +41,13 @@ end $$;
 -- existing seeded team_member row to the real user.id.
 insert into public.user_whitelist (email, display_name, role, team_member_code) values
   ('panuwee.w@garena.com',        'Panu',    'admin',  'panu'),
-  ('sasin.cha@garena.com',        'Gear',    'member', 'gear'),
+  ('sasin.cha@garena.com',        'Gear',    'admin',  'gear'),
   ('nithidol.k@garena.com',       'Big',     'member', 'big'),
   ('tanadech.s@garena.com',       'Mark',    'member', 'mark'),
   ('sakdarin@garena.com',         'Po',      'member', 'po'),
   ('fco.thanayoot@garena.com',    'Aof',     'member', 'aof'),
   ('fco.koravit@garena.com',      'Folk',    'member', 'folk'),
-  ('weerayut@garena.com',         'Mac',     'member', 'mac'),
+  ('weerayut@garena.com',         'Mac',     'admin',  'mac'),
   ('chayodom.a@garena.com',       'No',      'member', 'no'),
   ('kwanchanok.s@garena.com',     'May',     'member', 'may'),
   ('fco.rittichai@garena.com',    'Boss',    'member', 'boss'),
