@@ -1055,6 +1055,20 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           )}
 
+          {w.type === "quick" && (
+            <div className="card">
+              <div className="card__head"><span className="card__title">Quick Task details</span></div>
+              <div className="card__body">
+                <div className="meta-row"><div className="meta-row__lbl">Requester Team / Function</div><div className="meta-row__val">{w.requesterTeam || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Project / campaign</div><div className="meta-row__val">{w.campaign || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Assignee</div><div className="meta-row__val">{owner?.name || "Unassigned"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">1st Review / Draft</div><div className="meta-row__val">{w.dueLabel || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchLabel || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Priority</div><div className="meta-row__val"><PriorityBadge level={w.priority} /></div></div>
+              </div>
+            </div>
+          )}
+
           {hasCreativeDetails && (
             <div className="card">
               <div className="card__head"><span className="card__title">Creative details</span></div>
@@ -1140,7 +1154,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 </div>
               </div>
               <div className="meta-row">
-                <div className="meta-row__lbl">Due</div>
+                <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "Due"}</div>
                 <div className="meta-row__val">{w.dueLabel}, 2026</div>
               </div>
               {w.type === "quick" && (
