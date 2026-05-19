@@ -359,7 +359,7 @@ function QuickTaskChecklist({ work, onAdd, onToggle, onCommentAdd, onCommentEdit
 /* ============================================================
    CREATE - Quick Task + Creative Request
    ============================================================ */
-function CreateScreen({ onNav }) {
+function CreateScreen({ onNav, onOpen }) {
   const [mode, setMode] = useState("creative");
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
@@ -388,30 +388,70 @@ function CreateScreen({ onNav }) {
     launchDate: "2026-05-25",
   });
 
+  async function openCreatedDetail(created, id) {
+    const detailId = id || window.getFlowMateCreatedDisplayId(created);
+    if (!detailId) {
+      throw new Error("Create succeeded, but the response did not include a work item ID.");
+    }
+    if (!window.loadFlowMateListRows) {
+      throw new Error(`Create succeeded for ${detailId}, but the detail loader is not ready.`);
+    }
+    if (typeof onOpen !== "function") {
+      throw new Error(`Create succeeded for ${detailId}, but detail navigation is not ready.`);
+    }
+
+    const rows = await window.loadFlowMateListRows();
+    const createdRow = window.findFlowMateWorkItemById(rows, detailId);
+    if (!createdRow) {
+      throw new Error(`Create succeeded for ${detailId}, but the detail row could not be loaded.`);
+    }
+
+    window.flowmateSelectedWorkItem = createdRow;
+    onOpen(detailId);
+  }
+
   async function handleSubmit() {
+    if (isSubmitting) return;
     setIsSubmitting(true);
+    let shouldShowResult = true;
     try {
+      let created;
+      let nextResult;
       if (mode === "quick") {
-        const created = await window.createFlowMateQuickTask(quickDraft);
-        setResult({ kind: "quick_created", id: created.display_id || created.id });
+        created = await window.createFlowMateQuickTask(quickDraft);
+        nextResult = { kind: "quick_created", id: window.getFlowMateCreatedDisplayId(created) };
       } else {
-        const created = await window.createFlowMateCreativeRequest(creativeDraft);
+        created = await window.createFlowMateCreativeRequest(creativeDraft);
         const assignment = created.assignment || {};
         const result = assignment.result || "queued";
-        setResult({
+        nextResult = {
           kind: result === "assigned" ? "assigned" : result === "need_brief" ? "need_brief" : "queued",
-          id: created.display_id || created.id,
+          id: window.getFlowMateCreatedDisplayId(created),
           owner: assignment.owner_code ? `m-${assignment.owner_code}` : null,
           effort: assignment.effort || null,
           reason: assignment.reason || "",
+        };
+      }
+
+      try {
+        await openCreatedDetail(created, nextResult.id);
+        shouldShowResult = false;
+      } catch (openError) {
+        console.error("[FlowMate Create] open created detail failed:", openError);
+        setResult({
+          kind: "open_failed",
+          id: nextResult.id || "Saved",
+          message: openError.message || "Saved, but could not open the detail view.",
         });
       }
     } catch (error) {
       console.error("[FlowMate Create] submit failed:", error);
       setResult({ kind: "error", id: "Not saved", message: error.message || "Submit failed." });
     } finally {
-      setIsSubmitting(false);
-      setSubmitted(true);
+      if (shouldShowResult) {
+        setIsSubmitting(false);
+        setSubmitted(true);
+      }
     }
   }
 
@@ -623,6 +663,7 @@ function CreateResultScreen({ result, onAgain, onNav }) {
             {result.kind === "queued" && "Request submitted - queued"}
             {result.kind === "need_brief" && "Request submitted - needs brief"}
             {result.kind === "quick_created" && "Quick task created"}
+            {result.kind === "open_failed" && "Saved - detail did not open"}
             {result.kind === "error" && "Could not save"}
           </span>
           <span className="card__sub mono">{result.id}</span>
@@ -666,6 +707,9 @@ function CreateResultScreen({ result, onAgain, onNav }) {
           )}
           {result.kind === "error" && (
             <div className="reason-box reason-box--need">{result.message}</div>
+          )}
+          {result.kind === "open_failed" && (
+            <div className="reason-box reason-box--need">{result.message} Open the list view and search for <span className="mono">{result.id}</span>.</div>
           )}
         </div>
       </div>
@@ -1009,4 +1053,3 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 }
 
 Object.assign(window, { MyWorkScreen, CreateScreen, DetailScreen });
-

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import vm from "node:vm";
 import { describe, expect, it } from "vitest";
 import {
   calculateWorkloadSummary,
@@ -129,6 +130,20 @@ const fixture: WorkItemSummary[] = [
   },
 ];
 
+function loadGithubSearchUtils() {
+  const code = readFileSync(join(process.cwd(), "github", "search-utils.js"), "utf8");
+  const sandbox = {
+    window: {
+      MEMBERS_BY_ID: {},
+    },
+  };
+  vm.runInNewContext(code, sandbox);
+  return sandbox.window as {
+    getFlowMateCreatedDisplayId: (created: unknown) => string;
+    findFlowMateWorkItemById: <T extends { id?: string }>(rows: T[], id: string) => T | null;
+  };
+}
+
 // ============================================================================
 // UAT-005 — Quick tasks do not affect creative capacity
 // ============================================================================
@@ -243,6 +258,24 @@ describe("UAT-025 search fields", () => {
 // ============================================================================
 // UAT-012 — Hybrid request stays queued with needs_split semantics
 // ============================================================================
+// ============================================================================
+// UAT-101/UAT-102 - Created item detail target
+// ============================================================================
+describe("UAT-101/UAT-102 created item detail target helpers", () => {
+  const utils = loadGithubSearchUtils();
+
+  it("uses the real created display_id for detail navigation", () => {
+    expect(utils.getFlowMateCreatedDisplayId({ id: "db-row-id", display_id: "QT-0301" })).toBe("QT-0301");
+    expect(utils.getFlowMateCreatedDisplayId({ id: "CR-2010" })).toBe("CR-2010");
+  });
+
+  it("finds the created work item row from freshly loaded list rows", () => {
+    const row = { id: "CR-2010", title: "New request" };
+    expect(utils.findFlowMateWorkItemById([{ id: "QT-0301" }, row], "CR-2010")).toBe(row);
+    expect(utils.findFlowMateWorkItemById([{ id: "QT-0301" }], "CR-2010")).toBeNull();
+  });
+});
+
 describe("UAT-012 hybrid request visibility", () => {
   it("hybrid row is queued with effort 8 and assetType hybrid", () => {
     const hybrid = fixture.find((r) => r.displayId === "CR-1053")!;

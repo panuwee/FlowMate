@@ -191,7 +191,7 @@ function App() {
 
       <main className="app__main" key={route + (focusId || "")}>
         {route === "my-work"  && <MyWorkScreen   onOpen={open} onNav={nav} searchQuery={searchQuery} />}
-        {route === "create"   && <CreateScreen   onNav={nav} />}
+        {route === "create"   && <CreateScreen   onNav={nav} onOpen={open} />}
         {route === "detail"   && <DetailScreen   onNav={nav} onOpen={open} focusId={focusId} />}
         {route === "list"     && <ListScreen     onOpen={open} searchQuery={searchQuery} />}
         {route === "board"    && <BoardScreen    onOpen={open} />}

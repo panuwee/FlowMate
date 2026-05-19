@@ -33,4 +33,16 @@ function matchesFlowMateSearch(row, query) {
   return flowmateSearchText(row).includes(normalizedQuery);
 }
 
+function getFlowMateCreatedDisplayId(created) {
+  if (!created) return "";
+  return created.display_id || created.displayId || created.id || "";
+}
+
+function findFlowMateWorkItemById(rows, id) {
+  if (!Array.isArray(rows) || !id) return null;
+  return rows.find((row) => row && row.id === id) || null;
+}
+
 window.matchesFlowMateSearch = matchesFlowMateSearch;
+window.getFlowMateCreatedDisplayId = getFlowMateCreatedDisplayId;
+window.findFlowMateWorkItemById = findFlowMateWorkItemById;
