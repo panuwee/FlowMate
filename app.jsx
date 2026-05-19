@@ -3,13 +3,13 @@ const { useState: useStateApp, useEffect: useEffectApp } = React;
 
 const NAV = [
   { group: "Personal", items: [
-    { key: "my-work", label: "My work",       icon: "inbox", count: 7 },
+    { key: "my-work", label: "My work",       icon: "inbox" },
     { key: "create",  label: "Create",        icon: "plus" },
   ]},
   { group: "Team", items: [
     { key: "board",    label: "Board",         icon: "board" },
     { key: "list",     label: "List",          icon: "list" },
-    { key: "queue",    label: "Central queue", icon: "queue", count: 4 },
+    { key: "queue",    label: "Central queue", icon: "queue" },
   ]},
   { group: "Supervisor", items: [
     { key: "workload", label: "Workload",      icon: "users" },
@@ -31,6 +31,7 @@ function App() {
   });
   const [focusId, setFocusId] = useStateApp(null);
   const [searchQuery, setSearchQuery] = useStateApp("");
+  const [navCounts, setNavCounts] = useStateApp({});
   // status: "loading" → "signed-in" | "signed-out".
   // Loading shows a small splash. Signed-out shows the Login landing page.
   // Signed-in renders the full FlowMate app.
@@ -123,6 +124,30 @@ function App() {
     }
   }
 
+  useEffectApp(() => {
+    if (authState.status !== "signed-in") return;
+    let alive = true;
+
+    async function refreshNavCounts() {
+      if (!window.loadFlowMateListRows || !window.getFlowMateNavCounts) return;
+      try {
+        const rows = await window.loadFlowMateListRows();
+        if (!alive) return;
+        const currentUser = window.FLOWMATE_CURRENT_USER || authState.user || {};
+        setNavCounts(window.getFlowMateNavCounts(rows, currentUser, window.MEMBERS || []));
+      } catch (error) {
+        console.error("[FlowMate Nav] Count refresh failed:", error);
+      }
+    }
+
+    refreshNavCounts();
+    window.addEventListener("flowmate:refresh-counts", refreshNavCounts);
+    return () => {
+      alive = false;
+      window.removeEventListener("flowmate:refresh-counts", refreshNavCounts);
+    };
+  }, [authState.status, route]);
+
   // Gate the whole app on auth status.
   if (authState.status === "loading") {
     return <LoadingScreen />;
@@ -172,17 +197,20 @@ function App() {
         {NAV.map(group => (
           <div key={group.group}>
             <div className="nav-section">{group.group}</div>
-            {group.items.map(it => (
-              <div
-                key={it.key}
-                className={`nav-item ${route === it.key ? "is-active" : ""}`}
-                onClick={() => nav(it.key)}
-              >
-                <Icon name={it.icon} size={15} />
-                <span>{it.label}</span>
-                {it.count != null && <span className="nav-item__count">{it.count}</span>}
-              </div>
-            ))}
+            {group.items.map(it => {
+              const itemCount = navCounts[it.key];
+              return (
+                <div
+                  key={it.key}
+                  className={`nav-item ${route === it.key ? "is-active" : ""}`}
+                  onClick={() => nav(it.key)}
+                >
+                  <Icon name={it.icon} size={15} />
+                  <span>{it.label}</span>
+                  {itemCount != null && <span className="nav-item__count">{itemCount}</span>}
+                </div>
+              );
+            })}
           </div>
         ))}
 

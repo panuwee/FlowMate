@@ -66,8 +66,50 @@ function filterFlowMateAssigneeOptions(options, query) {
   );
 }
 
+const FLOWMATE_DONE_STATUSES = ["delivered", "cancelled", "done"];
+
+function isFlowMateActiveStatus(status) {
+  return !FLOWMATE_DONE_STATUSES.includes((status || "").toLowerCase());
+}
+
+function getFlowMateCurrentUserIds(currentUser, members) {
+  const user = currentUser || {};
+  const memberList = members || [];
+  const myMember = memberList.find((member) => member && member.id === user.team_member_id)
+    || memberList.find((member) =>
+      member && member.name && user.name && member.name.toLowerCase() === user.name.toLowerCase()
+    );
+  return [user.team_member_id, user.id, myMember && myMember.id].filter(Boolean);
+}
+
+function getFlowMateMyWorkRows(rows, currentUser, members, query) {
+  const meIds = getFlowMateCurrentUserIds(currentUser, members);
+  return (rows || []).filter((row) =>
+    meIds.includes(row && row.assignee)
+    && isFlowMateActiveStatus(row && row.status)
+    && matchesFlowMateSearch(row || {}, query)
+  );
+}
+
+function getFlowMateQueueRows(rows, query) {
+  return (rows || []).filter((row) =>
+    matchesFlowMateSearch(row || {}, query)
+    && (row.status === "queued" || row.status === "need_brief")
+  );
+}
+
+function getFlowMateNavCounts(rows, currentUser, members) {
+  return {
+    "my-work": getFlowMateMyWorkRows(rows, currentUser, members).length,
+    queue: getFlowMateQueueRows(rows).length,
+  };
+}
+
 window.matchesFlowMateSearch = matchesFlowMateSearch;
 window.getFlowMateCreatedDisplayId = getFlowMateCreatedDisplayId;
 window.findFlowMateWorkItemById = findFlowMateWorkItemById;
 window.buildFlowMateTemplateTitle = buildFlowMateTemplateTitle;
 window.filterFlowMateAssigneeOptions = filterFlowMateAssigneeOptions;
+window.getFlowMateMyWorkRows = getFlowMateMyWorkRows;
+window.getFlowMateQueueRows = getFlowMateQueueRows;
+window.getFlowMateNavCounts = getFlowMateNavCounts;

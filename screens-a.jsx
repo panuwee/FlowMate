@@ -25,6 +25,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       if (!alive) return;
       setSourceRows(rows);
       setLoadState({ status: "live", message: "Live Supabase data" });
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
     } catch (error) {
       if (!alive) return;
       console.error("[FlowMate My Work] Supabase load failed:", error);
@@ -45,6 +46,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
     try {
       await window.completeFlowMateQuickTask(work.id);
       await loadMyWorkRows(true);
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
       setLoadState({ status: "live", message: `Completed ${work.id}` });
     } catch (error) {
       console.error("[FlowMate My Work] Complete quick task failed:", error);
@@ -142,14 +144,17 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
     }
   }
 
-  const mine = sourceRows.filter(w => meIds.includes(w.assignee) && window.matchesFlowMateSearch(w, searchQuery));
+  const mine = window.getFlowMateMyWorkRows
+    ? window.getFlowMateMyWorkRows(sourceRows, currentUser, window.MEMBERS || [], searchQuery)
+    : sourceRows.filter(w => meIds.includes(w.assignee) && !["delivered", "cancelled", "done"].includes(w.status) && window.matchesFlowMateSearch(w, searchQuery));
   const overdue = mine.filter(w => w.overdue);
   const dueSoon = mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status));
   const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueSoon.includes(w));
-  const assigned = mine.filter(w => w.status === "assigned" && !dueSoon.includes(w));
-  const review = mine.filter(w => w.status === "review" && !dueSoon.includes(w));
-  const quick = mine.filter(w => w.type === "quick");
-  const blocked = mine.filter(w => w.status === "blocked");
+  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueSoon.includes(w));
+  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueSoon.includes(w));
+  const blocked = mine.filter(w => w.status === "blocked" && !w.overdue);
+  const activeGroupIds = new Set([...overdue, ...dueSoon, ...inProgress, ...assigned, ...review, ...blocked].map(w => w.id));
+  const quick = mine.filter(w => w.type === "quick" && !activeGroupIds.has(w.id));
   function scrollToOverdue() {
     document.getElementById("my-work-overdue")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
