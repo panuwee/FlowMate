@@ -393,6 +393,8 @@ create or replace function public.is_active_app_user()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -406,6 +408,8 @@ create or replace function public.is_work_item_participant(target_work_item_id u
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -424,6 +428,8 @@ create or replace function public.can_update_work_item(target_work_item_id uuid)
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select public.is_active_app_user()
     and public.is_work_item_participant(target_work_item_id);

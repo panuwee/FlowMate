@@ -298,6 +298,10 @@ describe("B-003/B-006 security hardening SQL", () => {
 
     expect(schemaSql).toContain("select auth.uid()");
     expect(hardeningSql).toContain("select auth.uid()");
+    expect(hardeningSql).toContain("create or replace function public.is_active_app_user()");
+    expect(hardeningSql).toContain("security definer");
+    expect(hardeningSql).toContain("set search_path = public");
+    expect(hardeningSql).toContain("using (public.is_admin_app_user())");
     expect(schemaSql).toContain("using (public.is_active_app_user())");
     expect(schemaSql).toContain("using (user_id = public.current_app_user_id())");
     expect(combinedSql).not.toContain("or public.current_app_user_id() is null");

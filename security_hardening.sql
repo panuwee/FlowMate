@@ -17,6 +17,8 @@ create or replace function public.is_active_app_user()
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -30,6 +32,8 @@ create or replace function public.is_work_item_participant(target_work_item_id u
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select exists (
     select 1
@@ -48,9 +52,27 @@ create or replace function public.can_update_work_item(target_work_item_id uuid)
 returns boolean
 language sql
 stable
+security definer
+set search_path = public
 as $$
   select public.is_active_app_user()
     and public.is_work_item_participant(target_work_item_id);
+$$;
+
+create or replace function public.is_admin_app_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = public.current_app_user_id()
+      and u.is_active = true
+      and u.role = 'admin'
+  );
 $$;
 
 alter table public.users enable row level security;
@@ -181,19 +203,5 @@ using (public.is_active_app_user());
 drop policy if exists "admins can write whitelist" on public.user_whitelist;
 create policy "admins can write whitelist"
 on public.user_whitelist for all
-using (
-  exists (
-    select 1 from public.users u
-    where u.id = public.current_app_user_id()
-      and u.is_active = true
-      and u.role = 'admin'
-  )
-)
-with check (
-  exists (
-    select 1 from public.users u
-    where u.id = public.current_app_user_id()
-      and u.is_active = true
-      and u.role = 'admin'
-  )
-);
+using (public.is_admin_app_user())
+with check (public.is_admin_app_user());

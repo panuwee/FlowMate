@@ -178,25 +178,27 @@ create policy "active users can read whitelist"
   on public.user_whitelist for select
   using (public.is_active_app_user());
 
+create or replace function public.is_admin_app_user()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = public.current_app_user_id()
+      and u.is_active = true
+      and u.role = 'admin'
+  );
+$$;
+
 drop policy if exists "admins can write whitelist" on public.user_whitelist;
 create policy "admins can write whitelist"
   on public.user_whitelist for all
-  using (
-    exists (
-      select 1 from public.users u
-      where u.id = public.current_app_user_id()
-        and u.is_active = true
-        and u.role = 'admin'
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.users u
-      where u.id = public.current_app_user_id()
-        and u.is_active = true
-        and u.role = 'admin'
-    )
-  );
+  using (public.is_admin_app_user())
+  with check (public.is_admin_app_user());
 
 grant select on public.user_whitelist to anon, authenticated;
 grant insert, update, delete on public.user_whitelist to authenticated;
