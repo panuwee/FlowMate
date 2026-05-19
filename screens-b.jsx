@@ -97,7 +97,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     }),
   ];
   const ownerOptions = Array.from(new Map(ownerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  const teamOptions = Array.from(new Set([...requesterTeamOptions, ...sourceRows.map(w => w.requesterTeam).filter(Boolean)])).sort();
+  const teamOptions = requesterTeamOptions;
   const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
   const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
 

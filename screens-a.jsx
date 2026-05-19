@@ -446,7 +446,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
 };
 
 function getDefaultQuickDraft() {
-  const requesterTeam = window.FLOWMATE_CURRENT_USER?.requester_team || TEAMS[0];
+  const requesterTeam = getDefaultRequesterTeam();
   return {
     title: "",
     note: "",
@@ -461,7 +461,7 @@ function getDefaultQuickDraft() {
 }
 
 function getDefaultCreativeDraft() {
-  const requesterTeam = window.FLOWMATE_CURRENT_USER?.requester_team || TEAMS[0];
+  const requesterTeam = getDefaultRequesterTeam();
   return {
     title: "",
     requesterTeam,
@@ -478,6 +478,10 @@ function getDefaultCreativeDraft() {
     dueDate: "2026-05-22",
     launchDate: "2026-05-25",
   };
+}
+
+function getDefaultRequesterTeam() {
+  return window.normalizeFlowMateRequesterTeam?.(window.FLOWMATE_CURRENT_USER?.requester_team) || TEAMS[0];
 }
 
 function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {

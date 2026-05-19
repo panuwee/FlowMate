@@ -1,3 +1,5 @@
+const isVisibleMemberCode = (memberCode) => String(memberCode || "").toLowerCase() !== "gear";
+
 async function loadFlowMateWorkloadRows() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -10,20 +12,24 @@ async function loadFlowMateWorkloadRows() {
       .order("member_code", { ascending: true }),
     window.flowmateSupabase
       .from("team_members")
-      .select("id,display_name,initials,color,discipline,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
+      .select("id,member_code,display_name,initials,color,discipline,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
     window.loadFlowMateListRows ? window.loadFlowMateListRows() : Promise.resolve([]),
   ]);
 
   const firstError = workloadResult.error || membersResult.error;
   if (firstError) throw firstError;
 
-  const membersById = Object.fromEntries((membersResult.data || []).map((member) => [member.id, member]));
+  const membersById = Object.fromEntries(
+    (membersResult.data || [])
+      .filter((member) => isVisibleMemberCode(member.member_code))
+      .map((member) => [member.id, member]),
+  );
 
   const queuedEffort = (activeItems || [])
     .filter((item) => item.status === "queued")
     .reduce((sum, item) => sum + (item.effort || 0), 0);
 
-  const rows = (workloadResult.data || []).map((row) => {
+  const rows = (workloadResult.data || []).filter((row) => isVisibleMemberCode(row.member_code)).map((row) => {
     const member = membersById[row.team_member_id] || {};
     const memberItems = (activeItems || []).filter((item) => item.assignee === row.team_member_id);
     const statusCounts = window.getFlowMateWorkloadStatusCounts

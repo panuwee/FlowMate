@@ -2,6 +2,17 @@ function flowmateToKebab(value) {
   return value ? value.replaceAll("_", "-") : value;
 }
 
+const FLOWMATE_ALLOWED_REQUESTER_TEAMS = ["Operations", "Marketing", "Esport", "GD/VE"];
+
+function normalizeFlowMateRequesterTeam(value) {
+  const team = String(value || "").trim();
+  if (team === "Operation") return "Operations";
+  if (team === "GD/VE Internal") return "GD/VE";
+  if (team === "Esport Ops") return "Esport";
+  if (team === "PM") return "Operations";
+  return FLOWMATE_ALLOWED_REQUESTER_TEAMS.includes(team) ? team : "";
+}
+
 function flowmateDateLabel(dateValue) {
   if (!dateValue) return "";
   const dueDate = new Date(`${dateValue}T00:00:00`);
@@ -144,6 +155,8 @@ async function loadFlowMateListRows() {
       };
     }
 
+    const requesterTeam = normalizeFlowMateRequesterTeam(item.requester_team || requester.requester_team);
+
     return {
       id: item.display_id,
       type: item.work_type === "quick_task" ? "quick" : "creative",
@@ -169,7 +182,7 @@ async function loadFlowMateListRows() {
       briefLink: details.brief_link || "",
       referenceLink: details.reference_link || "",
       campaign: item.campaign_name || item.project_name || "",
-      requesterTeam: item.requester_team || requester.requester_team || "No team",
+      requesterTeam: requesterTeam || "No team",
       assignee: owner ? owner.id : otherAssigneeId,
       assigneeOtherName,
       requester: requester.display_name || "-",
@@ -267,16 +280,13 @@ async function loadFlowMateRequesterTeams() {
 
   if (error) throw error;
 
-  const fallback = window.TEAMS || [];
+  const fallback = (window.TEAMS || []).map(normalizeFlowMateRequesterTeam).filter(Boolean);
   const liveTeams = (data || [])
-    .map((row) => (row.requester_team || "").trim())
+    .map((row) => normalizeFlowMateRequesterTeam(row.requester_team))
     .filter(Boolean);
-  return Array.from(new Set([...fallback, ...liveTeams])).sort((a, b) => {
-    const ai = fallback.indexOf(a);
-    const bi = fallback.indexOf(b);
-    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-    return a.localeCompare(b);
-  });
+  const availableTeams = new Set([...fallback, ...liveTeams]);
+  return FLOWMATE_ALLOWED_REQUESTER_TEAMS.filter((team) => availableTeams.has(team));
 }
 
 window.loadFlowMateRequesterTeams = loadFlowMateRequesterTeams;
+window.normalizeFlowMateRequesterTeam = normalizeFlowMateRequesterTeam;

@@ -48,7 +48,7 @@ function Icon({ name, size = 16, ...rest }) {
 const MEMBERS = [];
 const MEMBERS_BY_ID = Object.fromEntries(MEMBERS.map(m => [m.id, m]));
 
-const TEAMS = ["PM", "Operation", "Marketing", "GD/VE", "Esport"];
+const TEAMS = ["Operations", "Marketing", "Esport", "GD/VE"];
 
 const TODAY = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
 

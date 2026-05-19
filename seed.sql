@@ -2,23 +2,76 @@
 -- Run this after supabase/schema.sql.
 -- Seeds the real roster only. No mock/sample work items are inserted.
 
-delete from public.work_items
-where id::text like '20000000-0000-0000-0000-0000000010%'
-   or id::text like '30000000-0000-0000-0000-0000000002%';
+create temporary table if not exists flowmate_mock_users_to_delete (
+  id uuid primary key
+) on commit drop;
 
-update public.users
-set is_active = false
+truncate flowmate_mock_users_to_delete;
+
+insert into flowmate_mock_users_to_delete (id)
+select id
+from public.users
 where google_subject like 'mock-%';
+
+create temporary table if not exists flowmate_mock_team_members_to_delete (
+  id uuid primary key
+) on commit drop;
+
+truncate flowmate_mock_team_members_to_delete;
+
+insert into flowmate_mock_team_members_to_delete (id)
+select tm.id
+from public.team_members tm
+where tm.user_id in (select id from flowmate_mock_users_to_delete);
+
+create temporary table if not exists flowmate_mock_work_items_to_delete (
+  id uuid primary key
+) on commit drop;
+
+truncate flowmate_mock_work_items_to_delete;
+
+insert into flowmate_mock_work_items_to_delete (id)
+select wi.id
+from public.work_items wi
+where wi.requester_user_id in (select id from flowmate_mock_users_to_delete)
+   or wi.assignee_user_id in (select id from flowmate_mock_users_to_delete)
+   or wi.final_owner_member_id in (select id from flowmate_mock_team_members_to_delete)
+   or wi.id::text like '20000000-0000-0000-0000-0000000010%'
+   or wi.id::text like '30000000-0000-0000-0000-0000000002%';
+
+delete from public.comments
+where work_item_id in (select id from flowmate_mock_work_items_to_delete)
+   or author_user_id in (select id from flowmate_mock_users_to_delete);
+
+delete from public.checklist_items
+where work_item_id in (select id from flowmate_mock_work_items_to_delete)
+   or created_by_user_id in (select id from flowmate_mock_users_to_delete);
+
+delete from public.capacity_overrides
+where created_by_user_id in (select id from flowmate_mock_users_to_delete);
+
+update public.work_item_events
+set actor_user_id = null
+where actor_user_id in (select id from flowmate_mock_users_to_delete);
+
+delete from public.work_items
+where id in (select id from flowmate_mock_work_items_to_delete);
+
+delete from public.team_members
+where id in (select id from flowmate_mock_team_members_to_delete);
+
+delete from public.users
+where id in (select id from flowmate_mock_users_to_delete);
 
 insert into public.users (id, email, display_name, requester_team, google_subject, is_active)
 values
-  ('00000000-0000-0000-0000-000000001001', 'sasin.cha@garena.com', 'Gear', 'PM', 'seed-gear', true),
+  ('00000000-0000-0000-0000-000000001001', 'sasin.cha@garena.com', 'Gear', 'Operations', 'seed-gear', true),
   ('00000000-0000-0000-0000-000000001002', 'panuwee.w@garena.com', 'Panu', 'FCO', 'seed-panu', true),
-  ('00000000-0000-0000-0000-000000001003', 'nithidol.k@garena.com', 'Big', 'Operation', 'seed-big', true),
-  ('00000000-0000-0000-0000-000000001004', 'tanadech.s@garena.com', 'Mark', 'Operation', 'seed-mark', true),
-  ('00000000-0000-0000-0000-000000001005', 'sakdarin@garena.com', 'Po', 'Operation', 'seed-po', true),
-  ('00000000-0000-0000-0000-000000001006', 'fco.thanayoot@garena.com', 'Aof', 'Operation', 'seed-aof', true),
-  ('00000000-0000-0000-0000-000000001007', 'fco.koravit@garena.com', 'Folk', 'Operation', 'seed-folk', true),
+  ('00000000-0000-0000-0000-000000001003', 'nithidol.k@garena.com', 'Big', 'Operations', 'seed-big', true),
+  ('00000000-0000-0000-0000-000000001004', 'tanadech.s@garena.com', 'Mark', 'Operations', 'seed-mark', true),
+  ('00000000-0000-0000-0000-000000001005', 'sakdarin@garena.com', 'Po', 'Operations', 'seed-po', true),
+  ('00000000-0000-0000-0000-000000001006', 'fco.thanayoot@garena.com', 'Aof', 'Operations', 'seed-aof', true),
+  ('00000000-0000-0000-0000-000000001007', 'fco.koravit@garena.com', 'Folk', 'Operations', 'seed-folk', true),
   ('00000000-0000-0000-0000-000000001008', 'weerayut@garena.com', 'Mac', 'Marketing', 'seed-mac', true),
   ('00000000-0000-0000-0000-000000001009', 'chayodom.a@garena.com', 'No', 'Marketing', 'seed-no', true),
   ('00000000-0000-0000-0000-000000001010', 'kwanchanok.s@garena.com', 'May', 'Marketing', 'seed-may', true),
@@ -64,13 +117,13 @@ values
   ('10000000-0000-0000-0000-000000000003', 'tong', (select id from public.users where lower(email) = lower('fco.krittidech@garena.com')), 'Tong', 'TG', '#BF6B00', 'GD/VE', 'GD/VE', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, 4, 3, 'partial', true),
   ('10000000-0000-0000-0000-000000000004', 'eye', (select id from public.users where lower(email) = lower('fco.janyarat@garena.com')), 'Eye', 'EY', '#2E546D', 'GD/VE', 'GD/VE', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
   ('10000000-0000-0000-0000-000000000005', 'vee', (select id from public.users where lower(email) = lower('fco.thanadon@garena.com')), 'Vee', 'VE', '#C0504D', 'GD/VE', 'GD/VE', array['esport-video']::public.asset_type[], '{}'::public.asset_type[], 8, null, 2, 'available', true),
-  ('10000000-0000-0000-0000-000000000006', 'gear', (select id from public.users where lower(email) = lower('sasin.cha@garena.com')), 'Gear', 'GE', '#2E546D', 'PM', 'PM', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
+  ('10000000-0000-0000-0000-000000000006', 'gear', (select id from public.users where lower(email) = lower('sasin.cha@garena.com')), 'Gear', 'GE', '#2E546D', 'Operations', 'Operations', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
   ('10000000-0000-0000-0000-000000000007', 'panu', (select id from public.users where lower(email) = lower('panuwee.w@garena.com')), 'Panu', 'PN', '#C0504D', 'FCO Admin', 'FCO', array['static-graphic','general-video','motion']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
-  ('10000000-0000-0000-0000-000000000008', 'big', (select id from public.users where lower(email) = lower('nithidol.k@garena.com')), 'Big', 'BG', '#BF6B00', 'Operation', 'Operation', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
-  ('10000000-0000-0000-0000-000000000009', 'mark', (select id from public.users where lower(email) = lower('tanadech.s@garena.com')), 'Mark', 'MK', '#2E546D', 'Operation', 'Operation', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
-  ('10000000-0000-0000-0000-000000000010', 'po', (select id from public.users where lower(email) = lower('sakdarin@garena.com')), 'Po', 'PO', '#C0504D', 'Operation', 'Operation', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
-  ('10000000-0000-0000-0000-000000000011', 'aof', (select id from public.users where lower(email) = lower('fco.thanayoot@garena.com')), 'Aof', 'AO', '#BF6B00', 'Operation', 'Operation', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
-  ('10000000-0000-0000-0000-000000000012', 'folk', (select id from public.users where lower(email) = lower('fco.koravit@garena.com')), 'Folk', 'FK', '#2E546D', 'Operation', 'Operation', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
+  ('10000000-0000-0000-0000-000000000008', 'big', (select id from public.users where lower(email) = lower('nithidol.k@garena.com')), 'Big', 'BG', '#BF6B00', 'Operations', 'Operations', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
+  ('10000000-0000-0000-0000-000000000009', 'mark', (select id from public.users where lower(email) = lower('tanadech.s@garena.com')), 'Mark', 'MK', '#2E546D', 'Operations', 'Operations', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
+  ('10000000-0000-0000-0000-000000000010', 'po', (select id from public.users where lower(email) = lower('sakdarin@garena.com')), 'Po', 'PO', '#C0504D', 'Operations', 'Operations', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
+  ('10000000-0000-0000-0000-000000000011', 'aof', (select id from public.users where lower(email) = lower('fco.thanayoot@garena.com')), 'Aof', 'AO', '#BF6B00', 'Operations', 'Operations', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
+  ('10000000-0000-0000-0000-000000000012', 'folk', (select id from public.users where lower(email) = lower('fco.koravit@garena.com')), 'Folk', 'FK', '#2E546D', 'Operations', 'Operations', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
   ('10000000-0000-0000-0000-000000000013', 'mac', (select id from public.users where lower(email) = lower('weerayut@garena.com')), 'Mac', 'MC', '#C0504D', 'Marketing', 'Marketing', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
   ('10000000-0000-0000-0000-000000000014', 'no', (select id from public.users where lower(email) = lower('chayodom.a@garena.com')), 'No', 'NO', '#BF6B00', 'Marketing', 'Marketing', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
   ('10000000-0000-0000-0000-000000000015', 'may', (select id from public.users where lower(email) = lower('kwanchanok.s@garena.com')), 'May', 'MY', '#2E546D', 'Marketing', 'Marketing', array['static-graphic']::public.asset_type[], '{}'::public.asset_type[], 8, null, 3, 'available', true),
