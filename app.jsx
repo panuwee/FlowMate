@@ -22,9 +22,7 @@ const ADMIN_NAV_GROUP = { group: "Admin", items: [
   { key: "admin-whitelist", label: "Whitelist", icon: "users" },
 ]};
 
-function getVisibleNavGroups(isAdminUser) {
-  return isAdminUser ? [...NAV, ADMIN_NAV_GROUP] : NAV;
-}
+const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team");
 
 const TITLE_MAP = {
   "my-work": "My work", "create": "Create", "detail": "Work item",
@@ -32,6 +30,17 @@ const TITLE_MAP = {
   "workload": "Workload", "kpi": "KPI", "settings": "Team settings",
   "admin-whitelist": "Whitelist",
 };
+
+const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
+
+function getVisibleNavGroups(role) {
+  return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
+}
+
+function isFlowMateRouteAllowedForRole(role, routeKey) {
+  if (role === "admin") return Boolean(TITLE_MAP[routeKey]);
+  return MEMBER_ROUTE_KEYS.has(routeKey);
+}
 
 function App() {
   const [route, setRoute] = useStateApp(() => {
@@ -172,7 +181,8 @@ function App() {
   const currentUserEmail = user.email || "";
   const avatarMemberId   = user.team_member_id || null;
   const isAdminUser = user.role === "admin";
-  const visibleNavGroups = getVisibleNavGroups(isAdminUser);
+  const visibleNavGroups = getVisibleNavGroups(user.role);
+  const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route);
 
   return (
     <div className="app">
@@ -229,17 +239,17 @@ function App() {
       </nav>
 
       <main className="app__main" key={route + (focusId || "")}>
-        {route === "my-work"  && <MyWorkScreen   onOpen={open} onNav={nav} searchQuery={searchQuery} />}
-        {route === "create"   && <CreateScreen   onNav={nav} onOpen={open} />}
-        {route === "detail"   && <DetailScreen   onNav={nav} onOpen={open} focusId={focusId} />}
-        {route === "list"     && <ListScreen     onOpen={open} searchQuery={searchQuery} />}
-        {route === "board"    && <BoardScreen    onOpen={open} />}
-        {route === "queue"    && <QueueScreen    onOpen={open} searchQuery={searchQuery} />}
-        {route === "workload" && <WorkloadScreen onOpen={open} />}
-        {route === "kpi"      && <KpiScreen />}
-        {route === "settings" && <SettingsScreen />}
-        {route === "admin-whitelist" && isAdminUser && <AdminWhitelistScreen />}
-        {route === "admin-whitelist" && !isAdminUser && <AccessDeniedScreen onNav={nav} />}
+        {allowedRoute && route === "my-work"  && <MyWorkScreen   onOpen={open} onNav={nav} searchQuery={searchQuery} />}
+        {allowedRoute && route === "create"   && <CreateScreen   onNav={nav} onOpen={open} />}
+        {allowedRoute && route === "detail"   && <DetailScreen   onNav={nav} onOpen={open} focusId={focusId} />}
+        {allowedRoute && route === "list"     && <ListScreen     onOpen={open} searchQuery={searchQuery} />}
+        {allowedRoute && route === "board"    && <BoardScreen    onOpen={open} />}
+        {allowedRoute && route === "queue"    && <QueueScreen    onOpen={open} searchQuery={searchQuery} />}
+        {allowedRoute && route === "workload" && <WorkloadScreen onOpen={open} />}
+        {allowedRoute && route === "kpi"      && <KpiScreen />}
+        {allowedRoute && route === "settings" && <SettingsScreen />}
+        {allowedRoute && route === "admin-whitelist" && isAdminUser && <AdminWhitelistScreen />}
+        {!allowedRoute && <AccessDeniedScreen onNav={nav} />}
       </main>
     </div>
   );
