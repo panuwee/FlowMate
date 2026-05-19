@@ -418,6 +418,7 @@ function CreateScreen({ onNav, onOpen }) {
     platforms: "Instagram",
     sizeFormat: "1080x1080",
     briefLink: "",
+    briefNote: "",
     referenceLink: "",
     priority: "normal",
     urgentReason: "",
@@ -756,6 +757,10 @@ function CreativeRequestForm({ value, onChange }) {
         <label className="field__label">Brief link <span className="req">*</span></label>
         <input className="input" value={value.briefLink} onChange={e => update("briefLink", e.target.value)} placeholder="https://docs.google.com/..." />
       </div>
+      <div className="field field--full">
+        <label className="field__label">Brief Note</label>
+        <textarea className="textarea" value={value.briefNote} onChange={e => update("briefNote", e.target.value)} placeholder="Short brief context, key message, references, or special instructions."></textarea>
+      </div>
       <div className="field">
         <label className="field__label">Reference link</label>
         <input className="input" value={value.referenceLink} onChange={e => update("referenceLink", e.target.value)} placeholder="Optional - Figma / mood board / past asset" />
@@ -905,6 +910,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   const owner = MEMBERS_BY_ID[w.assignee];
   const isLiveDetail = Boolean(w.isSupabaseRow);
+  const visibleBriefNote = w.briefNote || w.note || "";
   const visibleChecklistItems = w.checklistItems || [];
   const visibleComments = w.comments || [];
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
@@ -1040,6 +1046,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
       <div className="detail">
         <div className="detail__main">
+          {visibleBriefNote && (
+            <div className="card">
+              <div className="card__head"><span className="card__title">{w.type === "quick" ? "Note" : "Brief Note"}</span></div>
+              <div className="card__body">
+                <div className="reason-box">{visibleBriefNote}</div>
+              </div>
+            </div>
+          )}
+
           {hasCreativeDetails && (
             <div className="card">
               <div className="card__head"><span className="card__title">Creative details</span></div>
@@ -1047,6 +1062,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType] || w.assetType || "-"}{w.subtype && ` - ${w.subtype}`}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{w.briefLink ? <a href={w.briefLink} target="_blank" rel="noreferrer">Open brief</a> : "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{w.referenceLink ? <a href={w.referenceLink} target="_blank" rel="noreferrer">Open reference</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchLabel || "-"}</div></div>
               </div>
             </div>
@@ -1126,6 +1143,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row__lbl">Due</div>
                 <div className="meta-row__val">{w.dueLabel}, 2026</div>
               </div>
+              {w.type === "quick" && (
+                <div className="meta-row">
+                  <div className="meta-row__lbl">Launch date</div>
+                  <div className="meta-row__val">{w.launchLabel || "-"}</div>
+                </div>
+              )}
               <div className="meta-row">
                 <div className="meta-row__lbl">Created</div>
                 <div className="meta-row__val">May 12, 2026</div>
@@ -1138,6 +1161,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               <div className="card__head"><span className="card__title">Assignment reason</span></div>
               <div className="card__body">
                 <div className="reason-box">{w.queueReason}</div>
+              </div>
+            </div>
+          )}
+
+          {w.urgentReason && (
+            <div className="card">
+              <div className="card__head"><span className="card__title">Urgent reason</span></div>
+              <div className="card__body">
+                <div className="reason-box reason-box--queued">{w.urgentReason}</div>
               </div>
             </div>
           )}

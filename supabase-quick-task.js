@@ -222,6 +222,7 @@ async function createFlowMateCreativeRequest(input) {
     p_platforms:        platforms,
     p_size_format:      input.sizeFormat || "",
     p_brief_link:       input.briefLink || "",
+    p_brief_note:       input.briefNote || null,
     p_reference_link:   input.referenceLink || null,
     p_priority:         input.priority || "normal",
     p_urgent_reason:    input.urgentReason || null,

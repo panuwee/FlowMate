@@ -27,7 +27,7 @@ async function loadFlowMateListRows() {
   const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,work_type,status,priority,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason")
+      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason")
       .order("due_date", { ascending: true }),
     window.flowmateSupabase
       .from("work_item_flags_v")
@@ -40,7 +40,7 @@ async function loadFlowMateListRows() {
       .select("id,user_id,display_name,initials,color,discipline_short,active"),
     window.flowmateSupabase
       .from("creative_request_details")
-      .select("work_item_id,asset_type,asset_subtype,platforms,size_format"),
+      .select("work_item_id,asset_type,asset_subtype,platforms,size_format,brief_link,reference_link"),
     window.flowmateSupabase
       .from("checklist_items")
       .select("id,work_item_id,title,is_done,sort_order")
@@ -97,6 +97,7 @@ async function loadFlowMateListRows() {
   return (workItemsResult.data || []).map((item) => {
     const flags = flagsByWorkItemId[item.id] || {};
     const requester = usersById[item.requester_user_id] || {};
+    const details = detailsByWorkItemId[item.id] || {};
     const owner =
       (item.final_owner_member_id && membersById[item.final_owner_member_id]) ||
       (item.assignee_user_id && membersByUserId[item.assignee_user_id]) ||
@@ -122,6 +123,8 @@ async function loadFlowMateListRows() {
       id: item.display_id,
       type: item.work_type === "quick_task" ? "quick" : "creative",
       title: item.title,
+      note: item.description || "",
+      briefNote: item.description || "",
       status: item.status,
       priority: item.priority,
       effort: item.work_type === "quick_task" ? null : item.effort_point,
@@ -129,11 +132,14 @@ async function loadFlowMateListRows() {
       dueDelta: flowmateDueDelta(item.due_date),
       launchDate: item.launch_date,
       launchLabel: flowmateDateLabel(item.launch_date),
-      assetType: flowmateToKebab(detailsByWorkItemId[item.id]?.asset_type),
-      subtype: detailsByWorkItemId[item.id]?.asset_subtype || "",
-      platforms: detailsByWorkItemId[item.id]?.platforms || [],
-      platform: (detailsByWorkItemId[item.id]?.platforms || []).join(", "),
-      size: detailsByWorkItemId[item.id]?.size_format || "",
+      urgentReason: item.urgent_reason || "",
+      assetType: flowmateToKebab(details.asset_type),
+      subtype: details.asset_subtype || "",
+      platforms: details.platforms || [],
+      platform: (details.platforms || []).join(", "),
+      size: details.size_format || "",
+      briefLink: details.brief_link || "",
+      referenceLink: details.reference_link || "",
       campaign: item.campaign_name || item.project_name || "",
       requesterTeam: item.requester_team || requester.requester_team || "No team",
       assignee: owner ? owner.id : otherAssigneeId,

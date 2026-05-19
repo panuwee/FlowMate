@@ -211,6 +211,7 @@ declare
   v_reason         text;
   v_has_any_skill  boolean;
   v_has_eligible   boolean;
+  v_creative_owner_codes text[] := array['pond','jo','tong','eye','vee'];
   v_snapshot       jsonb;
 begin
   select * into v_wi  from public.work_items where id = p_work_item_id for update;
@@ -348,6 +349,7 @@ begin
       end as skill_match
     from public.team_members tm
     where tm.active = true
+      and tm.member_code = any (v_creative_owner_codes)
   ),
   eligible as (
     select
@@ -390,6 +392,7 @@ begin
   -- diagnostic flags for queue reason
   select exists (select 1 from public.team_members tm
                   where tm.active = true
+                    and tm.member_code = any (v_creative_owner_codes)
                     and (v_det.asset_type = any (tm.skills) or v_det.asset_type = any (tm.backup_skills)))
     into v_has_any_skill;
 
@@ -402,6 +405,7 @@ begin
                            and wi.status = 'in_progress' and wi.wip_counted = true), 0) as wip_now
         from public.team_members tm
        where tm.active = true
+         and tm.member_code = any (v_creative_owner_codes)
          and (v_det.asset_type = any (tm.skills) or v_det.asset_type = any (tm.backup_skills))
     )
     select 1 from base b
@@ -491,7 +495,8 @@ begin
     '[]'::jsonb
   ) into v_snapshot
   from public.team_members tm
-  where tm.active = true;
+  where tm.active = true
+    and tm.member_code = any (v_creative_owner_codes);
 
   update public.work_items
      set status                = 'queued',
@@ -536,6 +541,11 @@ grant execute on function public.flowmate_run_assignment(uuid, public.assignment
 -- Backend is the SINGLE source of truth for effort_point and final owner —
 -- any client-provided values for those columns are IGNORED (UAT-008/009).
 -- ---------------------------------------------------------------------------
+drop function if exists public.create_creative_request(
+  uuid, text, text, text, public.asset_type, text, text[], text,
+  text, text, public.priority_level, text, date, date
+);
+
 create or replace function public.create_creative_request(
   p_actor_user_id uuid,
   p_title text,
@@ -546,6 +556,7 @@ create or replace function public.create_creative_request(
   p_platforms text[],
   p_size_format text,
   p_brief_link text,
+  p_brief_note text default null,
   p_reference_link text default null,
   p_priority public.priority_level default 'normal',
   p_urgent_reason text default null,
@@ -586,6 +597,7 @@ begin
 
   insert into public.work_items (
     display_id, work_type, title, campaign_name,
+    description,
     requester_user_id, requester_team,
     status, priority, urgent_reason,
     due_date, launch_date,
@@ -593,6 +605,7 @@ begin
     effort_point, final_owner_member_id, needs_split, review_round, wip_counted
   ) values (
     v_display_id, 'creative_request', trim(p_title), nullif(trim(coalesce(p_campaign_name,'')), ''),
+    nullif(trim(coalesce(p_brief_note,'')), ''),
     v_actor_id, nullif(trim(coalesce(p_requester_team,'')), ''),
     'new', coalesce(p_priority, 'normal'), nullif(trim(coalesce(p_urgent_reason,'')), ''),
     coalesce(p_due_date, current_date + 7), coalesce(p_launch_date, p_due_date),
@@ -628,7 +641,7 @@ $$;
 
 grant execute on function public.create_creative_request(
   uuid, text, text, text, public.asset_type, text, text[], text,
-  text, text, public.priority_level, text, date, date
+  text, text, text, public.priority_level, text, date, date
 ) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
