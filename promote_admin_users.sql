@@ -10,12 +10,10 @@ values
 on conflict (email) do update set
   display_name      = excluded.display_name,
   role              = excluded.role,
-  team_member_code  = excluded.team_member_code,
-  is_active         = true;
+  team_member_code  = excluded.team_member_code;
 
 update public.user_whitelist
-set role = 'admin',
-    is_active = true
+set role = 'admin'
 where lower(email) in (
   'sasin.cha@garena.com',
   'weerayut@garena.com'
@@ -32,7 +30,7 @@ where lower(email) in (
 
 commit;
 
-select email, display_name, role, is_active
+select email, display_name, role
 from public.user_whitelist
 where lower(email) in (
   'sasin.cha@garena.com',
