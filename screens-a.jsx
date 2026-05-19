@@ -410,20 +410,43 @@ const FLOWMATE_ASSIGNEE_FALLBACK = [
   { userId: "00000000-0000-0000-0000-000000001023", name: "Peak" },
 ];
 
-function getDefaultQuickAssignee(options = FLOWMATE_ASSIGNEE_FALLBACK) {
-  const currentUserId = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id;
-  return options.find((option) => option.userId === currentUserId)
-    || options.find((option) => option.name === "Pond")
-    || options[0];
-}
+const FLOWMATE_CREATE_DRAFT_KEYS = {
+  quick: "flowmate:create:quickDraft:v1",
+  creative: "flowmate:create:creativeDraft:v1",
+};
 
-function CreateScreen({ onNav, onOpen }) {
-  const [mode, setMode] = useState("creative");
-  const [submitted, setSubmitted] = useState(false);
-  const [result, setResult] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
-  const [quickDraft, setQuickDraft] = useState({
+const FLOWMATE_CREATE_DRAFT_FIELDS = {
+  quick: [
+    "title",
+    "note",
+    "requesterTeam",
+    "projectName",
+    "assigneeUserId",
+    "assigneeOtherName",
+    "dueDate",
+    "launchDate",
+    "priority",
+  ],
+  creative: [
+    "title",
+    "requesterTeam",
+    "campaignName",
+    "assetType",
+    "assetSubtype",
+    "platforms",
+    "sizeFormat",
+    "briefLink",
+    "briefNote",
+    "referenceLink",
+    "priority",
+    "urgentReason",
+    "dueDate",
+    "launchDate",
+  ],
+};
+
+function getDefaultQuickDraft() {
+  return {
     title: "",
     note: "",
     requesterTeam: "Marketing",
@@ -433,8 +456,11 @@ function CreateScreen({ onNav, onOpen }) {
     dueDate: "2026-05-18",
     launchDate: "2026-05-25",
     priority: "normal",
-  });
-  const [creativeDraft, setCreativeDraft] = useState({
+  };
+}
+
+function getDefaultCreativeDraft() {
+  return {
     title: "",
     requesterTeam: "Marketing",
     campaignName: "",
@@ -449,7 +475,68 @@ function CreateScreen({ onNav, onOpen }) {
     urgentReason: "",
     dueDate: "2026-05-22",
     launchDate: "2026-05-25",
-  });
+  };
+}
+
+function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {
+  const fields = FLOWMATE_CREATE_DRAFT_FIELDS[kind] || [];
+  return fields.reduce((payload, field) => {
+    const value = Object.prototype.hasOwnProperty.call(draft || {}, field) ? draft[field] : fallback[field];
+    payload[field] = typeof value === "string" ? value : "";
+    return payload;
+  }, {});
+}
+
+function readFlowMateCreateDraft(kind, fallback) {
+  if (!window.localStorage) return fallback;
+  try {
+    const raw = window.localStorage.getItem(FLOWMATE_CREATE_DRAFT_KEYS[kind]);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fallback;
+    return getFlowMateCreateDraftPayload(kind, parsed, fallback);
+  } catch (error) {
+    console.warn("[FlowMate Create] draft restore failed:", error);
+    return fallback;
+  }
+}
+
+function saveFlowMateCreateDraft(kind, draft) {
+  if (!window.localStorage) return;
+  try {
+    window.localStorage.setItem(
+      FLOWMATE_CREATE_DRAFT_KEYS[kind],
+      JSON.stringify(getFlowMateCreateDraftPayload(kind, draft)),
+    );
+  } catch (error) {
+    console.warn("[FlowMate Create] draft save failed:", error);
+  }
+}
+
+function clearFlowMateCreateDraft(kind) {
+  if (!window.localStorage) return;
+  try {
+    window.localStorage.removeItem(FLOWMATE_CREATE_DRAFT_KEYS[kind]);
+  } catch (error) {
+    console.warn("[FlowMate Create] draft clear failed:", error);
+  }
+}
+
+function getDefaultQuickAssignee(options = FLOWMATE_ASSIGNEE_FALLBACK) {
+  const currentUserId = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id;
+  return options.find((option) => option.userId === currentUserId)
+    || options.find((option) => option.name === "Pond")
+    || options[0];
+}
+
+function CreateScreen({ onNav, onOpen }) {
+  const [mode, setMode] = useState("creative");
+  const [submitted, setSubmitted] = useState(false);
+  const [result, setResult] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
+  const [quickDraft, setQuickDraft] = useState(() => readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
+  const [creativeDraft, setCreativeDraft] = useState(() => readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
 
   useEffect(() => {
     let alive = true;
@@ -461,7 +548,9 @@ function CreateScreen({ onNav, onOpen }) {
         setAssigneeOptions(options);
         setQuickDraft((draft) => {
           if (options.some((option) => option.userId === draft.assigneeUserId)) return draft;
-          return { ...draft, assigneeUserId: getDefaultQuickAssignee(options).userId, assigneeOtherName: "" };
+          const nextQuickDraft = { ...draft, assigneeUserId: getDefaultQuickAssignee(options).userId, assigneeOtherName: "" };
+          saveFlowMateCreateDraft("quick", nextQuickDraft);
+          return nextQuickDraft;
         });
       })
       .catch((error) => {
@@ -515,6 +604,7 @@ function CreateScreen({ onNav, onOpen }) {
           reason: assignment.reason || "",
         };
       }
+      clearFlowMateCreateDraft(mode);
 
       try {
         await openCreatedDetail(created, nextResult.id);
@@ -546,7 +636,9 @@ function CreateScreen({ onNav, onOpen }) {
       requesterTeam: nextDraft.requesterTeam,
       projectName: nextDraft.campaignName,
     });
-    setCreativeDraft({ ...nextDraft, title });
+    const nextCreativeDraft = { ...nextDraft, title };
+    setCreativeDraft(nextCreativeDraft);
+    saveFlowMateCreateDraft("creative", nextCreativeDraft);
   }
 
   function updateQuickDraft(nextDraft) {
@@ -555,7 +647,9 @@ function CreateScreen({ onNav, onOpen }) {
       requesterTeam: nextDraft.requesterTeam,
       projectName: nextDraft.projectName,
     });
-    setQuickDraft({ ...nextDraft, title });
+    const nextQuickDraft = { ...nextDraft, title };
+    setQuickDraft(nextQuickDraft);
+    saveFlowMateCreateDraft("quick", nextQuickDraft);
   }
 
   return (
@@ -602,7 +696,7 @@ function CreateScreen({ onNav, onOpen }) {
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <button className="btn btn--ghost" onClick={() => onNav("my-work")}>Cancel</button>
-        <button className="btn btn--secondary" disabled title="Draft saving is planned for MVP 1.1">Save draft (MVP 1.1)</button>
+        <button className="btn btn--secondary" onClick={() => saveFlowMateCreateDraft(mode, mode === "quick" ? quickDraft : creativeDraft)}>Save draft</button>
         <button className="btn btn--primary" onClick={handleSubmit} disabled={isSubmitting}>
           <Icon name="send" /> {isSubmitting ? "Saving..." : mode === "quick" ? "Create quick task" : "Submit request"}
         </button>
