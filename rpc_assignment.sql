@@ -27,6 +27,41 @@ alter table public.creative_request_details
     or brief_link ~* '^https?://[^[:space:]]{4,}$'
   );
 
+-- ---------------------------------------------------------------------------
+-- Security helper: trust Supabase Auth, never client-supplied actor ids.
+-- Existing RPC signatures keep p_actor_user_id for backward compatibility,
+-- but function bodies resolve the actor from auth.uid() only.
+-- ---------------------------------------------------------------------------
+create or replace function public.flowmate_actor_user_id()
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+begin
+  v_user_id := auth.uid();
+
+  if v_user_id is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if not exists (
+    select 1
+    from public.users u
+    where u.id = v_user_id
+      and u.is_active = true
+  ) then
+    raise exception 'Authenticated user is inactive or not found';
+  end if;
+
+  return v_user_id;
+end;
+$$;
+
+grant execute on function public.flowmate_actor_user_id() to anon, authenticated;
+
 create or replace function public.flowmate_effort_for_subtype(
   p_asset_type public.asset_type,
   p_asset_subtype text
@@ -504,13 +539,15 @@ security definer
 set search_path = public
 as $$
 declare
+  v_actor_id uuid;
   v_actor         public.users%rowtype;
   v_next_number   integer;
   v_display_id    text;
   v_work_item_id  uuid;
   v_assignment    jsonb;
 begin
-  select * into v_actor from public.users where id = p_actor_user_id;
+  v_actor_id := public.flowmate_actor_user_id();
+  select * into v_actor from public.users where id = v_actor_id;
   if v_actor.id is null or v_actor.is_active = false then
     raise exception 'Actor user is inactive or not found';
   end if;
@@ -537,7 +574,7 @@ begin
     effort_point, final_owner_member_id, needs_split, review_round, wip_counted
   ) values (
     v_display_id, 'creative_request', trim(p_title), nullif(trim(coalesce(p_campaign_name,'')), ''),
-    p_actor_user_id, nullif(trim(coalesce(p_requester_team,'')), ''),
+    v_actor_id, nullif(trim(coalesce(p_requester_team,'')), ''),
     'new', coalesce(p_priority, 'normal'), nullif(trim(coalesce(p_urgent_reason,'')), ''),
     coalesce(p_due_date, current_date + 7), coalesce(p_launch_date, p_due_date),
     null, null, false, 0, false
@@ -556,7 +593,7 @@ begin
   insert into public.work_item_events (
     work_item_id, actor_user_id, event_type, to_status, metadata
   ) values (
-    v_work_item_id, p_actor_user_id, 'created', 'new',
+    v_work_item_id, v_actor_id, 'created', 'new',
     jsonb_build_object('source', 'rpc', 'work_type', 'creative_request')
   );
 
@@ -588,10 +625,12 @@ security definer
 set search_path = public
 as $$
 declare
+  v_actor_id uuid;
   v_actor public.users%rowtype;
   v_wi    public.work_items%rowtype;
 begin
-  select * into v_actor from public.users where id = p_actor_user_id;
+  v_actor_id := public.flowmate_actor_user_id();
+  select * into v_actor from public.users where id = v_actor_id;
   if v_actor.id is null or v_actor.is_active = false then
     raise exception 'Actor user is inactive or not found';
   end if;
@@ -602,7 +641,7 @@ begin
     raise exception 'Only creative requests can be brief-checked';
   end if;
 
-  if v_wi.requester_user_id <> p_actor_user_id then
+  if v_wi.requester_user_id <> v_actor_id then
     raise exception 'Only the requester can recheck a brief';
   end if;
 
@@ -625,10 +664,12 @@ security definer
 set search_path = public
 as $$
 declare
+  v_actor_id uuid;
   v_actor public.users%rowtype;
   v_wi    public.work_items%rowtype;
 begin
-  select * into v_actor from public.users where id = p_actor_user_id;
+  v_actor_id := public.flowmate_actor_user_id();
+  select * into v_actor from public.users where id = v_actor_id;
   if v_actor.id is null or v_actor.is_active = false then
     raise exception 'Actor user is inactive or not found';
   end if;

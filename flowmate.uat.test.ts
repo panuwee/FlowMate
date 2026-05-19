@@ -273,6 +273,39 @@ describe("UAT-007 incomplete creative brief persistence", () => {
 });
 
 // ============================================================================
+// B-003/B-006 — Security hardening is enforced in SQL, not by client payloads
+// ============================================================================
+describe("B-003/B-006 security hardening SQL", () => {
+  it("RPCs resolve actors from auth.uid() instead of trusting p_actor_user_id", () => {
+    const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+
+    for (const sql of [quickTaskSql, assignmentSql]) {
+      expect(sql).toContain("create or replace function public.flowmate_actor_user_id()");
+      expect(sql).toContain("v_user_id := auth.uid()");
+      expect(sql).toContain("v_actor_id := public.flowmate_actor_user_id()");
+      expect(sql).not.toMatch(/where id = p_actor_user_id\b/i);
+      expect(sql).not.toMatch(/requester_user_id,\s*\n\s*p_actor_user_id\b/i);
+      expect(sql).not.toMatch(/actor_user_id,\s*\n\s*p_actor_user_id\b/i);
+    }
+  });
+
+  it("RLS read policies do not allow null app-user bypasses", () => {
+    const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
+    const whitelistSql = readFileSync(join(process.cwd(), "supabase", "whitelist_access.sql"), "utf8");
+    const hardeningSql = readFileSync(join(process.cwd(), "supabase", "security_hardening.sql"), "utf8");
+    const combinedSql = `${schemaSql}\n${whitelistSql}\n${hardeningSql}`;
+
+    expect(schemaSql).toContain("select auth.uid()");
+    expect(hardeningSql).toContain("select auth.uid()");
+    expect(schemaSql).toContain("using (public.is_active_app_user())");
+    expect(schemaSql).toContain("using (user_id = public.current_app_user_id())");
+    expect(combinedSql).not.toContain("or public.current_app_user_id() is null");
+    expect(combinedSql).not.toContain("public.is_active_app_user() or");
+  });
+});
+
+// ============================================================================
 // UAT-026 — Workload counts match active creative items
 // ============================================================================
 describe("UAT-026 workload summary numbers", () => {

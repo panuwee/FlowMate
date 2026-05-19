@@ -176,7 +176,7 @@ alter table public.user_whitelist enable row level security;
 drop policy if exists "active users can read whitelist" on public.user_whitelist;
 create policy "active users can read whitelist"
   on public.user_whitelist for select
-  using (public.is_active_app_user() or public.current_app_user_id() is null);
+  using (public.is_active_app_user());
 
 drop policy if exists "admins can write whitelist" on public.user_whitelist;
 create policy "admins can write whitelist"

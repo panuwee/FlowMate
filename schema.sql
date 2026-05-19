@@ -386,7 +386,7 @@ returns uuid
 language sql
 stable
 as $$
-  select nullif(current_setting('app.current_user_id', true), '')::uuid;
+  select auth.uid();
 $$;
 
 create or replace function public.is_active_app_user()
@@ -440,25 +440,25 @@ alter table public.checklist_items enable row level security;
 alter table public.notifications enable row level security;
 alter table public.capacity_overrides enable row level security;
 
--- MVP/dev policy model:
--- - Frontend direct reads are allowed for active mock user contexts.
--- - Writes should normally go through Edge Functions/RPC that set app.current_user_id.
--- - These policies keep tables closed unless the app user context is set.
+-- Auth policy model:
+-- - Reads require a real Supabase Auth session mapped to an active public.users row.
+-- - Signed-out anon requests must not see application data.
+-- - Writes normally go through security-definer RPCs that resolve auth.uid().
 
 drop policy if exists "active users can read users" on public.users;
 create policy "active users can read users"
 on public.users for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "active users can read team members" on public.team_members;
 create policy "active users can read team members"
 on public.team_members for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "active users can read work items" on public.work_items;
 create policy "active users can read work items"
 on public.work_items for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "participants can update work items" on public.work_items;
 create policy "participants can update work items"
@@ -477,7 +477,7 @@ with check (
 drop policy if exists "active users can read creative details" on public.creative_request_details;
 create policy "active users can read creative details"
 on public.creative_request_details for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "participants can mutate creative details" on public.creative_request_details;
 create policy "participants can mutate creative details"
@@ -488,17 +488,17 @@ with check (public.can_update_work_item(work_item_id));
 drop policy if exists "active users can read assignment runs" on public.assignment_runs;
 create policy "active users can read assignment runs"
 on public.assignment_runs for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "active users can read events" on public.work_item_events;
 create policy "active users can read events"
 on public.work_item_events for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "participants can read comments" on public.comments;
 create policy "participants can read comments"
 on public.comments for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "active users can insert own comments" on public.comments;
 create policy "active users can insert own comments"
@@ -517,7 +517,7 @@ with check (author_user_id = public.current_app_user_id());
 drop policy if exists "active users can read checklist" on public.checklist_items;
 create policy "active users can read checklist"
 on public.checklist_items for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "participants can mutate checklist" on public.checklist_items;
 create policy "participants can mutate checklist"
@@ -528,7 +528,7 @@ with check (public.can_update_work_item(work_item_id));
 drop policy if exists "users can read own notifications" on public.notifications;
 create policy "users can read own notifications"
 on public.notifications for select
-using (user_id = public.current_app_user_id() or public.current_app_user_id() is null);
+using (user_id = public.current_app_user_id());
 
 drop policy if exists "users can update own notifications" on public.notifications;
 create policy "users can update own notifications"
@@ -539,7 +539,7 @@ with check (user_id = public.current_app_user_id());
 drop policy if exists "active users can read capacity overrides" on public.capacity_overrides;
 create policy "active users can read capacity overrides"
 on public.capacity_overrides for select
-using (public.is_active_app_user() or public.current_app_user_id() is null);
+using (public.is_active_app_user());
 
 drop policy if exists "linked members can insert capacity overrides" on public.capacity_overrides;
 create policy "linked members can insert capacity overrides"
