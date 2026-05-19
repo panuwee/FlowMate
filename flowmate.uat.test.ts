@@ -720,6 +720,77 @@ describe("full assignee roster", () => {
   });
 });
 
+describe("requester function sync", () => {
+  const functionRows = [
+    ["sasin.cha@garena.com", "gear", "PM"],
+    ["nithidol.k@garena.com", "big", "Operation"],
+    ["tanadech.s@garena.com", "mark", "Operation"],
+    ["sakdarin@garena.com", "po", "Operation"],
+    ["fco.thanayoot@garena.com", "aof", "Operation"],
+    ["fco.koravit@garena.com", "folk", "Operation"],
+    ["weerayut@garena.com", "mac", "Marketing"],
+    ["chayodom.a@garena.com", "no", "Marketing"],
+    ["kwanchanok.s@garena.com", "may", "Marketing"],
+    ["fco.rittichai@garena.com", "boss", "Marketing"],
+    ["fco.thanatbhum@garena.com", "mag", "Marketing"],
+    ["fco.punyakon@garena.com", "real", "Marketing"],
+    ["fco.run@garena.com", "pointer", "Marketing"],
+    ["kasidet.y@garena.com", "pond", "GD/VE"],
+    ["nattaporn.j@garena.com", "jo", "GD/VE"],
+    ["fco.krittidech@garena.com", "tong", "GD/VE"],
+    ["fco.janyarat@garena.com", "eye", "GD/VE"],
+    ["fco.thanadon@garena.com", "vee", "GD/VE"],
+    ["napol.a@garena.com", "pluem", "Esport"],
+    ["fco.piyapat@garena.com", "net", "Esport"],
+    ["fco.kittipoj@garena.com", "ben", "Esport"],
+    ["fco.pheerati@garena.com", "peak", "Esport"],
+  ];
+
+  it("seeds users.requester_team and team_members.discipline from the agreed function map", () => {
+    const seedSql = readFileSync(join(process.cwd(), "supabase", "seed.sql"), "utf8");
+
+    for (const [email, memberCode, functionLabel] of functionRows) {
+      expect(seedSql).toContain(`'${email}'`);
+      expect(seedSql).toContain(`'${functionLabel}'`);
+      expect(seedSql).toMatch(new RegExp(`'${memberCode}'[\\s\\S]*?'${functionLabel}'[\\s\\S]*?'${functionLabel}'`));
+    }
+  });
+
+  it("provides a live update script that syncs users, team members, and existing work items", () => {
+    const syncSql = readFileSync(join(process.cwd(), "supabase", "update_requester_team_functions.sql"), "utf8");
+
+    expect(syncSql).toContain("with role_map(name, email, role_label, member_code) as");
+    expect(syncSql).toContain("update public.users u");
+    expect(syncSql).toContain("set requester_team = rm.role_label");
+    expect(syncSql).toContain("update public.team_members tm");
+    expect(syncSql).toContain("set discipline = rm.role_label");
+    expect(syncSql).toContain("discipline_short = rm.role_label");
+    expect(syncSql).toContain("update public.work_items wi");
+    expect(syncSql).toContain("set requester_team = rm.role_label");
+    expect(syncSql).not.toMatch(/set\s+role\s*=\s*rm\.role_label/i);
+  });
+
+  it("frontend loads requester team options from users.requester_team and shares them across Create and List", () => {
+    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+
+    expect(dataJsx).toContain('const TEAMS = ["PM", "Operation", "Marketing", "GD/VE", "Esport"];');
+    expect(listDataJs).toContain("async function loadFlowMateRequesterTeams()");
+    expect(listDataJs).toContain(".from(\"users\")");
+    expect(listDataJs).toContain(".select(\"requester_team\")");
+    expect(listDataJs).toContain("window.loadFlowMateRequesterTeams = loadFlowMateRequesterTeams");
+    expect(screensA).toContain("const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS)");
+    expect(screensA).toContain("window.loadFlowMateRequesterTeams()");
+    expect(screensA).toContain("requesterTeamOptions={requesterTeamOptions}");
+    expect(screensA).toContain("{requesterTeamOptions.map");
+    expect(screensB).toContain("const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS)");
+    expect(screensB).toContain("window.loadFlowMateRequesterTeams()");
+    expect(screensB).toContain("requesterTeamOptions");
+  });
+});
+
 describe("UAT-012 hybrid request visibility", () => {
   it("hybrid row is queued with effort 8 and assetType hybrid", () => {
     const hybrid = fixture.find((r) => r.displayId === "CR-1053")!;

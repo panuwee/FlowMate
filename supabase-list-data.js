@@ -8,6 +8,22 @@ function flowmateDateLabel(dateValue) {
   return dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function flowmateDateFullLabel(dateValue) {
+  if (!dateValue) return "";
+  const dueDate = dateValue.includes("T") ? new Date(dateValue) : new Date(`${dateValue}T00:00:00`);
+  return dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function flowmateDateTimeLabel(dateValue) {
+  if (!dateValue) return "";
+  return new Date(dateValue).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function flowmateDueDelta(dateValue) {
   if (!dateValue) return null;
   // Compare in UTC to keep behaviour identical to the database's `current_date`
@@ -24,10 +40,10 @@ async function loadFlowMateListRows() {
     throw new Error("Supabase client is not ready.");
   }
 
-  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult] = await Promise.all([
+  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason")
+      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,created_at")
       .order("due_date", { ascending: true }),
     window.flowmateSupabase
       .from("work_item_flags_v")
@@ -50,6 +66,10 @@ async function loadFlowMateListRows() {
       .select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at")
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
+    window.flowmateSupabase
+      .from("assignment_runs")
+      .select("work_item_id,ran_at")
+      .order("ran_at", { ascending: false }),
   ]);
 
   const firstError =
@@ -59,7 +79,8 @@ async function loadFlowMateListRows() {
     membersResult.error ||
     detailsResult.error ||
     checklistResult.error ||
-    commentsResult.error;
+    commentsResult.error ||
+    assignmentRunsResult.error;
 
   if (firstError) throw firstError;
 
@@ -90,6 +111,10 @@ async function loadFlowMateListRows() {
       ...comment,
       authorName: usersById[comment.author_user_id]?.display_name || "Unknown",
     });
+  });
+  const assignmentRunByWorkItemId = {};
+  (assignmentRunsResult.data || []).forEach((run) => {
+    if (!assignmentRunByWorkItemId[run.work_item_id]) assignmentRunByWorkItemId[run.work_item_id] = run;
   });
 
   syncFlowMateMembers(membersResult.data || []);
@@ -129,9 +154,12 @@ async function loadFlowMateListRows() {
       priority: item.priority,
       effort: item.work_type === "quick_task" ? null : item.effort_point,
       dueLabel: flowmateDateLabel(item.due_date),
+      dueFullLabel: flowmateDateFullLabel(item.due_date),
       dueDelta: flowmateDueDelta(item.due_date),
       launchDate: item.launch_date,
       launchLabel: flowmateDateLabel(item.launch_date),
+      launchFullLabel: flowmateDateFullLabel(item.launch_date),
+      createdLabel: flowmateDateFullLabel(item.created_at),
       urgentReason: item.urgent_reason || "",
       assetType: flowmateToKebab(details.asset_type),
       subtype: details.asset_subtype || "",
@@ -148,6 +176,7 @@ async function loadFlowMateListRows() {
       reviewRound: item.review_round || 0,
       needsSplit: Boolean(item.needs_split),
       queueReason: item.assignment_reason || (item.status === "need_brief" ? "Required brief fields are missing." : "Assignment engine queued this request."),
+      lastRunLabel: flowmateDateTimeLabel(assignmentRunByWorkItemId[item.id]?.ran_at),
       blockReason: item.blocked_reason,
       checklistItems: checklistByWorkItemId[item.id] || [],
       checklist: {
@@ -223,3 +252,31 @@ async function loadFlowMateAssignees() {
 
 window.loadFlowMateListRows = loadFlowMateListRows;
 window.loadFlowMateAssignees = loadFlowMateAssignees;
+
+async function loadFlowMateRequesterTeams() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const { data, error } = await window.flowmateSupabase
+    .from("users")
+    .select("requester_team")
+    .not("requester_team", "is", null)
+    .eq("is_active", true)
+    .order("requester_team", { ascending: true });
+
+  if (error) throw error;
+
+  const fallback = window.TEAMS || [];
+  const liveTeams = (data || [])
+    .map((row) => (row.requester_team || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set([...fallback, ...liveTeams])).sort((a, b) => {
+    const ai = fallback.indexOf(a);
+    const bi = fallback.indexOf(b);
+    if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    return a.localeCompare(b);
+  });
+}
+
+window.loadFlowMateRequesterTeams = loadFlowMateRequesterTeams;

@@ -45,134 +45,14 @@ function Icon({ name, size = 16, ...rest }) {
 }
 
 /* ---------- Domain data ---------- */
-const MEMBERS = [
-  { id: "m-pond", name: "Pond",   initials: "PD", color: "#2E546D", discipline: "Hybrid",        skills: ["static-graphic", "general-video", "motion", "esport-video-backup"], capacityPerDay: 8, wipLimit: 3, availability: "available" },
-  { id: "m-jo",   name: "Jo",     initials: "JO", color: "#C0504D", discipline: "Static Graphic", skills: ["static-graphic"], capacityPerDay: 8, wipLimit: 3, availability: "available" },
-  { id: "m-tong", name: "Tong",   initials: "TG", color: "#BF6B00", discipline: "Static Graphic", skills: ["static-graphic"], capacityPerDay: 8, wipLimit: 3, availability: "partial", capacityOverride: 4 },
-  { id: "m-eye",  name: "Eye",    initials: "EY", color: "#2E546D", discipline: "Static Graphic", skills: ["static-graphic"], capacityPerDay: 8, wipLimit: 3, availability: "available" },
-  { id: "m-vee",  name: "Vee",    initials: "VE", color: "#C0504D", discipline: "eSport Video",   skills: ["esport-video"], capacityPerDay: 8, wipLimit: 2, availability: "available" },
-];
+const MEMBERS = [];
 const MEMBERS_BY_ID = Object.fromEntries(MEMBERS.map(m => [m.id, m]));
 
-const TEAMS = ["Marketing", "Esport Ops", "Community", "Sales", "Product", "Operations"];
+const TEAMS = ["PM", "Operation", "Marketing", "GD/VE", "Esport"];
 
-// Today is May 15 2026 per design system context
-const TODAY = "May 15";
+const TODAY = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-const WORK = [
-  // OVERDUE
-  { id: "CR-1042", type: "creative", title: "Free Fire OB48 launch — IG carousel set (6 frames)",
-    status: "in_progress", priority: "urgent", effort: 4, dueLabel: "May 13", dueDelta: -2,
-    assetType: "static-graphic", subtype: "social carousel", platform: "Instagram", size: "1080×1350",
-    requesterTeam: "Marketing", campaign: "OB48 Launch",
-    assignee: "m-jo", requester: "Lin Chen",
-    reviewRound: 0, checklist: { done: 4, total: 6 },
-    overdue: true },
-  { id: "CR-1038", type: "creative", title: "AOV ranked season promo banner — YouTube end-card",
-    status: "blocked", priority: "high", effort: 2, dueLabel: "May 14", dueDelta: -1,
-    assetType: "static-graphic", platform: "YouTube", size: "1920×1080",
-    requesterTeam: "Marketing", campaign: "AOV S24",
-    assignee: "m-eye", requester: "Daniel Park",
-    blockReason: "Waiting on legal copy review",
-    reviewRound: 1, checklist: { done: 2, total: 5 },
-    overdue: true },
-
-  // DUE SOON / IN PROGRESS / REVIEW
-  { id: "CR-1051", type: "creative", title: "CODM World Championship — TikTok teaser (15s)",
-    status: "in_progress", priority: "urgent", effort: 7, dueLabel: "May 16", dueDelta: 1,
-    assetType: "esport-video", subtype: "short-form", platform: "TikTok", size: "1080×1920",
-    requesterTeam: "Esport Ops", campaign: "CODM Worlds",
-    assignee: "m-vee", requester: "Mira Santos",
-    reviewRound: 0, checklist: { done: 3, total: 5 } },
-  { id: "CR-1047", type: "creative", title: "Q2 partner deck — chart visual refresh (8 slides)",
-    status: "review", priority: "normal", effort: 4, dueLabel: "May 17", dueDelta: 2,
-    assetType: "static-graphic", platform: "Deck", size: "1920×1080",
-    requesterTeam: "Sales", campaign: "Q2 Partner Review",
-    assignee: "m-pond", requester: "Aisha Rahman",
-    reviewRound: 1, checklist: { done: 5, total: 5 } },
-  { id: "CR-1049", type: "creative", title: "AOV community spotlight — motion intro (6s loop)",
-    status: "assigned", priority: "normal", effort: 6, dueLabel: "May 19", dueDelta: 4,
-    assetType: "motion", platform: "Instagram, YouTube", size: "1080×1080",
-    requesterTeam: "Community", campaign: "Spotlight #14",
-    assignee: "m-pond", requester: "Jamal Wright",
-    reviewRound: 0, checklist: { done: 0, total: 4 } },
-  { id: "CR-1052", type: "creative", title: "Garena careers — campus visit recap reel",
-    status: "in_progress", priority: "normal", effort: 6, dueLabel: "May 21", dueDelta: 6,
-    assetType: "general-video", platform: "LinkedIn", size: "1080×1080",
-    requesterTeam: "Operations", campaign: "Campus 2026",
-    assignee: "m-pond", requester: "Hana Liu",
-    reviewRound: 0, checklist: { done: 1, total: 4 } },
-  { id: "CR-1045", type: "creative", title: "Esport graphic pack — FF Pro League finals",
-    status: "in_progress", priority: "high", effort: 8, dueLabel: "May 20", dueDelta: 5,
-    assetType: "static-graphic", subtype: "esport pack — full set", platform: "Multi",
-    requesterTeam: "Esport Ops", campaign: "FFPL Finals",
-    assignee: "m-tong", requester: "Mira Santos",
-    reviewRound: 0, checklist: { done: 2, total: 8 } },
-  { id: "CR-1050", type: "creative", title: "Anti-cheat update — explainer thumbnail set",
-    status: "assigned", priority: "normal", effort: 2, dueLabel: "May 18", dueDelta: 3,
-    assetType: "static-graphic", platform: "Web, YouTube",
-    requesterTeam: "Product", campaign: "Anti-Cheat 2.3",
-    assignee: "m-eye", requester: "Soo-yeon Park",
-    reviewRound: 0, checklist: { done: 0, total: 3 } },
-  { id: "CR-1048", type: "creative", title: "FF skin reveal — short-form vertical (10s)",
-    status: "review", priority: "high", effort: 4, dueLabel: "May 18", dueDelta: 3,
-    assetType: "esport-video", subtype: "short-form", platform: "TikTok, Reels",
-    requesterTeam: "Marketing", campaign: "FF May Drop",
-    assignee: "m-vee", requester: "Lin Chen",
-    reviewRound: 2, checklist: { done: 4, total: 4 } },
-
-  // QUEUED
-  { id: "CR-1053", type: "creative", title: "AOV launch — hybrid package (key art + 20s motion)",
-    status: "queued", priority: "high", effort: 8, dueLabel: "May 22", dueDelta: 7,
-    assetType: "hybrid", platform: "Multi",
-    requesterTeam: "Marketing", campaign: "AOV S24 Launch",
-    requester: "Daniel Park",
-    queueReason: "Hybrid request must be split into separate static + video requests.",
-    needsSplit: true },
-  { id: "CR-1054", type: "creative", title: "Free Fire MX — regional banner refresh (4 sizes)",
-    status: "queued", priority: "normal", effort: 4, dueLabel: "May 18", dueDelta: 3,
-    assetType: "static-graphic", platform: "Web, App",
-    requesterTeam: "Marketing", campaign: "FF MX June",
-    requester: "Aisha Rahman",
-    queueReason: "All static graphic designers at WIP limit before due date." },
-  { id: "CR-1055", type: "creative", title: "Pro League finals — venue signage motion loop",
-    status: "queued", priority: "urgent", effort: 7, dueLabel: "May 17", dueDelta: 2,
-    assetType: "motion", platform: "Venue", size: "3840×1080",
-    requesterTeam: "Esport Ops", campaign: "FFPL Finals",
-    requester: "Mira Santos",
-    queueReason: "Pond at WIP limit; no other motion-capable member with remaining capacity before due date." },
-
-  // NEED BRIEF
-  { id: "CR-1056", type: "creative", title: "Community AMA recap — graphics",
-    status: "need_brief", priority: "low", effort: null, dueLabel: "May 24", dueDelta: 9,
-    assetType: "static-graphic", requesterTeam: "Community",
-    requester: "Jamal Wright",
-    queueReason: "Need Brief: brief link and size/format are required." },
-
-  // QUICK TASKS
-  { id: "QT-209",  type: "quick", title: "Update shared brand-asset folder structure for Q2",
-    status: "in_progress", priority: "normal", dueLabel: "May 16", dueDelta: 1,
-    assignee: "m-pond", requester: "Pond", requesterTeam: "GD/VE Internal",
-    checklist: { done: 2, total: 4 } },
-  { id: "QT-211",  type: "quick", title: "Pull retention chart numbers for tomorrow's standup",
-    status: "assigned", priority: "low", dueLabel: "May 15", dueDelta: 0,
-    assignee: "m-eye", requester: "Tom Liu", requesterTeam: "GD/VE Internal",
-    checklist: { done: 0, total: 2 } },
-  { id: "QT-213",  type: "quick", title: "Review junior designer portfolio — first round",
-    status: "assigned", priority: "normal", dueLabel: "May 19", dueDelta: 4,
-    assignee: "m-pond", requester: "Pond", requesterTeam: "GD/VE Internal",
-    checklist: { done: 0, total: 1 } },
-
-  // DELIVERED (recent — for KPI / board)
-  { id: "CR-1031", type: "creative", title: "OB47 patch notes — chart visuals (12 charts)",
-    status: "delivered", priority: "normal", effort: 6, dueLabel: "May 10", dueDelta: -5,
-    assetType: "static-graphic", platform: "Web", requesterTeam: "Product",
-    assignee: "m-jo", requester: "Soo-yeon Park", reviewRound: 1 },
-  { id: "CR-1029", type: "creative", title: "May newsletter — header banner",
-    status: "delivered", priority: "low", effort: 2, dueLabel: "May 8", dueDelta: -7,
-    assetType: "static-graphic", platform: "Email", requesterTeam: "Marketing",
-    assignee: "m-eye", requester: "Lin Chen", reviewRound: 0 },
-];
+const WORK = [];
 
 const WORK_BY_ID = Object.fromEntries(WORK.map(w => [w.id, w]));
 

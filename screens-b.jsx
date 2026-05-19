@@ -41,6 +41,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
   const [filterAsset, setFilterAsset] = useStateB("all");
   const [filterType, setFilterType] = useStateB("all");
   const [sourceRows, setSourceRows] = useStateB(WORK);
+  const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS);
   const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
 
   useEffectB(() => {
@@ -55,8 +56,13 @@ function ListScreen({ onOpen, searchQuery = "" }) {
 
       try {
         const rows = await window.loadFlowMateListRows();
+        let liveRequesterTeams = [];
+        if (window.loadFlowMateRequesterTeams) {
+          liveRequesterTeams = await window.loadFlowMateRequesterTeams();
+        }
         if (!alive) return;
         setSourceRows(rows);
+        if (liveRequesterTeams.length) setRequesterTeamOptions(liveRequesterTeams);
         setLoadState({ status: "live", message: "Live Supabase data" });
       } catch (error) {
         if (!alive) return;
@@ -91,7 +97,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     }),
   ];
   const ownerOptions = Array.from(new Map(ownerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  const teamOptions = Array.from(new Set(sourceRows.map(w => w.requesterTeam).filter(Boolean))).sort();
+  const teamOptions = Array.from(new Set([...requesterTeamOptions, ...sourceRows.map(w => w.requesterTeam).filter(Boolean)])).sort();
   const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
   const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
 

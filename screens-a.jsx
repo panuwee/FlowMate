@@ -446,10 +446,11 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
 };
 
 function getDefaultQuickDraft() {
+  const requesterTeam = window.FLOWMATE_CURRENT_USER?.requester_team || TEAMS[0];
   return {
     title: "",
     note: "",
-    requesterTeam: "Marketing",
+    requesterTeam,
     projectName: "",
     assigneeUserId: getDefaultQuickAssignee().userId,
     assigneeOtherName: "",
@@ -460,9 +461,10 @@ function getDefaultQuickDraft() {
 }
 
 function getDefaultCreativeDraft() {
+  const requesterTeam = window.FLOWMATE_CURRENT_USER?.requester_team || TEAMS[0];
   return {
     title: "",
-    requesterTeam: "Marketing",
+    requesterTeam,
     campaignName: "",
     assetType: "static-graphic",
     assetSubtype: "Standard banner / complex social content",
@@ -535,6 +537,7 @@ function CreateScreen({ onNav, onOpen }) {
   const [result, setResult] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
+  const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
   const [quickDraft, setQuickDraft] = useState(() => readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
   const [creativeDraft, setCreativeDraft] = useState(() => readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
 
@@ -555,6 +558,22 @@ function CreateScreen({ onNav, onOpen }) {
       })
       .catch((error) => {
         console.warn("[FlowMate Create] assignee load failed:", error);
+      });
+
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    if (!window.loadFlowMateRequesterTeams) return () => {};
+
+    window.loadFlowMateRequesterTeams()
+      .then((options) => {
+        if (!alive || !options.length) return;
+        setRequesterTeamOptions(options);
+      })
+      .catch((error) => {
+        console.warn("[FlowMate Create] requester team load failed:", error);
       });
 
     return () => { alive = false; };
@@ -689,8 +708,8 @@ function CreateScreen({ onNav, onOpen }) {
         </div>
         <div className="card__body">
           {mode === "quick"
-            ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} />
-            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} />}
+            ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} requesterTeamOptions={requesterTeamOptions} />
+            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions} />}
         </div>
       </div>
 
@@ -704,7 +723,7 @@ function CreateScreen({ onNav, onOpen }) {
   );
 }
 
-function QuickTaskForm({ value, onChange, assigneeOptions }) {
+function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions = TEAMS }) {
   const options = assigneeOptions || FLOWMATE_ASSIGNEE_FALLBACK;
   const selectedAssignee = options.find((option) => option.userId === value.assigneeUserId) || null;
   const [assigneeQuery, setAssigneeQuery] = useState(selectedAssignee ? selectedAssignee.name : "");
@@ -750,7 +769,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions }) {
       <div className="field">
         <label className="field__label">Requester Team / Function <span className="req">*</span></label>
         <select className="select" value={value.requesterTeam} onChange={(e) => update("requesterTeam", e.target.value)}>
-          <option>Marketing</option><option>Esport Ops</option><option>Community</option><option>Sales</option><option>Product</option><option>Operations</option>
+          {requesterTeamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
         </select>
       </div>
       <div className="field">
@@ -820,7 +839,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions }) {
     </div>
   );
 }
-function CreativeRequestForm({ value, onChange }) {
+function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS }) {
   function update(field, next) { onChange({ ...value, [field]: next }); }
   return (
     <div className="form-grid">
@@ -832,7 +851,7 @@ function CreativeRequestForm({ value, onChange }) {
       <div className="field">
         <label className="field__label">Requester Team / Function <span className="req">*</span></label>
         <select className="select" value={value.requesterTeam} onChange={e => update("requesterTeam", e.target.value)}>
-          <option>Marketing</option><option>Esport Ops</option><option>Community</option><option>Sales</option><option>Product</option><option>Operations</option>
+          {requesterTeamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
         </select>
       </div>
       <div className="field">
