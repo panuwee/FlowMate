@@ -91,6 +91,35 @@ function getFlowMateMyWorkRows(rows, currentUser, members, query) {
   );
 }
 
+function getFlowMateMyWorkSortRank(row) {
+  if (row && (row.overdue || (row.dueDelta != null && row.dueDelta < 0))) return 0;
+  if (row && row.dueDelta === 0) return 1;
+  if (row && row.dueDelta != null && row.dueDelta > 0) return 2;
+  return 3;
+}
+
+function sortFlowMateMyWorkRows(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const rankDiff = getFlowMateMyWorkSortRank(a) - getFlowMateMyWorkSortRank(b);
+    if (rankDiff) return rankDiff;
+    const dueA = a && a.dueDelta != null ? a.dueDelta : 9999;
+    const dueB = b && b.dueDelta != null ? b.dueDelta : 9999;
+    if (dueA !== dueB) return dueA - dueB;
+    return String((a && a.id) || "").localeCompare(String((b && b.id) || ""));
+  });
+}
+
+function filterFlowMateMyWorkByStatus(rows, status) {
+  const value = status || "all";
+  const source = rows || [];
+  if (value === "all") return source;
+  if (value === "overdue") return source.filter((row) => row && (row.overdue || (row.dueDelta != null && row.dueDelta < 0)));
+  if (value === "due_today") return source.filter((row) => row && !row.overdue && row.dueDelta === 0);
+  if (value === "quick") return source.filter((row) => row && row.type === "quick");
+  if (value === "creative") return source.filter((row) => row && row.type === "creative");
+  return source.filter((row) => row && row.status === value);
+}
+
 function getFlowMateQueueRows(rows, query) {
   return (rows || []).filter((row) =>
     matchesFlowMateSearch(row || {}, query)
@@ -105,11 +134,36 @@ function getFlowMateNavCounts(rows, currentUser, members) {
   };
 }
 
+const FLOWMATE_GD_VE_NAMES = ["pond", "joe", "jo", "tong", "eye", "vee"];
+
+function isFlowMateGdVeMember(member) {
+  const name = String((member && member.name) || (member && member.display_name) || "").toLowerCase();
+  const code = String((member && member.member_code) || "").toLowerCase();
+  const id = String((member && member.id) || "").toLowerCase();
+  return FLOWMATE_GD_VE_NAMES.includes(name)
+    || FLOWMATE_GD_VE_NAMES.includes(code)
+    || FLOWMATE_GD_VE_NAMES.some((owner) => id.includes(owner));
+}
+
+function getFlowMateWorkloadStatusCounts(items) {
+  const counts = { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 };
+  (items || []).forEach((item) => {
+    if (item && Object.prototype.hasOwnProperty.call(counts, item.status)) {
+      counts[item.status] += 1;
+    }
+  });
+  return counts;
+}
+
 window.matchesFlowMateSearch = matchesFlowMateSearch;
 window.getFlowMateCreatedDisplayId = getFlowMateCreatedDisplayId;
 window.findFlowMateWorkItemById = findFlowMateWorkItemById;
 window.buildFlowMateTemplateTitle = buildFlowMateTemplateTitle;
 window.filterFlowMateAssigneeOptions = filterFlowMateAssigneeOptions;
 window.getFlowMateMyWorkRows = getFlowMateMyWorkRows;
+window.filterFlowMateMyWorkByStatus = filterFlowMateMyWorkByStatus;
+window.sortFlowMateMyWorkRows = sortFlowMateMyWorkRows;
 window.getFlowMateQueueRows = getFlowMateQueueRows;
 window.getFlowMateNavCounts = getFlowMateNavCounts;
+window.isFlowMateGdVeMember = isFlowMateGdVeMember;
+window.getFlowMateWorkloadStatusCounts = getFlowMateWorkloadStatusCounts;

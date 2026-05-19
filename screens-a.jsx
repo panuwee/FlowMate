@@ -5,18 +5,18 @@ const { useState, useEffect } = React;
    MY WORK
    ============================================================ */
 function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
-  // Identify "me" from the current mock-auth user. When Google SSO lands,
-  // window.FLOWMATE_CURRENT_USER is the seam — meIds derives from it.
   const currentUser = window.FLOWMATE_CURRENT_USER || {};
   const myMember = (window.MEMBERS || []).find(m => m.id === currentUser.team_member_id)
     || (window.MEMBERS || []).find(m => m.name && currentUser.name && m.name.toLowerCase() === currentUser.name.toLowerCase());
   const meIds = [currentUser.team_member_id, currentUser.id, myMember && myMember.id].filter(Boolean);
   const [sourceRows, setSourceRows] = useState(WORK);
   const [loadState, setLoadState] = useState({ status: "loading", message: "Loading Supabase data..." });
+  const [filterStatus, setFilterStatus] = useState("all");
 
   async function loadMyWorkRows(alive = true) {
     if (!window.loadFlowMateListRows) {
-      setLoadState({ status: "fallback", message: "Using mock data: Supabase list loader is not ready." });
+      setSourceRows([]);
+      setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
       return;
     }
 
@@ -29,8 +29,8 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
     } catch (error) {
       if (!alive) return;
       console.error("[FlowMate My Work] Supabase load failed:", error);
-      setSourceRows(WORK);
-      setLoadState({ status: "fallback", message: `Using mock data: ${error.message || "Supabase query failed."}` });
+      setSourceRows([]);
+      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
     }
   }
 
@@ -144,16 +144,20 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
     }
   }
 
-  const mine = window.getFlowMateMyWorkRows
+  const rawMine = window.getFlowMateMyWorkRows
     ? window.getFlowMateMyWorkRows(sourceRows, currentUser, window.MEMBERS || [], searchQuery)
     : sourceRows.filter(w => meIds.includes(w.assignee) && !["delivered", "cancelled", "done"].includes(w.status) && window.matchesFlowMateSearch(w, searchQuery));
-  const overdue = mine.filter(w => w.overdue);
-  const dueSoon = mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status));
-  const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueSoon.includes(w));
-  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueSoon.includes(w));
-  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueSoon.includes(w));
+  const mine = window.sortFlowMateMyWorkRows
+    ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(rawMine, filterStatus))
+    : rawMine;
+  const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0)));
+  const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned","in_progress","review"].includes(w.status)));
+  const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)));
+  const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueToday.includes(w) && !dueSoon.includes(w));
+  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueToday.includes(w) && !dueSoon.includes(w));
+  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueToday.includes(w) && !dueSoon.includes(w));
   const blocked = mine.filter(w => w.status === "blocked" && !w.overdue);
-  const activeGroupIds = new Set([...overdue, ...dueSoon, ...inProgress, ...assigned, ...review, ...blocked].map(w => w.id));
+  const activeGroupIds = new Set([...overdue, ...dueToday, ...dueSoon, ...inProgress, ...assigned, ...review, ...blocked].map(w => w.id));
   const quick = mine.filter(w => w.type === "quick" && !activeGroupIds.has(w.id));
   function scrollToOverdue() {
     document.getElementById("my-work-overdue")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -174,7 +178,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
         <div>
           <h1 className="page__title">My work</h1>
           <div className="page__sub">{loadState.message}</div>
-          <div className="page__sub">Hi Pond - here's what's open as of {TODAY}, 09:42 SGT.</div>
+          <div className="page__sub">{currentUser.name ? `Hi ${currentUser.name} - ` : ""}Open work as of {new Date().toLocaleString("en-SG", { timeZone: "Asia/Singapore", dateStyle: "medium", timeStyle: "short" })} SGT.</div>
         </div>
         <div className="page__actions">
           <button className="btn btn--secondary" disabled title="Calendar range selector is planned for MVP 1.1"><Icon name="calendar" /> This week (MVP 1.1)</button>
@@ -184,14 +188,30 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
       <div className="stat-strip">
         <div className="stat stat--accent"><div className="stat__num">{overdue.length}</div><div className="stat__lbl">Overdue</div></div>
-        <div className="stat stat--warn"><div className="stat__num">{dueSoon.length}</div><div className="stat__lbl">Due soon</div></div>
-        <div className="stat stat--info"><div className="stat__num">{inProgress.length + dueSoon.filter(d=>d.status==="in_progress").length}</div><div className="stat__lbl">In progress</div></div>
-        <div className="stat"><div className="stat__num">{review.length + dueSoon.filter(d=>d.status==="review").length}</div><div className="stat__lbl">Review</div></div>
+        <div className="stat stat--warn"><div className="stat__num">{dueToday.length}</div><div className="stat__lbl">Due today</div></div>
+        <div className="stat stat--info"><div className="stat__num">{inProgress.length + dueSoon.filter(d=>d.status==="in_progress").length + dueToday.filter(d=>d.status==="in_progress").length}</div><div className="stat__lbl">In progress</div></div>
+        <div className="stat"><div className="stat__num">{review.length + dueSoon.filter(d=>d.status==="review").length + dueToday.filter(d=>d.status==="review").length}</div><div className="stat__lbl">Review</div></div>
         <div className="stat"><div className="stat__num">{blocked.length}</div><div className="stat__lbl">Blocked</div></div>
       </div>
 
+      <div className="filterbar">
+        <button className={`chip ${filterStatus === "all" ? "is-active" : ""}`} onClick={() => setFilterStatus("all")}>All</button>
+        <button className={`chip ${filterStatus === "due_today" ? "is-active" : ""}`} onClick={() => setFilterStatus("due_today")}>Due today</button>
+        <button className={`chip ${filterStatus === "overdue" ? "is-active" : ""}`} onClick={() => setFilterStatus("overdue")}>Overdue</button>
+        <select className="select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="assigned">Assigned</option>
+          <option value="in_progress">In progress</option>
+          <option value="review">Review</option>
+          <option value="blocked">Blocked</option>
+          <option value="quick">Quick tasks</option>
+          <option value="creative">Creative requests</option>
+        </select>
+      </div>
+
       <MyWorkGroup title="Overdue" tone="overdue" items={overdue} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="Today & Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Due today" items={dueToday} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="In progress" items={inProgress} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="Assigned" items={assigned} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="In review by requester" items={review} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
@@ -335,7 +355,7 @@ function QuickTaskChecklist({ work, onAdd, onToggle, onCommentAdd, onCommentEdit
                 <strong style={{ fontSize: 12 }}>{comment.authorName}</strong>
                 <span className="mono muted" style={{ fontSize: 11 }}>{new Date(comment.created_at).toLocaleString()}</span>
                 <span className="spacer"></span>
-                {comment.author_user_id === window.FLOWMATE_MOCK_USERS?.pond && (
+                {comment.author_user_id === window.FLOWMATE_CURRENT_USER?.id && (
                   <>
                     <button className="btn btn--xs btn--ghost" type="button" onClick={() => onCommentEdit(comment)}>Edit</button>
                     <button className="btn btn--xs btn--ghost" type="button" onClick={() => onCommentDelete(comment)}>Delete</button>
@@ -881,13 +901,12 @@ function CreateResultScreen({ result, onAgain, onNav }) {
    WORK ITEM DETAIL
    ============================================================ */
 function DetailScreen({ onNav, onOpen, focusId }) {
-  const id = focusId || "CR-1051";
+  const id = focusId || "";
   const selected = window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === id
     ? window.flowmateSelectedWorkItem
     : null;
-  // Do NOT fall back to a hard-coded "CR-1051" when the id can't be resolved
-  // — that produced the bug where clicking QT-0214 in Board showed CR-1051's
-  // detail. If we genuinely have nothing, render an empty state below.
+  // Do not fall back to a static item when the id cannot be resolved.
+  // If we genuinely have nothing, render an empty state below.
   const w = selected || WORK_BY_ID[id] || null;
 
   if (!w) {
@@ -924,7 +943,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   async function runCreativeTransition(nextStatus) {
     if (!w.isSupabaseRow) {
-      setActionMsg({ tone: "warn", text: "This is mock data — connect to Supabase to mutate." });
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so status changes are disabled." });
       return;
     }
     const options = {};
@@ -951,7 +970,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   async function runRerunAssignment() {
     if (!w.isSupabaseRow) {
-      setActionMsg({ tone: "warn", text: "This is mock data — connect to Supabase to rerun." });
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so assignment rerun is disabled." });
       return;
     }
     setPending(true);
@@ -968,7 +987,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   async function runCancel() {
     if (!w.isSupabaseRow) {
-      setActionMsg({ tone: "warn", text: "This is mock data — connect to Supabase to cancel." });
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so cancel is disabled." });
       return;
     }
     const reason = window.prompt("Cancel reason is required");
@@ -1068,7 +1087,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Project / campaign</div><div className="meta-row__val">{w.campaign || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Assignee</div><div className="meta-row__val">{owner?.name || "Unassigned"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">1st Review / Draft</div><div className="meta-row__val">{w.dueLabel || "-"}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchLabel || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Priority</div><div className="meta-row__val"><PriorityBadge level={w.priority} /></div></div>
               </div>
             </div>
@@ -1083,7 +1102,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{w.briefLink ? <a href={w.briefLink} target="_blank" rel="noreferrer">Open brief</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{w.referenceLink ? <a href={w.referenceLink} target="_blank" rel="noreferrer">Open reference</a> : "-"}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchLabel || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div></div>
               </div>
             </div>
           )}
@@ -1123,18 +1142,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           )}
 
-          {!isLiveDetail && (
-            <div className="card">
-              <div className="card__head"><span className="card__title">Activity</span></div>
-              <div className="card__body">
-                <div className="timeline">
-                  <div className="tl-item">
-                    <div className="tl-item__text">Sample activity is shown only for mock data.</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="detail__side">
@@ -1158,19 +1165,19 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
                 </div>
               </div>
-              <div className="meta-row">
-                <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "Due"}</div>
-                <div className="meta-row__val">{w.dueLabel}, 2026</div>
-              </div>
+                <div className="meta-row">
+                  <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "Due"}</div>
+                  <div className="meta-row__val">{w.dueFullLabel || w.dueLabel || "-"}</div>
+                </div>
               {w.type === "quick" && (
                 <div className="meta-row">
                   <div className="meta-row__lbl">Launch date</div>
-                  <div className="meta-row__val">{w.launchLabel || "-"}</div>
+                  <div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div>
                 </div>
               )}
               <div className="meta-row">
                 <div className="meta-row__lbl">Created</div>
-                <div className="meta-row__val">May 12, 2026</div>
+                <div className="meta-row__val">{w.createdLabel || "-"}</div>
               </div>
             </div>
           </div>

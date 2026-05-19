@@ -26,6 +26,9 @@ async function loadFlowMateWorkloadRows() {
   const rows = (workloadResult.data || []).map((row) => {
     const member = membersById[row.team_member_id] || {};
     const memberItems = (activeItems || []).filter((item) => item.assignee === row.team_member_id);
+    const statusCounts = window.getFlowMateWorkloadStatusCounts
+      ? window.getFlowMateWorkloadStatusCounts(memberItems)
+      : { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 };
     const openCreativeItems = memberItems.filter(
       (item) =>
         item.type === "creative" &&
@@ -51,6 +54,7 @@ async function loadFlowMateWorkloadRows() {
         wipLimit: Number(member.wip_limit || 0),
         availability: row.availability,
       },
+      statusCounts,
       assignedEffort,
       effectiveCap,
       window: windowCapacity,
