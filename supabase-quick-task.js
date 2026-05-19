@@ -1,24 +1,7 @@
-const FLOWMATE_MOCK_USERS = {
-  pond: "00000000-0000-0000-0000-000000000001",
-  jo: "00000000-0000-0000-0000-000000000002",
-  tong: "00000000-0000-0000-0000-000000000003",
-  eye: "00000000-0000-0000-0000-000000000004",
-  vee: "00000000-0000-0000-0000-000000000005",
-};
-
-// MVP mock-auth: a single "logged-in" user identity used by every RPC.
-// Real Google Workspace SSO is tracked as B-004 — see docs/QA report.
-// Until then, switching this constant (or reading it from a header / URL
-// param) is the seam where real auth will plug in.
-window.FLOWMATE_CURRENT_USER = window.FLOWMATE_CURRENT_USER || {
-  id: FLOWMATE_MOCK_USERS.pond,
-  name: "Pond",
-  email: "pond@garena.com",
-  team_member_id: "10000000-0000-0000-0000-000000000001",
-};
+window.FLOWMATE_CURRENT_USER = window.FLOWMATE_CURRENT_USER || null;
 
 function flowmateActorId() {
-  return (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id) || FLOWMATE_MOCK_USERS.pond;
+  return (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id) || null;
 }
 window.flowmateActorId = flowmateActorId;
 
@@ -48,7 +31,7 @@ async function createFlowMateQuickTask(input) {
     p_note: input.note || null,
     p_project_name: input.projectName || null,
     p_requester_team: input.requesterTeam,
-    p_assignee_user_id: isOtherAssignee ? null : (input.assigneeUserId || FLOWMATE_MOCK_USERS.pond),
+    p_assignee_user_id: isOtherAssignee ? null : (input.assigneeUserId || null),
     p_assignee_other_name: isOtherAssignee ? assigneeOtherName : null,
     p_priority: input.priority || "normal",
   });
@@ -57,7 +40,6 @@ async function createFlowMateQuickTask(input) {
   return data;
 }
 
-window.FLOWMATE_MOCK_USERS = FLOWMATE_MOCK_USERS;
 window.createFlowMateQuickTask = createFlowMateQuickTask;
 
 async function completeFlowMateQuickTask(displayId) {
@@ -281,14 +263,12 @@ window.cancelFlowMateWorkItem = cancelFlowMateWorkItem;
 // ===========================================================================
 // Google Workspace SSO (Supabase Auth + Google provider)
 // ===========================================================================
-// `flowmateInitAuth` is called once on App mount. If a Supabase session
-// exists, it overwrites the mock `FLOWMATE_CURRENT_USER` with the real
-// signed-in user. If no session, the mock identity stays as a dev fallback
-// so the app keeps working before SSO is fully configured.
+// `flowmateInitAuth` is called once on App mount. It only returns a user when
+// Supabase Auth has an active Google Workspace session.
 async function flowmateInitAuth() {
   if (!window.flowmateSupabase || !window.flowmateSupabase.auth
       || typeof window.flowmateSupabase.auth.getSession !== "function") {
-    console.info("[FlowMate Auth] Supabase auth client not available — staying on mock identity.");
+    console.info("[FlowMate Auth] Supabase auth client not available.");
     return null;
   }
 
@@ -301,13 +281,13 @@ async function flowmateInitAuth() {
     return null;
   }
   if (!session || !session.user) {
-    console.info("[FlowMate Auth] No active session — mock fallback in effect.");
+    console.info("[FlowMate Auth] No active session.");
     return null;
   }
 
   const { data: profile, error: profileError } = await window.flowmateSupabase
     .from("users")
-    .select("id, email, display_name, requester_team, is_active")
+    .select("id, email, display_name, requester_team, is_active, role")
     .eq("id", session.user.id)
     .maybeSingle();
 
@@ -354,10 +334,76 @@ async function flowmateInitAuth() {
     email: profile.email,
     team_member_id: member ? member.id : null,
     requester_team: profile.requester_team || null,
+    role: profile.role || "member",
     is_authenticated: true,
   };
   return window.FLOWMATE_CURRENT_USER;
 }
+
+// ===========================================================================
+// Admin whitelist management
+// ===========================================================================
+function assertFlowMateAdminAccess() {
+  if (!window.FLOWMATE_CURRENT_USER || window.FLOWMATE_CURRENT_USER.role !== "admin") {
+    throw new Error("Admin access required.");
+  }
+}
+
+async function loadFlowMateWhitelistUsers() {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  assertFlowMateAdminAccess();
+
+  const { data, error } = await window.flowmateSupabase
+    .from("user_whitelist")
+    .select("email,display_name,role,team_member_code,created_at,added_by")
+    .order("email", { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+async function upsertFlowMateWhitelistUser(input) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  assertFlowMateAdminAccess();
+
+  const email = (input && input.email || "").trim().toLowerCase();
+  const displayName = (input && input.displayName || "").trim();
+  const role = input && input.role ? input.role : "member";
+  const teamMemberCode = (input && input.teamMemberCode || "").trim();
+
+  if (!email) throw new Error("Email is required.");
+  if (!displayName) throw new Error("Display name is required.");
+  if (role !== "admin" && role !== "member") throw new Error("Role must be admin or member.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_upsert_whitelist_user", {
+    p_email: email,
+    p_display_name: displayName,
+    p_role: role,
+    p_team_member_code: teamMemberCode || null,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+async function deleteFlowMateWhitelistUser(email) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  assertFlowMateAdminAccess();
+
+  const normalizedEmail = (email || "").trim().toLowerCase();
+  if (!normalizedEmail) throw new Error("Email is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_delete_whitelist_user", {
+    p_email: normalizedEmail,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+window.loadFlowMateWhitelistUsers = loadFlowMateWhitelistUsers;
+window.upsertFlowMateWhitelistUser = upsertFlowMateWhitelistUser;
+window.deleteFlowMateWhitelistUser = deleteFlowMateWhitelistUser;
 
 async function flowmateSignInWithGoogle() {
   if (!window.flowmateSupabase) {
@@ -391,7 +437,7 @@ async function flowmateSignInWithGoogle() {
 async function flowmateSignOut() {
   if (!window.flowmateSupabase) return;
   await window.flowmateSupabase.auth.signOut();
-  // Drop the cached identity so the mock fallback re-applies on reload.
+  // Drop the cached identity before reload.
   window.FLOWMATE_CURRENT_USER = null;
   window.location.reload();
 }

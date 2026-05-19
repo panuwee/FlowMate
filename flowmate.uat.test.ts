@@ -142,6 +142,33 @@ function loadGithubSearchUtils() {
     getFlowMateCreatedDisplayId: (created: unknown) => string;
     findFlowMateWorkItemById: <T extends { id?: string }>(rows: T[], id: string) => T | null;
     filterFlowMateAssigneeOptions: <T extends { name?: string }>(options: T[], query: string) => T[];
+    getFlowMateMyWorkRows: <T extends { assignee?: string; status?: string }>(
+      rows: T[],
+      currentUser: { id?: string; team_member_id?: string; name?: string },
+      members: { id?: string; name?: string }[],
+      query?: string,
+    ) => T[];
+    getFlowMateQueueRows: <T extends { status?: string }>(rows: T[], query?: string) => T[];
+    getFlowMateNavCounts: <T extends { assignee?: string; status?: string }>(
+      rows: T[],
+      currentUser: { id?: string; team_member_id?: string; name?: string },
+      members: { id?: string; name?: string }[],
+    ) => { "my-work": number; queue: number };
+    filterFlowMateMyWorkByStatus: <T extends { status?: string; overdue?: boolean; dueDelta?: number | null }>(
+      rows: T[],
+      status: string,
+    ) => T[];
+    sortFlowMateMyWorkRows: <T extends { status?: string; overdue?: boolean; dueDelta?: number | null; dueLabel?: string; id?: string }>(
+      rows: T[],
+    ) => T[];
+    isFlowMateGdVeMember: (member: { name?: string; member_code?: string; id?: string }) => boolean;
+    getFlowMateWorkloadStatusCounts: <T extends { status?: string }>(items: T[]) => {
+      assigned: number;
+      in_progress: number;
+      review: number;
+      blocked: number;
+      delivered: number;
+    };
     buildFlowMateTemplateTitle: (input: {
       launchDate?: string;
       requesterTeam?: string;
@@ -280,6 +307,61 @@ describe("UAT-101/UAT-102 created item detail target helpers", () => {
     expect(utils.findFlowMateWorkItemById([{ id: "QT-0301" }, row], "CR-2010")).toBe(row);
     expect(utils.findFlowMateWorkItemById([{ id: "QT-0301" }], "CR-2010")).toBeNull();
   });
+
+  it("computes sidebar counts from active live rows instead of static numbers", () => {
+    const currentUser = { id: "user-pond", team_member_id: "m-pond", name: "Pond" };
+    const members = [{ id: "m-pond", name: "Pond" }];
+    const rows = [
+      { id: "QT-1", assignee: "m-pond", status: "assigned", title: "Open quick" },
+      { id: "QT-2", assignee: "m-pond", status: "delivered", title: "Done quick" },
+      { id: "QT-3", assignee: "m-pond", status: "done", title: "Done status quick" },
+      { id: "CR-1", assignee: "m-other", status: "assigned", title: "Other owner" },
+      { id: "CR-2", status: "queued", title: "Queued" },
+      { id: "CR-3", status: "need_brief", title: "Need brief" },
+    ];
+
+    expect(utils.getFlowMateMyWorkRows(rows, currentUser, members).map((row) => row.id)).toEqual(["QT-1"]);
+    expect(utils.getFlowMateQueueRows(rows).map((row) => row.id)).toEqual(["CR-2", "CR-3"]);
+    expect(utils.getFlowMateNavCounts(rows, currentUser, members)).toEqual({ "my-work": 1, queue: 2 });
+  });
+
+  it("sorts My work by overdue first, then due today, then later due dates", () => {
+    const rows = [
+      { id: "later", status: "assigned", dueDelta: 3 },
+      { id: "today", status: "review", dueDelta: 0 },
+      { id: "overdue", status: "assigned", overdue: true, dueDelta: -2 },
+      { id: "tomorrow", status: "in_progress", dueDelta: 1 },
+    ];
+
+    expect(utils.sortFlowMateMyWorkRows(rows).map((row) => row.id)).toEqual([
+      "overdue",
+      "today",
+      "tomorrow",
+      "later",
+    ]);
+    expect(utils.filterFlowMateMyWorkByStatus(rows, "due_today").map((row) => row.id)).toEqual(["today"]);
+    expect(utils.filterFlowMateMyWorkByStatus(rows, "overdue").map((row) => row.id)).toEqual(["overdue"]);
+  });
+
+  it("splits workload members into GD/VE and Non GD/VE groups with status counts", () => {
+    expect(utils.isFlowMateGdVeMember({ name: "Pond" })).toBe(true);
+    expect(utils.isFlowMateGdVeMember({ name: "Joe" })).toBe(true);
+    expect(utils.isFlowMateGdVeMember({ name: "Gear" })).toBe(false);
+    expect(utils.getFlowMateWorkloadStatusCounts([
+      { status: "assigned" },
+      { status: "in_progress" },
+      { status: "review" },
+      { status: "blocked" },
+      { status: "delivered" },
+      { status: "queued" },
+    ])).toEqual({
+      assigned: 1,
+      in_progress: 1,
+      review: 1,
+      blocked: 1,
+      delivered: 1,
+    });
+  });
 });
 
 describe("create form title helper", () => {
@@ -291,6 +373,38 @@ describe("create form title helper", () => {
       requesterTeam: "Marketing",
       projectName: "FCO S24 Launch",
     })).toBe("[25-05-2026][Marketing][FCO S24 Launch]");
+  });
+});
+
+describe("MVP 1.1 create form draft saving", () => {
+  const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+
+  it("stores Quick Task and Creative Request drafts under separate localStorage keys", () => {
+    expect(createScreenJsx).toContain('quick: "flowmate:create:quickDraft:v1"');
+    expect(createScreenJsx).toContain('creative: "flowmate:create:creativeDraft:v1"');
+    expect(createScreenJsx).toContain("saveFlowMateCreateDraft(\"quick\", nextQuickDraft)");
+    expect(createScreenJsx).toContain("saveFlowMateCreateDraft(\"creative\", nextCreativeDraft)");
+  });
+
+  it("restores drafts on create screen load and clears only the submitted draft after success", () => {
+    expect(createScreenJsx).toContain("readFlowMateCreateDraft(\"quick\", getDefaultQuickDraft())");
+    expect(createScreenJsx).toContain("readFlowMateCreateDraft(\"creative\", getDefaultCreativeDraft())");
+    expect(createScreenJsx).toContain("clearFlowMateCreateDraft(mode)");
+  });
+
+  it("uses autosave only and does not show a manual Save draft button", () => {
+    const createScreenSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreateScreen"));
+
+    expect(createScreenSource).not.toContain(">Save draft</button>");
+  });
+
+  it("does not persist known secret or auth token field names in create drafts", () => {
+    const draftSource = createScreenJsx.slice(
+      createScreenJsx.indexOf("const FLOWMATE_CREATE_DRAFT_FIELDS"),
+      createScreenJsx.indexOf("function getDefaultQuickAssignee"),
+    );
+
+    expect(draftSource).not.toMatch(/password|token|api[_-]?key|authorization|secret/i);
   });
 });
 
@@ -325,12 +439,172 @@ describe("quick task Other assignee SQL support", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
 
+    expect(createScreenJsx).toContain('All fields with * are required');
+    expect(createScreenJsx).not.toContain("Only title and due date are required.");
     expect(createScreenJsx).toContain("function updateQuickDraft");
     expect(quickTaskFormSource).toContain("Requester Team / Function");
     expect(quickTaskFormSource).toContain("Launch date");
     expect(quickTaskFormSource).toContain("1st Review / Draft");
     expect(quickTaskFormSource).toContain("Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.");
     expect(quickTaskFormSource).toContain("readOnly");
+  });
+
+  it("creative request form explains its auto-filled title template", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
+
+    expect(creativeFormSource).toContain("Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.");
+  });
+
+  it("creative request form has a Brief Note field that is submitted to description", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+    const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
+
+    expect(createScreenJsx).toContain("briefNote");
+    expect(creativeFormSource).toContain("Brief Note");
+    expect(quickTaskJs).toContain("p_brief_note");
+    expect(assignmentSql).toContain("p_brief_note text default null");
+    expect(assignmentSql).toContain("description");
+    expect(assignmentSql).toContain("nullif(trim(coalesce(p_brief_note,'')), '')");
+  });
+
+  it("live detail loads and shows work item description as note content", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
+
+    expect(listDataJs).toContain("description");
+    expect(listDataJs).toContain("briefNote: item.description || \"\"");
+    expect(listDataJs).toContain("note: item.description || \"\"");
+    expect(detailSource).toContain("const visibleBriefNote = w.briefNote || w.note || \"\"");
+    expect(detailSource).toContain("Brief Note");
+    expect(detailSource).toContain("visibleBriefNote");
+  });
+
+  it("detail view surfaces all extra fields collected by create forms", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
+
+    expect(listDataJs).toContain("urgent_reason");
+    expect(listDataJs).toContain("brief_link");
+    expect(listDataJs).toContain("reference_link");
+    expect(listDataJs).toContain("urgentReason: item.urgent_reason || \"\"");
+    expect(listDataJs).toContain("briefLink: details.brief_link || \"\"");
+    expect(listDataJs).toContain("referenceLink: details.reference_link || \"\"");
+    expect(detailSource).toContain("Brief link");
+    expect(detailSource).toContain("Reference link");
+    expect(detailSource).toContain("Urgent reason");
+    expect(detailSource).toContain("Launch date");
+  });
+
+  it("quick task detail mirrors the fields from quick task creation", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
+
+    expect(detailSource).toContain("Quick Task details");
+    expect(detailSource).toContain("Requester Team / Function");
+    expect(detailSource).toContain("Project / campaign");
+    expect(detailSource).toContain("1st Review / Draft");
+    expect(detailSource).toContain("Priority");
+    expect(detailSource).toContain("w.type === \"quick\"");
+  });
+
+  it("my work and sidebar counts use active rows instead of static counts", () => {
+    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const myWorkSource = createScreenJsx.slice(createScreenJsx.indexOf("function MyWorkScreen"));
+
+    expect(appJsx).not.toContain("count: 7");
+    expect(appJsx).not.toContain("count: 4");
+    expect(appJsx).toContain("navCounts");
+    expect(appJsx).toContain("getFlowMateNavCounts");
+    expect(myWorkSource).toContain("getFlowMateMyWorkRows");
+    expect(myWorkSource).toContain("activeGroupIds");
+    expect(myWorkSource).toContain("!w.overdue");
+  });
+
+  it("detail note preserves line breaks from the create textarea", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
+
+    expect(detailSource).toContain('whiteSpace: "pre-wrap"');
+  });
+
+  it("live detail view does not show static mock brief, checklist, comments, or activity", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
+
+    expect(detailSource).toContain("const isLiveDetail = Boolean(w.isSupabaseRow)");
+    expect(detailSource).toContain("Assignee");
+    expect(detailSource).toContain("visibleChecklistItems.length > 0");
+    expect(detailSource).toContain("visibleComments.length > 0");
+    expect(detailSource).not.toContain("!isLiveDetail &&");
+    expect(detailSource).not.toContain("Vertical 15-second teaser announcing");
+    expect(detailSource).not.toContain("First cut ready. Holding on team logo plate");
+    expect(detailSource).not.toContain("Sample activity is shown only for mock data.");
+  });
+
+  it("removes static sample work rows from the deployed fallback data", () => {
+    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
+
+    expect(dataJsx).toContain("const WORK = [];");
+    expect(dataJsx).not.toContain("CR-1051");
+    expect(dataJsx).not.toContain("QT-209");
+    expect(dataJsx).not.toContain("OB48 Launch");
+    expect(dataJsx).not.toContain('const TODAY = "May 15"');
+  });
+
+  it("does not show hard-coded mock fallback messages or timestamps in live screens", () => {
+    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const combined = `${screensA}\n${screensB}`;
+
+    expect(combined).not.toContain("Using mock data");
+    expect(combined).not.toContain("Prototype mock data");
+    expect(combined).not.toContain("setSourceRows(WORK)");
+    expect(combined).not.toContain("Hi Pond");
+    expect(combined).not.toContain("09:42 SGT");
+    expect(combined).not.toContain("May 15, 09:00");
+    expect(combined).not.toContain("Sample activity is shown only for mock data.");
+    expect(screensA).not.toContain('focusId || "CR-1051"');
+  });
+
+  it("KPI screen does not render static sample metrics", () => {
+    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+
+    expect(screensC).not.toContain("const memberKpi = [");
+    expect(screensC).not.toContain("const teamKpi = [");
+    expect(screensC).not.toContain("delivered: 22");
+    expect(screensC).not.toContain("count: 28");
+    expect(screensC).not.toContain("Apr 19-May 15, 2026");
+    expect(screensC).toContain("window.loadFlowMateListRows");
+  });
+
+  it("My work UI has Team Flow style status filters and ordered sections", () => {
+    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const myWorkSource = screensA.slice(screensA.indexOf("function MyWorkScreen"));
+
+    expect(myWorkSource).toContain("filterStatus");
+    expect(myWorkSource).toContain("filterFlowMateMyWorkByStatus");
+    expect(myWorkSource).toContain("sortFlowMateMyWorkRows");
+    expect(myWorkSource.indexOf('title="Overdue"')).toBeLessThan(myWorkSource.indexOf('title="Due today"'));
+    expect(myWorkSource).toContain("All statuses");
+  });
+
+  it("Workload UI splits Non GD/VE and GD/VE tabs with defensive skill rendering", () => {
+    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"));
+
+    expect(workloadSource).toContain("workloadTab");
+    expect(workloadSource).toContain("Workload - GD/VE");
+    expect(workloadSource).toContain("Workload");
+    expect(workloadSource).toContain("isFlowMateGdVeMember");
+    expect(workloadSource).toContain("getFlowMateWorkloadStatusCounts");
+    expect(workloadSource).toContain("(r.m.skills || [])");
+    expect(workloadSource).toContain("Delivered");
   });
 });
 
@@ -419,6 +693,31 @@ describe("full assignee roster", () => {
     expect(listScreenJsx).toContain("...(window.MEMBERS || []).map");
     expect(listScreenJsx).toContain("ownerOptionRows");
   });
+
+  it("creative request assignment is limited to the creative owner pool only", () => {
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+    const allowedCodes = ["pond", "jo", "tong", "eye", "vee"];
+    for (const code of allowedCodes) {
+      expect(assignmentSql).toContain(`'${code}'`);
+    }
+    expect(assignmentSql).toContain("tm.member_code = any (v_creative_owner_codes)");
+    expect(assignmentSql).not.toContain("tm.member_code = any (array['gear'");
+  });
+
+  it("seed keeps the real roster but removes mock work sample data", () => {
+    const seedSql = readFileSync(join(process.cwd(), "supabase", "seed.sql"), "utf8");
+    expect(seedSql).toContain("insert into public.team_members");
+    expect(seedSql).toContain("update public.users");
+    expect(seedSql).toContain("set is_active = false");
+    expect(seedSql).not.toContain("delete from public.users");
+    expect(seedSql).not.toContain("mock-pond");
+    expect(seedSql).not.toContain("insert into public.work_items");
+    expect(seedSql).not.toContain("insert into public.creative_request_details");
+    expect(seedSql).not.toContain("insert into public.checklist_items");
+    expect(seedSql).not.toContain("insert into public.comments");
+    expect(seedSql).not.toContain("CR-1051");
+    expect(seedSql).not.toContain("QT-0209");
+  });
 });
 
 describe("UAT-012 hybrid request visibility", () => {
@@ -486,6 +785,80 @@ describe("B-003/B-006 security hardening SQL", () => {
     expect(schemaSql).toContain("using (user_id = public.current_app_user_id())");
     expect(combinedSql).not.toContain("or public.current_app_user_id() is null");
     expect(combinedSql).not.toContain("public.is_active_app_user() or");
+  });
+});
+
+// ============================================================================
+// MVP 1.1 Admin whitelist UI backend support
+// ============================================================================
+describe("MVP 1.1 admin whitelist backend SQL", () => {
+  it("routes whitelist writes through admin-only RPCs that resolve the actor from auth.uid()", () => {
+    const whitelistSql = readFileSync(join(process.cwd(), "supabase", "whitelist_access.sql"), "utf8");
+
+    expect(whitelistSql).toContain("create or replace function public.flowmate_admin_upsert_whitelist_user(");
+    expect(whitelistSql).toContain("create or replace function public.flowmate_admin_delete_whitelist_user(");
+    expect(whitelistSql).toContain("v_actor_id := auth.uid()");
+    expect(whitelistSql).toContain("if not public.is_admin_app_user() then");
+    expect(whitelistSql).toContain("Only FlowMate admins can manage the whitelist");
+    expect(whitelistSql).toContain("revoke insert, update, delete on public.user_whitelist from anon, authenticated");
+    expect(whitelistSql).toContain("grant execute on function public.flowmate_admin_upsert_whitelist_user(");
+    expect(whitelistSql).toContain("grant execute on function public.flowmate_admin_delete_whitelist_user(");
+    expect(whitelistSql).not.toContain("grant insert, update, delete on public.user_whitelist to authenticated");
+    expect(whitelistSql).not.toContain("p_actor_user_id");
+  });
+
+  it("normalizes and validates whitelist input without accepting non-Garena emails or invalid roles", () => {
+    const whitelistSql = readFileSync(join(process.cwd(), "supabase", "whitelist_access.sql"), "utf8");
+
+    expect(whitelistSql).toContain("v_email := lower(trim(p_email))");
+    expect(whitelistSql).toContain("v_email !~* '^[^@\\s]+@garena\\.com$'");
+    expect(whitelistSql).toContain("p_role not in ('admin', 'member')");
+    expect(whitelistSql).toContain("member_code = v_team_member_code");
+    expect(whitelistSql).toContain("added_by = v_actor_id");
+  });
+});
+
+describe("MVP 1.1 admin whitelist frontend UI", () => {
+  it("loads the signed-in user's role so admin-only routes can be gated client-side", () => {
+    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+
+    expect(quickTaskJs).toContain("id, email, display_name, requester_team, is_active, role");
+    expect(quickTaskJs).toContain("role: profile.role || \"member\"");
+  });
+
+  it("shows whitelist entry points only for admin users", () => {
+    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+
+    expect(appJsx).toContain("const isAdminUser = user.role === \"admin\"");
+    expect(appJsx).toContain("getVisibleNavGroups(isAdminUser)");
+    expect(appJsx).toContain("{route === \"admin-whitelist\" && isAdminUser && <AdminWhitelistScreen />}");
+    expect(appJsx).toContain("{route === \"admin-whitelist\" && !isAdminUser && <AccessDeniedScreen onNav={nav} />}");
+  });
+
+  it("uses admin whitelist helpers and RPCs instead of direct browser writes", () => {
+    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+
+    expect(quickTaskJs).toContain("async function loadFlowMateWhitelistUsers()");
+    expect(quickTaskJs).toContain(".from(\"user_whitelist\")");
+    expect(quickTaskJs).toContain("async function upsertFlowMateWhitelistUser(input)");
+    expect(quickTaskJs).toContain("flowmate_admin_upsert_whitelist_user");
+    expect(quickTaskJs).toContain("async function deleteFlowMateWhitelistUser(email)");
+    expect(quickTaskJs).toContain("flowmate_admin_delete_whitelist_user");
+    expect(quickTaskJs).not.toContain(".from(\"user_whitelist\").insert");
+    expect(quickTaskJs).not.toContain(".from(\"user_whitelist\").update");
+    expect(quickTaskJs).not.toContain(".from(\"user_whitelist\").delete");
+  });
+
+  it("renders list, add, deactivate, and Supabase error states for admin whitelist management", () => {
+    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+
+    expect(screensB).toContain("function AdminWhitelistScreen()");
+    expect(screensB).toContain("loadFlowMateWhitelistUsers");
+    expect(screensB).toContain("upsertFlowMateWhitelistUser");
+    expect(screensB).toContain("deleteFlowMateWhitelistUser");
+    expect(screensB).toContain("Deactivate");
+    expect(screensB).toContain("Admin access required.");
+    expect(screensB).toContain("error.message || \"Whitelist RPC failed.\"");
   });
 });
 

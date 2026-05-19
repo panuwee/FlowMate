@@ -18,10 +18,19 @@ const NAV = [
   ]},
 ];
 
+const ADMIN_NAV_GROUP = { group: "Admin", items: [
+  { key: "admin-whitelist", label: "Whitelist", icon: "users" },
+]};
+
+function getVisibleNavGroups(isAdminUser) {
+  return isAdminUser ? [...NAV, ADMIN_NAV_GROUP] : NAV;
+}
+
 const TITLE_MAP = {
   "my-work": "My work", "create": "Create", "detail": "Work item",
   "list": "All work", "board": "Board", "queue": "Central queue",
   "workload": "Workload", "kpi": "KPI", "settings": "Team settings",
+  "admin-whitelist": "Whitelist",
 };
 
 function App() {
@@ -162,6 +171,8 @@ function App() {
   const currentUserName  = user.name  || "User";
   const currentUserEmail = user.email || "";
   const avatarMemberId   = user.team_member_id || null;
+  const isAdminUser = user.role === "admin";
+  const visibleNavGroups = getVisibleNavGroups(isAdminUser);
 
   return (
     <div className="app">
@@ -194,7 +205,7 @@ function App() {
       </div>
 
       <nav className="app__sidebar">
-        {NAV.map(group => (
+        {visibleNavGroups.map(group => (
           <div key={group.group}>
             <div className="nav-section">{group.group}</div>
             {group.items.map(it => {
@@ -227,7 +238,31 @@ function App() {
         {route === "workload" && <WorkloadScreen onOpen={open} />}
         {route === "kpi"      && <KpiScreen />}
         {route === "settings" && <SettingsScreen />}
+        {route === "admin-whitelist" && isAdminUser && <AdminWhitelistScreen />}
+        {route === "admin-whitelist" && !isAdminUser && <AccessDeniedScreen onNav={nav} />}
       </main>
+    </div>
+  );
+}
+
+function AccessDeniedScreen({ onNav }) {
+  return (
+    <div className="page" style={{ maxWidth: 720 }}>
+      <div className="card">
+        <div className="card__head">
+          <span className="card__title">Admin access required</span>
+        </div>
+        <div className="card__body">
+          <div className="reason-box reason-box--need">
+            This page is only available to FlowMate admins.
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <button className="btn btn--secondary" onClick={() => onNav("my-work")}>
+              <Icon name="inbox" /> Back to My work
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

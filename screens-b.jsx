@@ -48,7 +48,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
 
     async function loadRows() {
       if (!window.loadFlowMateListRows) {
-        setLoadState({ status: "fallback", message: "Using mock data: Supabase list loader is not ready." });
+        setSourceRows([]);
+        setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
         return;
       }
 
@@ -60,8 +61,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
       } catch (error) {
         if (!alive) return;
         console.error("[FlowMate List] Supabase load failed:", error);
-        setSourceRows(WORK);
-        setLoadState({ status: "fallback", message: `Using mock data: ${error.message || "Supabase query failed."}` });
+        setSourceRows([]);
+        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
       }
     }
 
@@ -195,7 +196,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
         </table>
       </div>
 
-      <Source>{loadState.status === "live" ? "Supabase work_items table" : "Prototype mock data"} - {TODAY} 2026</Source>
+      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {TODAY}</Source>
     </div>
   );
 }
@@ -220,7 +221,8 @@ function BoardScreen({ onOpen }) {
 
   async function loadRows() {
     if (!window.loadFlowMateListRows) {
-      setLoadState({ status: "fallback", message: "Using mock data: Supabase list loader is not ready." });
+      setSourceRows([]);
+      setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
       return;
     }
     try {
@@ -229,8 +231,8 @@ function BoardScreen({ onOpen }) {
       setLoadState({ status: "live", message: "Live Supabase data" });
     } catch (error) {
       console.error("[FlowMate Board] Supabase load failed:", error);
-      setSourceRows(WORK);
-      setLoadState({ status: "fallback", message: `Using mock data: ${error.message || "Supabase query failed."}` });
+      setSourceRows([]);
+      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
     }
   }
 
@@ -240,8 +242,7 @@ function BoardScreen({ onOpen }) {
 
   function handleDragStart(e, w) {
     if (!w.isSupabaseRow) {
-      // Mock rows: nothing to mutate against, prevent the drag from
-      // misleading the user.
+      // Rows without a Supabase backing record cannot be mutated.
       e.preventDefault();
       setFlash({ tone: "warn", text: "Drag-drop only works on live Supabase data." });
       return;
@@ -398,7 +399,7 @@ function BoardScreen({ onOpen }) {
                         if (isDragging) return;
                         // Pass the full row through the global so DetailScreen
                         // can render Supabase-only items that aren't in the
-                        // static WORK_BY_ID mock (e.g. QT-0214).
+                        // static WORK_BY_ID fallback.
                         window.flowmateSelectedWorkItem = w;
                         onOpen(w.id);
                       }}
@@ -456,7 +457,8 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
 
     async function loadRows() {
       if (!window.loadFlowMateListRows) {
-        setLoadState({ status: "fallback", message: "Using mock data: Supabase queue loader is not ready." });
+        setSourceRows([]);
+        setLoadState({ status: "error", message: "Live data unavailable: Supabase queue loader is not ready." });
         return;
       }
 
@@ -468,8 +470,8 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
       } catch (error) {
         if (!alive) return;
         console.error("[FlowMate Queue] Supabase load failed:", error);
-        setSourceRows(WORK);
-        setLoadState({ status: "fallback", message: `Using mock data: ${error.message || "Supabase query failed."}` });
+        setSourceRows([]);
+        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
       }
     }
 
@@ -572,7 +574,7 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
                   {w.queueReason}
                 </div>
               </td>
-              <td className="mono muted" style={{ fontSize: 11 }}>{w.status === "need_brief" ? "-" : "May 15, 09:00"}</td>
+              <td className="mono muted" style={{ fontSize: 11 }}>{w.status === "need_brief" ? "-" : (w.lastRunLabel || "-")}</td>
               <td className="col-right" onClick={(e) => e.stopPropagation()}>
                 <div style={{ display: "inline-flex", gap: 4 }}>
                   {w.needsSplit && (
@@ -606,4 +608,225 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
   );
 }
 
-Object.assign(window, { ListScreen, BoardScreen, QueueScreen });
+/* ============================================================
+   ADMIN WHITELIST
+   ============================================================ */
+function AdminWhitelistScreen() {
+  const currentUser = window.FLOWMATE_CURRENT_USER || {};
+  const [rows, setRows] = useStateB([]);
+  const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading whitelist users..." });
+  const [form, setForm] = useStateB({ email: "", displayName: "", role: "member", teamMemberCode: "" });
+  const [pending, setPending] = useStateB(false);
+
+  async function loadWhitelist() {
+    if (!window.loadFlowMateWhitelistUsers) {
+      setRows([]);
+      setLoadState({ status: "error", message: "Whitelist loader is not ready." });
+      return;
+    }
+
+    try {
+      const data = await window.loadFlowMateWhitelistUsers();
+      setRows(data || []);
+      setLoadState({ status: "live", message: `${(data || []).length} whitelisted users` });
+    } catch (error) {
+      console.error("[FlowMate Admin] Whitelist load failed:", error);
+      setRows([]);
+      setLoadState({ status: "error", message: error.message || "Whitelist RPC failed." });
+    }
+  }
+
+  useEffectB(() => { loadWhitelist(); }, []);
+
+  if (currentUser.role !== "admin") {
+    return (
+      <div className="page" style={{ maxWidth: 720 }}>
+        <div className="card">
+          <div className="card__head"><span className="card__title">Admin access required.</span></div>
+          <div className="card__body">
+            <div className="reason-box reason-box--need">Only FlowMate admins can manage the whitelist.</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function updateForm(key, value) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function submitWhitelistUser(event) {
+    event.preventDefault();
+    setPending(true);
+    setLoadState({ status: "loading", message: "Saving whitelist user..." });
+    try {
+      await window.upsertFlowMateWhitelistUser(form);
+      setForm({ email: "", displayName: "", role: "member", teamMemberCode: "" });
+      await loadWhitelist();
+    } catch (error) {
+      console.error("[FlowMate Admin] Whitelist save failed:", error);
+      setLoadState({ status: "error", message: error.message || "Whitelist RPC failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function deactivateWhitelistUser(row) {
+    if (!row || !row.email) return;
+    if (row.email === currentUser.email) {
+      setLoadState({ status: "error", message: "You cannot deactivate your own admin account from this screen." });
+      return;
+    }
+    if (!window.confirm(`Deactivate ${row.email}? They will lose FlowMate access.`)) return;
+
+    setPending(true);
+    setLoadState({ status: "loading", message: `Deactivating ${row.email}...` });
+    try {
+      await window.deleteFlowMateWhitelistUser(row.email);
+      await loadWhitelist();
+    } catch (error) {
+      console.error("[FlowMate Admin] Whitelist deactivate failed:", error);
+      setLoadState({ status: "error", message: error.message || "Whitelist RPC failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="page">
+      <div className="page__header">
+        <div>
+          <h1 className="page__title">Whitelist</h1>
+          <div className="page__sub">Manage who can sign in to FlowMate - {loadState.message}</div>
+        </div>
+        <div className="page__actions">
+          <button className="btn btn--secondary" onClick={loadWhitelist} disabled={pending}>
+            <Icon name="rerun" /> Refresh
+          </button>
+        </div>
+      </div>
+
+      {loadState.status === "error" && (
+        <div className="reason-box reason-box--need" style={{ marginBottom: 12 }}>
+          {loadState.message}
+        </div>
+      )}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card__head">
+          <span className="card__title">Add or update user</span>
+          <span className="card__sub">Backend RPC validates admin access and @garena.com email.</span>
+        </div>
+        <div className="card__body">
+          <form onSubmit={submitWhitelistUser} style={{ display: "grid", gap: 12 }}>
+            <div className="form-grid" style={{ gridTemplateColumns: "1.2fr 1fr 120px 160px" }}>
+              <label className="field">
+                <span className="field__label">Email *</span>
+                <input
+                  className="input"
+                  value={form.email}
+                  onChange={(event) => updateForm("email", event.target.value)}
+                  placeholder="name@garena.com"
+                  type="email"
+                  disabled={pending}
+                />
+              </label>
+              <label className="field">
+                <span className="field__label">Display name *</span>
+                <input
+                  className="input"
+                  value={form.displayName}
+                  onChange={(event) => updateForm("displayName", event.target.value)}
+                  placeholder="Display name"
+                  disabled={pending}
+                />
+              </label>
+              <label className="field">
+                <span className="field__label">Role</span>
+                <select
+                  className="select"
+                  value={form.role}
+                  onChange={(event) => updateForm("role", event.target.value)}
+                  disabled={pending}
+                >
+                  <option value="member">Member</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </label>
+              <label className="field">
+                <span className="field__label">Team member code</span>
+                <input
+                  className="input"
+                  value={form.teamMemberCode}
+                  onChange={(event) => updateForm("teamMemberCode", event.target.value)}
+                  placeholder="optional"
+                  disabled={pending}
+                />
+              </label>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btn--primary" type="submit" disabled={pending}>
+                <Icon name="plus" /> Add / update
+              </button>
+              <span className="muted" style={{ fontSize: 12 }}>Deactivate removes the email from whitelist and marks the matching app user inactive.</span>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="card card__body--flush" style={{ overflow: "hidden" }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Display name</th>
+              <th>Role</th>
+              <th>Team code</th>
+              <th>Added</th>
+              <th className="col-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const isCurrentUser = row.email === currentUser.email;
+              return (
+                <tr key={row.email}>
+                  <td className="mono">{row.email}</td>
+                  <td>{row.display_name || "-"}</td>
+                  <td>
+                    <span className={`badge ${row.role === "admin" ? "badge--progress" : "badge--assigned"}`}>
+                      {row.role === "admin" ? "Admin" : "Member"}
+                    </span>
+                  </td>
+                  <td className="mono muted">{row.team_member_code || "-"}</td>
+                  <td className="mono muted" style={{ fontSize: 11 }}>
+                    {row.created_at ? new Date(row.created_at).toLocaleDateString() : "-"}
+                  </td>
+                  <td className="col-right" onClick={(event) => event.stopPropagation()}>
+                    <button
+                      className="btn btn--xs btn--danger"
+                      onClick={() => deactivateWhitelistUser(row)}
+                      disabled={pending || isCurrentUser}
+                      title={isCurrentUser ? "You cannot deactivate your own admin account here." : "Deactivate whitelist access"}
+                    >
+                      Deactivate
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan="6" style={{ textAlign: "center", color: "var(--garena-grey)", padding: 18 }}>
+                  No whitelist users loaded.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { ListScreen, BoardScreen, QueueScreen, AdminWhitelistScreen });
