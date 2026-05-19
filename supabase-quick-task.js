@@ -29,19 +29,25 @@ async function createFlowMateQuickTask(input) {
 
   const title = (input.title || "").trim();
   const dueDate = input.dueDate;
+  const launchDate = input.launchDate;
+  const requesterTeam = (input.requesterTeam || "").trim();
   const isOtherAssignee = input.assigneeUserId === "other";
   const assigneeOtherName = (input.assigneeOtherName || "").trim();
 
   if (!title) throw new Error("Title is required.");
-  if (!dueDate) throw new Error("Due date is required.");
+  if (!requesterTeam) throw new Error("Requester Team / Function is required.");
+  if (!dueDate) throw new Error("1st Review / Draft is required.");
+  if (!launchDate) throw new Error("Launch date is required.");
   if (isOtherAssignee && !assigneeOtherName) throw new Error("Other assignee name is required.");
 
   const { data, error } = await window.flowmateSupabase.rpc("create_quick_task", {
     p_actor_user_id: flowmateActorId(),
     p_title: title,
     p_due_date: dueDate,
+    p_launch_date: input.launchDate,
     p_note: input.note || null,
     p_project_name: input.projectName || null,
+    p_requester_team: input.requesterTeam,
     p_assignee_user_id: isOtherAssignee ? null : (input.assigneeUserId || FLOWMATE_MOCK_USERS.pond),
     p_assignee_other_name: isOtherAssignee ? assigneeOtherName : null,
     p_priority: input.priority || "normal",

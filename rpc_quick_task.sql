@@ -63,13 +63,37 @@ drop function if exists public.create_quick_task(
   uuid,
   public.priority_level
 );
+drop function if exists public.create_quick_task(
+  uuid,
+  text,
+  date,
+  text,
+  text,
+  uuid,
+  text,
+  public.priority_level
+);
+drop function if exists public.create_quick_task(
+  uuid,
+  text,
+  date,
+  date,
+  text,
+  text,
+  text,
+  uuid,
+  text,
+  public.priority_level
+);
 
 create or replace function public.create_quick_task(
   p_actor_user_id uuid,
   p_title text,
   p_due_date date,
+  p_launch_date date,
   p_note text default null,
   p_project_name text default null,
+  p_requester_team text default null,
   p_assignee_user_id uuid default null,
   p_assignee_other_name text default null,
   p_priority public.priority_level default 'normal'
@@ -105,7 +129,15 @@ begin
   end if;
 
   if p_due_date is null then
-    raise exception 'Quick task due date is required';
+    raise exception 'Quick task 1st Review / Draft date is required';
+  end if;
+
+  if p_launch_date is null then
+    raise exception 'Quick task launch date is required';
+  end if;
+
+  if length(trim(coalesce(p_requester_team, ''))) = 0 then
+    raise exception 'Quick task requester team/function is required';
   end if;
 
   v_assignee_user_id := p_assignee_user_id;
@@ -149,7 +181,8 @@ begin
     assignee_other_name,
     status,
     priority,
-    due_date
+    due_date,
+    launch_date
   )
   values (
     v_display_id,
@@ -158,12 +191,13 @@ begin
     nullif(trim(coalesce(p_note, '')), ''),
     nullif(trim(coalesce(p_project_name, '')), ''),
     v_actor_id,
-    coalesce(v_actor.requester_team, 'GD/VE Internal'),
+    nullif(trim(coalesce(p_requester_team, '')), ''),
     v_assignee_user_id,
     v_assignee_other_name,
     'assigned',
     coalesce(p_priority, 'normal'),
-    p_due_date
+    p_due_date,
+    p_launch_date
   )
   returning id into v_work_item_id;
 
@@ -199,6 +233,8 @@ grant execute on function public.create_quick_task(
   uuid,
   text,
   date,
+  date,
+  text,
   text,
   text,
   uuid,

@@ -307,6 +307,31 @@ describe("quick task Other assignee SQL support", () => {
     expect(quickTaskSql).toContain("perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id)");
     expect(quickTaskSql).not.toMatch(/where id = p_actor_user_id\b/i);
   });
+
+  it("quick task create flow stores launch date and requester team/function", () => {
+    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
+
+    expect(quickTaskJs).toContain("p_launch_date: input.launchDate");
+    expect(quickTaskJs).toContain("p_requester_team: input.requesterTeam");
+    expect(quickTaskSql).toContain("p_launch_date date");
+    expect(quickTaskSql).toContain("p_requester_team text");
+    expect(quickTaskSql).toContain("nullif(trim(coalesce(p_requester_team, '')), '')");
+    expect(quickTaskSql).toContain("launch_date");
+    expect(quickTaskSql).toContain("p_launch_date");
+  });
+
+  it("quick task form uses the creative title template fields", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
+
+    expect(createScreenJsx).toContain("function updateQuickDraft");
+    expect(quickTaskFormSource).toContain("Requester Team / Function");
+    expect(quickTaskFormSource).toContain("Launch date");
+    expect(quickTaskFormSource).toContain("1st Review / Draft");
+    expect(quickTaskFormSource).toContain("Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.");
+    expect(quickTaskFormSource).toContain("readOnly");
+  });
 });
 
 describe("full assignee roster", () => {
@@ -321,6 +346,13 @@ describe("full assignee roster", () => {
     for (const code of assigneeCodes) {
       expect(seedSql).toContain(`'${code}'`);
     }
+  });
+
+  it("links seeded team members by user email so existing auth users keep their real ids", () => {
+    const seedSql = readFileSync(join(process.cwd(), "supabase", "seed.sql"), "utf8");
+    expect(seedSql).toContain("select id from public.users where lower(email) = lower('panuwee.w@garena.com')");
+    expect(seedSql).not.toMatch(/'panu',\s*'00000000-0000-0000-0000-000000001002'/);
+    expect(seedSql).not.toMatch(/'pond',\s*'00000000-0000-0000-0000-000000001015'/);
   });
 
   it("links every whitelisted assignee to a team_member_code", () => {

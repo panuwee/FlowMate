@@ -401,10 +401,12 @@ function CreateScreen({ onNav, onOpen }) {
   const [quickDraft, setQuickDraft] = useState({
     title: "",
     note: "",
+    requesterTeam: "Marketing",
     projectName: "",
     assigneeUserId: getDefaultQuickAssignee().userId,
     assigneeOtherName: "",
     dueDate: "2026-05-18",
+    launchDate: "2026-05-25",
     priority: "normal",
   });
   const [creativeDraft, setCreativeDraft] = useState({
@@ -521,6 +523,15 @@ function CreateScreen({ onNav, onOpen }) {
     setCreativeDraft({ ...nextDraft, title });
   }
 
+  function updateQuickDraft(nextDraft) {
+    const title = window.buildFlowMateTemplateTitle({
+      launchDate: nextDraft.launchDate,
+      requesterTeam: nextDraft.requesterTeam,
+      projectName: nextDraft.projectName,
+    });
+    setQuickDraft({ ...nextDraft, title });
+  }
+
   return (
     <div className="page" style={{ maxWidth: 1100 }}>
       <div className="page__header">
@@ -558,7 +569,7 @@ function CreateScreen({ onNav, onOpen }) {
         </div>
         <div className="card__body">
           {mode === "quick"
-            ? <QuickTaskForm value={quickDraft} onChange={setQuickDraft} assigneeOptions={assigneeOptions} />
+            ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} />
             : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} />}
         </div>
       </div>
@@ -610,14 +621,21 @@ function QuickTaskForm({ value, onChange, assigneeOptions }) {
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} onChange={(e) => update("title", e.target.value)} placeholder="e.g. Pull retention numbers for Monday standup" />
+        <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
       </div>
       <div className="field field--full">
         <label className="field__label">Note</label>
         <textarea className="textarea" value={value.note} onChange={(e) => update("note", e.target.value)} placeholder="Short description - what needs doing, any context, link to the doc."></textarea>
       </div>
       <div className="field">
-        <label className="field__label">Project / campaign</label>
+        <label className="field__label">Requester Team / Function <span className="req">*</span></label>
+        <select className="select" value={value.requesterTeam} onChange={(e) => update("requesterTeam", e.target.value)}>
+          <option>Marketing</option><option>Esport Ops</option><option>Community</option><option>Sales</option><option>Product</option><option>Operations</option>
+        </select>
+      </div>
+      <div className="field">
+        <label className="field__label">Project / campaign <span className="req">*</span></label>
         <input className="input" value={value.projectName} onChange={(e) => update("projectName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
       </div>
       <div className="field">
@@ -665,8 +683,12 @@ function QuickTaskForm({ value, onChange, assigneeOptions }) {
         </div>
       </div>
       <div className="field">
-        <label className="field__label">Due date <span className="req">*</span></label>
+        <label className="field__label">1st Review / Draft <span className="req">*</span></label>
         <input className="input" value={value.dueDate} onChange={(e) => update("dueDate", e.target.value)} type="date" />
+      </div>
+      <div className="field">
+        <label className="field__label">Launch date <span className="req">*</span></label>
+        <input className="input" value={value.launchDate} onChange={(e) => update("launchDate", e.target.value)} type="date" />
       </div>
       <div className="field">
         <label className="field__label">Priority</label>
