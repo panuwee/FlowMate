@@ -1050,7 +1050,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             <div className="card">
               <div className="card__head"><span className="card__title">{w.type === "quick" ? "Note" : "Brief Note"}</span></div>
               <div className="card__body">
-                <div className="reason-box">{visibleBriefNote}</div>
+                <div className="reason-box" style={{ whiteSpace: "pre-wrap" }}>{visibleBriefNote}</div>
               </div>
             </div>
           )}
