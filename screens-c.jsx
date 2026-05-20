@@ -63,7 +63,10 @@ function WorkloadScreen({ onOpen }) {
     }
 
     loadRows();
-    return () => { alive = false; };
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRows)
+      : () => {};
+    return () => { alive = false; cleanup(); };
   }, []);
 
   const safeRows = (rows || []).filter(r => r && r.m).map(r => ({
@@ -345,7 +348,10 @@ function KpiScreen() {
     }
 
     loadRows();
-    return () => { alive = false; };
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRows)
+      : () => {};
+    return () => { alive = false; cleanup(); };
   }, []);
 
   const deliveredRows = rows.filter(w => w.status === "delivered" || w.status === "done");
@@ -548,7 +554,10 @@ function SettingsScreen() {
     }
 
     loadMembers();
-    return () => { alive = false; };
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadMembers)
+      : () => {};
+    return () => { alive = false; cleanup(); };
   }, []);
 
   return (

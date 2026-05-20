@@ -73,7 +73,10 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     }
 
     loadRows();
-    return () => { alive = false; };
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRows)
+      : () => {};
+    return () => { alive = false; cleanup(); };
   }, []);
 
   const rows = sourceRows.filter(w => {
@@ -225,7 +228,7 @@ function BoardScreen({ onOpen }) {
   const [busy, setBusy] = useStateB(false);
   const [flash, setFlash] = useStateB(null);
 
-  async function loadRows() {
+  async function loadRows(isAlive = () => true) {
     if (!window.loadFlowMateListRows) {
       setSourceRows([]);
       setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
@@ -233,16 +236,25 @@ function BoardScreen({ onOpen }) {
     }
     try {
       const rows = await window.loadFlowMateListRows();
+      if (!isAlive()) return;
       setSourceRows(rows);
       setLoadState({ status: "live", message: "Live Supabase data" });
     } catch (error) {
+      if (!isAlive()) return;
       console.error("[FlowMate Board] Supabase load failed:", error);
       setSourceRows([]);
       setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
     }
   }
 
-  useEffectB(() => { loadRows(); }, []);
+  useEffectB(() => {
+    let alive = true;
+    loadRows(() => alive);
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(() => loadRows(() => alive))
+      : () => {};
+    return () => { alive = false; cleanup(); };
+  }, []);
 
   const byCol = Object.fromEntries(columns.map(c => [c.key, sourceRows.filter(w => w.status === c.key)]));
 
@@ -482,7 +494,10 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
     }
 
     loadRows();
-    return () => { alive = false; };
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRows)
+      : () => {};
+    return () => { alive = false; cleanup(); };
   }, []);
 
   const queued = sourceRows.filter(w => {

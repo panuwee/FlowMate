@@ -3,6 +3,132 @@ function flowmateToKebab(value) {
 }
 
 const FLOWMATE_ALLOWED_REQUESTER_TEAMS = ["Operations", "Marketing", "Esport", "GD/VE"];
+const FLOWMATE_REALTIME_DEBOUNCE_MS = 700;
+const FLOWMATE_REFRESH_POLL_MS = 60000;
+const FLOWMATE_REALTIME_TABLES = [
+  "work_items",
+  "creative_request_details",
+  "checklist_items",
+  "comments",
+  "assignment_runs",
+  "work_item_events",
+  "notifications",
+];
+
+let flowmateRealtimeChannel = null;
+let flowmateRealtimeRefreshTimer = null;
+
+window.FLOWMATE_REALTIME_STATE = window.FLOWMATE_REALTIME_STATE || {
+  status: "idle",
+  message: "Realtime not started",
+  lastEventAt: null,
+};
+
+function setFlowMateRealtimeState(nextState) {
+  window.FLOWMATE_REALTIME_STATE = {
+    ...window.FLOWMATE_REALTIME_STATE,
+    ...nextState,
+  };
+  window.dispatchEvent(new CustomEvent("flowmate:realtime-state", {
+    detail: window.FLOWMATE_REALTIME_STATE,
+  }));
+}
+
+function emitFlowMateSynced(source) {
+  window.dispatchEvent(new CustomEvent("flowmate:synced", { detail: { source } }));
+}
+
+function scheduleFlowMateRealtimeRefresh(reason) {
+  if (flowmateRealtimeRefreshTimer) clearTimeout(flowmateRealtimeRefreshTimer);
+  setFlowMateRealtimeState({
+    status: "syncing",
+    message: "Realtime update received",
+    lastEventAt: Date.now(),
+  });
+  flowmateRealtimeRefreshTimer = setTimeout(() => {
+    flowmateRealtimeRefreshTimer = null;
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }, FLOWMATE_REALTIME_DEBOUNCE_MS);
+}
+
+function startFlowMateRealtime() {
+  if (!window.flowmateSupabase || typeof window.flowmateSupabase.channel !== "function") {
+    setFlowMateRealtimeState({ status: "degraded", message: "Realtime degraded - polling fallback active" });
+    return null;
+  }
+  if (!window.FLOWMATE_CURRENT_USER) {
+    setFlowMateRealtimeState({ status: "idle", message: "Realtime waits for sign-in" });
+    return null;
+  }
+  if (flowmateRealtimeChannel) return flowmateRealtimeChannel;
+
+  try {
+    const channel = window.flowmateSupabase.channel("flowmate-live-updates-v1");
+    FLOWMATE_REALTIME_TABLES.forEach((table) => {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, () => {
+        scheduleFlowMateRealtimeRefresh(table);
+      });
+    });
+    flowmateRealtimeChannel = channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        setFlowMateRealtimeState({ status: "connected", message: "Realtime connected" });
+        return;
+      }
+      if (["CHANNEL_ERROR", "TIMED_OUT", "CLOSED"].includes(status)) {
+        setFlowMateRealtimeState({ status: "degraded", message: "Realtime degraded - polling fallback active" });
+      }
+    });
+    return flowmateRealtimeChannel;
+  } catch (error) {
+    console.warn("[FlowMate Realtime] setup failed:", error && error.message);
+    flowmateRealtimeChannel = null;
+    setFlowMateRealtimeState({ status: "degraded", message: "Realtime degraded - polling fallback active" });
+    return null;
+  }
+}
+
+function stopFlowMateRealtime() {
+  if (flowmateRealtimeRefreshTimer) {
+    clearTimeout(flowmateRealtimeRefreshTimer);
+    flowmateRealtimeRefreshTimer = null;
+  }
+  if (flowmateRealtimeChannel && window.flowmateSupabase && typeof window.flowmateSupabase.removeChannel === "function") {
+    window.flowmateSupabase.removeChannel(flowmateRealtimeChannel);
+  }
+  flowmateRealtimeChannel = null;
+  setFlowMateRealtimeState({ status: "idle", message: "Realtime stopped" });
+}
+
+function attachFlowMateLiveRefresh(refreshFn, options = {}) {
+  const intervalMs = options.intervalMs || FLOWMATE_REFRESH_POLL_MS;
+  let running = false;
+  let queued = false;
+
+  async function runRefresh() {
+    if (running) {
+      queued = true;
+      return;
+    }
+    running = true;
+    try {
+      await refreshFn();
+    } finally {
+      running = false;
+      if (queued) {
+        queued = false;
+        runRefresh();
+      }
+    }
+  }
+
+  window.addEventListener("flowmate:refresh-request", runRefresh);
+  const intervalId = setInterval(runRefresh, intervalMs);
+  return () => {
+    window.removeEventListener("flowmate:refresh-request", runRefresh);
+    clearInterval(intervalId);
+  };
+}
 
 function normalizeFlowMateRequesterTeam(value) {
   const team = String(value || "").trim();
@@ -130,7 +256,7 @@ async function loadFlowMateListRows() {
 
   syncFlowMateMembers(membersResult.data || []);
 
-  return (workItemsResult.data || []).map((item) => {
+  const rows = (workItemsResult.data || []).map((item) => {
     const flags = flagsByWorkItemId[item.id] || {};
     const requester = usersById[item.requester_user_id] || {};
     const details = detailsByWorkItemId[item.id] || {};
@@ -202,6 +328,8 @@ async function loadFlowMateListRows() {
       isSupabaseRow: true,
     };
   });
+  emitFlowMateSynced("work_items");
+  return rows;
 }
 
 function normalizeFlowMateMember(member) {
@@ -265,6 +393,9 @@ async function loadFlowMateAssignees() {
 
 window.loadFlowMateListRows = loadFlowMateListRows;
 window.loadFlowMateAssignees = loadFlowMateAssignees;
+window.startFlowMateRealtime = startFlowMateRealtime;
+window.stopFlowMateRealtime = stopFlowMateRealtime;
+window.attachFlowMateLiveRefresh = attachFlowMateLiveRefresh;
 
 async function loadFlowMateRequesterTeams() {
   if (!window.flowmateSupabase) {

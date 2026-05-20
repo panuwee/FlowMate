@@ -55,6 +55,10 @@ function App() {
   // Signed-in renders the full FlowMate app.
   const [authState, setAuthState] = useStateApp({ status: "loading", user: null });
   const [isSigningIn, setIsSigningIn] = useStateApp(false);
+  const [realtimeState, setRealtimeState] = useStateApp(() => window.FLOWMATE_REALTIME_STATE || {
+    status: "idle",
+    message: "Realtime not started",
+  });
 
   function nav(key) {
     setRoute(key);
@@ -141,6 +145,25 @@ function App() {
       console.error("[FlowMate Auth] sign-out failed:", error);
     }
   }
+
+  useEffectApp(() => {
+    function onRealtimeState(event) {
+      setRealtimeState(event.detail || window.FLOWMATE_REALTIME_STATE || { status: "idle" });
+    }
+    window.addEventListener("flowmate:realtime-state", onRealtimeState);
+    return () => window.removeEventListener("flowmate:realtime-state", onRealtimeState);
+  }, []);
+
+  useEffectApp(() => {
+    if (authState.status !== "signed-in") {
+      if (window.stopFlowMateRealtime) window.stopFlowMateRealtime();
+      return;
+    }
+    if (window.startFlowMateRealtime) window.startFlowMateRealtime();
+    return () => {
+      if (window.stopFlowMateRealtime) window.stopFlowMateRealtime();
+    };
+  }, [authState.status]);
 
   useEffectApp(() => {
     if (authState.status !== "signed-in") return;
@@ -235,7 +258,7 @@ function App() {
           </div>
         ))}
 
-        <LiveStatus />
+        <LiveStatus realtimeState={realtimeState} />
       </nav>
 
       <main className="app__main" key={route + (focusId || "")}>
@@ -277,7 +300,7 @@ function AccessDeniedScreen({ onNav }) {
   );
 }
 
-function LiveStatus() {
+function LiveStatus({ realtimeState }) {
   const [tick, setTick] = useStateApp(0);
   const [lastSyncedAt, setLastSyncedAt] = useStateApp(() => Date.now());
 
@@ -297,12 +320,26 @@ function LiveStatus() {
 
   const seconds = Math.max(0, Math.floor((Date.now() - lastSyncedAt) / 1000));
   const label = seconds < 5 ? "just now" : seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)}m ago`;
+  const realtimeStatus = realtimeState && realtimeState.status ? realtimeState.status : "idle";
+  const realtimeMessage =
+    realtimeStatus === "connected" ? "Realtime connected" :
+    realtimeStatus === "syncing" ? "Realtime syncing" :
+    realtimeStatus === "degraded" ? "Realtime degraded" :
+    "Polling fallback active";
+  const dotColor =
+    realtimeStatus === "connected" ? "var(--garena-positive)" :
+    realtimeStatus === "syncing" ? "var(--garena-orange)" :
+    realtimeStatus === "degraded" ? "var(--garena-red)" :
+    "var(--garena-grey)";
   void tick;
   return (
     <div style={{ padding: "16px 24px", marginTop: 24, borderTop: "1px solid var(--garena-light-grey)" }}>
       <div className="muted" style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, marginBottom: 8 }}>Live</div>
       <div className="row" style={{ gap: 6, fontSize: 12, color: "var(--garena-iron)" }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--garena-positive)" }}></span>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor }}></span>
+        <span>{realtimeMessage}</span>
+      </div>
+      <div className="row" style={{ gap: 6, fontSize: 12, color: "var(--garena-grey)", marginTop: 4 }}>
         <span>Synced {label}</span>
       </div>
     </div>

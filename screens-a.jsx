@@ -13,7 +13,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const [loadState, setLoadState] = useState({ status: "loading", message: "Loading Supabase data..." });
   const [filterStatus, setFilterStatus] = useState("all");
 
-  async function loadMyWorkRows(alive = true) {
+  async function loadMyWorkRows(isAlive = () => true) {
     if (!window.loadFlowMateListRows) {
       setSourceRows([]);
       setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
@@ -22,12 +22,12 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       const rows = await window.loadFlowMateListRows();
-      if (!alive) return;
+      if (!isAlive()) return;
       setSourceRows(rows);
       setLoadState({ status: "live", message: "Live Supabase data" });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
     } catch (error) {
-      if (!alive) return;
+      if (!isAlive()) return;
       console.error("[FlowMate My Work] Supabase load failed:", error);
       setSourceRows([]);
       setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
@@ -36,8 +36,11 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
   useEffect(() => {
     let alive = true;
-    loadMyWorkRows(alive);
-    return () => { alive = false; };
+    loadMyWorkRows(() => alive);
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(() => loadMyWorkRows(() => alive))
+      : () => {};
+    return () => { alive = false; cleanup(); };
   }, []);
 
   async function handleQuickDone(work) {
@@ -45,7 +48,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       await window.completeFlowMateQuickTask(work.id);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
       setLoadState({ status: "live", message: `Completed ${work.id}` });
     } catch (error) {
@@ -59,7 +62,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       await window.addFlowMateQuickTaskChecklistItem(work.id, title);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       setLoadState({ status: "live", message: `Added checklist item to ${work.id}` });
     } catch (error) {
       console.error("[FlowMate My Work] Add checklist item failed:", error);
@@ -70,7 +73,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   async function handleChecklistToggle(item, isDone) {
     try {
       await window.toggleFlowMateQuickTaskChecklistItem(item.id, isDone);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       setLoadState({ status: "live", message: "Checklist updated" });
     } catch (error) {
       console.error("[FlowMate My Work] Toggle checklist item failed:", error);
@@ -83,7 +86,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       await window.addFlowMateWorkItemComment(work.id, body);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       setLoadState({ status: "live", message: `Added comment to ${work.id}` });
     } catch (error) {
       console.error("[FlowMate My Work] Add comment failed:", error);
@@ -97,7 +100,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       await window.updateFlowMateOwnComment(comment.id, nextBody);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       setLoadState({ status: "live", message: "Comment updated" });
     } catch (error) {
       console.error("[FlowMate My Work] Edit comment failed:", error);
@@ -110,7 +113,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       await window.deleteFlowMateOwnComment(comment.id);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       setLoadState({ status: "live", message: "Comment deleted" });
     } catch (error) {
       console.error("[FlowMate My Work] Delete comment failed:", error);
@@ -136,7 +139,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     try {
       await window.transitionFlowMateCreativeStatus(work.id, nextStatus, options);
-      await loadMyWorkRows(true);
+      await loadMyWorkRows();
       setLoadState({ status: "live", message: `${work.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}` });
     } catch (error) {
       console.error("[FlowMate My Work] Creative status transition failed:", error);
