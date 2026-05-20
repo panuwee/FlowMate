@@ -667,8 +667,26 @@ function CalendarScreen({ onOpen }) {
     setMonthKey(calendarMonthKeyC(dateKey));
   }
 
+  function openCalendarOverflow(event, dateKey) {
+    event.stopPropagation();
+    selectDate(dateKey);
+    setAgendaRange("day");
+    setViewMode("agenda");
+  }
+
   function calendarItem(item, compact = false) {
     const owner = item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : (item.assigneeOtherName || "Unassigned");
+    const textClampStyle = compact ? {
+      display: "-webkit-box",
+      WebkitLineClamp: 2,
+      WebkitBoxOrient: "vertical",
+      overflow: "hidden",
+      overflowWrap: "anywhere",
+      wordBreak: "break-word",
+    } : {
+      overflowWrap: "anywhere",
+      wordBreak: "break-word",
+    };
     return (
       <button
         key={item.id}
@@ -677,21 +695,23 @@ function CalendarScreen({ onOpen }) {
         onClick={() => openCalendarItem(item)}
         style={{
           width: "100%",
+          minWidth: 0,
           justifyContent: "flex-start",
           textAlign: "left",
           height: "auto",
           padding: compact ? "6px 8px" : "10px 12px",
           borderColor: item.overdue || (item.dueDelta != null && item.dueDelta < 0) ? "var(--garena-red)" : "var(--garena-light-grey)",
           background: item.overdue || (item.dueDelta != null && item.dueDelta < 0) ? "var(--garena-red-light-2)" : "#fff",
+          overflow: "hidden",
         }}
       >
-        <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
-          <span className="row" style={{ justifyContent: "space-between", gap: 8 }}>
-            <span className="mono strong" style={{ fontSize: 11 }}>{item.id}</span>
+        <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", minWidth: 0 }}>
+          <span className="row" style={{ justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+            <span className="mono strong" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.id}</span>
             {!compact && <TypePill type={item.type} />}
           </span>
-          <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3 }}>{item.title}</span>
-          <span className="muted" style={{ fontSize: 11 }}>{owner} - {STATUS_LABEL[item.status] || item.status}</span>
+          <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3, minWidth: 0, ...textClampStyle }}>{item.title}</span>
+          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner} - {STATUS_LABEL[item.status] || item.status}</span>
           {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
         </span>
       </button>
@@ -794,7 +814,16 @@ function CalendarScreen({ onOpen }) {
                   </div>
                   <div className="col" style={{ gap: 6 }}>
                     {items.slice(0, 3).map(item => calendarItem(item, true))}
-                    {items.length > 3 && <span className="muted" style={{ fontSize: 11 }}>+{items.length - 3} more</span>}
+                    {items.length > 3 && (
+                      <button
+                        type="button"
+                        className="btn btn--xs btn--ghost"
+                        onClick={(event) => openCalendarOverflow(event, cell.key)}
+                        style={{ width: "100%", justifyContent: "flex-start", minWidth: 0 }}
+                      >
+                        Open all +{items.length - 3} more
+                      </button>
+                    )}
                   </div>
                 </div>
               );
