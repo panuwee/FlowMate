@@ -120,6 +120,62 @@ function filterFlowMateMyWorkByStatus(rows, status) {
   return source.filter((row) => row && row.status === value);
 }
 
+function getFlowMateUtcDateKey(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function getFlowMateCalendarDateKey(row, today = new Date()) {
+  if (!row) return "";
+  const rawDate = row.calendarDate || row.dueDate;
+  if (rawDate && /^\d{4}-\d{2}-\d{2}/.test(rawDate)) return rawDate.slice(0, 10);
+  if (row.dueDelta == null || Number.isNaN(Number(row.dueDelta))) return "";
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return getFlowMateUtcDateKey(new Date(todayUtc + Number(row.dueDelta) * 86400000));
+}
+
+function getFlowMateCalendarWeekBounds(dateKey) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || "")) return null;
+  const [y, m, d] = dateKey.split("-").map(Number);
+  const selected = new Date(Date.UTC(y, m - 1, d));
+  const mondayOffset = (selected.getUTCDay() + 6) % 7;
+  const start = new Date(selected.getTime() - mondayOffset * 86400000);
+  const end = new Date(start.getTime() + 6 * 86400000);
+  return {
+    startKey: getFlowMateUtcDateKey(start),
+    endKey: getFlowMateUtcDateKey(end),
+  };
+}
+
+function getFlowMateCalendarAgendaRows(rows, filters = {}, today = new Date()) {
+  const selectedDateKey = filters.dateKey || getFlowMateUtcDateKey(today);
+  const weekBounds = filters.range === "week" ? getFlowMateCalendarWeekBounds(selectedDateKey) : null;
+  return (rows || []).filter((row) => {
+    if (!row) return false;
+    const dateKey = getFlowMateCalendarDateKey(row, today);
+    if (!dateKey) return false;
+    if (weekBounds) {
+      if (dateKey < weekBounds.startKey || dateKey > weekBounds.endKey) return false;
+    } else if (dateKey !== selectedDateKey) {
+      return false;
+    }
+    if (filters.assignee && filters.assignee !== "all" && (row.assignee || "unassigned") !== filters.assignee) return false;
+    if (filters.status && filters.status !== "all" && row.status !== filters.status) return false;
+    if (filters.type && filters.type !== "all" && row.type !== filters.type) return false;
+    if (filters.priority && filters.priority !== "all" && row.priority !== filters.priority) return false;
+    return true;
+  }).sort((a, b) => {
+    const dateDiff = getFlowMateCalendarDateKey(a, today).localeCompare(getFlowMateCalendarDateKey(b, today));
+    if (dateDiff) return dateDiff;
+    const dueA = a && a.dueDelta != null ? a.dueDelta : 9999;
+    const dueB = b && b.dueDelta != null ? b.dueDelta : 9999;
+    if (dueA !== dueB) return dueA - dueB;
+    return String((a && a.id) || "").localeCompare(String((b && b.id) || ""));
+  });
+}
+
 function getFlowMateQueueRows(rows, query) {
   return (rows || []).filter((row) =>
     matchesFlowMateSearch(row || {}, query)
@@ -163,6 +219,8 @@ window.filterFlowMateAssigneeOptions = filterFlowMateAssigneeOptions;
 window.getFlowMateMyWorkRows = getFlowMateMyWorkRows;
 window.filterFlowMateMyWorkByStatus = filterFlowMateMyWorkByStatus;
 window.sortFlowMateMyWorkRows = sortFlowMateMyWorkRows;
+window.getFlowMateCalendarDateKey = getFlowMateCalendarDateKey;
+window.getFlowMateCalendarAgendaRows = getFlowMateCalendarAgendaRows;
 window.getFlowMateQueueRows = getFlowMateQueueRows;
 window.getFlowMateNavCounts = getFlowMateNavCounts;
 window.isFlowMateGdVeMember = isFlowMateGdVeMember;

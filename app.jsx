@@ -9,6 +9,7 @@ const NAV = [
   { group: "Team", items: [
     { key: "board",    label: "Board",         icon: "board" },
     { key: "list",     label: "List",          icon: "list" },
+    { key: "calendar", label: "Calendar",      icon: "calendar" },
     { key: "queue",    label: "Central queue", icon: "queue" },
   ]},
   { group: "Supervisor", items: [
@@ -26,7 +27,7 @@ const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || grou
 
 const TITLE_MAP = {
   "my-work": "My work", "create": "Create", "detail": "Work item",
-  "list": "All work", "board": "Board", "queue": "Central queue",
+  "list": "All work", "board": "Board", "calendar": "Team calendar", "queue": "Central queue",
   "workload": "Workload", "kpi": "KPI", "settings": "Team settings",
   "admin-whitelist": "Whitelist",
 };
@@ -267,6 +268,7 @@ function App() {
         {allowedRoute && route === "detail"   && <DetailScreen   onNav={nav} onOpen={open} focusId={focusId} />}
         {allowedRoute && route === "list"     && <ListScreen     onOpen={open} searchQuery={searchQuery} />}
         {allowedRoute && route === "board"    && <BoardScreen    onOpen={open} />}
+        {allowedRoute && route === "calendar" && <CalendarScreen onOpen={open} />}
         {allowedRoute && route === "queue"    && <QueueScreen    onOpen={open} searchQuery={searchQuery} />}
         {allowedRoute && route === "workload" && <WorkloadScreen onOpen={open} />}
         {allowedRoute && route === "kpi"      && <KpiScreen />}

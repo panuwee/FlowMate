@@ -524,6 +524,327 @@ function KpiScreen() {
 }
 
 /* ============================================================
+   TEAM CALENDAR
+   ============================================================ */
+function calendarUtcKeyC(date) {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function calendarParseKeyC(dateKey) {
+  const [y, m, d] = String(dateKey || "").split("-").map(Number);
+  return new Date(Date.UTC(y || 1970, (m || 1) - 1, d || 1));
+}
+
+function calendarAddDaysC(dateKey, days) {
+  return calendarUtcKeyC(new Date(calendarParseKeyC(dateKey).getTime() + days * 86400000));
+}
+
+function calendarMonthKeyC(dateKey) {
+  return `${String(dateKey || calendarUtcKeyC(new Date())).slice(0, 7)}-01`;
+}
+
+function calendarShiftMonthC(monthKey, delta) {
+  const date = calendarParseKeyC(monthKey);
+  return calendarUtcKeyC(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1)));
+}
+
+function calendarMonthLabelC(monthKey) {
+  return calendarParseKeyC(monthKey).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function calendarDateLabelC(dateKey) {
+  return calendarParseKeyC(dateKey).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function calendarWeekLabelC(dateKey) {
+  const selected = calendarParseKeyC(dateKey);
+  const mondayOffset = (selected.getUTCDay() + 6) % 7;
+  const startKey = calendarUtcKeyC(new Date(selected.getTime() - mondayOffset * 86400000));
+  const endKey = calendarAddDaysC(startKey, 6);
+  return `${calendarDateLabelC(startKey)} - ${calendarDateLabelC(endKey)}`;
+}
+
+function calendarMonthCellsC(monthKey) {
+  const first = calendarParseKeyC(monthKey);
+  const gridStartOffset = first.getUTCDay();
+  const start = new Date(first.getTime() - gridStartOffset * 86400000);
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start.getTime() + index * 86400000);
+    return {
+      key: calendarUtcKeyC(date),
+      day: date.getUTCDate(),
+      inMonth: date.getUTCMonth() === first.getUTCMonth(),
+    };
+  });
+}
+
+function CalendarScreen({ onOpen }) {
+  const todayKey = calendarUtcKeyC(new Date());
+  const [sourceRows, setSourceRows] = useStateC(WORK);
+  const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
+  const [viewMode, setViewMode] = useStateC("month");
+  const [agendaRange, setAgendaRange] = useStateC("day");
+  const [selectedDateKey, setSelectedDateKey] = useStateC(todayKey);
+  const [monthKey, setMonthKey] = useStateC(calendarMonthKeyC(todayKey));
+  const [filterAssignee, setFilterAssignee] = useStateC("all");
+  const [filterStatus, setFilterStatus] = useStateC("all");
+  const [filterType, setFilterType] = useStateC("all");
+  const [filterPriority, setFilterPriority] = useStateC("all");
+
+  useEffectC(() => {
+    let alive = true;
+
+    async function loadRows() {
+      if (!window.loadFlowMateListRows) {
+        setSourceRows([]);
+        setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
+        return;
+      }
+
+      try {
+        const rows = await window.loadFlowMateListRows();
+        if (!alive) return;
+        setSourceRows(rows);
+        setLoadState({ status: "live", message: "Live Supabase data" });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Calendar] Supabase load failed:", error);
+        setSourceRows([]);
+        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+      }
+    }
+
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRows)
+      : () => {};
+    return () => { alive = false; cleanup(); };
+  }, []);
+
+  const calendarRows = (sourceRows || []).map((row) => ({
+    ...row,
+    calendarDate: window.getFlowMateCalendarDateKey ? window.getFlowMateCalendarDateKey(row) : "",
+  })).filter((row) => row.calendarDate && (row.type === "quick" || row.type === "creative"));
+
+  const rowsByDate = calendarRows.reduce((map, row) => {
+    if (!map[row.calendarDate]) map[row.calendarDate] = [];
+    map[row.calendarDate].push(row);
+    return map;
+  }, {});
+
+  const ownerOptionRows = [
+    ...(window.MEMBERS || []).map(member => [member.id, member.name]),
+    ...calendarRows.map(row => {
+      const id = row.assignee || "unassigned";
+      const label = row.assignee && MEMBERS_BY_ID[row.assignee] ? MEMBERS_BY_ID[row.assignee].name : (row.assigneeOtherName || "Unassigned");
+      return [id, label];
+    }),
+  ];
+  const ownerOptions = Array.from(new Map(ownerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  const agendaRows = window.getFlowMateCalendarAgendaRows
+    ? window.getFlowMateCalendarAgendaRows(calendarRows, {
+      dateKey: selectedDateKey,
+      range: agendaRange,
+      assignee: filterAssignee,
+      status: filterStatus,
+      type: filterType,
+      priority: filterPriority,
+    })
+    : [];
+  const overdueCount = calendarRows.filter(row => row.overdue || (row.dueDelta != null && row.dueDelta < 0)).length;
+  const dueSoonCount = calendarRows.filter(row => !row.overdue && row.dueDelta != null && row.dueDelta >= 0 && row.dueDelta <= 2).length;
+
+  function openCalendarItem(item) {
+    window.flowmateSelectedWorkItem = item;
+    onOpen(item.id);
+  }
+
+  function selectDate(dateKey) {
+    setSelectedDateKey(dateKey);
+    setMonthKey(calendarMonthKeyC(dateKey));
+  }
+
+  function calendarItem(item, compact = false) {
+    const owner = item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : (item.assigneeOtherName || "Unassigned");
+    return (
+      <button
+        key={item.id}
+        type="button"
+        className="btn btn--ghost"
+        onClick={() => openCalendarItem(item)}
+        style={{
+          width: "100%",
+          justifyContent: "flex-start",
+          textAlign: "left",
+          height: "auto",
+          padding: compact ? "6px 8px" : "10px 12px",
+          borderColor: item.overdue || (item.dueDelta != null && item.dueDelta < 0) ? "var(--garena-red)" : "var(--garena-light-grey)",
+          background: item.overdue || (item.dueDelta != null && item.dueDelta < 0) ? "var(--garena-red-light-2)" : "#fff",
+        }}
+      >
+        <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+          <span className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+            <span className="mono strong" style={{ fontSize: 11 }}>{item.id}</span>
+            {!compact && <TypePill type={item.type} />}
+          </span>
+          <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3 }}>{item.title}</span>
+          <span className="muted" style={{ fontSize: 11 }}>{owner} - {STATUS_LABEL[item.status] || item.status}</span>
+          {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="page">
+      <div className="page__header">
+        <div>
+          <h1 className="page__title">Team calendar</h1>
+          <div className="page__sub">Quick Tasks and Creative Requests placed by due date. {loadState.message}</div>
+        </div>
+        <div className="page__actions">
+          <button className={`btn ${viewMode === "month" ? "btn--primary" : "btn--secondary"}`} onClick={() => setViewMode("month")}><Icon name="calendar" /> Month</button>
+          <button className={`btn ${viewMode === "agenda" ? "btn--primary" : "btn--secondary"}`} onClick={() => setViewMode("agenda")}><Icon name="list" /> Agenda</button>
+        </div>
+      </div>
+
+      <div className="grid grid--4" style={{ marginBottom: 14 }}>
+        <div className="stat"><div className="stat__num mono">{calendarRows.length}</div><div className="stat__lbl">Scheduled items</div></div>
+        <div className="stat stat--accent"><div className="stat__num mono">{calendarRows.filter(row => row.type === "quick").length}</div><div className="stat__lbl">Quick Tasks</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{dueSoonCount}</div><div className="stat__lbl">Due soon</div></div>
+        <div className="stat stat--accent"><div className="stat__num mono">{overdueCount}</div><div className="stat__lbl">Overdue</div></div>
+      </div>
+
+      <div className="filterbar">
+        <select className="select" value={filterAssignee} onChange={e => setFilterAssignee(e.target.value)}>
+          <option value="all">All assignees</option>
+          {ownerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+        <select className="select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          <option value="all">All statuses</option>
+          {Object.entries(STATUS_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select>
+        <select className="select" value={filterType} onChange={e => setFilterType(e.target.value)}>
+          <option value="all">All types</option>
+          <option value="creative">Creative requests</option>
+          <option value="quick">Quick tasks</option>
+        </select>
+        <select className="select" value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
+          <option value="all">All priorities</option>
+          <option value="urgent">Urgent</option>
+          <option value="high">High</option>
+          <option value="normal">Normal</option>
+          <option value="low">Low</option>
+        </select>
+        <span className="spacer"></span>
+        <select className="select" value={agendaRange} onChange={e => setAgendaRange(e.target.value)}>
+          <option value="day">Selected day</option>
+          <option value="week">Selected week</option>
+        </select>
+      </div>
+
+      <div className="row" style={{ justifyContent: "space-between", margin: "0 0 12px", gap: 12 }}>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="btn btn--secondary" onClick={() => setMonthKey(calendarShiftMonthC(monthKey, -1))}><Icon name="chevron" style={{ transform: "rotate(180deg)" }} /> Prev</button>
+          <button className="btn btn--secondary" onClick={() => { setMonthKey(calendarMonthKeyC(todayKey)); setSelectedDateKey(todayKey); }}>Today</button>
+          <button className="btn btn--secondary" onClick={() => setMonthKey(calendarShiftMonthC(monthKey, 1))}>Next <Icon name="chevron" /></button>
+        </div>
+        <div>
+          <div className="strong" style={{ textAlign: "right" }}>{calendarMonthLabelC(monthKey)}</div>
+          <div className="muted" style={{ fontSize: 12 }}>{agendaRange === "week" ? calendarWeekLabelC(selectedDateKey) : calendarDateLabelC(selectedDateKey)}</div>
+        </div>
+      </div>
+
+      {viewMode === "month" && (
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(128px, 1fr))", gap: 8, minWidth: 900 }}>
+            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
+              <div key={day} className="muted" style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>{day}</div>
+            ))}
+            {calendarMonthCellsC(monthKey).map(cell => {
+              const items = (rowsByDate[cell.key] || []).filter(item => window.getFlowMateCalendarAgendaRows
+                ? window.getFlowMateCalendarAgendaRows([item], {
+                  dateKey: cell.key,
+                  range: "day",
+                  assignee: filterAssignee,
+                  status: filterStatus,
+                  type: filterType,
+                  priority: filterPriority,
+                }).length > 0
+                : true);
+              return (
+                <div
+                  key={cell.key}
+                  onClick={() => selectDate(cell.key)}
+                  style={{
+                    minHeight: 132,
+                    padding: 8,
+                    border: cell.key === selectedDateKey ? "2px solid var(--garena-red)" : "1px solid var(--garena-light-grey)",
+                    background: cell.inMonth ? "#fff" : "var(--garena-bg)",
+                    opacity: cell.inMonth ? 1 : 0.72,
+                    cursor: "pointer",
+                  }}
+                >
+                  <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+                    <span className={`mono ${cell.key === todayKey ? "strong" : ""}`}>{cell.day}</span>
+                    {items.length > 0 && <span className="tag">{items.length}</span>}
+                  </div>
+                  <div className="col" style={{ gap: 6 }}>
+                    {items.slice(0, 3).map(item => calendarItem(item, true))}
+                    {items.length > 3 && <span className="muted" style={{ fontSize: 11 }}>+{items.length - 3} more</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {viewMode === "agenda" && (
+        <div className="card card__body--flush" style={{ overflow: "hidden" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Due date</th>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Assignee</th>
+                <th>Priority</th>
+                <th>Launch date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {agendaRows.map(item => (
+                <tr key={item.id} className={item.overdue ? "is-overdue" : ""} onClick={() => openCalendarItem(item)}>
+                  <td><DueBadge delta={item.dueDelta} label={item.dueLabel} status={item.status} /></td>
+                  <td className="mono">{item.id}</td>
+                  <td className="col-title">{item.title}</td>
+                  <td><TypePill type={item.type} /></td>
+                  <td><StatusBadge status={item.status} /></td>
+                  <td>{item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : (item.assigneeOtherName || "Unassigned")}</td>
+                  <td><PriorityBadge level={item.priority} /></td>
+                  <td><span className="muted">{item.launchFullLabel || item.launchLabel || "-"}</span></td>
+                </tr>
+              ))}
+              {agendaRows.length === 0 && (
+                <tr><td colSpan="8"><span className="muted">No work items match this calendar selection.</span></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - due date calendar placement</Source>
+    </div>
+  );
+}
+
+/* ============================================================
    TEAM SETTINGS
    ============================================================ */
 function SettingsScreen() {
@@ -633,4 +954,4 @@ function SettingsScreen() {
   );
 }
 
-Object.assign(window, { WorkloadScreen, KpiScreen, SettingsScreen });
+Object.assign(window, { WorkloadScreen, KpiScreen, CalendarScreen, SettingsScreen });
