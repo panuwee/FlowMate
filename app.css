@@ -197,6 +197,11 @@ button:disabled {
   color: var(--garena-iron);
 }
 .btn--secondary:hover { border-color: var(--garena-iron); color: var(--garena-black); }
+.btn--secondary.is-active {
+  border-color: var(--garena-iron);
+  background: var(--garena-iron);
+  color: var(--garena-white);
+}
 .btn:disabled:hover { border-color: var(--garena-light-grey); color: inherit; background: inherit; }
 
 .btn--ghost { color: var(--garena-iron); }
@@ -519,6 +524,16 @@ button:disabled {
   font-size: 12px; color: var(--garena-grey); font-weight: var(--weight-regular);
 }
 .section__head--overdue .section__count { color: var(--garena-red); }
+.my-work-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.my-work-actions .btn {
+  flex-shrink: 0;
+}
 
 /* ---------- Kanban ---------- */
 .kanban {

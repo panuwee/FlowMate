@@ -14,6 +14,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const [sourceRows, setSourceRows] = useState(WORK);
   const [loadState, setLoadState] = useState({ status: "loading", message: "Loading Supabase data..." });
   const [filterStatus, setFilterStatus] = useState("all");
+  const [showThisWeek, setShowThisWeek] = useState(false);
 
   async function loadMyWorkRows(isAlive = () => true) {
     if (!window.loadFlowMateListRows) {
@@ -152,9 +153,12 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const rawMine = window.getFlowMateMyWorkRows
     ? window.getFlowMateMyWorkRows(sourceRows, currentUser, window.MEMBERS || [], searchQuery)
     : sourceRows.filter(w => meIds.includes(w.assignee) && !["delivered", "cancelled", "done"].includes(w.status) && window.matchesFlowMateSearch(w, searchQuery));
-  const mine = window.sortFlowMateMyWorkRows
-    ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(rawMine, filterStatus))
+  const weekMine = showThisWeek
+    ? rawMine.filter(w => w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 6)
     : rawMine;
+  const mine = window.sortFlowMateMyWorkRows
+    ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(weekMine, filterStatus))
+    : weekMine;
   const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0)));
   const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned","in_progress","review"].includes(w.status)));
   const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)));
@@ -186,7 +190,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
           <div className="page__sub">{currentUser.name ? `Hi ${currentUser.name} - ` : ""}Open work as of {new Date().toLocaleString("en-SG", { timeZone: "Asia/Singapore", dateStyle: "medium", timeStyle: "short" })} SGT.</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary" disabled title="Calendar range selector is planned for MVP 1.1"><Icon name="calendar" /> This week (MVP 1.1)</button>
+          <button className={`btn btn--secondary ${showThisWeek ? "is-active" : ""}`} onClick={() => setShowThisWeek(current => !current)} title="Show work due in the next 7 days"><Icon name="calendar" /> This week</button>
           <button className="btn btn--primary" onClick={() => onNav("create")}><Icon name="plus" /> New</button>
         </div>
       </div>
@@ -226,16 +230,15 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 }
 
 function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, onChecklistAdd, onChecklistToggle, onCommentAdd, onCommentEdit, onCommentDelete, tone, compact }) {
+  if (!items.length) return null;
+
   return (
     <div className="section" id={tone === "overdue" ? "my-work-overdue" : undefined}>
       <div className={`section__head${tone === "overdue" ? " section__head--overdue" : ""}`}>
         <span className="section__title">{title}</span>
         <span className="section__count">{items.length}</span>
       </div>
-      {items.length === 0 ? (
-        <div style={{ padding: "16px", color: "var(--garena-grey)", fontSize: 13 }}>No items.</div>
-      ) : (
-        <table className="tbl">
+      <table className="tbl">
           <thead>
             <tr>
               <th className="col-id">ID</th>
@@ -264,20 +267,21 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                 <td><Progress {...(w.checklist || { done: 0, total: 0 })} /></td>
                 <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
                 <td className="col-right" onClick={(e) => e.stopPropagation()}>
-                  {w.type === "quick" && w.status !== "delivered" && (
-                    <button className="btn btn--xs btn--secondary" onClick={() => onQuickDone && onQuickDone(w)}>Mark done</button>
-                  )}
-                  {w.type !== "quick" && w.status === "assigned" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Start</button>}
-                  {w.type !== "quick" && w.status === "in_progress" && <button className="btn btn--xs btn--primary" onClick={() => onCreativeTransition && onCreativeTransition(w, "review")}><Icon name="send" size={11} /> Submit review</button>}
-                  {w.type !== "quick" && w.status === "review" && <button className="btn btn--xs btn--ghost" disabled>Awaiting requester</button>}
-                  {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && <button className="btn btn--xs btn--danger" onClick={() => onCreativeTransition && onCreativeTransition(w, "blocked")}>Block</button>}
-                  {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Resume</button>}
+                  <div className="my-work-actions">
+                    {w.type === "quick" && w.status !== "delivered" && (
+                      <button className="btn btn--xs btn--secondary" onClick={() => onQuickDone && onQuickDone(w)}>Mark done</button>
+                    )}
+                    {w.type !== "quick" && w.status === "assigned" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Start</button>}
+                    {w.type !== "quick" && w.status === "in_progress" && <button className="btn btn--xs btn--primary" onClick={() => onCreativeTransition && onCreativeTransition(w, "review")}><Icon name="send" size={11} /> Submit review</button>}
+                    {w.type !== "quick" && w.status === "review" && <button className="btn btn--xs btn--ghost" disabled>Awaiting requester</button>}
+                    {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && <button className="btn btn--xs btn--danger" onClick={() => onCreativeTransition && onCreativeTransition(w, "blocked")}><Icon name="block" size={11} /> Block</button>}
+                    {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Resume</button>}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
       {compact && items.some(w => w.isSupabaseRow) && (
         <div className="checklist" style={{ borderTop: "1px solid var(--garena-light-grey)" }}>
           {items.map(w => (
