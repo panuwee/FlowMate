@@ -15,6 +15,7 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `notification_center.sql` | MVP 1.2 Notification Center table hardening, read-state RPCs, trusted event trigger creation, and due-date notification generator |
 | `collaboration_admin.sql` | MVP 1.2 detail links, watchers, watcher notification recipients, admin status override, and admin soft archive |
 | `view_security_hardening.sql` | Locks public views to authenticated users and forces `security_invoker` so underlying RLS is respected |
+| `team_settings_admin.sql` | MVP 1.2 Team settings admin-only member capacity, availability, and WIP update RPC |
 
 ## Before Running
 
@@ -43,6 +44,7 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    7. `supabase/notification_center.sql`
    8. `supabase/collaboration_admin.sql`
    9. `supabase/view_security_hardening.sql`
+   10. `supabase/team_settings_admin.sql`
 
 ## Expected Tables
 
@@ -102,6 +104,7 @@ select count(*) from public.work_item_links;
 select count(*) from public.work_item_watchers;
 select proname from pg_proc where proname in ('add_work_item_link', 'add_work_item_watcher', 'flowmate_admin_transition_work_status', 'flowmate_admin_archive_work_item') order by proname;
 select tgname from pg_trigger where tgname = 'flowmate_collaboration_notifications_after_event';
+select proname from pg_proc where proname = 'flowmate_admin_update_team_member';
 ```
 
 ## Notification Center Manual Checks

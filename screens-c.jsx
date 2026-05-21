@@ -878,13 +878,36 @@ function CalendarScreen({ onOpen }) {
    ============================================================ */
 function SettingsScreen() {
   const [members, setMembers] = useStateC(MEMBERS);
+  const [filter, setFilter] = useStateC("all");
+  const [editMember, setEditMember] = useStateC(null);
+  const [editForm, setEditForm] = useStateC({ availability: "available", capacityPerDay: 8, capacityOverride: "", wipLimit: 3 });
+  const [saveState, setSaveState] = useStateC({ status: "idle", message: "" });
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase members..." });
+
+  async function loadMembers() {
+    if (!window.loadFlowMateWorkloadRows) {
+      setMembers(window.MEMBERS || []);
+      setLoadState({ status: "error", message: "Live data unavailable: Supabase workload loader is not ready." });
+      return;
+    }
+
+    try {
+      const liveRows = await window.loadFlowMateWorkloadRows();
+      setMembers(liveRows.map(row => row.m));
+      setLoadState({ status: "live", message: "Live Supabase data" });
+    } catch (error) {
+      console.error("[FlowMate Settings] Supabase load failed:", error);
+      setMembers([]);
+      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+    }
+  }
 
   useEffectC(() => {
     let alive = true;
 
-    async function loadMembers() {
+    async function loadMembersIfAlive() {
       if (!window.loadFlowMateWorkloadRows) {
+        if (!alive) return;
         setMembers(window.MEMBERS || []);
         setLoadState({ status: "error", message: "Live data unavailable: Supabase workload loader is not ready." });
         return;
@@ -903,12 +926,75 @@ function SettingsScreen() {
       }
     }
 
-    loadMembers();
+    loadMembersIfAlive();
     const cleanup = window.attachFlowMateLiveRefresh
-      ? window.attachFlowMateLiveRefresh(loadMembers)
+      ? window.attachFlowMateLiveRefresh(loadMembersIfAlive)
       : () => {};
     return () => { alive = false; cleanup(); };
   }, []);
+
+  const uiModel = window.getFlowMateTeamSettingsUiModel
+    ? window.getFlowMateTeamSettingsUiModel(window.FLOWMATE_CURRENT_USER)
+    : { canEditMembers: window.FLOWMATE_CURRENT_USER?.role === "admin", showAdminActions: window.FLOWMATE_CURRENT_USER?.role === "admin" };
+  const filterOptions = window.FLOWMATE_TEAM_SETTINGS_FILTERS || [
+    { key: "all", label: "All members" },
+    { key: "active", label: "Active" },
+    { key: "partial", label: "Partial" },
+    { key: "leave", label: "On leave" },
+  ];
+  const safeMembers = (members || []).map(m => ({
+    ...m,
+    name: m.name || m.display_name || "Unnamed member",
+    discipline: m.discipline || m.discipline_short || "",
+    skills: m.skills || [],
+    availability: m.availability || "available",
+    capacityPerDay: Number(m.capacityPerDay ?? m.capacity_per_day ?? 0),
+    capacityOverride: m.capacityOverride ?? m.capacity_override_per_day ?? null,
+    wipLimit: Number(m.wipLimit ?? m.wip_limit ?? 0),
+  }));
+  const board = window.getFlowMateTeamSettingsBoard
+    ? window.getFlowMateTeamSettingsBoard(safeMembers, filter)
+    : [{ title: "Operation", members: safeMembers, unknownCount: 0 }, { title: "Marketing", members: [], unknownCount: 0 }, { title: "GD/VE", members: [], unknownCount: 0 }, { title: "Esport", members: [], unknownCount: 0 }];
+  const visibleCount = board.reduce((sum, column) => sum + column.members.length, 0);
+
+  function openEditMember(member) {
+    setEditMember(member);
+    setEditForm({
+      availability: member.availability || "available",
+      capacityPerDay: member.capacityPerDay ?? 0,
+      capacityOverride: member.capacityOverride ?? "",
+      wipLimit: member.wipLimit ?? 0,
+    });
+    setSaveState({ status: "idle", message: "" });
+  }
+
+  function updateEditForm(field, value) {
+    setEditForm(current => ({ ...current, [field]: value }));
+  }
+
+  async function saveMemberEdit(event) {
+    event.preventDefault();
+    if (!editMember || !window.adminUpdateFlowMateTeamMember) return;
+
+    setSaveState({ status: "saving", message: "Saving member settings..." });
+    try {
+      await window.adminUpdateFlowMateTeamMember(editMember.id, editForm);
+      await loadMembers();
+      setEditMember(null);
+      setSaveState({ status: "idle", message: "" });
+    } catch (error) {
+      console.error("[FlowMate Settings] Admin member update failed:", error);
+      setSaveState({ status: "error", message: error.message || "Team member update failed." });
+    }
+  }
+
+  function availabilityLabel(member) {
+    if (member.availability === "partial") {
+      return member.capacityOverride ? `Partial - ${member.capacityOverride} pt/d` : "Partial - no override";
+    }
+    if (member.availability === "leave") return "On leave";
+    return "Available";
+  }
 
   return (
     <div className="page">
@@ -918,67 +1004,123 @@ function SettingsScreen() {
           <div className="page__sub">Members, skills, capacity, and WIP limits used by the assignment engine. {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary" disabled title="Team member editing is planned for MVP 1.1"><Icon name="plus" /> Add member (MVP 1.1)</button>
+          <button className="btn btn--secondary" disabled title="Add member is planned after MVP 1.2"><Icon name="plus" /> Add member (post-MVP 1.2)</button>
         </div>
       </div>
 
       <div className="filterbar">
-        <button className="chip is-active" disabled title="Team settings filters are planned for MVP 1.1">All members (MVP 1.1)</button>
-        <button className="chip" disabled title="Team settings filters are planned for MVP 1.1">Active (MVP 1.1)</button>
-        <button className="chip" disabled title="Team settings filters are planned for MVP 1.1">Partial (MVP 1.1)</button>
-        <button className="chip" disabled title="Team settings filters are planned for MVP 1.1">On leave (MVP 1.1)</button>
+        {filterOptions.map(option => (
+          <button
+            key={option.key}
+            className={`chip ${filter === option.key ? "is-active" : ""}`}
+            onClick={() => setFilter(option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
         <span className="spacer"></span>
-        <span className="muted" style={{ fontSize: 12 }}>{members.length} members</span>
+        <span className="muted" style={{ fontSize: 12 }}>{visibleCount} members</span>
       </div>
 
-      <div className="col" style={{ gap: 12 }}>
-        {members.map(m => (
-          <div key={m.id} className="member-card">
-            <div className="member-card__head">
-              <Avatar memberId={m.id} size="avatar--xl" />
+      <div className="team-settings-board">
+        {board.map(column => (
+          <section key={column.title} className="team-settings-column">
+            <div className="team-settings-column__head">
               <div>
-                <div className="member-card__name">{m.name}</div>
-                <div className="member-card__discipline">{m.discipline}</div>
-                <div className={`avail avail--${m.availability}`} style={{ marginTop: 4 }}>
-                  <span className="avail__dot"></span>
-                  {m.availability === "available" && "Available"}
-                  {m.availability === "partial" && (m.capacityOverride ? `Partial - ${m.capacityOverride} pt/d override` : "Partial - no override")}
-                  {m.availability === "leave" && "On leave"}
-                </div>
+                <h2>{column.title}</h2>
+                {column.unknownCount > 0 && (
+                  <div className="muted" style={{ fontSize: 11 }}>{column.unknownCount} unknown discipline fallback</div>
+                )}
               </div>
+              <span className="team-settings-column__count">{column.members.length}</span>
             </div>
-
-            <div className="col" style={{ gap: 6 }}>
-              <div className="muted" style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>Skills</div>
-              <div className="skill-tags">
-                {(m.skills || []).map(s => <span key={s} className="tag">{ASSET_LABEL[s.replace("-backup","")] || s}{s.endsWith("backup") && " (backup)"}</span>)}
-                <button className="btn btn--xs btn--ghost" disabled title="Skill editing is planned for MVP 1.1"><Icon name="plus" size={11} /> Add skill (MVP 1.1)</button>
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                Team member ID: <span className="strong mono" style={{ color: "var(--garena-iron)" }}>{m.id}</span>
-              </div>
-            </div>
-
-            <div className="member-card__cap">
-              <div className="row" style={{ justifyContent: "flex-end", gap: 16 }}>
-                <div>
-                  <div className="member-card__cap-num mono">{m.capacityPerDay || 0}</div>
-                  <div className="member-card__cap-lbl">cap pt/day</div>
+            <div className="team-settings-column__list">
+              {column.members.map(m => (
+                <div key={m.id || m.name} className="member-card member-card--compact">
+                  <div className="member-card__head">
+                    <span className="avatar" style={{ background: m.color || "var(--garena-deep-blue)" }}>{m.initials || String(m.name || "?").slice(0, 2).toUpperCase()}</span>
+                    <div className="member-card__main">
+                      <div className="member-card__name">{m.name}</div>
+                      <div className="member-card__discipline">{m.discipline || "Unknown discipline"}</div>
+                    </div>
+                  </div>
+                  <div className={`avail avail--${m.availability}`}>
+                    <span className="avail__dot"></span>
+                    {availabilityLabel(m)}
+                  </div>
+                  <div className="skill-tags skill-tags--compact">
+                    {(m.skills || []).slice(0, 4).map(s => <span key={s} className="tag">{ASSET_LABEL[s.replace("-backup","")] || s}{s.endsWith("backup") && " (backup)"}</span>)}
+                    {(m.skills || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>No skills</span>}
+                    {(m.skills || []).length > 4 && <span className="tag">+{m.skills.length - 4}</span>}
+                  </div>
+                  <div className="member-card__metrics">
+                    <div>
+                      <div className="member-card__cap-num mono">{m.capacityPerDay || 0}</div>
+                      <div className="member-card__cap-lbl">cap pt/day</div>
+                    </div>
+                    <div>
+                      <div className="member-card__cap-num mono">{m.wipLimit || 0}</div>
+                      <div className="member-card__cap-lbl">WIP limit</div>
+                    </div>
+                    {uiModel.showAdminActions && (
+                      <button className="btn btn--xs btn--secondary" onClick={() => openEditMember(m)}><Icon name="pencil" /> Edit</button>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <div className="member-card__cap-num mono">{m.wipLimit || 0}</div>
-                  <div className="member-card__cap-lbl">WIP limit</div>
-                </div>
-                <button className="btn btn--xs btn--secondary" disabled title="Capacity editing is planned for MVP 1.1"><Icon name="pencil" /> Edit (MVP 1.1)</button>
-              </div>
+              ))}
+              {column.members.length === 0 && (
+                <div className="team-settings-empty">No members match this filter.</div>
+              )}
             </div>
-          </div>
+          </section>
         ))}
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
         <strong>Routing rules</strong> are configured at the team level - not per member. Edits here change skill eligibility and capacity inputs to the assignment engine. Changing capacity reruns assignment for queued items in the background.
       </div>
+
+      {editMember && uiModel.canEditMembers && (
+        <div className="modal-backdrop" role="presentation">
+          <form className="modal modal--settings" onSubmit={saveMemberEdit}>
+            <div className="modal__head">
+              <div>
+                <h2>Edit member</h2>
+                <div className="muted" style={{ fontSize: 12 }}>{editMember.name}</div>
+              </div>
+              <button type="button" className="iconbtn" onClick={() => setEditMember(null)} aria-label="Close"><Icon name="x" /></button>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span className="field__label">Availability</span>
+                <select className="select" value={editForm.availability} onChange={event => updateEditForm("availability", event.target.value)}>
+                  <option value="available">Available</option>
+                  <option value="partial">Partial</option>
+                  <option value="leave">On leave</option>
+                </select>
+              </label>
+              <label className="field">
+                <span className="field__label">Capacity pt/day</span>
+                <input className="input" type="number" min="0" max="24" step="0.25" value={editForm.capacityPerDay} onChange={event => updateEditForm("capacityPerDay", event.target.value)} />
+              </label>
+              <label className="field">
+                <span className="field__label">Override pt/day</span>
+                <input className="input" type="number" min="0" max="24" step="0.25" value={editForm.availability === "leave" ? "" : editForm.capacityOverride} disabled={editForm.availability === "leave"} onChange={event => updateEditForm("capacityOverride", event.target.value)} />
+                <span className="field__hint">On leave clears override.</span>
+              </label>
+              <label className="field">
+                <span className="field__label">WIP limit</span>
+                <input className="input" type="number" min="0" max="20" step="1" value={editForm.wipLimit} onChange={event => updateEditForm("wipLimit", event.target.value)} />
+              </label>
+            </div>
+            {saveState.status === "error" && <div className="reason-box reason-box--need" style={{ marginTop: 12 }}>{saveState.message}</div>}
+            <div className="modal__actions">
+              <button type="button" className="btn btn--secondary" onClick={() => setEditMember(null)}>Cancel</button>
+              <button type="submit" className="btn btn--primary" disabled={saveState.status === "saving"}>{saveState.status === "saving" ? "Saving..." : "Save changes"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

@@ -271,6 +271,119 @@ window.adminArchiveFlowMateWorkItem = adminArchiveFlowMateWorkItem;
 window.transitionFlowMateWorkStatus = transitionFlowMateWorkStatus;
 
 // ---------------------------------------------------------------------------
+// Team settings helpers. Admin mutations go through auth.uid-scoped RPCs.
+// ---------------------------------------------------------------------------
+const FLOWMATE_TEAM_SETTINGS_COLUMNS = ["Operation", "Marketing", "GD/VE", "Esport"];
+const FLOWMATE_TEAM_SETTINGS_FILTERS = [
+  { key: "all", label: "All members" },
+  { key: "active", label: "Active" },
+  { key: "partial", label: "Partial" },
+  { key: "leave", label: "On leave" },
+];
+
+function normalizeFlowMateTeamSettingsTeam(member) {
+  const raw = String((member && (member.discipline || member.discipline_short)) || "").trim();
+  const value = raw.toLowerCase();
+  if (["operations", "operation", "op", "ops"].includes(value)) return { team: "Operation", isUnknown: false };
+  if (["marketing", "mkt"].includes(value)) return { team: "Marketing", isUnknown: false };
+  if (["gd/ve", "gd", "ve", "design", "video"].includes(value)) return { team: "GD/VE", isUnknown: false };
+  if (["esport", "esports", "es"].includes(value)) return { team: "Esport", isUnknown: false };
+  return { team: "Operation", isUnknown: true };
+}
+
+function filterFlowMateTeamSettingsMembers(members, filter) {
+  const activeFilter = filter || "all";
+  const rows = Array.isArray(members) ? members : [];
+  if (activeFilter === "active") return rows.filter((member) => (member.availability || "available") === "available");
+  if (activeFilter === "partial") return rows.filter((member) => member.availability === "partial");
+  if (activeFilter === "leave") return rows.filter((member) => member.availability === "leave");
+  return rows;
+}
+
+function getFlowMateTeamSettingsBoard(members, filter) {
+  const buckets = Object.fromEntries(
+    FLOWMATE_TEAM_SETTINGS_COLUMNS.map((title) => [title, { title, members: [], unknownCount: 0 }]),
+  );
+  filterFlowMateTeamSettingsMembers(members, filter).forEach((member) => {
+    const normalized = normalizeFlowMateTeamSettingsTeam(member);
+    buckets[normalized.team].members.push(member);
+    if (normalized.isUnknown) buckets[normalized.team].unknownCount += 1;
+  });
+  return FLOWMATE_TEAM_SETTINGS_COLUMNS.map((title) => ({
+    ...buckets[title],
+    members: buckets[title].members.slice().sort((a, b) =>
+      String(a.name || a.display_name || "").localeCompare(String(b.name || b.display_name || "")),
+    ),
+  }));
+}
+
+function getFlowMateTeamSettingsUiModel(user) {
+  const isAdmin = Boolean(user && user.role === "admin");
+  return {
+    canEditMembers: isAdmin,
+    showAdminActions: isAdmin,
+  };
+}
+
+function flowmateNumberInRange(value, label, min, max) {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < min || numberValue > max) {
+    throw new Error(`${label} must be a number from ${min} to ${max}.`);
+  }
+  return numberValue;
+}
+
+function flowmateIntegerInRange(value, label, min, max) {
+  const numberValue = flowmateNumberInRange(value, label, min, max);
+  if (!Number.isInteger(numberValue)) {
+    throw new Error(`${label} must be a whole number from ${min} to ${max}.`);
+  }
+  return numberValue;
+}
+
+async function adminUpdateFlowMateTeamMember(memberId, input) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  assertFlowMateAdminAccess();
+  if (!memberId) throw new Error("Team member ID is required.");
+
+  const availability = input && input.availability;
+  if (!["available", "partial", "leave"].includes(availability)) {
+    throw new Error("Availability must be available, partial, or leave.");
+  }
+
+  const capacityPerDay = flowmateNumberInRange(input && input.capacityPerDay, "Capacity per day", 0, 24);
+  const wipLimit = flowmateIntegerInRange(input && input.wipLimit, "WIP limit", 0, 20);
+  const rawOverride = input ? input.capacityOverride : null;
+  const capacityOverride = availability === "leave"
+    ? null
+    : (rawOverride === "" || rawOverride == null ? null : flowmateNumberInRange(rawOverride, "Capacity override", 0, 24));
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_update_team_member", {
+    p_team_member_id: memberId,
+    p_availability: availability,
+    p_capacity_per_day: capacityPerDay,
+    p_capacity_override_per_day: capacityOverride,
+    p_wip_limit: wipLimit,
+  });
+
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "team_settings_admin_update" } }));
+  }
+  return data;
+}
+
+Object.assign(window, {
+  FLOWMATE_TEAM_SETTINGS_COLUMNS,
+  FLOWMATE_TEAM_SETTINGS_FILTERS,
+  normalizeFlowMateTeamSettingsTeam,
+  filterFlowMateTeamSettingsMembers,
+  getFlowMateTeamSettingsBoard,
+  getFlowMateTeamSettingsUiModel,
+  adminUpdateFlowMateTeamMember,
+});
+
+// ---------------------------------------------------------------------------
 // Creative request creation -- backend computes effort, owner, queue reason.
 // ---------------------------------------------------------------------------
 async function createFlowMateCreativeRequest(input) {
