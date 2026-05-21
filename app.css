@@ -434,6 +434,21 @@ button:disabled {
 }
 .form-grid .field--full { grid-column: 1 / -1; }
 
+.watcher-add-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+.watcher-add-form__select {
+  min-width: 0;
+}
+.watcher-add-form__button {
+  width: 100%;
+  justify-content: center;
+  white-space: normal;
+  line-height: 1.2;
+}
+
 .choice-card {
   display: flex; flex-direction: column; gap: 8px;
   padding: 24px;

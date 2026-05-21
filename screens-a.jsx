@@ -1056,8 +1056,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const visibleBriefNote = w.briefNote || w.note || "";
   const visibleChecklistItems = w.checklistItems || [];
   const visibleComments = w.comments || [];
-  const visibleLinks = w.links || [];
-  const visibleWatchers = w.watchers || [];
   const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
   const [actionMsg, setActionMsg] = useState(null);
@@ -1065,6 +1063,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkDescription, setLinkDescription] = useState("");
   const [watcherUserId, setWatcherUserId] = useState("");
+  const [detailLinks, setDetailLinks] = useState(w.links || []);
+  const [detailWatchers, setDetailWatchers] = useState(w.watchers || []);
+  const visibleLinks = detailLinks;
+  const visibleWatchers = detailWatchers;
+
+  useEffect(() => {
+    setDetailLinks(w.links || []);
+    setDetailWatchers(w.watchers || []);
+  }, [w.id, w.links, w.watchers]);
 
   async function runCreativeTransition(nextStatus) {
     if (!w.isSupabaseRow) {
@@ -1101,10 +1108,29 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
     setPending(true);
     try {
-      await window.addFlowMateWorkItemLink(w.id, linkUrl, linkDescription);
+      const data = await window.addFlowMateWorkItemLink(w.id, linkUrl, linkDescription);
+      const addedLink = {
+        id: data?.id || `local-link-${Date.now()}`,
+        work_item_id: data?.work_item_id,
+        url: data?.url || linkUrl.trim(),
+        description: data?.description || linkDescription.trim(),
+        created_by_user_id: data?.created_by_user_id || window.FLOWMATE_CURRENT_USER?.id,
+        createdByName: window.FLOWMATE_CURRENT_USER?.name || "You",
+        created_at: data?.created_at,
+        createdLabel: "Just now",
+      };
+      setDetailLinks((current) => {
+        if (current.some((link) => link.id === addedLink.id)) return current;
+        const next = [...current, addedLink];
+        w.links = next;
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.links = next;
+        }
+        return next;
+      });
       setLinkUrl("");
       setLinkDescription("");
-      setActionMsg({ tone: "ok", text: "Link added. Refresh the detail view if it does not appear immediately." });
+      setActionMsg({ tone: "ok", text: "Link added." });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_links" } }));
     } catch (error) {
       setActionMsg({ tone: "bad", text: error.message || "Add link failed." });
@@ -1121,9 +1147,29 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
     setPending(true);
     try {
-      await window.addFlowMateWorkItemWatcher(w.id, watcherUserId);
+      const selectedWatcher = watcherOptions.find((member) => member.userId === watcherUserId);
+      const data = await window.addFlowMateWorkItemWatcher(w.id, watcherUserId);
+      const addedWatcher = {
+        id: data?.id || `local-watcher-${watcherUserId}`,
+        work_item_id: data?.work_item_id,
+        watcher_user_id: data?.watcher_user_id || watcherUserId,
+        added_by_user_id: data?.added_by_user_id || window.FLOWMATE_CURRENT_USER?.id,
+        watcherName: selectedWatcher?.name || "Watcher",
+        addedByName: window.FLOWMATE_CURRENT_USER?.name || "You",
+        created_at: data?.created_at,
+        createdLabel: "Just now",
+      };
+      setDetailWatchers((current) => {
+        if (current.some((watcher) => watcher.watcher_user_id === addedWatcher.watcher_user_id)) return current;
+        const next = [...current, addedWatcher];
+        w.watchers = next;
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.watchers = next;
+        }
+        return next;
+      });
       setWatcherUserId("");
-      setActionMsg({ tone: "ok", text: "Watcher added. Refresh the detail view if it does not appear immediately." });
+      setActionMsg({ tone: "ok", text: "Watcher added." });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_watchers" } }));
     } catch (error) {
       setActionMsg({ tone: "bad", text: error.message || "Add watcher failed." });
@@ -1377,14 +1423,14 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   ) : (
                     <span className="muted">No watchers</span>
                   )}
-                  <form className="row" onSubmit={submitWatcher} style={{ gap: 6, alignItems: "stretch" }}>
-                    <select className="select" value={watcherUserId} onChange={(e) => setWatcherUserId(e.target.value)} disabled={pending} style={{ minWidth: 0 }}>
+                  <form className="watcher-add-form" onSubmit={submitWatcher}>
+                    <select className="select watcher-add-form__select" value={watcherUserId} onChange={(e) => setWatcherUserId(e.target.value)} disabled={pending}>
                       <option value="">Add watcher</option>
                       {watcherOptions.map((member) => (
                         <option key={member.userId} value={member.userId}>{member.name}</option>
                       ))}
                     </select>
-                    <button className="btn btn--secondary" type="submit" disabled={pending || !watcherUserId}><Icon name="plus" /> Add</button>
+                    <button className="btn btn--secondary watcher-add-form__button" type="submit" disabled={pending || !watcherUserId}><Icon name="plus" /> Add watcher</button>
                   </form>
                 </div>
               </div>
