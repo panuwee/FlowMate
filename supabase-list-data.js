@@ -15,6 +15,7 @@ const FLOWMATE_REALTIME_TABLES = [
   "assignment_runs",
   "work_item_events",
   "notifications",
+  "leave_requests",
 ];
 
 let flowmateRealtimeChannel = null;
@@ -437,6 +438,75 @@ function syncFlowMateMentionUsers(users) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function flowmateExpandLeaveDates(startDate, endDate) {
+  const rows = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate || "") || !/^\d{4}-\d{2}-\d{2}$/.test(endDate || "")) return rows;
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    rows.push(cursor);
+    const [y, m, d] = cursor.split("-").map(Number);
+    cursor = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  }
+  return rows;
+}
+
+async function loadFlowMateLeaveRows() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const [leaveResult, membersResult] = await Promise.all([
+    window.flowmateSupabase
+      .from("leave_requests")
+      .select("id,team_member_id,start_date,end_date,reason,created_at,cancelled_at")
+      .is("cancelled_at", null)
+      .order("start_date", { ascending: true }),
+    window.flowmateSupabase
+      .from("team_members")
+      .select("id,display_name,initials,color,discipline,discipline_short,member_code,active"),
+  ]);
+
+  const firstError = leaveResult.error || membersResult.error;
+  if (firstError) throw firstError;
+
+  const membersById = Object.fromEntries((membersResult.data || []).map((member) => [member.id, member]));
+  syncFlowMateMembers(membersResult.data || []);
+
+  return (leaveResult.data || []).flatMap((leave) => {
+    const member = membersById[leave.team_member_id] || {};
+    return flowmateExpandLeaveDates(leave.start_date, leave.end_date).map((dateKey) => ({
+      id: `LV-${String(leave.id).slice(0, 8)}-${dateKey}`,
+      leaveRequestId: leave.id,
+      type: "leave",
+      title: `${member.display_name || "Team member"} on leave`,
+      status: "leave",
+      priority: "normal",
+      dueDate: dateKey,
+      dueLabel: flowmateDateLabel(dateKey),
+      dueFullLabel: flowmateDateFullLabel(dateKey),
+      dueDelta: flowmateDueDelta(dateKey),
+      calendarDate: dateKey,
+      startDate: leave.start_date,
+      endDate: leave.end_date,
+      leaveReason: leave.reason || "",
+      assignee: leave.team_member_id,
+      assigneeOtherName: "",
+      requester: member.display_name || "-",
+      requesterTeam: member.discipline || member.discipline_short || "No team",
+      isLeaveRequest: true,
+      isSupabaseRow: true,
+    }));
+  });
+}
+
+async function loadFlowMateCalendarRows() {
+  const [workRows, leaveRows] = await Promise.all([
+    loadFlowMateListRows(),
+    loadFlowMateLeaveRows(),
+  ]);
+  return [...workRows, ...leaveRows];
+}
+
 async function loadFlowMateMentionUsers() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -480,6 +550,8 @@ async function loadFlowMateAssignees() {
 }
 
 window.loadFlowMateListRows = loadFlowMateListRows;
+window.loadFlowMateLeaveRows = loadFlowMateLeaveRows;
+window.loadFlowMateCalendarRows = loadFlowMateCalendarRows;
 window.loadFlowMateAssignees = loadFlowMateAssignees;
 window.loadFlowMateMentionUsers = loadFlowMateMentionUsers;
 window.startFlowMateRealtime = startFlowMateRealtime;

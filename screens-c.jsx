@@ -593,19 +593,43 @@ function CalendarScreen({ onOpen }) {
   const [filterStatus, setFilterStatus] = useStateC("all");
   const [filterType, setFilterType] = useStateC("all");
   const [filterPriority, setFilterPriority] = useStateC("all");
+  const [leaveModalOpen, setLeaveModalOpen] = useStateC(false);
+  const [leaveForm, setLeaveForm] = useStateC({ startDate: todayKey, endDate: todayKey, reason: "" });
+  const [leaveState, setLeaveState] = useStateC({ status: "idle", message: "" });
+
+  async function loadRows() {
+    const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+    if (!loader) {
+      setSourceRows([]);
+      setLoadState({ status: "error", message: "Live data unavailable: Supabase calendar loader is not ready." });
+      return;
+    }
+
+    try {
+      const rows = await loader();
+      setSourceRows(rows);
+      setLoadState({ status: "live", message: "Live Supabase data" });
+    } catch (error) {
+      console.error("[FlowMate Calendar] Supabase load failed:", error);
+      setSourceRows([]);
+      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+    }
+  }
 
   useEffectC(() => {
     let alive = true;
 
-    async function loadRows() {
-      if (!window.loadFlowMateListRows) {
+    async function loadRowsIfAlive() {
+      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      if (!loader) {
+        if (!alive) return;
         setSourceRows([]);
-        setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
+        setLoadState({ status: "error", message: "Live data unavailable: Supabase calendar loader is not ready." });
         return;
       }
 
       try {
-        const rows = await window.loadFlowMateListRows();
+        const rows = await loader();
         if (!alive) return;
         setSourceRows(rows);
         setLoadState({ status: "live", message: "Live Supabase data" });
@@ -617,9 +641,9 @@ function CalendarScreen({ onOpen }) {
       }
     }
 
-    loadRows();
+    loadRowsIfAlive();
     const cleanup = window.attachFlowMateLiveRefresh
-      ? window.attachFlowMateLiveRefresh(loadRows)
+      ? window.attachFlowMateLiveRefresh(loadRowsIfAlive)
       : () => {};
     return () => { alive = false; cleanup(); };
   }, []);
@@ -627,7 +651,7 @@ function CalendarScreen({ onOpen }) {
   const calendarRows = (sourceRows || []).map((row) => ({
     ...row,
     calendarDate: window.getFlowMateCalendarDateKey ? window.getFlowMateCalendarDateKey(row) : "",
-  })).filter((row) => row.calendarDate && (row.type === "quick" || row.type === "creative"));
+  })).filter((row) => row.calendarDate && (row.type === "quick" || row.type === "creative" || row.type === "leave"));
 
   const rowsByDate = calendarRows.reduce((map, row) => {
     if (!map[row.calendarDate]) map[row.calendarDate] = [];
@@ -658,8 +682,35 @@ function CalendarScreen({ onOpen }) {
   const dueSoonCount = calendarRows.filter(row => !row.overdue && row.dueDelta != null && row.dueDelta >= 0 && row.dueDelta <= 2).length;
 
   function openCalendarItem(item) {
+    if (item.type === "leave") return;
     window.flowmateSelectedWorkItem = item;
     onOpen(item.id);
+  }
+
+  async function submitLeaveRequest(event) {
+    event.preventDefault();
+    if (!window.createFlowMateLeaveRequest) return;
+    setLeaveState({ status: "saving", message: "Saving leave request..." });
+    try {
+      await window.createFlowMateLeaveRequest(leaveForm);
+      await loadRows();
+      setLeaveModalOpen(false);
+      setLeaveState({ status: "idle", message: "" });
+      setLeaveForm({ startDate: todayKey, endDate: todayKey, reason: "" });
+    } catch (error) {
+      console.error("[FlowMate Calendar] Leave request failed:", error);
+      setLeaveState({ status: "error", message: error.message || "Leave request failed." });
+    }
+  }
+
+  function calendarTypePill(item) {
+    if (item.type === "leave") return <span className="tag" style={{ background: "#F3F4F6", color: "#4B5563" }}>Leave</span>;
+    return <TypePill type={item.type} />;
+  }
+
+  function calendarStatusPill(item) {
+    if (item.type === "leave") return <span className="avail avail--leave"><span className="avail__dot"></span>On leave</span>;
+    return <StatusBadge status={item.status} />;
   }
 
   function selectDate(dateKey) {
@@ -708,11 +759,12 @@ function CalendarScreen({ onOpen }) {
         <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", minWidth: 0 }}>
           <span className="row" style={{ justifyContent: "space-between", gap: 8, minWidth: 0 }}>
             <span className="mono strong" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.id}</span>
-            {!compact && <TypePill type={item.type} />}
+            {!compact && calendarTypePill(item)}
           </span>
           <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3, minWidth: 0, ...textClampStyle }}>{item.title}</span>
-          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner} - {STATUS_LABEL[item.status] || item.status}</span>
+          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner} - {item.type === "leave" ? "On leave" : (STATUS_LABEL[item.status] || item.status)}</span>
           {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
+          {!compact && item.type === "leave" && item.leaveReason && <span className="muted" style={{ fontSize: 11 }}>{item.leaveReason}</span>}
         </span>
       </button>
     );
@@ -726,6 +778,7 @@ function CalendarScreen({ onOpen }) {
           <div className="page__sub">Quick Tasks and Creative Requests placed by due date. {loadState.message}</div>
         </div>
         <div className="page__actions">
+          <button className="btn btn--secondary" onClick={() => setLeaveModalOpen(true)}><Icon name="plus" /> Create Leave Request</button>
           <button className={`btn ${viewMode === "month" ? "btn--primary" : "btn--secondary"}`} onClick={() => setViewMode("month")}><Icon name="calendar" /> Month</button>
           <button className={`btn ${viewMode === "agenda" ? "btn--primary" : "btn--secondary"}`} onClick={() => setViewMode("agenda")}><Icon name="list" /> Agenda</button>
         </div>
@@ -751,6 +804,7 @@ function CalendarScreen({ onOpen }) {
           <option value="all">All types</option>
           <option value="creative">Creative requests</option>
           <option value="quick">Quick tasks</option>
+          <option value="leave">Leave</option>
         </select>
         <select className="select" value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
           <option value="all">All priorities</option>
@@ -853,8 +907,8 @@ function CalendarScreen({ onOpen }) {
                   <td><DueBadge delta={item.dueDelta} label={item.dueLabel} status={item.status} /></td>
                   <td className="mono">{item.id}</td>
                   <td className="col-title">{item.title}</td>
-                  <td><TypePill type={item.type} /></td>
-                  <td><StatusBadge status={item.status} /></td>
+                  <td>{calendarTypePill(item)}</td>
+                  <td>{calendarStatusPill(item)}</td>
                   <td>{item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : (item.assigneeOtherName || "Unassigned")}</td>
                   <td><PriorityBadge level={item.priority} /></td>
                   <td><span className="muted">{item.launchFullLabel || item.launchLabel || "-"}</span></td>
@@ -868,7 +922,40 @@ function CalendarScreen({ onOpen }) {
         </div>
       )}
 
-      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - due date calendar placement</Source>
+      <Source>{loadState.status === "live" ? "Supabase work_items and leave_requests tables" : "No local fallback data"} - due date calendar placement</Source>
+
+      {leaveModalOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <form className="modal modal--settings" onSubmit={submitLeaveRequest}>
+            <div className="modal__head">
+              <div>
+                <h2>Create Leave Request</h2>
+                <div className="muted" style={{ fontSize: 12 }}>Applies to your linked team member.</div>
+              </div>
+              <button type="button" className="iconbtn" onClick={() => setLeaveModalOpen(false)} aria-label="Close"><Icon name="x" /></button>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span className="field__label">Start date</span>
+                <input className="input" type="date" value={leaveForm.startDate} onChange={event => setLeaveForm(current => ({ ...current, startDate: event.target.value }))} />
+              </label>
+              <label className="field">
+                <span className="field__label">End date</span>
+                <input className="input" type="date" value={leaveForm.endDate} onChange={event => setLeaveForm(current => ({ ...current, endDate: event.target.value }))} />
+              </label>
+              <label className="field field--full">
+                <span className="field__label">Reason</span>
+                <textarea className="textarea" value={leaveForm.reason} onChange={event => setLeaveForm(current => ({ ...current, reason: event.target.value }))} rows="3"></textarea>
+              </label>
+            </div>
+            {leaveState.status === "error" && <div className="reason-box reason-box--need" style={{ marginTop: 12 }}>{leaveState.message}</div>}
+            <div className="modal__actions">
+              <button type="button" className="btn btn--secondary" onClick={() => setLeaveModalOpen(false)}>Cancel</button>
+              <button type="submit" className="btn btn--primary" disabled={leaveState.status === "saving"}>{leaveState.status === "saving" ? "Saving..." : "Save leave"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -1036,37 +1123,48 @@ function SettingsScreen() {
             </div>
             <div className="team-settings-column__list">
               {column.members.map(m => (
-                <div key={m.id || m.name} className="member-card member-card--compact">
-                  <div className="member-card__head">
-                    <span className="avatar" style={{ background: m.color || "var(--garena-deep-blue)" }}>{m.initials || String(m.name || "?").slice(0, 2).toUpperCase()}</span>
-                    <div className="member-card__main">
-                      <div className="member-card__name">{m.name}</div>
-                      <div className="member-card__discipline">{m.discipline || "Unknown discipline"}</div>
+                (() => {
+                  const memberUi = window.getFlowMateTeamSettingsMemberUi
+                    ? window.getFlowMateTeamSettingsMemberUi(m, window.FLOWMATE_CURRENT_USER)
+                    : { isGdVe: m.discipline === "GD/VE", showCapacityControls: m.discipline === "GD/VE", canEdit: uiModel.showAdminActions && m.discipline === "GD/VE" };
+                  return (
+                    <div key={m.id || m.name} className="member-card member-card--compact">
+                      <div className="member-card__head">
+                        <span className="avatar" style={{ background: m.color || "var(--garena-deep-blue)" }}>{m.initials || String(m.name || "?").slice(0, 2).toUpperCase()}</span>
+                        <div className="member-card__main">
+                          <div className="member-card__name">{m.name}</div>
+                          <div className="member-card__discipline">{m.discipline || "Unknown discipline"}</div>
+                        </div>
+                      </div>
+                      <div className={`avail avail--${m.availability}`}>
+                        <span className="avail__dot"></span>
+                        {availabilityLabel(m)}
+                      </div>
+                      {memberUi.showCapacityControls && (
+                        <>
+                          <div className="skill-tags skill-tags--compact">
+                            {(m.skills || []).slice(0, 4).map(s => <span key={s} className="tag">{ASSET_LABEL[s.replace("-backup","")] || s}{s.endsWith("backup") && " (backup)"}</span>)}
+                            {(m.skills || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>No skills</span>}
+                            {(m.skills || []).length > 4 && <span className="tag">+{m.skills.length - 4}</span>}
+                          </div>
+                          <div className="member-card__metrics">
+                            <div>
+                              <div className="member-card__cap-num mono">{m.capacityPerDay || 0}</div>
+                              <div className="member-card__cap-lbl">cap pt/day</div>
+                            </div>
+                            <div>
+                              <div className="member-card__cap-num mono">{m.wipLimit || 0}</div>
+                              <div className="member-card__cap-lbl">WIP limit</div>
+                            </div>
+                            {memberUi.canEdit && (
+                              <button className="btn btn--xs btn--secondary" onClick={() => openEditMember(m)}><Icon name="pencil" /> Edit</button>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
-                  <div className={`avail avail--${m.availability}`}>
-                    <span className="avail__dot"></span>
-                    {availabilityLabel(m)}
-                  </div>
-                  <div className="skill-tags skill-tags--compact">
-                    {(m.skills || []).slice(0, 4).map(s => <span key={s} className="tag">{ASSET_LABEL[s.replace("-backup","")] || s}{s.endsWith("backup") && " (backup)"}</span>)}
-                    {(m.skills || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>No skills</span>}
-                    {(m.skills || []).length > 4 && <span className="tag">+{m.skills.length - 4}</span>}
-                  </div>
-                  <div className="member-card__metrics">
-                    <div>
-                      <div className="member-card__cap-num mono">{m.capacityPerDay || 0}</div>
-                      <div className="member-card__cap-lbl">cap pt/day</div>
-                    </div>
-                    <div>
-                      <div className="member-card__cap-num mono">{m.wipLimit || 0}</div>
-                      <div className="member-card__cap-lbl">WIP limit</div>
-                    </div>
-                    {uiModel.showAdminActions && (
-                      <button className="btn btn--xs btn--secondary" onClick={() => openEditMember(m)}><Icon name="pencil" /> Edit</button>
-                    )}
-                  </div>
-                </div>
+                  );
+                })()
               ))}
               {column.members.length === 0 && (
                 <div className="team-settings-empty">No members match this filter.</div>

@@ -325,6 +325,17 @@ function getFlowMateTeamSettingsUiModel(user) {
   };
 }
 
+function getFlowMateTeamSettingsMemberUi(member, user) {
+  const normalized = normalizeFlowMateTeamSettingsTeam(member);
+  const isGdVe = normalized.team === "GD/VE";
+  const isAdmin = Boolean(user && user.role === "admin");
+  return {
+    isGdVe,
+    showCapacityControls: isGdVe,
+    canEdit: isAdmin && isGdVe,
+  };
+}
+
 function flowmateNumberInRange(value, label, min, max) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue) || numberValue < min || numberValue > max) {
@@ -373,6 +384,30 @@ async function adminUpdateFlowMateTeamMember(memberId, input) {
   return data;
 }
 
+async function createFlowMateLeaveRequest(input) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!window.FLOWMATE_CURRENT_USER) throw new Error("Sign in is required.");
+
+  const startDate = input && input.startDate;
+  const endDate = input && input.endDate;
+  const reason = ((input && input.reason) || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate || "")) throw new Error("Start date is required.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate || "")) throw new Error("End date is required.");
+  if (endDate < startDate) throw new Error("End date must be on or after start date.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("create_leave_request", {
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_reason: reason || null,
+  });
+
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "leave_request_created" } }));
+  }
+  return data;
+}
+
 Object.assign(window, {
   FLOWMATE_TEAM_SETTINGS_COLUMNS,
   FLOWMATE_TEAM_SETTINGS_FILTERS,
@@ -380,7 +415,9 @@ Object.assign(window, {
   filterFlowMateTeamSettingsMembers,
   getFlowMateTeamSettingsBoard,
   getFlowMateTeamSettingsUiModel,
+  getFlowMateTeamSettingsMemberUi,
   adminUpdateFlowMateTeamMember,
+  createFlowMateLeaveRequest,
 });
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,20 @@
 const isVisibleMemberCode = (memberCode) => String(memberCode || "").toLowerCase() !== "gear";
 
+function flowmateWorkloadTodayKey() {
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(now.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 async function loadFlowMateWorkloadRows() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
 
-  const [workloadResult, membersResult, activeItems] = await Promise.all([
+  const todayKey = flowmateWorkloadTodayKey();
+  const [workloadResult, membersResult, leaveResult, activeItems] = await Promise.all([
     window.flowmateSupabase
       .from("member_workload_v")
       .select("team_member_id,member_code,display_name,discipline_short,skills,backup_skills,availability,effective_capacity_per_day,assigned_effort,current_wip,overdue_count,due_soon_count,blocked_count,review_count,quick_task_count")
@@ -13,10 +22,16 @@ async function loadFlowMateWorkloadRows() {
     window.flowmateSupabase
       .from("team_members")
       .select("id,member_code,display_name,initials,color,discipline,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
+    window.flowmateSupabase
+      .from("leave_requests")
+      .select("team_member_id,start_date,end_date,cancelled_at")
+      .is("cancelled_at", null)
+      .lte("start_date", todayKey)
+      .gte("end_date", todayKey),
     window.loadFlowMateListRows ? window.loadFlowMateListRows() : Promise.resolve([]),
   ]);
 
-  const firstError = workloadResult.error || membersResult.error;
+  const firstError = workloadResult.error || membersResult.error || leaveResult.error;
   if (firstError) throw firstError;
 
   const membersById = Object.fromEntries(
@@ -28,6 +43,7 @@ async function loadFlowMateWorkloadRows() {
   const queuedEffort = (activeItems || [])
     .filter((item) => item.status === "queued")
     .reduce((sum, item) => sum + (item.effort || 0), 0);
+  const onLeaveToday = new Set((leaveResult.data || []).map((leave) => leave.team_member_id));
 
   const rows = (workloadResult.data || []).filter((row) => isVisibleMemberCode(row.member_code)).map((row) => {
     const member = membersById[row.team_member_id] || {};
@@ -40,7 +56,8 @@ async function loadFlowMateWorkloadRows() {
         item.type === "creative" &&
         ["assigned", "in_progress", "review", "blocked"].includes(item.status),
     );
-    const effectiveCap = Number(row.effective_capacity_per_day || 0);
+    const isOnLeaveToday = onLeaveToday.has(row.team_member_id);
+    const effectiveCap = isOnLeaveToday ? 0 : Number(row.effective_capacity_per_day || 0);
     const assignedEffort = Number(row.assigned_effort || 0);
     const windowCapacity = effectiveCap * 5;
 
@@ -58,7 +75,7 @@ async function loadFlowMateWorkloadRows() {
         capacityPerDay: Number(member.capacity_per_day || effectiveCap),
         capacityOverride: member.capacity_override_per_day,
         wipLimit: Number(member.wip_limit || 0),
-        availability: row.availability,
+        availability: isOnLeaveToday ? "leave" : row.availability,
       },
       statusCounts,
       assignedEffort,
