@@ -1490,7 +1490,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                         <span className="comment__author">{comment.authorName || "Unknown"}</span>
                         <span className="comment__time">{comment.createdLabel || flowmateFormatCommentTime(comment.created_at)}</span>
                       </div>
-                      <div className="comment__text">{comment.body}</div>
+                      <div className="comment__text" style={{ whiteSpace: "pre-wrap" }}>{comment.body}</div>
                     </div>
                   </div>
                 ))
