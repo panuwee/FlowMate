@@ -967,7 +967,7 @@ function SettingsScreen() {
   const [members, setMembers] = useStateC(MEMBERS);
   const [filter, setFilter] = useStateC("all");
   const [editMember, setEditMember] = useStateC(null);
-  const [editForm, setEditForm] = useStateC({ availability: "available", capacityPerDay: 8, capacityOverride: "", wipLimit: 3 });
+  const [editForm, setEditForm] = useStateC({ capacityPerDay: 8, wipLimit: 3 });
   const [saveState, setSaveState] = useStateC({ status: "idle", message: "" });
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase members..." });
 
@@ -1047,9 +1047,7 @@ function SettingsScreen() {
   function openEditMember(member) {
     setEditMember(member);
     setEditForm({
-      availability: member.availability || "available",
       capacityPerDay: member.capacityPerDay ?? 0,
-      capacityOverride: member.capacityOverride ?? "",
       wipLimit: member.wipLimit ?? 0,
     });
     setSaveState({ status: "idle", message: "" });
@@ -1175,7 +1173,7 @@ function SettingsScreen() {
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
-        <strong>Routing rules</strong> are configured at the team level - not per member. Edits here change skill eligibility and capacity inputs to the assignment engine. Changing capacity reruns assignment for queued items in the background.
+        <strong>Routing rules</strong> are configured at the team level - not per member. Edits here change GD/VE capacity inputs used by the assignment engine. Leave requests control On leave status by date.
       </div>
 
       {editMember && uiModel.canEditMembers && (
@@ -1190,25 +1188,14 @@ function SettingsScreen() {
             </div>
             <div className="form-grid">
               <label className="field">
-                <span className="field__label">Availability</span>
-                <select className="select" value={editForm.availability} onChange={event => updateEditForm("availability", event.target.value)}>
-                  <option value="available">Available</option>
-                  <option value="partial">Partial</option>
-                  <option value="leave">On leave</option>
-                </select>
-              </label>
-              <label className="field">
                 <span className="field__label">Capacity pt/day</span>
                 <input className="input" type="number" min="0" max="24" step="0.25" value={editForm.capacityPerDay} onChange={event => updateEditForm("capacityPerDay", event.target.value)} />
-              </label>
-              <label className="field">
-                <span className="field__label">Override pt/day</span>
-                <input className="input" type="number" min="0" max="24" step="0.25" value={editForm.availability === "leave" ? "" : editForm.capacityOverride} disabled={editForm.availability === "leave"} onChange={event => updateEditForm("capacityOverride", event.target.value)} />
-                <span className="field__hint">On leave clears override.</span>
+                <span className="field__hint">Normal points this person can handle per day.</span>
               </label>
               <label className="field">
                 <span className="field__label">WIP limit</span>
                 <input className="input" type="number" min="0" max="20" step="1" value={editForm.wipLimit} onChange={event => updateEditForm("wipLimit", event.target.value)} />
+                <span className="field__hint">Maximum active jobs this person should hold at once.</span>
               </label>
             </div>
             {saveState.status === "error" && <div className="reason-box reason-box--need" style={{ marginTop: 12 }}>{saveState.message}</div>}

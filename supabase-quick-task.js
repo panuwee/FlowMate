@@ -357,23 +357,12 @@ async function adminUpdateFlowMateTeamMember(memberId, input) {
   assertFlowMateAdminAccess();
   if (!memberId) throw new Error("Team member ID is required.");
 
-  const availability = input && input.availability;
-  if (!["available", "partial", "leave"].includes(availability)) {
-    throw new Error("Availability must be available, partial, or leave.");
-  }
-
   const capacityPerDay = flowmateNumberInRange(input && input.capacityPerDay, "Capacity per day", 0, 24);
   const wipLimit = flowmateIntegerInRange(input && input.wipLimit, "WIP limit", 0, 20);
-  const rawOverride = input ? input.capacityOverride : null;
-  const capacityOverride = availability === "leave"
-    ? null
-    : (rawOverride === "" || rawOverride == null ? null : flowmateNumberInRange(rawOverride, "Capacity override", 0, 24));
 
   const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_update_team_member", {
     p_team_member_id: memberId,
-    p_availability: availability,
     p_capacity_per_day: capacityPerDay,
-    p_capacity_override_per_day: capacityOverride,
     p_wip_limit: wipLimit,
   });
 
