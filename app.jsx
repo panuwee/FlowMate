@@ -51,6 +51,11 @@ function App() {
   const [focusId, setFocusId] = useStateApp(null);
   const [searchQuery, setSearchQuery] = useStateApp("");
   const [navCounts, setNavCounts] = useStateApp({});
+  const [notifications, setNotifications] = useStateApp([]);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useStateApp(false);
+  const [notificationLoadState, setNotificationLoadState] = useStateApp({ status: "idle", message: "" });
+  const [markingNotificationId, setMarkingNotificationId] = useStateApp(null);
+  const [isMarkingAllNotifications, setIsMarkingAllNotifications] = useStateApp(false);
   // status: "loading" → "signed-in" | "signed-out".
   // Loading shows a small splash. Signed-out shows the Login landing page.
   // Signed-in renders the full FlowMate app.
@@ -69,6 +74,88 @@ function App() {
     setFocusId(id);
     setRoute("detail");
     window.location.hash = `detail/${id}`;
+  }
+
+  async function refreshNotifications(options = {}) {
+    if (!window.loadFlowMateNotifications) {
+      setNotifications([]);
+      setNotificationLoadState({ status: "error", message: "Notification loader is not ready." });
+      return [];
+    }
+    if (options.showLoading) {
+      setNotificationLoadState({ status: "loading", message: "Loading notifications..." });
+    }
+    try {
+      const rows = await window.loadFlowMateNotifications();
+      setNotifications(rows || []);
+      setNotificationLoadState({ status: "live", message: "Live Supabase notifications" });
+      return rows || [];
+    } catch (error) {
+      console.error("[FlowMate Notifications] Load failed:", error);
+      setNotifications([]);
+      setNotificationLoadState({ status: "error", message: error.message || "Notification load failed." });
+      return [];
+    }
+  }
+
+  async function handleMarkNotificationRead(notification) {
+    if (!notification || notification.readAt || !window.markFlowMateNotificationRead) return;
+    setMarkingNotificationId(notification.id);
+    try {
+      const result = await window.markFlowMateNotificationRead(notification.id);
+      const readAt = (result && result.read_at) || new Date().toISOString();
+      setNotifications(rows => rows.map(row => (
+        row.id === notification.id ? { ...row, readAt, isRead: true } : row
+      )));
+    } catch (error) {
+      console.error("[FlowMate Notifications] Mark read failed:", error);
+      setNotificationLoadState({ status: "error", message: error.message || "Mark read failed." });
+    } finally {
+      setMarkingNotificationId(null);
+    }
+  }
+
+  async function handleMarkAllNotificationsRead() {
+    if (!window.markAllFlowMateNotificationsRead) return;
+    setIsMarkingAllNotifications(true);
+    try {
+      await window.markAllFlowMateNotificationsRead();
+      const readAt = new Date().toISOString();
+      setNotifications(rows => rows.map(row => row.readAt ? row : { ...row, readAt, isRead: true }));
+      refreshNotifications({ showLoading: false });
+    } catch (error) {
+      console.error("[FlowMate Notifications] Mark all read failed:", error);
+      setNotificationLoadState({ status: "error", message: error.message || "Mark all read failed." });
+    } finally {
+      setIsMarkingAllNotifications(false);
+    }
+  }
+
+  async function handleOpenNotification(notification) {
+    if (!notification) return;
+    await handleMarkNotificationRead(notification);
+
+    if (!notification.workItemId) {
+      return;
+    }
+
+    try {
+      if (window.loadFlowMateListRows && window.findFlowMateWorkItemById) {
+        const rows = await window.loadFlowMateListRows();
+        const row = window.findFlowMateWorkItemById(rows, notification.workItemId);
+        if (row) {
+          window.flowmateSelectedWorkItem = row;
+          open(row.id);
+          setIsNotificationCenterOpen(false);
+          return;
+        }
+      }
+      open(notification.workItemId);
+      setIsNotificationCenterOpen(false);
+    } catch (error) {
+      console.error("[FlowMate Notifications] Open detail failed:", error);
+      setNotificationLoadState({ status: "error", message: error.message || "Open notification failed." });
+    }
   }
 
   useEffectApp(() => {
@@ -190,6 +277,31 @@ function App() {
     };
   }, [authState.status, route]);
 
+  useEffectApp(() => {
+    if (authState.status !== "signed-in") {
+      setNotifications([]);
+      setIsNotificationCenterOpen(false);
+      setNotificationLoadState({ status: "idle", message: "" });
+      return;
+    }
+
+    let alive = true;
+    async function loadRows() {
+      const rows = await refreshNotifications({ showLoading: notifications.length === 0 });
+      if (!alive) return;
+      return rows;
+    }
+
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRows)
+      : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, [authState.status]);
+
   // Gate the whole app on auth status.
   if (authState.status === "loading") {
     return <LoadingScreen />;
@@ -207,6 +319,7 @@ function App() {
   const isAdminUser = user.role === "admin";
   const visibleNavGroups = getVisibleNavGroups(user.role);
   const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route);
+  const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
 
   return (
     <div className="app">
@@ -226,9 +339,39 @@ function App() {
         </div>
         <span className="topbar__spacer"></span>
         <button className="topbar__btn" onClick={() => nav("create")}><Icon name="plus" /> Create</button>
-        <button className="topbar__btn" disabled title="Notifications are planned for MVP 1.1">
-          <Icon name="bell" /> Notifications (MVP 1.1)
+        <button className="topbar__btn" onClick={() => setIsNotificationCenterOpen(true)} title="Open notifications">
+          <Icon name="bell" /> Notifications
+          {unreadNotificationCount > 0 && (
+            <span className="nav-item__count" style={{
+              marginLeft: 2,
+              minWidth: 18,
+              height: 18,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              borderRadius: 999,
+              background: "var(--garena-red)",
+              color: "var(--garena-white)",
+              fontSize: 11,
+              fontWeight: 700,
+              padding: "0 5px",
+            }}>{unreadNotificationCount}</span>
+          )}
         </button>
+        {isNotificationCenterOpen && (
+          <NotificationCenterPanel
+            notifications={notifications}
+            unreadCount={unreadNotificationCount}
+            loadState={notificationLoadState}
+            markingNotificationId={markingNotificationId}
+            isMarkingAll={isMarkingAllNotifications}
+            onClose={() => setIsNotificationCenterOpen(false)}
+            onRefresh={() => refreshNotifications({ showLoading: true })}
+            onOpen={handleOpenNotification}
+            onMarkRead={handleMarkNotificationRead}
+            onMarkAllRead={handleMarkAllNotificationsRead}
+          />
+        )}
         <div className="topbar__user" title={`Signed in as ${currentUserEmail}`}>
           <Avatar memberId={avatarMemberId} size="" />
           <span className="topbar__user-name">{currentUserName}</span>
@@ -276,6 +419,168 @@ function App() {
         {allowedRoute && route === "admin-whitelist" && isAdminUser && <AdminWhitelistScreen />}
         {!allowedRoute && <AccessDeniedScreen onNav={nav} />}
       </main>
+    </div>
+  );
+}
+
+function NotificationCenterPanel({
+  notifications,
+  unreadCount,
+  loadState,
+  markingNotificationId,
+  isMarkingAll,
+  onClose,
+  onRefresh,
+  onOpen,
+  onMarkRead,
+  onMarkAllRead,
+}) {
+  const safeNotifications = notifications || [];
+  const isLoading = loadState.status === "loading";
+  const hasError = loadState.status === "error";
+  const panelStyle = {
+    position: "fixed",
+    top: 64,
+    right: 20,
+    width: 420,
+    maxWidth: "calc(100vw - 32px)",
+    maxHeight: "calc(100vh - 88px)",
+    zIndex: 40,
+    boxShadow: "0 18px 48px rgba(46, 84, 109, 0.18)",
+    overflow: "hidden",
+  };
+  const listStyle = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    maxHeight: 460,
+    overflowY: "auto",
+  };
+
+  function notificationKindLabel(type) {
+    return {
+      assigned: "Assigned",
+      status_changed: "Status",
+      review_requested: "Review",
+      approved: "Approved",
+      changes_requested: "Changes",
+      blocked: "Blocked",
+      resumed: "Resumed",
+      cancelled: "Cancelled",
+      comment_created: "Comment",
+      due_soon: "Due soon",
+      overdue: "Overdue",
+    }[type] || "Notification";
+  }
+
+  function onNotificationKeyDown(event, notification) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onOpen(notification);
+    }
+  }
+
+  return (
+    <div className="card" style={panelStyle}>
+      <div className="card__head">
+        <div>
+          <span className="card__title">Notification Center</span>
+          <div className="card__sub">{unreadCount} unread</div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="btn btn--xs btn--ghost" onClick={onRefresh} disabled={isLoading}>Refresh</button>
+          <button className="iconbtn" onClick={onClose} title="Close notifications"><Icon name="x" size={14} /></button>
+        </div>
+      </div>
+      <div className="card__body" style={{ padding: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {safeNotifications.length} notifications
+          </span>
+          <button
+            className="btn btn--xs btn--secondary"
+            onClick={onMarkAllRead}
+            disabled={unreadCount === 0 || isMarkingAll}
+          >
+            <Icon name="check" size={11} /> Mark all as read
+          </button>
+        </div>
+
+        {hasError && (
+          <div className="reason-box reason-box--need" style={{ marginBottom: 10 }}>
+            {loadState.message}
+          </div>
+        )}
+
+        {isLoading && safeNotifications.length === 0 && (
+          <div className="reason-box">Loading notifications...</div>
+        )}
+
+        {!isLoading && safeNotifications.length === 0 && (
+          <div className="reason-box" style={{ textAlign: "center" }}>
+            <div className="strong">No notifications yet</div>
+            <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+              Assignments, review requests, comments, and due reminders will appear here.
+            </div>
+          </div>
+        )}
+
+        {safeNotifications.length > 0 && (
+          <div style={listStyle}>
+            {safeNotifications.map(notification => {
+              const isUnread = !notification.readAt;
+              return (
+                <div
+                  key={notification.id}
+                  role="button"
+                  tabIndex="0"
+                  onClick={() => onOpen(notification)}
+                  onKeyDown={(event) => onNotificationKeyDown(event, notification)}
+                  style={{
+                    border: "1px solid var(--garena-light-grey)",
+                    borderLeft: isUnread ? "3px solid var(--garena-red)" : "3px solid var(--garena-light-grey)",
+                    background: isUnread ? "var(--garena-red-light-2)" : "var(--garena-white)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div className="row" style={{ justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="row" style={{ gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                        <span className={`badge ${isUnread ? "badge--overdue" : "badge--neutral"}`}>
+                          {isUnread ? "Unread" : "Read"}
+                        </span>
+                        <span className="tag">{notificationKindLabel(notification.type)}</span>
+                        {notification.workItemId && <span className="mono muted" style={{ fontSize: 11 }}>{notification.workItemId}</span>}
+                      </div>
+                      <div className="strong" style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}>{notification.title}</div>
+                      {notification.body && (
+                        <div className="muted" style={{ fontSize: 12, marginTop: 3, overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                          {notification.body}
+                        </div>
+                      )}
+                      <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{notification.createdLabel || "No timestamp"}</div>
+                    </div>
+                    {isUnread && (
+                      <button
+                        className="btn btn--xs btn--ghost"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onMarkRead(notification);
+                        }}
+                        disabled={markingNotificationId === notification.id}
+                      >
+                        Mark read
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

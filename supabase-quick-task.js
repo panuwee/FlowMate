@@ -260,6 +260,97 @@ async function cancelFlowMateWorkItem(work, reason) {
 }
 window.cancelFlowMateWorkItem = cancelFlowMateWorkItem;
 
+// ---------------------------------------------------------------------------
+// Notification Center -- reads are RLS-scoped; read state changes go via RPC.
+// ---------------------------------------------------------------------------
+function flowmateNotificationDateTimeLabel(dateValue) {
+  if (!dateValue) return "";
+  return new Date(dateValue).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+async function loadFlowMateNotifications() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+  if (!window.FLOWMATE_CURRENT_USER) {
+    throw new Error("Sign in is required to load notifications.");
+  }
+
+  const { data, error } = await window.flowmateSupabase
+    .from("notifications")
+    .select("id,type,title,body,work_item_id,metadata,read_at,created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) throw error;
+
+  const workItemIds = Array.from(new Set((data || []).map((row) => row.work_item_id).filter(Boolean)));
+  let workItemsById = {};
+  if (workItemIds.length > 0) {
+    const { data: workItems, error: workItemsError } = await window.flowmateSupabase
+      .from("work_items")
+      .select("id,display_id,title,status")
+      .in("id", workItemIds);
+    if (workItemsError) throw workItemsError;
+    workItemsById = Object.fromEntries((workItems || []).map((item) => [item.id, item]));
+  }
+
+  return (data || []).map((row) => {
+    const workItem = row.work_item_id ? workItemsById[row.work_item_id] : null;
+    const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+    const displayId = workItem?.display_id || metadata.display_id || metadata.work_item_display_id || "";
+    return {
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      body: row.body || "",
+      workItemUuid: row.work_item_id || null,
+      workItemId: displayId,
+      workItemTitle: workItem?.title || "",
+      workItemStatus: workItem?.status || "",
+      metadata,
+      readAt: row.read_at || null,
+      isRead: Boolean(row.read_at),
+      createdAt: row.created_at,
+      createdLabel: flowmateNotificationDateTimeLabel(row.created_at),
+    };
+  });
+}
+
+async function markFlowMateNotificationRead(notificationId) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+  if (!notificationId) throw new Error("Notification ID is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("mark_notification_read", {
+    p_notification_id: notificationId,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+async function markAllFlowMateNotificationsRead() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const { data, error } = await window.flowmateSupabase.rpc("mark_all_notifications_read");
+
+  if (error) throw error;
+  return data;
+}
+
+window.loadFlowMateNotifications = loadFlowMateNotifications;
+window.markFlowMateNotificationRead = markFlowMateNotificationRead;
+window.markAllFlowMateNotificationsRead = markAllFlowMateNotificationsRead;
+
 // ===========================================================================
 // Google Workspace SSO (Supabase Auth + Google provider)
 // ===========================================================================
