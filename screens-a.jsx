@@ -1055,23 +1055,33 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const isLiveDetail = Boolean(w.isSupabaseRow);
   const visibleBriefNote = w.briefNote || w.note || "";
   const visibleChecklistItems = w.checklistItems || [];
-  const visibleComments = w.comments || [];
   const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
+  const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
+  const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (
+    window.FLOWMATE_CURRENT_USER?.role === "admin" ||
+    currentUserId === w.requesterUserId ||
+    currentUserId === w.assigneeUserId ||
+    owner?.userId === currentUserId
+  ));
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkDescription, setLinkDescription] = useState("");
+  const [commentBody, setCommentBody] = useState("");
   const [watcherUserId, setWatcherUserId] = useState("");
   const [detailLinks, setDetailLinks] = useState(w.links || []);
+  const [detailComments, setDetailComments] = useState(w.comments || []);
   const [detailWatchers, setDetailWatchers] = useState(w.watchers || []);
   const visibleLinks = detailLinks;
+  const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
 
   useEffect(() => {
     setDetailLinks(w.links || []);
+    setDetailComments(w.comments || []);
     setDetailWatchers(w.watchers || []);
-  }, [w.id, w.links, w.watchers]);
+  }, [w.id, w.links, w.comments, w.watchers]);
 
   async function runCreativeTransition(nextStatus) {
     if (!w.isSupabaseRow) {
@@ -1134,6 +1144,42 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_links" } }));
     } catch (error) {
       setActionMsg({ tone: "bad", text: error.message || "Add link failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function submitComment(event) {
+    event.preventDefault();
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so comments are disabled." });
+      return;
+    }
+    setPending(true);
+    try {
+      const data = await window.addFlowMateWorkItemComment(w.id, commentBody);
+      const addedComment = {
+        id: data?.id || `local-comment-${Date.now()}`,
+        work_item_id: data?.work_item_id,
+        author_user_id: data?.author_user_id || window.FLOWMATE_CURRENT_USER?.id,
+        body: data?.body || commentBody.trim(),
+        authorName: window.FLOWMATE_CURRENT_USER?.name || "You",
+        created_at: data?.created_at || new Date().toISOString(),
+      };
+      setDetailComments((current) => {
+        if (current.some((comment) => comment.id === addedComment.id)) return current;
+        const next = [...current, addedComment];
+        w.comments = next;
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.comments = next;
+        }
+        return next;
+      });
+      setCommentBody("");
+      setActionMsg({ tone: "ok", text: "Comment added." });
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "comments" } }));
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Add comment failed." });
     } finally {
       setPending(false);
     }
@@ -1234,31 +1280,31 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="page__sub" style={{ marginTop: 4 }}>{w.requesterTeam || "No team"} - {w.campaign || "No campaign"} - requested by {w.requester || "-"}</div>
         </div>
         <div className="page__actions">
-          {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && (
+          {canStatusTransition && ["assigned", "in_progress", "review"].includes(w.status) && (
             <button className="btn btn--danger" onClick={() => runCreativeTransition("blocked")} disabled={pending}><Icon name="block" /> Block</button>
           )}
-          {w.type !== "quick" && !["delivered", "cancelled"].includes(w.status) && (
+          {canStatusTransition && !["delivered", "cancelled"].includes(w.status) && (
             <button className="btn btn--ghost" onClick={runCancel} disabled={pending}><Icon name="x" /> Cancel</button>
           )}
-          {w.type !== "quick" && w.status === "assigned" && (
+          {canStatusTransition && w.status === "assigned" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Start work</button>
           )}
-          {w.type !== "quick" && w.status === "in_progress" && (
+          {canStatusTransition && w.status === "in_progress" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("review")} disabled={pending}><Icon name="send" /> Submit review</button>
           )}
-          {w.type !== "quick" && w.status === "review" && (
+          {canStatusTransition && w.status === "review" && (
             <>
               <button className="btn btn--secondary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}>Request changes</button>
               <button className="btn btn--primary" onClick={() => runCreativeTransition("delivered")} disabled={pending}><Icon name="check" /> Approve delivered</button>
             </>
           )}
-          {w.type !== "quick" && w.status === "blocked" && (
+          {canStatusTransition && w.status === "blocked" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Resume</button>
           )}
-          {w.type !== "quick" && w.status === "queued" && (
+          {canStatusTransition && w.status === "queued" && (
             <button className="btn btn--primary" onClick={runRerunAssignment} disabled={pending}><Icon name="rerun" /> Rerun assignment</button>
           )}
-          {w.type !== "quick" && w.status === "need_brief" && (
+          {canStatusTransition && w.status === "need_brief" && (
             <button className="btn btn--primary" onClick={async () => {
               setPending(true);
               try {
@@ -1366,13 +1412,13 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           )}
 
-          {visibleComments.length > 0 && (
-            <div className="card">
-              <div className="card__head">
-                <span className="card__title">Comments <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{visibleComments.length}</span></span>
-              </div>
-              <div className="card__body">
-                {visibleComments.map((comment) => (
+          <div className="card">
+            <div className="card__head">
+              <span className="card__title">Comment zone <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{visibleComments.length}</span></span>
+            </div>
+            <div className="card__body" style={{ display: "grid", gap: 12 }}>
+              {visibleComments.length > 0 ? (
+                visibleComments.map((comment) => (
                   <div className="comment" key={comment.id}>
                     <Avatar memberId={comment.author_user_id} size="avatar--lg" />
                     <div className="comment__body">
@@ -1380,10 +1426,22 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                       <div className="comment__text">{comment.body}</div>
                     </div>
                   </div>
-                ))}
-              </div>
+                ))
+              ) : (
+                <div className="muted">No comments yet.</div>
+              )}
+              <form className="form-grid" onSubmit={submitComment}>
+                <label className="field field--full">
+                  <span className="field__label">Comment</span>
+                  <textarea className="textarea" value={commentBody} onChange={(e) => setCommentBody(e.target.value)} placeholder="Add comment" disabled={pending}></textarea>
+                </label>
+                <div className="field" style={{ justifyContent: "end" }}>
+                  <span className="field__label">&nbsp;</span>
+                  <button className="btn btn--primary" type="submit" disabled={pending || !commentBody.trim()}><Icon name="send" /> Add comment</button>
+                </div>
+              </form>
             </div>
-          )}
+          </div>
 
         </div>
 

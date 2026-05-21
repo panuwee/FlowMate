@@ -342,6 +342,8 @@ async function loadFlowMateListRows() {
       referenceLink: details.reference_link || "",
       campaign: item.campaign_name || item.project_name || "",
       requesterTeam: requesterTeam || "No team",
+      requesterUserId: item.requester_user_id,
+      assigneeUserId: item.assignee_user_id,
       assignee: owner ? owner.id : otherAssigneeId,
       assigneeOtherName,
       requester: requester.display_name || "-",

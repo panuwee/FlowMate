@@ -468,6 +468,8 @@ function NotificationCenterPanel({
       resumed: "Resumed",
       cancelled: "Cancelled",
       comment_created: "Comment",
+      link_added: "Link",
+      watcher_added: "Watcher",
       due_soon: "Due soon",
       overdue: "Overdue",
     }[type] || "Notification";
@@ -520,7 +522,7 @@ function NotificationCenterPanel({
           <div className="reason-box" style={{ textAlign: "center" }}>
             <div className="strong">No notifications yet</div>
             <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-              Assignments, review requests, comments, and due reminders will appear here.
+              Assignments, review requests, comments, links, watchers, and due reminders will appear here.
             </div>
           </div>
         )}
