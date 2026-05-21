@@ -99,7 +99,7 @@ async function toggleFlowMateQuickTaskChecklistItem(checklistItemId, isDone) {
 window.addFlowMateQuickTaskChecklistItem = addFlowMateQuickTaskChecklistItem;
 window.toggleFlowMateQuickTaskChecklistItem = toggleFlowMateQuickTaskChecklistItem;
 
-async function addFlowMateWorkItemComment(displayId, body) {
+async function addFlowMateWorkItemComment(displayId, body, mentionedUserIds = []) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
@@ -112,6 +112,7 @@ async function addFlowMateWorkItemComment(displayId, body) {
     p_actor_user_id: flowmateActorId(),
     p_display_id: displayId,
     p_body: trimmedBody,
+    p_mentioned_user_ids: Array.isArray(mentionedUserIds) ? mentionedUserIds : [],
   });
 
   if (error) throw error;

@@ -516,10 +516,17 @@ grant execute on function public.toggle_quick_task_checklist_item(
   boolean
 ) to anon, authenticated;
 
+drop function if exists public.add_work_item_comment(
+  uuid,
+  text,
+  text
+);
+
 create or replace function public.add_work_item_comment(
   p_actor_user_id uuid,
   p_display_id text,
-  p_body text
+  p_body text,
+  p_mentioned_user_ids uuid[] default '{}'::uuid[]
 )
 returns jsonb
 language plpgsql
@@ -531,6 +538,7 @@ declare
   v_actor public.users%rowtype;
   v_work public.work_items%rowtype;
   v_comment_id uuid;
+  v_mentioned_user_ids uuid[];
 begin
   v_actor_id := public.flowmate_actor_user_id();
   perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
@@ -557,6 +565,13 @@ begin
     raise exception 'Only requester or assignee can comment on this item in MVP';
   end if;
 
+  select coalesce(array_agg(distinct u.id), '{}'::uuid[])
+  into v_mentioned_user_ids
+  from unnest(coalesce(p_mentioned_user_ids, '{}'::uuid[])) as mentioned(user_id)
+  join public.users u
+    on u.id = mentioned.user_id
+   and u.is_active = true;
+
   insert into public.comments (
     work_item_id,
     author_user_id,
@@ -579,13 +594,19 @@ begin
     v_work.id,
     v_actor_id,
     'commented',
-    jsonb_build_object('source', 'static_mvp', 'action', 'add_comment', 'comment_id', v_comment_id)
+    jsonb_build_object(
+      'source', 'static_mvp',
+      'action', 'add_comment',
+      'comment_id', v_comment_id,
+      'mentioned_user_ids', coalesce(v_mentioned_user_ids, '{}'::uuid[])
+    )
   );
 
   return jsonb_build_object(
     'id', v_comment_id,
     'display_id', v_work.display_id,
-    'body', trim(p_body)
+    'body', trim(p_body),
+    'mentioned_user_ids', coalesce(v_mentioned_user_ids, '{}'::uuid[])
   );
 end;
 $$;
@@ -593,7 +614,8 @@ $$;
 grant execute on function public.add_work_item_comment(
   uuid,
   text,
-  text
+  text,
+  uuid[]
 ) to anon, authenticated;
 
 create or replace function public.update_own_work_item_comment(

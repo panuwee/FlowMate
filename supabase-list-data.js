@@ -163,6 +163,20 @@ function flowmateDateTimeLabel(dateValue) {
   });
 }
 
+function flowmateDateTimeFullLabel(dateValue) {
+  if (!dateValue) return "";
+  return new Date(dateValue)
+    .toLocaleString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    })
+    .replace(/\b(am|pm)\b/i, (match) => match.toUpperCase());
+}
+
 function flowmateDueDelta(dateValue) {
   if (!dateValue) return null;
   // Compare in UTC to keep behaviour identical to the database's `current_date`
@@ -189,7 +203,7 @@ async function loadFlowMateListRows() {
       .select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked"),
     window.flowmateSupabase
       .from("users")
-      .select("id,display_name,requester_team"),
+      .select("id,email,display_name,requester_team,is_active"),
     window.flowmateSupabase
       .from("team_members")
       .select("id,user_id,display_name,initials,color,discipline_short,active"),
@@ -261,6 +275,7 @@ async function loadFlowMateListRows() {
     commentsByWorkItemId[comment.work_item_id].push({
       ...comment,
       authorName: usersById[comment.author_user_id]?.display_name || "Unknown",
+      createdLabel: flowmateDateTimeFullLabel(comment.created_at),
     });
   });
   const linksByWorkItemId = {};
@@ -288,6 +303,7 @@ async function loadFlowMateListRows() {
   });
 
   syncFlowMateMembers(membersResult.data || []);
+  syncFlowMateMentionUsers(usersResult.data || []);
 
   const rows = (workItemsResult.data || []).map((item) => {
     const flags = flagsByWorkItemId[item.id] || {};
@@ -403,6 +419,37 @@ function syncFlowMateMembers(members) {
   }
 }
 
+function normalizeFlowMateMentionUser(user) {
+  return {
+    id: user.id,
+    name: user.display_name || user.email || "Unknown",
+    email: user.email || "",
+  };
+}
+
+function syncFlowMateMentionUsers(users) {
+  window.FLOWMATE_MENTION_USERS = (users || [])
+    .filter((user) => user && user.id && user.is_active !== false)
+    .map(normalizeFlowMateMentionUser)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function loadFlowMateMentionUsers() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const { data, error } = await window.flowmateSupabase
+    .from("users")
+    .select("id,email,display_name,is_active")
+    .eq("is_active", true)
+    .order("display_name", { ascending: true });
+
+  if (error) throw error;
+  syncFlowMateMentionUsers(data || []);
+  return window.FLOWMATE_MENTION_USERS || [];
+}
+
 async function loadFlowMateAssignees() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -431,6 +478,7 @@ async function loadFlowMateAssignees() {
 
 window.loadFlowMateListRows = loadFlowMateListRows;
 window.loadFlowMateAssignees = loadFlowMateAssignees;
+window.loadFlowMateMentionUsers = loadFlowMateMentionUsers;
 window.startFlowMateRealtime = startFlowMateRealtime;
 window.stopFlowMateRealtime = stopFlowMateRealtime;
 window.attachFlowMateLiveRefresh = attachFlowMateLiveRefresh;

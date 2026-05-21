@@ -468,6 +468,7 @@ function NotificationCenterPanel({
       resumed: "Resumed",
       cancelled: "Cancelled",
       comment_created: "Comment",
+      mentioned_in_comment: "Mention",
       link_added: "Link",
       watcher_added: "Watcher",
       due_soon: "Due soon",

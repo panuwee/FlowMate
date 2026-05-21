@@ -1069,6 +1069,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const [linkUrl, setLinkUrl] = useState("");
   const [linkDescription, setLinkDescription] = useState("");
   const [commentBody, setCommentBody] = useState("");
+  const [mentionUsers, setMentionUsers] = useState(window.FLOWMATE_MENTION_USERS || []);
   const [watcherUserId, setWatcherUserId] = useState("");
   const [detailLinks, setDetailLinks] = useState(w.links || []);
   const [detailComments, setDetailComments] = useState(w.comments || []);
@@ -1076,12 +1077,72 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
+  const mentionQueryMatch = commentBody.match(/(^|\s)@([^\s@]*)$/);
+  const mentionQuery = mentionQueryMatch ? mentionQueryMatch[2].toLowerCase() : null;
+  const mentionSuggestions = mentionQuery == null ? [] : mentionUsers
+    .filter((user) => user.id !== currentUserId)
+    .filter((user) => {
+      const name = (user.name || "").toLowerCase();
+      const email = (user.email || "").toLowerCase();
+      return !mentionQuery || name.includes(mentionQuery) || email.includes(mentionQuery);
+    })
+    .slice(0, 6);
 
   useEffect(() => {
     setDetailLinks(w.links || []);
     setDetailComments(w.comments || []);
     setDetailWatchers(w.watchers || []);
   }, [w.id, w.links, w.comments, w.watchers]);
+
+  useEffect(() => {
+    let alive = true;
+    if (window.FLOWMATE_MENTION_USERS && window.FLOWMATE_MENTION_USERS.length > 0) {
+      setMentionUsers(window.FLOWMATE_MENTION_USERS);
+    }
+    if (!window.loadFlowMateMentionUsers) return () => { alive = false; };
+    window.loadFlowMateMentionUsers()
+      .then((users) => { if (alive) setMentionUsers(users || []); })
+      .catch((error) => {
+        console.warn("[FlowMate Mentions] Load failed:", error && error.message);
+      });
+    return () => { alive = false; };
+  }, [w.id]);
+
+  function flowmateFormatCommentTime(dateValue) {
+    if (!dateValue) return "";
+    return new Date(dateValue)
+      .toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+      .replace(/\b(am|pm)\b/i, (match) => match.toUpperCase());
+  }
+
+  function extractFlowMateMentionedUserIds(body) {
+    const lowerBody = (body || "").toLowerCase();
+    const ids = new Set();
+    mentionUsers.forEach((user) => {
+      const mentionText = `@${(user.name || "").toLowerCase()}`;
+      if (user.id && mentionText.length > 1 && lowerBody.includes(mentionText)) {
+        ids.add(user.id);
+      }
+    });
+    return Array.from(ids);
+  }
+
+  function insertMentionUser(user) {
+    if (!user || !user.id) return;
+    setCommentBody((body) => {
+      const next = body.match(/(^|\s)@([^\s@]*)$/)
+        ? body.replace(/(^|\s)@([^\s@]*)$/, `$1@${user.name} `)
+        : `${body}${body.endsWith(" ") || body.length === 0 ? "" : " "}@${user.name} `;
+      return next;
+    });
+  }
 
   async function runCreativeTransition(nextStatus) {
     if (!w.isSupabaseRow) {
@@ -1157,14 +1218,17 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
     setPending(true);
     try {
-      const data = await window.addFlowMateWorkItemComment(w.id, commentBody);
+      const mentionedUserIds = extractFlowMateMentionedUserIds(commentBody);
+      const data = await window.addFlowMateWorkItemComment(w.id, commentBody, mentionedUserIds);
       const addedComment = {
         id: data?.id || `local-comment-${Date.now()}`,
         work_item_id: data?.work_item_id,
         author_user_id: data?.author_user_id || window.FLOWMATE_CURRENT_USER?.id,
         body: data?.body || commentBody.trim(),
+        mentioned_user_ids: data?.mentioned_user_ids || mentionedUserIds,
         authorName: window.FLOWMATE_CURRENT_USER?.name || "You",
         created_at: data?.created_at || new Date().toISOString(),
+        createdLabel: flowmateFormatCommentTime(data?.created_at || new Date().toISOString()),
       };
       setDetailComments((current) => {
         if (current.some((comment) => comment.id === addedComment.id)) return current;
@@ -1422,7 +1486,10 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   <div className="comment" key={comment.id}>
                     <Avatar memberId={comment.author_user_id} size="avatar--lg" />
                     <div className="comment__body">
-                      <div className="comment__head"><span className="comment__author">{comment.authorName || "Unknown"}</span></div>
+                      <div className="comment__head">
+                        <span className="comment__author">{comment.authorName || "Unknown"}</span>
+                        <span className="comment__time">{comment.createdLabel || flowmateFormatCommentTime(comment.created_at)}</span>
+                      </div>
                       <div className="comment__text">{comment.body}</div>
                     </div>
                   </div>
@@ -1434,6 +1501,22 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <label className="field field--full">
                   <span className="field__label">Comment</span>
                   <textarea className="textarea" value={commentBody} onChange={(e) => setCommentBody(e.target.value)} placeholder="Add comment" disabled={pending}></textarea>
+                  {mentionSuggestions.length > 0 && (
+                    <div className="reason-box" style={{ padding: 8, display: "grid", gap: 4 }}>
+                      {mentionSuggestions.map((user) => (
+                        <button
+                          key={user.id}
+                          type="button"
+                          className="btn btn--xs btn--ghost"
+                          style={{ justifyContent: "flex-start" }}
+                          onClick={() => insertMentionUser(user)}
+                        >
+                          @{user.name}
+                          {user.email && <span className="muted" style={{ marginLeft: 6 }}>{user.email}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </label>
                 <div className="field" style={{ justifyContent: "end" }}>
                   <span className="field__label">&nbsp;</span>

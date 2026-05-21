@@ -120,6 +120,7 @@ as $$
 $$;
 
 revoke all on function public.flowmate_can_read_work_item(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.flowmate_can_read_work_item(uuid, uuid) to authenticated;
 
 create or replace function public.flowmate_can_collaborate_on_work_item(
   p_work_item_id uuid,
@@ -584,6 +585,7 @@ alter table public.notifications
       'due_soon',
       'overdue',
       'comment_created',
+      'mentioned_in_comment',
       'link_added',
       'watcher_added'
     )
@@ -601,6 +603,7 @@ declare
   v_notification_type text;
   v_title text;
   v_body text;
+  v_mentioned_user_ids jsonb;
 begin
   select *
   into v_work
@@ -615,6 +618,7 @@ begin
     v_notification_type := 'comment_created';
     v_title := 'New comment: ' || v_work.display_id;
     v_body := v_work.title;
+    v_mentioned_user_ids := coalesce(new.metadata -> 'mentioned_user_ids', '[]'::jsonb);
   elsif new.event_type in ('status_changed', 'blocked', 'reviewed', 'cancelled') then
     v_notification_type := 'status_changed';
     v_title := 'Status changed: ' || v_work.display_id;
@@ -653,6 +657,41 @@ begin
       'event:' || new.id::text || ':' || v_notification_type || ':' || coalesce(v_target_user_id::text, '')
     );
   end loop;
+
+  if new.event_type = 'commented'
+     and coalesce(new.metadata ->> 'action', '') = 'add_comment'
+     and jsonb_typeof(v_mentioned_user_ids) = 'array' then
+    v_notification_type := 'mentioned_in_comment';
+    v_title := 'Mentioned in comment: ' || v_work.display_id;
+    v_body := v_work.title;
+
+    for v_target_user_id in
+      select distinct mentioned.user_id::uuid
+      from jsonb_array_elements_text(new.metadata -> 'mentioned_user_ids') as mentioned(user_id)
+      join public.users u
+        on u.id = mentioned.user_id::uuid
+       and u.is_active = true
+    loop
+      if v_target_user_id <> new.actor_user_id then
+        perform public.flowmate_create_notification(
+          v_target_user_id,
+          v_notification_type,
+          v_title,
+          v_body,
+          v_work.id,
+          new.actor_user_id,
+          new.id,
+          jsonb_build_object(
+            'event_type', new.event_type::text,
+            'action', new.metadata ->> 'action',
+            'comment_id', new.metadata ->> 'comment_id',
+            'mentioned_user_ids', new.metadata -> 'mentioned_user_ids'
+          ),
+          'event:' || new.id::text || ':' || v_notification_type || ':' || coalesce(v_target_user_id::text, '')
+        );
+      end if;
+    end loop;
+  end if;
 
   return new;
 end;
