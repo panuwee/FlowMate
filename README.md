@@ -12,6 +12,8 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `rpc_assignment.sql` | Assignment engine: `create_creative_request`, `recheck_brief`, `rerun_assignment`, plus effort + brief-completeness helpers |
 | `whitelist_access.sql` | Restricts Google sign-in to a fixed list of `@garena.com` emails. Run AFTER the auth-sync triggers from the SSO setup step. |
 | `security_hardening.sql` | Re-applies auth-based RLS helpers, policies, and final grants/revokes after RPC + whitelist setup |
+| `notification_center.sql` | MVP 1.2 Notification Center table hardening, read-state RPCs, trusted event trigger creation, and due-date notification generator |
+| `collaboration_admin.sql` | MVP 1.2 detail links, watchers, watcher notification recipients, admin status override, and admin soft archive |
 
 ## Before Running
 
@@ -37,6 +39,8 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    4. `supabase/rpc_assignment.sql`
    5. `supabase/whitelist_access.sql`
    6. `supabase/security_hardening.sql`
+   7. `supabase/notification_center.sql`
+   8. `supabase/collaboration_admin.sql`
 
 ## Expected Tables
 
@@ -51,6 +55,8 @@ After the full run order, these tables should exist:
 - `comments`
 - `checklist_items`
 - `notifications`
+- `work_item_links`
+- `work_item_watchers`
 - `capacity_overrides`
 - `user_whitelist`
 
@@ -61,15 +67,9 @@ After the full run order, these tables should exist:
 
 ## MVP Security Note
 
-This schema includes RLS and helper functions designed for mock-login development.
+This schema uses Supabase Auth identity through `auth.uid()`.
 
-The policy model expects the app/server layer to set:
-
-```sql
-select set_config('app.current_user_id', '<user uuid>', true);
-```
-
-For the first frontend wiring pass, direct read policies are permissive enough to inspect seeded data with the anon key. Before real pilot, write actions should go through controlled RPC/Edge Functions so `app.current_user_id` is set server-side.
+Signed-out users must not read protected FlowMate rows. Write actions that need identity-sensitive behavior should go through controlled SQL RPCs that resolve the actor from `auth.uid()` instead of trusting client-supplied actor IDs.
 
 ## Mock User IDs
 
@@ -93,7 +93,37 @@ select count(*) from public.team_members;
 select count(*) from public.work_items;
 select * from public.member_workload_v order by member_code;
 select display_id, is_overdue, is_due_soon, is_queued from public.work_item_flags_v order by display_id;
+select count(*) from public.notifications;
+select proname from pg_proc where proname in ('mark_notification_read', 'mark_all_notifications_read', 'flowmate_generate_due_notifications') order by proname;
+select tgname from pg_trigger where tgname = 'flowmate_notifications_after_event';
+select count(*) from public.work_item_links;
+select count(*) from public.work_item_watchers;
+select proname from pg_proc where proname in ('add_work_item_link', 'add_work_item_watcher', 'flowmate_admin_transition_work_status', 'flowmate_admin_archive_work_item') order by proname;
+select tgname from pg_trigger where tgname = 'flowmate_collaboration_notifications_after_event';
 ```
+
+## Notification Center Manual Checks
+
+After running `notification_center.sql`, confirm:
+
+1. `authenticated` can `select` from `public.notifications`, but direct `insert`, `update`, and `delete` are revoked.
+2. `mark_notification_read(notification_id)` only updates a notification where `notifications.user_id = auth.uid()`.
+3. `mark_all_notifications_read()` only updates unread notifications for `auth.uid()`.
+4. Creating work-item events through existing RPCs creates notifications for the intended recipient and not for unrelated users.
+5. `flowmate_generate_due_notifications(2)` can be run from trusted SQL/backend context to create `due_soon` and `overdue` notifications; do not expose this RPC directly to frontend users.
+
+## Collaboration/Admin Manual Checks
+
+After running `collaboration_admin.sql`, confirm:
+
+1. `authenticated` can `select` from `public.work_item_links` and `public.work_item_watchers`, but direct `insert`, `update`, and `delete` are revoked.
+2. `add_work_item_link(display_id, url, description)` uses the signed-in `auth.uid()` as `created_by_user_id`; do not pass actor IDs from the browser.
+3. `add_work_item_watcher(display_id, watcher_user_id)` works for requester, assignee/current owner, and admin, but not for unrelated users.
+4. A watcher can read active links/watchers for watched work and receives status/comment/link/watcher notifications.
+5. A watcher cannot transition status only because they are a watcher.
+6. `flowmate_admin_transition_work_status(...)` works only for admin users and writes `work_item_events.actor_user_id` as the real admin from `auth.uid()`.
+7. `flowmate_admin_archive_work_item(...)` sets `archived_at`, `archived_by_user_id`, and `archive_reason`; it must not delete work rows, comments, links, watchers, events, or notifications.
+8. `member_workload_v` and `work_item_flags_v` exclude archived rows.
 
 ## Next Step
 
