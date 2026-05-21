@@ -241,6 +241,24 @@ async function adminTransitionFlowMateWorkStatus(displayId, nextStatus, options 
   return data;
 }
 
+async function adminArchiveFlowMateWorkItem(displayId, reason) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const trimmedReason = (reason || "").trim();
+  if (!displayId) throw new Error("Work item ID is required.");
+  if (!trimmedReason) throw new Error("Archive reason is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_archive_work_item", {
+    p_display_id: displayId,
+    p_archive_reason: trimmedReason,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
 async function transitionFlowMateWorkStatus(displayId, nextStatus, options = {}) {
   if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin") {
     return adminTransitionFlowMateWorkStatus(displayId, nextStatus, options);
@@ -249,6 +267,7 @@ async function transitionFlowMateWorkStatus(displayId, nextStatus, options = {})
 }
 
 window.adminTransitionFlowMateWorkStatus = adminTransitionFlowMateWorkStatus;
+window.adminArchiveFlowMateWorkItem = adminArchiveFlowMateWorkItem;
 window.transitionFlowMateWorkStatus = transitionFlowMateWorkStatus;
 
 // ---------------------------------------------------------------------------

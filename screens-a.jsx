@@ -5,7 +5,9 @@ const { useState, useEffect } = React;
    MY WORK
    ============================================================ */
 function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
-  const currentUser = window.FLOWMATE_CURRENT_USER || {};
+  const currentUser = window.getFlowMatePerspectiveUser
+    ? window.getFlowMatePerspectiveUser(window.FLOWMATE_CURRENT_USER || {})
+    : (window.FLOWMATE_CURRENT_USER || {});
   const myMember = (window.MEMBERS || []).find(m => m.id === currentUser.team_member_id)
     || (window.MEMBERS || []).find(m => m.name && currentUser.name && m.name.toLowerCase() === currentUser.name.toLowerCase());
   const meIds = [currentUser.team_member_id, currentUser.id, myMember && myMember.id].filter(Boolean);
@@ -1058,8 +1060,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
+  const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
   const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (
-    window.FLOWMATE_CURRENT_USER?.role === "admin" ||
+    isAdminUser ||
     currentUserId === w.requesterUserId ||
     currentUserId === w.assigneeUserId ||
     owner?.userId === currentUserId
@@ -1323,6 +1326,33 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
   }
 
+  async function runAdminArchive() {
+    if (!isAdminUser) return;
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so admin archive is disabled." });
+      return;
+    }
+    const reason = window.prompt("Archive reason is required. This is a soft archive, not a permanent delete.");
+    if (!reason || !reason.trim()) return;
+    const confirmed = window.confirm(`Archive ${w.id}? This is a soft archive, not a permanent delete. History, comments, links, watchers, and audit stay preserved.`);
+    if (!confirmed) return;
+    setPending(true);
+    try {
+      await window.adminArchiveFlowMateWorkItem(w.id, reason);
+      w.archivedAt = new Date().toISOString();
+      if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+        window.flowmateSelectedWorkItem.archivedAt = w.archivedAt;
+      }
+      setActionMsg({ tone: "ok", text: `${w.id} archived. It will be hidden from normal active views after refresh.` });
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "admin_archive" } }));
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Admin archive failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div className="page">
       <div className="row" style={{ marginBottom: 12, fontSize: 12 }}>
@@ -1349,6 +1379,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           )}
           {canStatusTransition && !["delivered", "cancelled"].includes(w.status) && (
             <button className="btn btn--ghost" onClick={runCancel} disabled={pending}><Icon name="x" /> Cancel</button>
+          )}
+          {isAdminUser && w.isSupabaseRow && !w.archivedAt && (
+            <button className="btn btn--danger" onClick={runAdminArchive} disabled={pending}><Icon name="layers" /> Admin archive</button>
           )}
           {canStatusTransition && w.status === "assigned" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Start work</button>

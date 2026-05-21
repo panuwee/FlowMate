@@ -196,7 +196,7 @@ async function loadFlowMateListRows() {
   const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,created_at")
+      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
       .order("due_date", { ascending: true }),
     window.flowmateSupabase
       .from("work_item_flags_v")
@@ -305,7 +305,9 @@ async function loadFlowMateListRows() {
   syncFlowMateMembers(membersResult.data || []);
   syncFlowMateMentionUsers(usersResult.data || []);
 
-  const rows = (workItemsResult.data || []).map((item) => {
+  const activeWorkItems = (workItemsResult.data || []).filter((item) => !item.archived_at);
+
+  const rows = activeWorkItems.map((item) => {
     const flags = flagsByWorkItemId[item.id] || {};
     const requester = usersById[item.requester_user_id] || {};
     const details = detailsByWorkItemId[item.id] || {};
@@ -368,6 +370,7 @@ async function loadFlowMateListRows() {
       queueReason: item.assignment_reason || (item.status === "need_brief" ? "Required brief fields are missing." : "Assignment engine queued this request."),
       lastRunLabel: flowmateDateTimeLabel(assignmentRunByWorkItemId[item.id]?.ran_at),
       blockReason: item.blocked_reason,
+      archivedAt: item.archived_at || null,
       checklistItems: checklistByWorkItemId[item.id] || [],
       checklist: {
         done: (checklistByWorkItemId[item.id] || []).filter((checklistItem) => checklistItem.is_done).length,
