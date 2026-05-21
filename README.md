@@ -14,6 +14,7 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `security_hardening.sql` | Re-applies auth-based RLS helpers, policies, and final grants/revokes after RPC + whitelist setup |
 | `notification_center.sql` | MVP 1.2 Notification Center table hardening, read-state RPCs, trusted event trigger creation, and due-date notification generator |
 | `collaboration_admin.sql` | MVP 1.2 detail links, watchers, watcher notification recipients, admin status override, and admin soft archive |
+| `view_security_hardening.sql` | Locks public views to authenticated users and forces `security_invoker` so underlying RLS is respected |
 
 ## Before Running
 
@@ -41,6 +42,7 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    6. `supabase/security_hardening.sql`
    7. `supabase/notification_center.sql`
    8. `supabase/collaboration_admin.sql`
+   9. `supabase/view_security_hardening.sql`
 
 ## Expected Tables
 
@@ -124,6 +126,14 @@ After running `collaboration_admin.sql`, confirm:
 6. `flowmate_admin_transition_work_status(...)` works only for admin users and writes `work_item_events.actor_user_id` as the real admin from `auth.uid()`.
 7. `flowmate_admin_archive_work_item(...)` sets `archived_at`, `archived_by_user_id`, and `archive_reason`; it must not delete work rows, comments, links, watchers, events, or notifications.
 8. `member_workload_v` and `work_item_flags_v` exclude archived rows.
+
+## Public View Security Checks
+
+After running `view_security_hardening.sql`, confirm:
+
+1. `member_workload_v` and `work_item_flags_v` are no longer readable by `anon`.
+2. `authenticated` can still read both views after login.
+3. Both views use `security_invoker = true`, so underlying table RLS is evaluated as the signed-in caller.
 
 ## Next Step
 

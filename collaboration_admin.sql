@@ -884,7 +884,8 @@ grant execute on function public.flowmate_admin_archive_work_item(text, text) to
 -- ---------------------------------------------------------------------------
 -- Active backend views hide archived rows.
 -- ---------------------------------------------------------------------------
-create or replace view public.member_workload_v as
+create or replace view public.member_workload_v
+with (security_invoker = true) as
 select
   tm.id as team_member_id,
   tm.member_code,
@@ -927,7 +928,8 @@ left join public.work_items wi on wi.final_owner_member_id = tm.id
   and wi.archived_at is null
 group by tm.id;
 
-create or replace view public.work_item_flags_v as
+create or replace view public.work_item_flags_v
+with (security_invoker = true) as
 select
   wi.id as work_item_id,
   wi.display_id,
@@ -941,3 +943,8 @@ select
   (wi.status = 'blocked') as is_blocked
 from public.work_items wi
 where wi.archived_at is null;
+
+revoke all privileges on public.member_workload_v from public, anon, authenticated;
+revoke all privileges on public.work_item_flags_v from public, anon, authenticated;
+grant select on public.member_workload_v to authenticated;
+grant select on public.work_item_flags_v to authenticated;
