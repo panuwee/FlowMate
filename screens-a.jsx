@@ -1056,9 +1056,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const visibleBriefNote = w.briefNote || w.note || "";
   const visibleChecklistItems = w.checklistItems || [];
   const visibleComments = w.comments || [];
+  const visibleLinks = w.links || [];
+  const visibleWatchers = w.watchers || [];
+  const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkDescription, setLinkDescription] = useState("");
+  const [watcherUserId, setWatcherUserId] = useState("");
 
   async function runCreativeTransition(nextStatus) {
     if (!w.isSupabaseRow) {
@@ -1078,10 +1084,49 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
     setPending(true);
     try {
-      await window.transitionFlowMateCreativeStatus(w.id, nextStatus, options);
+      await window.transitionFlowMateWorkStatus(w.id, nextStatus, options);
       setActionMsg({ tone: "ok", text: `${w.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}. Refresh the list to see the update.` });
     } catch (error) {
       setActionMsg({ tone: "bad", text: error.message || "Status change failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function submitLink(event) {
+    event.preventDefault();
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so links are disabled." });
+      return;
+    }
+    setPending(true);
+    try {
+      await window.addFlowMateWorkItemLink(w.id, linkUrl, linkDescription);
+      setLinkUrl("");
+      setLinkDescription("");
+      setActionMsg({ tone: "ok", text: "Link added. Refresh the detail view if it does not appear immediately." });
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_links" } }));
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Add link failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function submitWatcher(event) {
+    event.preventDefault();
+    if (!w.isSupabaseRow) {
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so watchers are disabled." });
+      return;
+    }
+    setPending(true);
+    try {
+      await window.addFlowMateWorkItemWatcher(w.id, watcherUserId);
+      setWatcherUserId("");
+      setActionMsg({ tone: "ok", text: "Watcher added. Refresh the detail view if it does not appear immediately." });
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_watchers" } }));
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Add watcher failed." });
     } finally {
       setPending(false);
     }
@@ -1226,6 +1271,39 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           )}
 
+          <div className="card">
+            <div className="card__head">
+              <span className="card__title">Link zone <span className="muted" style={{ fontWeight: 400, marginLeft: 6 }}>{visibleLinks.length}</span></span>
+            </div>
+            <div className="card__body" style={{ display: "grid", gap: 12 }}>
+              {visibleLinks.length > 0 ? visibleLinks.map((link) => (
+                <div className="meta-row" key={link.id}>
+                  <div className="meta-row__lbl">{link.createdByName || "Link"}</div>
+                  <div className="meta-row__val">
+                    <a href={link.url} target="_blank" rel="noreferrer">{link.description || link.url}</a>
+                    {link.description && <div className="muted" style={{ fontSize: 11, wordBreak: "break-all" }}>{link.url}</div>}
+                  </div>
+                </div>
+              )) : (
+                <div className="muted">No links yet.</div>
+              )}
+              <form className="form-grid" onSubmit={submitLink}>
+                <label className="field">
+                  <span className="field__label">URL</span>
+                  <input className="input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." disabled={pending} />
+                </label>
+                <label className="field">
+                  <span className="field__label">Description</span>
+                  <input className="input" value={linkDescription} onChange={(e) => setLinkDescription(e.target.value)} placeholder="Brief, delivery, reference..." disabled={pending} />
+                </label>
+                <div className="field" style={{ justifyContent: "end" }}>
+                  <span className="field__label">&nbsp;</span>
+                  <button className="btn btn--primary" type="submit" disabled={pending || !linkUrl.trim()}><Icon name="link" /> Add link</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
           {visibleChecklistItems.length > 0 && (
             <div className="card">
               <div className="card__head">
@@ -1282,6 +1360,32 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row__lbl">Assignee</div>
                 <div className="meta-row__val row" style={{ gap: 6 }}>
                   <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
+                </div>
+              </div>
+              <div className="meta-row">
+                <div className="meta-row__lbl">Watchers</div>
+                <div className="meta-row__val" style={{ display: "grid", gap: 8 }}>
+                  {visibleWatchers.length > 0 ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      {visibleWatchers.map((watcher) => (
+                        <div className="row" key={watcher.id} style={{ gap: 6 }}>
+                          <Icon name="users" size={13} />
+                          <span>{watcher.watcherName || watcher.watcher_user_id}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="muted">No watchers</span>
+                  )}
+                  <form className="row" onSubmit={submitWatcher} style={{ gap: 6, alignItems: "stretch" }}>
+                    <select className="select" value={watcherUserId} onChange={(e) => setWatcherUserId(e.target.value)} disabled={pending} style={{ minWidth: 0 }}>
+                      <option value="">Add watcher</option>
+                      {watcherOptions.map((member) => (
+                        <option key={member.userId} value={member.userId}>{member.name}</option>
+                      ))}
+                    </select>
+                    <button className="btn btn--secondary" type="submit" disabled={pending || !watcherUserId}><Icon name="plus" /> Add</button>
+                  </form>
                 </div>
               </div>
                 <div className="meta-row">

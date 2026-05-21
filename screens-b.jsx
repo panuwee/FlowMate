@@ -305,7 +305,10 @@ function BoardScreen({ onOpen }) {
     // Quick tasks: only a couple of board transitions make sense in MVP.
     if (row.type === "quick") {
       if (targetStatus === "delivered") {
-        await runMutate(() => window.completeFlowMateQuickTask(row.id),
+        const completeQuickTask = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin"
+          ? () => window.transitionFlowMateWorkStatus(row.id, targetStatus, {})
+          : () => window.completeFlowMateQuickTask(row.id);
+        await runMutate(completeQuickTask,
                         `${row.id} marked done.`);
       } else if (targetStatus === "cancelled") {
         const reason = window.prompt("Cancel reason is required");
@@ -337,7 +340,7 @@ function BoardScreen({ onOpen }) {
     }
 
     await runMutate(
-      () => window.transitionFlowMateCreativeStatus(row.id, targetStatus, options),
+      () => window.transitionFlowMateWorkStatus(row.id, targetStatus, options),
       `${row.id} → ${STATUS_LABEL[targetStatus] || targetStatus}`,
     );
   }

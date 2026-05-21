@@ -10,6 +10,8 @@ const FLOWMATE_REALTIME_TABLES = [
   "creative_request_details",
   "checklist_items",
   "comments",
+  "work_item_links",
+  "work_item_watchers",
   "assignment_runs",
   "work_item_events",
   "notifications",
@@ -177,7 +179,7 @@ async function loadFlowMateListRows() {
     throw new Error("Supabase client is not ready.");
   }
 
-  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, assignmentRunsResult] = await Promise.all([
+  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
       .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,created_at")
@@ -204,6 +206,16 @@ async function loadFlowMateListRows() {
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
     window.flowmateSupabase
+      .from("work_item_links")
+      .select("id,work_item_id,url,description,created_by_user_id,created_at,deleted_at")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: true }),
+    window.flowmateSupabase
+      .from("work_item_watchers")
+      .select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at")
+      .is("removed_at", null)
+      .order("created_at", { ascending: true }),
+    window.flowmateSupabase
       .from("assignment_runs")
       .select("work_item_id,ran_at")
       .order("ran_at", { ascending: false }),
@@ -217,6 +229,8 @@ async function loadFlowMateListRows() {
     detailsResult.error ||
     checklistResult.error ||
     commentsResult.error ||
+    linksResult.error ||
+    watchersResult.error ||
     assignmentRunsResult.error;
 
   if (firstError) throw firstError;
@@ -247,6 +261,25 @@ async function loadFlowMateListRows() {
     commentsByWorkItemId[comment.work_item_id].push({
       ...comment,
       authorName: usersById[comment.author_user_id]?.display_name || "Unknown",
+    });
+  });
+  const linksByWorkItemId = {};
+  (linksResult.data || []).forEach((link) => {
+    if (!linksByWorkItemId[link.work_item_id]) linksByWorkItemId[link.work_item_id] = [];
+    linksByWorkItemId[link.work_item_id].push({
+      ...link,
+      createdByName: usersById[link.created_by_user_id]?.display_name || "Unknown",
+      createdLabel: flowmateDateTimeLabel(link.created_at),
+    });
+  });
+  const watchersByWorkItemId = {};
+  (watchersResult.data || []).forEach((watcher) => {
+    if (!watchersByWorkItemId[watcher.work_item_id]) watchersByWorkItemId[watcher.work_item_id] = [];
+    watchersByWorkItemId[watcher.work_item_id].push({
+      ...watcher,
+      watcherName: usersById[watcher.watcher_user_id]?.display_name || membersByUserId[watcher.watcher_user_id]?.display_name || "Unknown",
+      addedByName: usersById[watcher.added_by_user_id]?.display_name || "Unknown",
+      createdLabel: flowmateDateTimeLabel(watcher.created_at),
     });
   });
   const assignmentRunByWorkItemId = {};
@@ -323,6 +356,8 @@ async function loadFlowMateListRows() {
         total: (checklistByWorkItemId[item.id] || []).length,
       },
       comments: commentsByWorkItemId[item.id] || [],
+      links: linksByWorkItemId[item.id] || [],
+      watchers: watchersByWorkItemId[item.id] || [],
       overdue: Boolean(flags.is_overdue),
       dueSoon: Boolean(flags.is_due_soon),
       isSupabaseRow: true,
@@ -335,6 +370,7 @@ async function loadFlowMateListRows() {
 function normalizeFlowMateMember(member) {
   return {
     id: member.id,
+    userId: member.user_id,
     name: member.display_name,
     initials: member.initials,
     color: member.color || "#2E546D",

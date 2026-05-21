@@ -157,6 +157,46 @@ window.addFlowMateWorkItemComment = addFlowMateWorkItemComment;
 window.updateFlowMateOwnComment = updateFlowMateOwnComment;
 window.deleteFlowMateOwnComment = deleteFlowMateOwnComment;
 
+async function addFlowMateWorkItemLink(displayId, url, description) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const trimmedUrl = (url || "").trim();
+  const trimmedDescription = (description || "").trim();
+  if (!displayId) throw new Error("Work item ID is required.");
+  if (!trimmedUrl) throw new Error("URL is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("add_work_item_link", {
+    p_display_id: displayId,
+    p_url: trimmedUrl,
+    p_description: trimmedDescription || null,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+async function addFlowMateWorkItemWatcher(displayId, watcherUserId) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  if (!displayId) throw new Error("Work item ID is required.");
+  if (!watcherUserId) throw new Error("Watcher is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("add_work_item_watcher", {
+    p_display_id: displayId,
+    p_watcher_user_id: watcherUserId,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+window.addFlowMateWorkItemLink = addFlowMateWorkItemLink;
+window.addFlowMateWorkItemWatcher = addFlowMateWorkItemWatcher;
+
 async function transitionFlowMateCreativeStatus(displayId, nextStatus, options = {}) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -179,6 +219,36 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
 }
 
 window.transitionFlowMateCreativeStatus = transitionFlowMateCreativeStatus;
+
+async function adminTransitionFlowMateWorkStatus(displayId, nextStatus, options = {}) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  if (!displayId) throw new Error("Work item ID is required.");
+  if (!nextStatus) throw new Error("Next status is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_transition_work_status", {
+    p_display_id: displayId,
+    p_next_status: nextStatus,
+    p_delivery_link: options.deliveryLink || null,
+    p_blocked_reason: options.blockedReason || null,
+    p_cancel_reason: options.cancelReason || null,
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+async function transitionFlowMateWorkStatus(displayId, nextStatus, options = {}) {
+  if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin") {
+    return adminTransitionFlowMateWorkStatus(displayId, nextStatus, options);
+  }
+  return transitionFlowMateCreativeStatus(displayId, nextStatus, options);
+}
+
+window.adminTransitionFlowMateWorkStatus = adminTransitionFlowMateWorkStatus;
+window.transitionFlowMateWorkStatus = transitionFlowMateWorkStatus;
 
 // ---------------------------------------------------------------------------
 // Creative request creation -- backend computes effort, owner, queue reason.
@@ -245,6 +315,10 @@ async function cancelFlowMateWorkItem(work, reason) {
   if (!work || !work.id) throw new Error("Work item is required.");
   const trimmed = (reason || "").trim();
   if (!trimmed) throw new Error("Cancel reason is required.");
+
+  if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin") {
+    return adminTransitionFlowMateWorkStatus(work.id, "cancelled", { cancelReason: trimmed });
+  }
 
   if (work.type === "quick") {
     const { data, error } = await window.flowmateSupabase.rpc("cancel_quick_task", {
