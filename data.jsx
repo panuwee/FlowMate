@@ -94,9 +94,6 @@ function PriorityBadge({ level }) {
 }
 
 function DueBadge({ delta, label, status }) {
-  if (status === "delivered" || status === "cancelled") {
-    return <span className="muted mono">{label}</span>;
-  }
   if (delta < 0) {
     return <span className="badge badge--overdue">{label} · {Math.abs(delta)}d late</span>;
   }
