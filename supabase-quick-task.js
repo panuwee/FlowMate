@@ -516,7 +516,8 @@ async function loadFlowMateNotifications() {
 
   const { data, error } = await window.flowmateSupabase
     .from("notifications")
-    .select("id,type,title,body,work_item_id,metadata,read_at,created_at")
+    .select("id,type,title,body,work_item_id,metadata,read_at,dismissed_at,created_at")
+    .is("dismissed_at", null)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -580,9 +581,21 @@ async function markAllFlowMateNotificationsRead() {
   return data;
 }
 
+async function dismissReadFlowMateNotifications() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const { data, error } = await window.flowmateSupabase.rpc("dismiss_read_notifications");
+
+  if (error) throw error;
+  return data;
+}
+
 window.loadFlowMateNotifications = loadFlowMateNotifications;
 window.markFlowMateNotificationRead = markFlowMateNotificationRead;
 window.markAllFlowMateNotificationsRead = markAllFlowMateNotificationsRead;
+window.dismissReadFlowMateNotifications = dismissReadFlowMateNotifications;
 
 // ===========================================================================
 // Google Workspace SSO (Supabase Auth + Google provider)

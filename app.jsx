@@ -82,6 +82,10 @@ function App() {
   const [notificationLoadState, setNotificationLoadState] = useStateApp({ status: "idle", message: "" });
   const [markingNotificationId, setMarkingNotificationId] = useStateApp(null);
   const [isMarkingAllNotifications, setIsMarkingAllNotifications] = useStateApp(false);
+  const [isDismissingReadNotifications, setIsDismissingReadNotifications] = useStateApp(false);
+  const [isCreateMenuOpen, setIsCreateMenuOpen] = useStateApp(false);
+  const [createModeIntent, setCreateModeIntent] = useStateApp("creative");
+  const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
   const [viewAsMemberId, setViewAsMemberId] = useStateApp("");
   // status: "loading" → "signed-in" | "signed-out".
   // Loading shows a small splash. Signed-out shows the Login landing page.
@@ -156,6 +160,30 @@ function App() {
     } finally {
       setIsMarkingAllNotifications(false);
     }
+  }
+
+  async function handleDismissReadNotifications() {
+    if (!window.dismissReadFlowMateNotifications) return;
+    setIsDismissingReadNotifications(true);
+    try {
+      await window.dismissReadFlowMateNotifications();
+      await refreshNotifications({ showLoading: false });
+    } catch (error) {
+      console.error("[FlowMate Notifications] Dismiss read failed:", error);
+      setNotificationLoadState({ status: "error", message: error.message || "Clear read failed." });
+    } finally {
+      setIsDismissingReadNotifications(false);
+    }
+  }
+
+  function handleTopbarCreateChoice(choice) {
+    setIsCreateMenuOpen(false);
+    if (choice === "leave") {
+      setIsGlobalLeaveModalOpen(true);
+      return;
+    }
+    setCreateModeIntent(choice);
+    nav("create");
   }
 
   async function handleOpenNotification(notification) {
@@ -405,8 +433,35 @@ function App() {
             </select>
           </label>
         )}
-        <button className="topbar__btn" onClick={() => nav("create")}><Icon name="plus" /> Create</button>
-        <button className="topbar__btn" onClick={() => setIsNotificationCenterOpen(true)} title="Open notifications">
+        <div className="topbar__menu-wrap">
+          <button
+            className="topbar__btn"
+            onClick={() => {
+              setIsCreateMenuOpen(open => !open);
+              setIsNotificationCenterOpen(false);
+            }}
+            aria-haspopup="menu"
+            aria-expanded={isCreateMenuOpen}
+          >
+            <Icon name="plus" /> Create
+          </button>
+          {isCreateMenuOpen && (
+            <CreateMenuPanel
+              onQuick={() => handleTopbarCreateChoice("quick")}
+              onCreative={() => handleTopbarCreateChoice("creative")}
+              onLeave={() => handleTopbarCreateChoice("leave")}
+              onClose={() => setIsCreateMenuOpen(false)}
+            />
+          )}
+        </div>
+        <button
+          className="topbar__btn"
+          onClick={() => {
+            setIsNotificationCenterOpen(true);
+            setIsCreateMenuOpen(false);
+          }}
+          title="Open notifications"
+        >
           <Icon name="bell" /> Notifications
           {unreadNotificationCount > 0 && (
             <span className="nav-item__count" style={{
@@ -432,11 +487,13 @@ function App() {
             loadState={notificationLoadState}
             markingNotificationId={markingNotificationId}
             isMarkingAll={isMarkingAllNotifications}
+            isDismissingRead={isDismissingReadNotifications}
             onClose={() => setIsNotificationCenterOpen(false)}
             onRefresh={() => refreshNotifications({ showLoading: true })}
             onOpen={handleOpenNotification}
             onMarkRead={handleMarkNotificationRead}
             onMarkAllRead={handleMarkAllNotificationsRead}
+            onDismissRead={handleDismissReadNotifications}
           />
         )}
         <div className="topbar__user" title={`Signed in as ${currentUserEmail}`}>
@@ -490,7 +547,7 @@ function App() {
           </div>
         )}
         {allowedRoute && route === "my-work"  && <MyWorkScreen   onOpen={open} onNav={nav} searchQuery={searchQuery} />}
-        {allowedRoute && route === "create"   && <CreateScreen   onNav={nav} onOpen={open} />}
+        {allowedRoute && route === "create"   && <CreateScreen   onNav={nav} onOpen={open} initialMode={createModeIntent} />}
         {allowedRoute && route === "detail"   && <DetailScreen   onNav={nav} onOpen={open} focusId={focusId} />}
         {allowedRoute && route === "list"     && <ListScreen     onOpen={open} searchQuery={searchQuery} />}
         {allowedRoute && route === "board"    && <BoardScreen    onOpen={open} />}
@@ -502,6 +559,9 @@ function App() {
         {allowedRoute && route === "admin-whitelist" && isAdminUser && <AdminWhitelistScreen />}
         {!allowedRoute && <AccessDeniedScreen onNav={nav} />}
       </main>
+      {isGlobalLeaveModalOpen && (
+        <GlobalLeaveRequestModal onClose={() => setIsGlobalLeaveModalOpen(false)} />
+      )}
     </div>
   );
 }
@@ -512,15 +572,18 @@ function NotificationCenterPanel({
   loadState,
   markingNotificationId,
   isMarkingAll,
+  isDismissingRead,
   onClose,
   onRefresh,
   onOpen,
   onMarkRead,
   onMarkAllRead,
+  onDismissRead,
 }) {
   const safeNotifications = notifications || [];
   const isLoading = loadState.status === "loading";
   const hasError = loadState.status === "error";
+  const readCount = safeNotifications.filter(notification => notification.readAt).length;
   const panelStyle = {
     position: "fixed",
     top: 64,
@@ -589,6 +652,14 @@ function NotificationCenterPanel({
             disabled={unreadCount === 0 || isMarkingAll}
           >
             <Icon name="check" size={11} /> Mark all as read
+          </button>
+          <button
+            className="btn btn--xs btn--ghost"
+            onClick={onDismissRead}
+            disabled={readCount === 0 || isDismissingRead}
+            title="Hide read notifications from this center. Records are not deleted."
+          >
+            Clear read
           </button>
         </div>
 
@@ -667,6 +738,92 @@ function NotificationCenterPanel({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function flowMateTodayDateKey() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function CreateMenuPanel({ onQuick, onCreative, onLeave, onClose }) {
+  return (
+    <div className="topbar__create-menu" role="menu">
+      <div className="topbar__create-menu-head">
+        <span>Create new</span>
+        <button type="button" className="iconbtn" onClick={onClose} aria-label="Close create menu"><Icon name="x" size={12} /></button>
+      </div>
+      <button type="button" className="topbar__create-option" role="menuitem" onClick={onQuick}>
+        <span className="topbar__create-option-title"><Icon name="zap" size={14} /> Quick Task</span>
+        <span className="topbar__create-option-sub">Small task or reminder</span>
+      </button>
+      <button type="button" className="topbar__create-option" role="menuitem" onClick={onCreative}>
+        <span className="topbar__create-option-title"><Icon name="layers" size={14} /> Creative Request</span>
+        <span className="topbar__create-option-sub">Brief for assignment engine</span>
+      </button>
+      <button type="button" className="topbar__create-option" role="menuitem" onClick={onLeave}>
+        <span className="topbar__create-option-title"><Icon name="calendar" size={14} /> Leave request</span>
+        <span className="topbar__create-option-sub">Date range shown on calendar</span>
+      </button>
+    </div>
+  );
+}
+
+function GlobalLeaveRequestModal({ onClose }) {
+  const todayKey = flowMateTodayDateKey();
+  const [leaveForm, setLeaveForm] = useStateApp({ startDate: todayKey, endDate: todayKey, reason: "" });
+  const [leaveState, setLeaveState] = useStateApp({ status: "idle", message: "" });
+
+  async function submitLeaveRequest(event) {
+    event.preventDefault();
+    if (!window.createFlowMateLeaveRequest) {
+      setLeaveState({ status: "error", message: "Leave request helper is not ready." });
+      return;
+    }
+    setLeaveState({ status: "saving", message: "Saving leave request..." });
+    try {
+      await window.createFlowMateLeaveRequest(leaveForm);
+      onClose();
+    } catch (error) {
+      console.error("[FlowMate Create] Leave request failed:", error);
+      setLeaveState({ status: "error", message: error.message || "Leave request failed." });
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="modal modal--settings" onSubmit={submitLeaveRequest}>
+        <div className="modal__head">
+          <div>
+            <h2>Create Leave Request</h2>
+            <div className="muted" style={{ fontSize: 12 }}>Applies to your linked team member.</div>
+          </div>
+          <button type="button" className="iconbtn" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
+        </div>
+        <div className="form-grid">
+          <label className="field">
+            <span className="field__label">Start date</span>
+            <input className="input" type="date" value={leaveForm.startDate} onChange={event => setLeaveForm(current => ({ ...current, startDate: event.target.value }))} />
+          </label>
+          <label className="field">
+            <span className="field__label">End date</span>
+            <input className="input" type="date" value={leaveForm.endDate} onChange={event => setLeaveForm(current => ({ ...current, endDate: event.target.value }))} />
+          </label>
+          <label className="field field--full">
+            <span className="field__label">Reason</span>
+            <textarea className="textarea" value={leaveForm.reason} onChange={event => setLeaveForm(current => ({ ...current, reason: event.target.value }))} rows="3"></textarea>
+          </label>
+        </div>
+        {leaveState.status === "error" && <div className="reason-box reason-box--need" style={{ marginTop: 12 }}>{leaveState.message}</div>}
+        <div className="modal__actions">
+          <button type="button" className="btn btn--secondary" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn--primary" disabled={leaveState.status === "saving"}>{leaveState.status === "saving" ? "Saving..." : "Save leave"}</button>
+        </div>
+      </form>
     </div>
   );
 }
