@@ -34,6 +34,7 @@ function exportRowsCsv(rows) {
    LIST VIEW
    ============================================================ */
 function ListScreen({ onOpen, searchQuery = "" }) {
+  const LIST_STATUS_FILTER_KEYS = ["queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
   const [filterStatus, setFilterStatus] = useStateB("all");
   const [filterFlag, setFilterFlag] = useStateB("all");
   const [filterOwner, setFilterOwner] = useStateB("all");
@@ -79,11 +80,34 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     return () => { alive = false; cleanup(); };
   }, []);
 
+  function normalizeListTeam(value) {
+    const raw = String(value || "").trim();
+    if (window.normalizeFlowMateRequesterTeam) {
+      const normalized = window.normalizeFlowMateRequesterTeam(value);
+      if (normalized) return normalized;
+    }
+    if (["Operations", "Operation", "OP", "Ops"].includes(raw)) return "Operations";
+    if (["Marketing", "MKT"].includes(raw)) return "Marketing";
+    if (["GD/VE", "GD", "VE", "Design", "Video"].includes(raw)) return "GD/VE";
+    if (["Esport", "eSport", "ES"].includes(raw)) return "Esport";
+    return raw;
+  }
+
+  function getListMemberTeam(member) {
+    return normalizeListTeam(member && (member.discipline || member.discipline_short || member.requesterTeam));
+  }
+
+  const memberTeamById = Object.fromEntries((window.MEMBERS || []).map(member => [member.id, getListMemberTeam(member)]));
+
+  function getListWorkAssigneeTeam(work) {
+    return memberTeamById[work.assignee] || "";
+  }
+
   const rows = sourceRows.filter(w => {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     if (filterStatus !== "all" && w.status !== filterStatus) return false;
     if (filterOwner !== "all" && (w.assignee || "unassigned") !== filterOwner) return false;
-    if (filterTeam !== "all" && w.requesterTeam !== filterTeam) return false;
+    if (filterTeam !== "all" && getListWorkAssigneeTeam(w) !== filterTeam) return false;
     if (filterAsset !== "all" && (w.assetType || "none") !== filterAsset) return false;
     if (filterType !== "all" && w.type !== filterType) return false;
     if (filterFlag === "overdue" && !w.overdue) return false;
@@ -91,18 +115,28 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     if (filterFlag === "blocked" && w.status !== "blocked") return false;
     return true;
   });
-  const ownerOptionRows = [
-    ...(window.MEMBERS || []).map(member => [member.id, member.name]),
-    ...sourceRows.map(w => {
+  const scopedOwnerOptionRows = [
+    ...(window.MEMBERS || [])
+      .filter(member => filterTeam === "all" || getListMemberTeam(member) === filterTeam)
+      .map(member => [member.id, member.name]),
+    ...sourceRows
+      .filter(w => filterTeam === "all" || getListWorkAssigneeTeam(w) === filterTeam)
+      .map(w => {
     const id = w.assignee || "unassigned";
     const label = w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned";
     return [id, label];
-    }),
+      }),
   ];
-  const ownerOptions = Array.from(new Map(ownerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
+  const ownerOptions = Array.from(new Map(scopedOwnerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
   const teamOptions = requesterTeamOptions;
   const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
   const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
+
+  useEffectB(() => {
+    if (filterOwner !== "all" && !ownerOptions.some(([id]) => id === filterOwner)) {
+      setFilterOwner("all");
+    }
+  }, [filterTeam, filterOwner, sourceRows.length]);
 
   return (
     <div className="page">
@@ -112,9 +146,6 @@ function ListScreen({ onOpen, searchQuery = "" }) {
           <div className="page__sub">{sourceRows.length} items across all statuses - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary" disabled title="Saved views are planned for MVP 1.1">
-            <Icon name="filter" /> Saved views (MVP 1.1)
-          </button>
           <button className="btn btn--secondary" onClick={() => exportRowsCsv(rows)}>
             <Icon name="download" /> Export
           </button>
@@ -124,15 +155,15 @@ function ListScreen({ onOpen, searchQuery = "" }) {
       <div className="filterbar">
         <select className="select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           <option value="all">All statuses</option>
-          {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select className="select" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
-          <option value="all">All owners</option>
-          {ownerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          {LIST_STATUS_FILTER_KEYS.map(k => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
         </select>
         <select className="select" value={filterTeam} onChange={e => setFilterTeam(e.target.value)}>
           <option value="all">All teams</option>
           {teamOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <select className="select" value={filterOwner} onChange={e => setFilterOwner(e.target.value)}>
+          <option value="all">All Assignee</option>
+          {ownerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
         <select className="select" value={filterAsset} onChange={e => setFilterAsset(e.target.value)}>
           <option value="all">All asset types</option>
@@ -370,7 +401,7 @@ function BoardScreen({ onOpen }) {
           </div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary" onClick={loadRows} disabled={busy}>
+          <button className="btn btn--secondary" onClick={() => loadRows()} disabled={busy}>
             <Icon name="rerun" /> Refresh
           </button>
         </div>

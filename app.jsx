@@ -457,9 +457,12 @@ function App() {
         <button
           className="topbar__btn"
           onClick={() => {
-            setIsNotificationCenterOpen(true);
             setIsCreateMenuOpen(false);
-            refreshNotifications({ showLoading: true });
+            setIsNotificationCenterOpen(open => {
+              const nextOpen = !open;
+              if (nextOpen) refreshNotifications({ showLoading: true });
+              return nextOpen;
+            });
           }}
           title="Open notifications"
         >
