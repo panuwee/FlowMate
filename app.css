@@ -23,11 +23,11 @@ button:disabled {
 }
 .app__brand {
   grid-column: 1; grid-row: 1;
-  display: flex; align-items: center;
+  display: flex; align-items: center; align-content: center; flex-wrap: wrap;
   padding: 0 var(--s-5);
   border-right: var(--border-hairline);
   border-bottom: var(--border-hairline);
-  gap: 10px;
+  gap: 1px 10px;
 }
 .app__brand img { height: 20px; display: block; }
 .app__brand-name {
@@ -45,13 +45,15 @@ button:disabled {
 .app__brand-version {
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  flex: 0 0 auto;
+  height: 15px;
+  margin-left: 44px;
   padding: 0 6px;
   border: var(--border-hairline);
   border-radius: var(--radius-xs);
   background: var(--garena-badge-bg);
   color: var(--garena-grey);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: var(--weight-bold);
   line-height: 1;
   white-space: nowrap;
