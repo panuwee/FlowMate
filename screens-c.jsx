@@ -718,6 +718,22 @@ function CalendarScreen({ onOpen }) {
     setMonthKey(calendarMonthKeyC(dateKey));
   }
 
+  function shiftCalendarWindow(direction) {
+    if (viewMode === "agenda") {
+      const deltaDays = agendaRange === "week" ? 7 : 1;
+      const nextDateKey = calendarAddDaysC(selectedDateKey, direction * deltaDays);
+      setSelectedDateKey(nextDateKey);
+      setMonthKey(calendarMonthKeyC(nextDateKey));
+      return;
+    }
+    setMonthKey(calendarShiftMonthC(monthKey, direction));
+  }
+
+  function goToToday() {
+    setMonthKey(calendarMonthKeyC(todayKey));
+    setSelectedDateKey(todayKey);
+  }
+
   function openCalendarOverflow(event, dateKey) {
     event.stopPropagation();
     selectDate(dateKey);
@@ -822,9 +838,9 @@ function CalendarScreen({ onOpen }) {
 
       <div className="row" style={{ justifyContent: "space-between", margin: "0 0 12px", gap: 12 }}>
         <div className="row" style={{ gap: 8 }}>
-          <button className="btn btn--secondary" onClick={() => setMonthKey(calendarShiftMonthC(monthKey, -1))}><Icon name="chevron" style={{ transform: "rotate(180deg)" }} /> Prev</button>
-          <button className="btn btn--secondary" onClick={() => { setMonthKey(calendarMonthKeyC(todayKey)); setSelectedDateKey(todayKey); }}>Today</button>
-          <button className="btn btn--secondary" onClick={() => setMonthKey(calendarShiftMonthC(monthKey, 1))}>Next <Icon name="chevron" /></button>
+          <button className="btn btn--secondary" onClick={() => shiftCalendarWindow(-1)}><Icon name="chevron" style={{ transform: "rotate(180deg)" }} /> Prev</button>
+          <button className="btn btn--secondary" onClick={goToToday}>Today</button>
+          <button className="btn btn--secondary" onClick={() => shiftCalendarWindow(1)}>Next <Icon name="chevron" /></button>
         </div>
         <div>
           <div className="strong" style={{ textAlign: "right" }}>{calendarMonthLabelC(monthKey)}</div>

@@ -459,6 +459,7 @@ function App() {
           onClick={() => {
             setIsNotificationCenterOpen(true);
             setIsCreateMenuOpen(false);
+            refreshNotifications({ showLoading: true });
           }}
           title="Open notifications"
         >

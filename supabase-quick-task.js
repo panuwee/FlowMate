@@ -37,6 +37,10 @@ async function createFlowMateQuickTask(input) {
   });
 
   if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "quick_task_created" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
   return data;
 }
 
@@ -216,6 +220,10 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
   });
 
   if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_status_changed" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
   return data;
 }
 
@@ -238,6 +246,10 @@ async function adminTransitionFlowMateWorkStatus(displayId, nextStatus, options 
   });
 
   if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "admin_work_status_changed" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
   return data;
 }
 

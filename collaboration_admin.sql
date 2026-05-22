@@ -645,7 +645,7 @@ begin
       v_title,
       v_body,
       v_work.id,
-      new.actor_user_id,
+      case when v_notification_type = 'status_changed' then null else new.actor_user_id end,
       new.id,
       jsonb_build_object(
         'event_type', new.event_type::text,

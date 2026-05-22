@@ -16,6 +16,7 @@ create table if not exists public.notifications (
   metadata jsonb not null default '{}'::jsonb,
   dedupe_key text,
   read_at timestamptz,
+  dismissed_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -23,7 +24,8 @@ alter table public.notifications
   add column if not exists actor_user_id uuid references public.users(id) on delete set null,
   add column if not exists event_id uuid references public.work_item_events(id) on delete cascade,
   add column if not exists metadata jsonb not null default '{}'::jsonb,
-  add column if not exists dedupe_key text;
+  add column if not exists dedupe_key text,
+  add column if not exists dismissed_at timestamptz;
 
 do $$
 begin
@@ -59,6 +61,10 @@ on public.notifications(user_id, created_at desc);
 create index if not exists idx_notifications_user_unread
 on public.notifications(user_id, created_at desc)
 where read_at is null;
+
+create index if not exists idx_notifications_user_visible
+on public.notifications(user_id, created_at desc)
+where dismissed_at is null;
 
 create index if not exists idx_notifications_work_item
 on public.notifications(work_item_id, created_at desc);
@@ -289,6 +295,37 @@ $$;
 
 revoke all on function public.mark_all_notifications_read() from public, anon, authenticated;
 grant execute on function public.mark_all_notifications_read() to authenticated;
+
+create or replace function public.dismiss_read_notifications()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor_id uuid;
+  v_count integer;
+begin
+  v_actor_id := auth.uid();
+
+  if v_actor_id is null then
+    raise exception 'Authentication is required';
+  end if;
+
+  update public.notifications
+  set dismissed_at = coalesce(dismissed_at, now())
+  where user_id = v_actor_id
+    and read_at is not null
+    and dismissed_at is null;
+
+  get diagnostics v_count = row_count;
+
+  return jsonb_build_object('dismissed_count', v_count);
+end;
+$$;
+
+revoke all on function public.dismiss_read_notifications() from public, anon, authenticated;
+grant execute on function public.dismiss_read_notifications() to authenticated;
 
 create or replace function public.flowmate_notify_work_item_event()
 returns trigger
@@ -550,7 +587,7 @@ begin
         v_title,
         v_body,
         v_work.id,
-        new.actor_user_id,
+        null,
         new.id,
         jsonb_build_object('from_status', new.from_status::text, 'to_status', new.to_status::text),
         'event:' || new.id::text || ':' || v_notification_type || ':' || coalesce(v_target_user_id::text, '')
