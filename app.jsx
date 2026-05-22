@@ -101,7 +101,13 @@ function App() {
     setRoute(key);
     window.location.hash = key;
   }
-  function open(id) {
+  function open(id, options = {}) {
+    if (!options.preserveBackContext && window.saveFlowMateDetailBackContext && route !== "detail") {
+      window.saveFlowMateDetailBackContext({
+        route,
+        label: `Back to ${TITLE_MAP[route] || "Previous"}`,
+      });
+    }
     setFocusId(id);
     setRoute("detail");
     window.location.hash = `detail/${id}`;

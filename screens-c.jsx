@@ -668,7 +668,7 @@ function CalendarScreen({ onOpen }) {
     }),
   ];
   const ownerOptions = Array.from(new Map(ownerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  const agendaRows = window.getFlowMateCalendarAgendaRows
+  const selectedCalendarRows = window.getFlowMateCalendarAgendaRows
     ? window.getFlowMateCalendarAgendaRows(calendarRows, {
       dateKey: selectedDateKey,
       range: agendaRange,
@@ -678,8 +678,9 @@ function CalendarScreen({ onOpen }) {
       priority: filterPriority,
     })
     : [];
-  const overdueCount = calendarRows.filter(row => row.overdue || (row.dueDelta != null && row.dueDelta < 0)).length;
-  const dueSoonCount = calendarRows.filter(row => !row.overdue && row.dueDelta != null && row.dueDelta >= 0 && row.dueDelta <= 2).length;
+  const agendaRows = selectedCalendarRows;
+  const overdueCount = selectedCalendarRows.filter(row => row.overdue || (row.dueDelta != null && row.dueDelta < 0)).length;
+  const dueSoonCount = selectedCalendarRows.filter(row => !row.overdue && row.dueDelta != null && row.dueDelta >= 0 && row.dueDelta <= 2).length;
 
   function openCalendarItem(item) {
     if (item.type === "leave") return;
@@ -719,14 +720,10 @@ function CalendarScreen({ onOpen }) {
   }
 
   function shiftCalendarWindow(direction) {
-    if (viewMode === "agenda") {
-      const deltaDays = agendaRange === "week" ? 7 : 1;
-      const nextDateKey = calendarAddDaysC(selectedDateKey, direction * deltaDays);
-      setSelectedDateKey(nextDateKey);
-      setMonthKey(calendarMonthKeyC(nextDateKey));
-      return;
-    }
-    setMonthKey(calendarShiftMonthC(monthKey, direction));
+    const deltaDays = agendaRange === "week" ? 7 : 1;
+    const nextDateKey = calendarAddDaysC(selectedDateKey, direction * deltaDays);
+    setSelectedDateKey(nextDateKey);
+    setMonthKey(calendarMonthKeyC(nextDateKey));
   }
 
   function goToToday() {
@@ -801,8 +798,8 @@ function CalendarScreen({ onOpen }) {
       </div>
 
       <div className="grid grid--4" style={{ marginBottom: 14 }}>
-        <div className="stat"><div className="stat__num mono">{calendarRows.length}</div><div className="stat__lbl">Scheduled items</div></div>
-        <div className="stat stat--accent"><div className="stat__num mono">{calendarRows.filter(row => row.type === "quick").length}</div><div className="stat__lbl">Quick Tasks</div></div>
+        <div className="stat"><div className="stat__num mono">{selectedCalendarRows.length}</div><div className="stat__lbl">Scheduled items</div></div>
+        <div className="stat stat--accent"><div className="stat__num mono">{selectedCalendarRows.filter(row => row.type === "quick").length}</div><div className="stat__lbl">Quick Tasks</div></div>
         <div className="stat stat--warn"><div className="stat__num mono">{dueSoonCount}</div><div className="stat__lbl">Due soon</div></div>
         <div className="stat stat--accent"><div className="stat__num mono">{overdueCount}</div><div className="stat__lbl">Overdue</div></div>
       </div>
@@ -1061,16 +1058,29 @@ function SettingsScreen() {
   const visibleCount = board.reduce((sum, column) => sum + column.members.length, 0);
 
   function openEditMember(member) {
+    const skills = window.getFlowMateTeamSettingsEditableSkills
+      ? window.getFlowMateTeamSettingsEditableSkills(member)
+      : (member.skills || []);
     setEditMember(member);
     setEditForm({
       capacityPerDay: member.capacityPerDay ?? 0,
       wipLimit: member.wipLimit ?? 0,
+      skills,
     });
     setSaveState({ status: "idle", message: "" });
   }
 
   function updateEditForm(field, value) {
     setEditForm(current => ({ ...current, [field]: value }));
+  }
+
+  function toggleEditSkill(skillKey) {
+    setEditForm(current => {
+      const values = new Set(current.skills || []);
+      if (values.has(skillKey)) values.delete(skillKey);
+      else values.add(skillKey);
+      return { ...current, skills: Array.from(values) };
+    });
   }
 
   async function saveMemberEdit(event) {
@@ -1213,6 +1223,22 @@ function SettingsScreen() {
                 <input className="input" type="number" min="0" max="20" step="1" value={editForm.wipLimit} onChange={event => updateEditForm("wipLimit", event.target.value)} />
                 <span className="field__hint">Maximum active jobs this person should hold at once.</span>
               </label>
+              <div className="field field--full">
+                <span className="field__label">Skills</span>
+                <div className="skill-edit-grid">
+                  {(window.FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS || []).map(option => (
+                    <label key={option.key} className="skill-check">
+                      <input
+                        type="checkbox"
+                        checked={(editForm.skills || []).includes(option.key)}
+                        onChange={() => toggleEditSkill(option.key)}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <span className="field__hint">Keep at least one normal skill. Esport video backup is used only for urgent fallback.</span>
+              </div>
             </div>
             {saveState.status === "error" && <div className="reason-box reason-box--need" style={{ marginTop: 12 }}>{saveState.message}</div>}
             <div className="modal__actions">

@@ -447,9 +447,6 @@ const FLOWMATE_ASSET_SUBTYPE_OPTIONS = {
     "Promotional esport / highlight reel",
     "High-retention short video",
   ],
-  hybrid: [
-    "Hybrid static + video package",
-  ],
 };
 
 function getDefaultFlowMateAssetSubtype(assetType) {
@@ -847,7 +844,6 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           <ul className="choice-card__list">
             <li>Brief validation, auto effort point, auto routing</li>
             <li>Owner is decided by the engine - no preferred owner</li>
-            <li>Hybrid stays Queued and must be split</li>
           </ul>
         </button>
       </div>
@@ -1047,7 +1043,6 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
             <option value="general-video">General video</option>
             <option value="motion">Motion</option>
             <option value="esport-video">Esport video</option>
-            <option value="hybrid">Hybrid (static + video)</option>
           </select>
           {errors.assetType && <div className="field__error">{errors.assetType}</div>}
         </div>
@@ -1104,14 +1099,6 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
           <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />
           {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
         </div>
-
-        {value.assetType === "hybrid" && (
-          <div className="field field--full">
-            <div className="reason-box reason-box--queued">
-              <strong>Heads up - hybrid requests are queued automatically.</strong> Static and video work are split into separate requests so the assignment engine can route by skill. Effort will be set to 8 with <span className="mono">needs_split = true</span>.
-            </div>
-          </div>
-        )}
         <div className="field field--full">
           <div className="reason-box">
             <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
@@ -1276,6 +1263,15 @@ function CreateResultScreen({ result, onAgain, onNav }) {
    ============================================================ */
 function DetailScreen({ onNav, onOpen, focusId }) {
   const id = focusId || "";
+  const detailBackContext = window.readFlowMateDetailBackContext ? window.readFlowMateDetailBackContext() : null;
+  const detailBackRoute = detailBackContext && detailBackContext.route ? detailBackContext.route : "my-work";
+  const detailBackLabel = detailBackContext && detailBackContext.label ? detailBackContext.label : "My work";
+  function goDetailBack() {
+    if (detailBackContext && detailBackContext.listState && window.saveFlowMateListViewState) {
+      window.saveFlowMateListViewState(detailBackContext.listState);
+    }
+    onNav(detailBackRoute);
+  }
   const selected = window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === id
     ? window.flowmateSelectedWorkItem
     : null;
@@ -1287,7 +1283,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     return (
       <div className="page" style={{ maxWidth: 640 }}>
         <div className="row" style={{ marginBottom: 12, fontSize: 12 }}>
-          <button className="btn btn--ghost btn--xs" onClick={() => onNav("my-work")}><Icon name="chevron" size={11} style={{ transform: "rotate(180deg)" }} /> My work</button>
+          <button className="btn btn--ghost btn--xs" onClick={goDetailBack}><Icon name="chevron" size={11} style={{ transform: "rotate(180deg)" }} /> {detailBackLabel}</button>
           <span className="muted">/</span>
           <span className="mono muted">{id}</span>
         </div>
@@ -1609,7 +1605,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   return (
     <div className="page">
       <div className="row" style={{ marginBottom: 12, fontSize: 12 }}>
-        <button className="btn btn--ghost btn--xs" onClick={() => onNav("my-work")}><Icon name="chevron" size={11} style={{ transform: "rotate(180deg)" }} /> My work</button>
+        <button className="btn btn--ghost btn--xs" onClick={goDetailBack}><Icon name="chevron" size={11} style={{ transform: "rotate(180deg)" }} /> {detailBackLabel}</button>
         <span className="muted">/</span>
         <span className="mono muted">{w.id}</span>
       </div>

@@ -179,7 +179,8 @@ function getFlowMateCalendarAgendaRows(rows, filters = {}, today = new Date()) {
 function getFlowMateQueueRows(rows, query) {
   return (rows || []).filter((row) =>
     matchesFlowMateSearch(row || {}, query)
-    && (row.status === "queued" || row.status === "need_brief")
+    && row.status === "queued"
+    && !row.needsSplit
   );
 }
 

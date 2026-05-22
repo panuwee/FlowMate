@@ -982,6 +982,24 @@ button:disabled {
 .member-card--compact .member-card__cap-lbl {
   font-size: 9px;
 }
+.skill-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.skill-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid var(--garena-light-grey);
+  background: var(--garena-white);
+  font-size: 12px;
+}
+.skill-check input {
+  flex: 0 0 auto;
+}
 .modal-backdrop {
   position: fixed;
   inset: 0;

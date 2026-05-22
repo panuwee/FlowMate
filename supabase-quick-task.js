@@ -292,6 +292,15 @@ const FLOWMATE_TEAM_SETTINGS_FILTERS = [
   { key: "partial", label: "Partial" },
   { key: "leave", label: "On leave" },
 ];
+const FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS = [
+  { key: "static-graphic", label: "Static" },
+  { key: "general-video", label: "General video" },
+  { key: "motion", label: "Motion" },
+  { key: "esport-video", label: "Esport video" },
+  { key: "esport-video-backup", label: "Esport video (backup)" },
+];
+const FLOWMATE_TEAM_SETTINGS_PRIMARY_SKILLS = ["static-graphic", "general-video", "motion", "esport-video"];
+const FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS = ["esport-video-backup"];
 
 function normalizeFlowMateTeamSettingsTeam(member) {
   const raw = String((member && (member.discipline || member.discipline_short)) || "").trim();
@@ -348,6 +357,32 @@ function getFlowMateTeamSettingsMemberUi(member, user) {
   };
 }
 
+function getFlowMateTeamSettingsEditableSkills(member) {
+  const values = new Set((member && Array.isArray(member.skills) ? member.skills : []).map(String));
+  return FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS
+    .map(option => option.key)
+    .filter(key => values.has(key));
+}
+
+function splitFlowMateTeamSettingsEditableSkills(skills) {
+  const selected = Array.from(new Set((Array.isArray(skills) ? skills : []).map(String)));
+  const invalid = selected.filter(skill =>
+    !FLOWMATE_TEAM_SETTINGS_PRIMARY_SKILLS.includes(skill) &&
+    !FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS.includes(skill)
+  );
+  if (invalid.length) {
+    throw new Error(`Unsupported skill: ${invalid.join(", ")}`);
+  }
+  const primarySkills = selected.filter(skill => FLOWMATE_TEAM_SETTINGS_PRIMARY_SKILLS.includes(skill));
+  const backupSkills = selected
+    .filter(skill => FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS.includes(skill))
+    .map(skill => skill.replace("-backup", ""));
+  if (primarySkills.length === 0) {
+    throw new Error("Select at least one normal skill.");
+  }
+  return { primarySkills, backupSkills };
+}
+
 function flowmateNumberInRange(value, label, min, max) {
   const numberValue = Number(value);
   if (!Number.isFinite(numberValue) || numberValue < min || numberValue > max) {
@@ -371,12 +406,19 @@ async function adminUpdateFlowMateTeamMember(memberId, input) {
 
   const capacityPerDay = flowmateNumberInRange(input && input.capacityPerDay, "Capacity per day", 0, 24);
   const wipLimit = flowmateIntegerInRange(input && input.wipLimit, "WIP limit", 0, 20);
-
-  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_update_team_member", {
+  const params = {
     p_team_member_id: memberId,
     p_capacity_per_day: capacityPerDay,
     p_wip_limit: wipLimit,
-  });
+  };
+
+  if (Array.isArray(input && input.skills)) {
+    const splitSkills = splitFlowMateTeamSettingsEditableSkills(input.skills);
+    params.p_skills = splitSkills.primarySkills;
+    params.p_backup_skills = splitSkills.backupSkills;
+  }
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_update_team_member", params);
 
   if (error) throw error;
   if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
@@ -412,11 +454,14 @@ async function createFlowMateLeaveRequest(input) {
 Object.assign(window, {
   FLOWMATE_TEAM_SETTINGS_COLUMNS,
   FLOWMATE_TEAM_SETTINGS_FILTERS,
+  FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS,
   normalizeFlowMateTeamSettingsTeam,
   filterFlowMateTeamSettingsMembers,
   getFlowMateTeamSettingsBoard,
   getFlowMateTeamSettingsUiModel,
   getFlowMateTeamSettingsMemberUi,
+  getFlowMateTeamSettingsEditableSkills,
+  splitFlowMateTeamSettingsEditableSkills,
   adminUpdateFlowMateTeamMember,
   createFlowMateLeaveRequest,
 });

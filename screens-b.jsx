@@ -1,5 +1,50 @@
 ﻿// FlowMate - Screens part B: List, Board, Central Queue
 const { useState: useStateB, useEffect: useEffectB } = React;
+const FLOWMATE_LIST_VIEW_STATE_KEY = "flowmate:list:viewState:v1";
+const FLOWMATE_DETAIL_BACK_CONTEXT_KEY = "flowmate:detail:backContext:v1";
+
+function readFlowMateListViewState() {
+  try {
+    const raw = window.sessionStorage && window.sessionStorage.getItem(FLOWMATE_LIST_VIEW_STATE_KEY);
+    return raw ? JSON.parse(raw) : (window.flowmateListViewState || {});
+  } catch {
+    return window.flowmateListViewState || {};
+  }
+}
+
+function saveFlowMateListViewState(state) {
+  const next = { ...(state || {}) };
+  window.flowmateListViewState = next;
+  try {
+    if (window.sessionStorage) window.sessionStorage.setItem(FLOWMATE_LIST_VIEW_STATE_KEY, JSON.stringify(next));
+  } catch {}
+  return next;
+}
+
+function saveFlowMateDetailBackContext(context) {
+  const next = { ...(context || {}) };
+  window.flowmateDetailBackContext = next;
+  try {
+    if (window.sessionStorage) window.sessionStorage.setItem(FLOWMATE_DETAIL_BACK_CONTEXT_KEY, JSON.stringify(next));
+  } catch {}
+  return next;
+}
+
+function readFlowMateDetailBackContext() {
+  try {
+    const raw = window.sessionStorage && window.sessionStorage.getItem(FLOWMATE_DETAIL_BACK_CONTEXT_KEY);
+    return raw ? JSON.parse(raw) : (window.flowmateDetailBackContext || null);
+  } catch {
+    return window.flowmateDetailBackContext || null;
+  }
+}
+
+Object.assign(window, {
+  readFlowMateListViewState,
+  saveFlowMateListViewState,
+  saveFlowMateDetailBackContext,
+  readFlowMateDetailBackContext,
+});
 
 function exportRowsCsv(rows) {
   const columns = ["ID", "Title", "Type", "Status", "Owner", "Requester", "Team", "Asset", "Effort", "Priority", "Due"];
@@ -35,12 +80,13 @@ function exportRowsCsv(rows) {
    ============================================================ */
 function ListScreen({ onOpen, searchQuery = "" }) {
   const LIST_STATUS_FILTER_KEYS = ["queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
-  const [filterStatus, setFilterStatus] = useStateB("all");
-  const [filterFlag, setFilterFlag] = useStateB("all");
-  const [filterOwner, setFilterOwner] = useStateB("all");
-  const [filterTeam, setFilterTeam] = useStateB("all");
-  const [filterAsset, setFilterAsset] = useStateB("all");
-  const [filterType, setFilterType] = useStateB("all");
+  const savedListState = readFlowMateListViewState();
+  const [filterStatus, setFilterStatus] = useStateB(savedListState.filterStatus || "all");
+  const [filterFlag, setFilterFlag] = useStateB(savedListState.filterFlag || "all");
+  const [filterOwner, setFilterOwner] = useStateB(savedListState.filterOwner || "all");
+  const [filterTeam, setFilterTeam] = useStateB(savedListState.filterTeam || "all");
+  const [filterAsset, setFilterAsset] = useStateB(savedListState.filterAsset || "all");
+  const [filterType, setFilterType] = useStateB(savedListState.filterType || "all");
   const [sourceRows, setSourceRows] = useStateB(WORK);
   const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS);
   const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
@@ -138,6 +184,23 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     }
   }, [filterTeam, filterOwner, sourceRows.length]);
 
+  const currentListViewState = { filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType };
+
+  useEffectB(() => {
+    saveFlowMateListViewState(currentListViewState);
+  }, [filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType]);
+
+  function openListWorkItem(work) {
+    saveFlowMateListViewState(currentListViewState);
+    saveFlowMateDetailBackContext({
+      route: "list",
+      label: "Back to List",
+      listState: currentListViewState,
+    });
+    window.flowmateSelectedWorkItem = work;
+    onOpen(work.id, { preserveBackContext: true });
+  }
+
   return (
     <div className="page">
       <div className="page__header">
@@ -205,10 +268,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
           </thead>
           <tbody>
             {rows.map(w => (
-              <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => {
-                window.flowmateSelectedWorkItem = w;
-                onOpen(w.id);
-              }}>
+              <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => openListWorkItem(w)}>
                 <td className="col-id mono">{w.id}</td>
                 <td className="col-title">{w.title}</td>
                 <td><TypePill type={w.type} /></td>
@@ -536,12 +596,10 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
 
   const queued = sourceRows.filter(w => {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
-    return w.status === "queued" || w.status === "need_brief";
+    return w.status === "queued" && !w.needsSplit;
   });
   const byReason = {
-    hybrid: queued.filter(w => w.needsSplit),
-    capacity: queued.filter(w => w.status === "queued" && !w.needsSplit),
-    brief: queued.filter(w => w.status === "need_brief"),
+    capacity: queued,
   };
 
   return (
@@ -553,12 +611,11 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
         </div>
         <div className="page__actions">
           <button className="btn btn--secondary" onClick={async () => {
-            const targets = queued.filter(w => w.isSupabaseRow && (w.status === "queued" || w.status === "need_brief") && !w.needsSplit);
+            const targets = queued.filter(w => w.isSupabaseRow && w.status === "queued" && !w.needsSplit);
             if (!targets.length) { window.alert("Nothing to rerun."); return; }
             for (const w of targets) {
               try {
-                if (w.status === "need_brief") await window.recheckFlowMateBrief(w.id);
-                else                            await window.rerunFlowMateAssignment(w.id);
+                await window.rerunFlowMateAssignment(w.id);
               } catch (error) { console.error("[FlowMate Queue] rerun failed for", w.id, error); }
             }
             window.location.reload();
@@ -568,19 +625,13 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
         </div>
       </div>
 
-      <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <div className="stat-strip" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
         <div className="stat stat--accent"><div className="stat__num">{queued.length}</div><div className="stat__lbl">Queued total</div></div>
         <div className="stat stat--warn"><div className="stat__num">{byReason.capacity.length}</div><div className="stat__lbl">Capacity</div></div>
-        <div className="stat stat--warn"><div className="stat__num">{byReason.hybrid.length}</div><div className="stat__lbl">Needs split</div></div>
-        <div className="stat"><div className="stat__num">{byReason.brief.length}</div><div className="stat__lbl">Need brief</div></div>
       </div>
 
-      <QueueGroup title="Needs split (hybrid)" tone="warn" items={byReason.hybrid} onOpen={onOpen}
-                  hint="Hybrid requests need to be split into separate static + video requests. The engine will not auto-route hybrid." />
       <QueueGroup title="Capacity-blocked" tone="warn" items={byReason.capacity} onOpen={onOpen}
                   hint="No eligible owner with remaining capacity before the due date." />
-      <QueueGroup title="Need brief" tone="brand" items={byReason.brief} onOpen={onOpen}
-                  hint="Required brief fields are missing - engine will not run until brief is complete." />
     </div>
   );
 }
@@ -618,33 +669,19 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
               <td className="col-id mono">{w.id}</td>
               <td className="col-title">
                 <div>{w.title}</div>
-                {w.needsSplit && <span className="tag" style={{ background: "#FDEFE0", color: "#8A4A12", marginTop: 4 }}>Needs split</span>}
               </td>
               <td><span className="muted">{w.requesterTeam}</span></td>
               <td>{ASSET_LABEL[w.assetType]}</td>
               <td><Effort value={w.effort} /></td>
               <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
               <td>
-                <div className={`reason-box ${w.status === "need_brief" ? "reason-box--need" : "reason-box--queued"}`} style={{ padding: "6px 10px", fontSize: 12 }}>
+                <div className="reason-box reason-box--queued" style={{ padding: "6px 10px", fontSize: 12 }}>
                   {w.queueReason}
                 </div>
               </td>
-              <td className="mono muted" style={{ fontSize: 11 }}>{w.status === "need_brief" ? "-" : (w.lastRunLabel || "-")}</td>
+              <td className="mono muted" style={{ fontSize: 11 }}>{w.lastRunLabel || "-"}</td>
               <td className="col-right" onClick={(e) => e.stopPropagation()}>
                 <div style={{ display: "inline-flex", gap: 4 }}>
-                  {w.needsSplit && (
-                    <button className="btn btn--xs btn--secondary" disabled title="Hybrid split is intentionally manual — create two requests instead.">
-                      Create split (manual)
-                    </button>
-                  )}
-                  {w.status === "need_brief" && w.isSupabaseRow && (
-                    <button className="btn btn--xs btn--primary" onClick={async () => {
-                      try { await window.recheckFlowMateBrief(w.id); window.location.reload(); }
-                      catch (error) { window.alert(error.message || "Recheck failed."); }
-                    }}>
-                      Recheck brief
-                    </button>
-                  )}
                   {w.status === "queued" && !w.needsSplit && w.isSupabaseRow && (
                     <button className="btn btn--xs btn--secondary" onClick={async () => {
                       try { await window.rerunFlowMateAssignment(w.id); window.location.reload(); }
