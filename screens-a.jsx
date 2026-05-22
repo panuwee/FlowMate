@@ -5,9 +5,7 @@ const { useState, useEffect } = React;
    MY WORK
    ============================================================ */
 function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
-  const currentUser = window.getFlowMatePerspectiveUser
-    ? window.getFlowMatePerspectiveUser(window.FLOWMATE_CURRENT_USER || {})
-    : (window.FLOWMATE_CURRENT_USER || {});
+  const currentUser = window.FLOWMATE_CURRENT_USER || {};
   const myMember = (window.MEMBERS || []).find(m => m.id === currentUser.team_member_id)
     || (window.MEMBERS || []).find(m => m.name && currentUser.name && m.name.toLowerCase() === currentUser.name.toLowerCase());
   const meIds = [currentUser.team_member_id, currentUser.id, myMember && myMember.id].filter(Boolean);

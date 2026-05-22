@@ -45,30 +45,6 @@ function isFlowMateRouteAllowedForRole(role, routeKey) {
   return MEMBER_ROUTE_KEYS.has(routeKey);
 }
 
-window.FLOWMATE_VIEW_AS_MEMBER = window.FLOWMATE_VIEW_AS_MEMBER || null;
-
-function canUseFlowMateViewAs(user) {
-  const name = String((user && user.name) || "").trim().toLowerCase();
-  const email = String((user && user.email) || "").trim().toLowerCase();
-  return name === "panu" || email.startsWith("panu");
-}
-
-function getFlowMatePerspectiveUser(user) {
-  const realUser = user || {};
-  const viewAsMember = window.FLOWMATE_VIEW_AS_MEMBER;
-  if (!viewAsMember) return realUser;
-  return {
-    ...realUser,
-    id: viewAsMember.userId || realUser.id,
-    name: viewAsMember.name || realUser.name,
-    team_member_id: viewAsMember.id || realUser.team_member_id,
-    isViewAsPerspective: true,
-    realUserId: realUser.id,
-  };
-}
-
-window.getFlowMatePerspectiveUser = getFlowMatePerspectiveUser;
-
 function App() {
   const [route, setRoute] = useStateApp(() => {
     const h = window.location.hash.replace("#", "");
@@ -86,7 +62,6 @@ function App() {
   const [isCreateMenuOpen, setIsCreateMenuOpen] = useStateApp(false);
   const [createModeIntent, setCreateModeIntent] = useStateApp("creative");
   const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
-  const [viewAsMemberId, setViewAsMemberId] = useStateApp("");
   // status: "loading" → "signed-in" | "signed-out".
   // Loading shows a small splash. Signed-out shows the Login landing page.
   // Signed-in renders the full FlowMate app.
@@ -289,7 +264,6 @@ function App() {
   }
 
   async function handleSignOut() {
-    setViewAsMemberId("");
     try { await window.flowmateSignOut(); }
     catch (error) {
       console.error("[FlowMate Auth] sign-out failed:", error);
@@ -324,9 +298,7 @@ function App() {
       try {
         const rows = await window.loadFlowMateListRows();
         if (!alive) return;
-        const currentUser = window.getFlowMatePerspectiveUser
-          ? window.getFlowMatePerspectiveUser(window.FLOWMATE_CURRENT_USER || authState.user || {})
-          : (window.FLOWMATE_CURRENT_USER || authState.user || {});
+        const currentUser = window.FLOWMATE_CURRENT_USER || authState.user || {};
         setNavCounts(window.getFlowMateNavCounts(rows, currentUser, window.MEMBERS || []));
       } catch (error) {
         console.error("[FlowMate Nav] Count refresh failed:", error);
@@ -339,13 +311,7 @@ function App() {
       alive = false;
       window.removeEventListener("flowmate:refresh-counts", refreshNavCounts);
     };
-  }, [authState.status, route, viewAsMemberId]);
-
-  useEffectApp(() => {
-    const viewAsMember = (window.MEMBERS || []).find(member => member.id === viewAsMemberId) || null;
-    window.FLOWMATE_VIEW_AS_MEMBER = viewAsMember;
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
-  }, [viewAsMemberId]);
+  }, [authState.status, route]);
 
   useEffectApp(() => {
     if (authState.status !== "signed-in") {
@@ -387,16 +353,6 @@ function App() {
   const currentUserEmail = user.email || "";
   const avatarMemberId   = user.team_member_id || null;
   const isAdminUser = user.role === "admin";
-  const canUseViewAs = canUseFlowMateViewAs(user);
-  const viewAsOptions = (window.MEMBERS || [])
-    .filter(member => member && member.id && member.name)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const viewAsMember = canUseViewAs
-    ? viewAsOptions.find(member => member.id === viewAsMemberId) || null
-    : null;
-  window.FLOWMATE_VIEW_AS_MEMBER = viewAsMember;
-  const perspectiveUser = getFlowMatePerspectiveUser(user);
   const visibleNavGroups = getVisibleNavGroups(user.role);
   const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route);
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
@@ -419,26 +375,6 @@ function App() {
           />
         </div>
         <span className="topbar__spacer"></span>
-        {canUseViewAs && (
-          <label
-            className="topbar__viewas"
-            title="Frontend perspective only. Actions still audit as the signed-in user."
-            style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}
-          >
-            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--garena-grey)", whiteSpace: "nowrap" }}>View as</span>
-            <select
-              className="select"
-              value={viewAsMemberId}
-              onChange={(event) => setViewAsMemberId(event.target.value)}
-              style={{ height: 30, minWidth: 132, maxWidth: 180, fontSize: 12 }}
-            >
-              <option value="">Off</option>
-              {viewAsOptions.map(member => (
-                <option key={member.id} value={member.id}>{member.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
         <div className="topbar__menu-wrap">
           <button
             className="topbar__btn"
@@ -539,23 +475,7 @@ function App() {
         <LiveStatus realtimeState={realtimeState} />
       </nav>
 
-      <main className="app__main" key={route + (focusId || "") + (viewAsMemberId || "")}>
-        {viewAsMember && (
-          <div className="reason-box reason-box--queued" style={{
-            margin: "16px 24px 0",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 12,
-            borderColor: "var(--garena-red)",
-          }}>
-            <span>
-              <strong>Viewing as {perspectiveUser.name}</strong>
-              <span className="muted" style={{ marginLeft: 8 }}>Frontend perspective only. Actions still audit as {currentUserName}.</span>
-            </span>
-            <button className="btn btn--xs btn--secondary" onClick={() => setViewAsMemberId("")}>Turn off</button>
-          </div>
-        )}
+      <main className="app__main" key={route + (focusId || "")}>
         {allowedRoute && route === "my-work"  && <MyWorkScreen   onOpen={open} onNav={nav} searchQuery={searchQuery} />}
         {allowedRoute && route === "create"   && <CreateScreen   onNav={nav} onOpen={open} initialMode={createModeIntent} />}
         {allowedRoute && route === "detail"   && <DetailScreen   onNav={nav} onOpen={open} focusId={focusId} />}
