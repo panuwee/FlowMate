@@ -422,6 +422,89 @@ Object.assign(window, {
 });
 
 // ---------------------------------------------------------------------------
+// Creative request platform + size templates. Reads/writes go through RPCs
+// so the backend resolves the actor from auth.uid().
+// ---------------------------------------------------------------------------
+const FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK = [
+  {
+    id: "preset-instagram-square",
+    name: "Instagram square",
+    platform: "Instagram",
+    sizeFormat: "1080x1080",
+    description: "Feed square post",
+  },
+  {
+    id: "preset-instagram-story",
+    name: "Instagram story",
+    platform: "Instagram",
+    sizeFormat: "1080x1920",
+    description: "Story/Reels vertical",
+  },
+  {
+    id: "preset-facebook-feed",
+    name: "Facebook feed",
+    platform: "Facebook",
+    sizeFormat: "1200x628",
+    description: "Link share / feed creative",
+  },
+];
+
+function normalizeFlowMateCreativeRequestTemplate(row) {
+  return {
+    id: row && row.id ? row.id : "",
+    name: row && row.name ? row.name : "",
+    platform: row && row.platform ? row.platform : "",
+    sizeFormat: row && (row.size_format || row.sizeFormat) ? (row.size_format || row.sizeFormat) : "",
+    description: row && row.description ? row.description : "",
+  };
+}
+
+async function loadFlowMateCreativeRequestTemplates() {
+  if (!window.flowmateSupabase || !window.FLOWMATE_CURRENT_USER) {
+    return FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK;
+  }
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_list_creative_request_templates");
+  if (error) throw error;
+
+  const templates = (data || []).map(normalizeFlowMateCreativeRequestTemplate).filter((template) =>
+    template.name && template.platform && template.sizeFormat
+  );
+  return templates.length ? templates : FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK;
+}
+
+async function createFlowMateCreativeRequestTemplate(input) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!window.FLOWMATE_CURRENT_USER) throw new Error("Sign in is required.");
+
+  const name = ((input && input.name) || "").trim();
+  const platform = ((input && input.platform) || "").trim();
+  const sizeFormat = ((input && input.sizeFormat) || "").trim();
+  const description = ((input && input.description) || "").trim();
+
+  if (!name) throw new Error("Template name is required.");
+  if (!platform) throw new Error("Platform is required.");
+  if (!sizeFormat) throw new Error("Size / format is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_create_creative_request_template", {
+    p_name: name,
+    p_platform: platform,
+    p_size_format: sizeFormat,
+    p_description: description || null,
+  });
+
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return normalizeFlowMateCreativeRequestTemplate(row || {});
+}
+
+Object.assign(window, {
+  FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK,
+  loadFlowMateCreativeRequestTemplates,
+  createFlowMateCreativeRequestTemplate,
+});
+
+// ---------------------------------------------------------------------------
 // Creative request creation -- backend computes effort, owner, queue reason.
 // ---------------------------------------------------------------------------
 async function createFlowMateCreativeRequest(input) {

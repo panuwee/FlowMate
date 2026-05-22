@@ -424,6 +424,46 @@ const FLOWMATE_CREATE_DRAFT_KEYS = {
   creative: "flowmate:create:creativeDraft:v1",
 };
 
+const FLOWMATE_ASSET_SUBTYPE_OPTIONS = {
+  "static-graphic": [
+    "Simple banner / ad visual",
+    "Standard banner / complex social content",
+    "Esport graphic pack - minor",
+    "Esport graphic pack - full set",
+    "Web Assets",
+  ],
+  "general-video": [
+    "Short-form (TikTok / Reels)",
+    "Standard video / YouTube vlog",
+    "High-retention short video",
+  ],
+  motion: [
+    "Short-form motion",
+    "Standard motion graphic",
+    "High-retention short video",
+  ],
+  "esport-video": [
+    "Short-form esport clip",
+    "Promotional esport / highlight reel",
+    "High-retention short video",
+  ],
+  hybrid: [
+    "Hybrid static + video package",
+  ],
+};
+
+function getDefaultFlowMateAssetSubtype(assetType) {
+  const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
+  return options[0];
+}
+
+function normalizeFlowMateCreativeDraft(draft) {
+  const nextDraft = draft || getDefaultCreativeDraft();
+  const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[nextDraft.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
+  if (options.includes(nextDraft.assetSubtype)) return nextDraft;
+  return { ...nextDraft, assetSubtype: options[0] };
+}
+
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
   quick: [
     "title",
@@ -476,7 +516,7 @@ function getDefaultCreativeDraft() {
     requesterTeam,
     campaignName: "",
     assetType: "static-graphic",
-    assetSubtype: "Standard banner / complex social content",
+    assetSubtype: getDefaultFlowMateAssetSubtype("static-graphic"),
     platforms: "Instagram",
     sizeFormat: "1080x1080",
     briefLink: "",
@@ -590,7 +630,9 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
   const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
   const [quickDraft, setQuickDraft] = useState(() => readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
-  const [creativeDraft, setCreativeDraft] = useState(() => readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
+  const [creativeDraft, setCreativeDraft] = useState(() => normalizeFlowMateCreativeDraft(readFlowMateCreateDraft("creative", getDefaultCreativeDraft())));
+  const [creativeTemplates, setCreativeTemplates] = useState(() => window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
+  const [templateLoadState, setTemplateLoadState] = useState({ status: "idle", message: "" });
 
   useEffect(() => {
     let alive = true;
@@ -635,6 +677,37 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
 
     return () => { alive = false; };
   }, []);
+
+  async function refreshCreativeTemplates() {
+    if (!window.loadFlowMateCreativeRequestTemplates) {
+      setCreativeTemplates(window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
+      setTemplateLoadState({ status: "error", message: "Template loader is not ready." });
+      return;
+    }
+    setTemplateLoadState({ status: "loading", message: "Loading templates..." });
+    try {
+      const templates = await window.loadFlowMateCreativeRequestTemplates();
+      setCreativeTemplates(templates || []);
+      setTemplateLoadState({ status: "live", message: `${(templates || []).length} templates` });
+    } catch (error) {
+      console.warn("[FlowMate Create] template load failed:", error);
+      setCreativeTemplates(window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
+      setTemplateLoadState({ status: "error", message: error.message || "Template load failed." });
+    }
+  }
+
+  useEffect(() => {
+    refreshCreativeTemplates();
+  }, []);
+
+  async function handleCreateCreativeTemplate(input) {
+    if (!window.createFlowMateCreativeRequestTemplate) {
+      throw new Error("Template RPC is not ready.");
+    }
+    const created = await window.createFlowMateCreativeRequestTemplate(input);
+    await refreshCreativeTemplates();
+    return created;
+  }
 
   async function openCreatedDetail(created, id) {
     const detailId = id || window.getFlowMateCreatedDisplayId(created);
@@ -719,12 +792,13 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   function updateCreativeDraft(nextDraft) {
     setValidationErrors({});
     setCreateAlert("");
+    const normalizedDraft = normalizeFlowMateCreativeDraft(nextDraft);
     const title = window.buildFlowMateTemplateTitle({
-      launchDate: nextDraft.launchDate,
-      requesterTeam: nextDraft.requesterTeam,
-      projectName: nextDraft.campaignName,
+      launchDate: normalizedDraft.launchDate,
+      requesterTeam: normalizedDraft.requesterTeam,
+      projectName: normalizedDraft.campaignName,
     });
-    const nextCreativeDraft = { ...nextDraft, title };
+    const nextCreativeDraft = { ...normalizedDraft, title };
     setCreativeDraft(nextCreativeDraft);
     saveFlowMateCreateDraft("creative", nextCreativeDraft);
   }
@@ -791,7 +865,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           )}
           {mode === "quick"
             ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />
-            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />}
+            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} templates={creativeTemplates} templateLoadState={templateLoadState} onTemplateCreated={handleCreateCreativeTemplate} />}
         </div>
       </div>
 
@@ -925,113 +999,204 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
     </div>
   );
 }
-function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, errors = {} }) {
-  function update(field, next) { onChange({ ...value, [field]: next }); }
+function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, errors = {}, templates = [], templateLoadState = {}, onTemplateCreated }) {
+  const assetSubtypeOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[value.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
+  const selectedAssetSubtype = assetSubtypeOptions.includes(value.assetSubtype)
+    ? value.assetSubtype
+    : assetSubtypeOptions[0];
+  function update(field, next) {
+    if (field === "assetType") {
+      const nextOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[next] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
+      onChange({ ...value, assetType: next, assetSubtype: nextOptions[0] });
+      return;
+    }
+    onChange({ ...value, [field]: next });
+  }
+  function applyTemplate(template) {
+    if (!template) return;
+    onChange({
+      ...value,
+      platforms: template.platform || value.platforms,
+      sizeFormat: template.sizeFormat || value.sizeFormat,
+    });
+  }
   return (
-    <div className="form-grid">
-      <div className="field field--full">
-        <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
-      </div>
-      <div className={`field ${errors.requesterTeam ? "field--error" : ""}`}>
-        <label className="field__label">Requester Team / Function <span className="req">*</span></label>
-        <select className="select" value={value.requesterTeam} onChange={e => update("requesterTeam", e.target.value)}>
-          {requesterTeamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-        </select>
-        {errors.requesterTeam && <div className="field__error">{errors.requesterTeam}</div>}
-      </div>
-      <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
-        <label className="field__label">Project / campaign <span className="req">*</span></label>
-        <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
-        {errors.campaignName && <div className="field__error">{errors.campaignName}</div>}
-      </div>
-      <div className={`field ${errors.assetType ? "field--error" : ""}`}>
-        <label className="field__label">Asset type <span className="req">*</span></label>
-        <select className="select" value={value.assetType} onChange={e => update("assetType", e.target.value)}>
-          <option value="static-graphic">Static graphic</option>
-          <option value="general-video">General video</option>
-          <option value="motion">Motion</option>
-          <option value="esport-video">Esport video</option>
-          <option value="hybrid">Hybrid (static + video)</option>
-        </select>
-        {errors.assetType && <div className="field__error">{errors.assetType}</div>}
-      </div>
-      <div className={`field ${errors.assetSubtype ? "field--error" : ""}`}>
-        <label className="field__label">Asset subtype <span className="req">*</span></label>
-        <select className="select" value={value.assetSubtype} onChange={e => update("assetSubtype", e.target.value)}>
-          <option>Simple banner / ad visual</option>
-          <option>Standard banner / complex social content</option>
-          <option>Esport graphic pack - minor</option>
-          <option>Esport graphic pack - full set</option>
-          <option>Short-form (TikTok / Reels)</option>
-          <option>Standard video / YouTube vlog</option>
-          <option>High-retention short video</option>
-          <option>Promotional esport / highlight reel</option>
-          <option>Web Assets</option>
-        </select>
-        {errors.assetSubtype && <div className="field__error">{errors.assetSubtype}</div>}
-      </div>
-      <div className={`field ${errors.platforms ? "field--error" : ""}`}>
-        <label className="field__label">Platform <span className="req">*</span></label>
-        <input className="input" value={value.platforms} onChange={e => update("platforms", e.target.value)} placeholder="Instagram, TikTok, YouTube, Web..." />
-        {errors.platforms && <div className="field__error">{errors.platforms}</div>}
-      </div>
-      <div className={`field ${errors.sizeFormat ? "field--error" : ""}`}>
-        <label className="field__label">Size / format <span className="req">*</span></label>
-        <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="e.g. 1080x1350, 1080x1920" />
-        {errors.sizeFormat && <div className="field__error">{errors.sizeFormat}</div>}
-      </div>
-      <div className={`field ${errors.briefLink ? "field--error" : ""}`}>
-        <label className="field__label">Brief link <span className="req">*</span></label>
-        <input className="input" value={value.briefLink} onChange={e => update("briefLink", e.target.value)} placeholder="https://docs.google.com/..." />
-        {errors.briefLink && <div className="field__error">{errors.briefLink}</div>}
-      </div>
-      <div className="field field--full">
-        <label className="field__label">Brief Note</label>
-        <textarea className="textarea" value={value.briefNote} onChange={e => update("briefNote", e.target.value)} placeholder="Short brief context, key message, references, or special instructions."></textarea>
-      </div>
-      <div className="field">
-        <label className="field__label">Reference link</label>
-        <input className="input" value={value.referenceLink} onChange={e => update("referenceLink", e.target.value)} placeholder="Optional - Figma / mood board / past asset" />
-      </div>
-      <div className={`field ${errors.priority ? "field--error" : ""}`}>
-        <label className="field__label">Priority <span className="req">*</span></label>
-        <select className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>
-          <option value="low">Low</option><option value="normal">Normal</option>
-          <option value="high">High</option><option value="urgent">Urgent</option>
-        </select>
-        {errors.priority && <div className="field__error">{errors.priority}</div>}
-      </div>
-      <div className={`field ${errors.urgentReason ? "field--error" : ""}`}>
-        <label className="field__label">Urgent reason {value.priority === "urgent" && <span className="req">*</span>}</label>
-        <input className="input" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} disabled={value.priority !== "urgent"} placeholder={value.priority === "urgent" ? "Why urgent? (visible to supervisor)" : "Only required when priority is Urgent"} />
-        {errors.urgentReason && <div className="field__error">{errors.urgentReason}</div>}
-      </div>
-      <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
-        <label className="field__label">Due date <span className="req">*</span></label>
-        <input className="input" type="date" value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />
-        {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
-      </div>
-      <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
-        <label className="field__label">Launch date <span className="req">*</span></label>
-        <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />
-        {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
-      </div>
-
-      {value.assetType === "hybrid" && (
+    <div className="creative-request-layout">
+      <div className="form-grid">
         <div className="field field--full">
-          <div className="reason-box reason-box--queued">
-            <strong>Heads up - hybrid requests are queued automatically.</strong> Static and video work are split into separate requests so the assignment engine can route by skill. Effort will be set to 8 with <span className="mono">needs_split = true</span>.
+          <label className="field__label">Title <span className="req">*</span></label>
+          <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
+        </div>
+        <div className={`field ${errors.requesterTeam ? "field--error" : ""}`}>
+          <label className="field__label">Requester Team / Function <span className="req">*</span></label>
+          <select className="select" value={value.requesterTeam} onChange={e => update("requesterTeam", e.target.value)}>
+            {requesterTeamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+          </select>
+          {errors.requesterTeam && <div className="field__error">{errors.requesterTeam}</div>}
+        </div>
+        <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
+          <label className="field__label">Project / campaign <span className="req">*</span></label>
+          <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
+          {errors.campaignName && <div className="field__error">{errors.campaignName}</div>}
+        </div>
+        <div className={`field ${errors.assetType ? "field--error" : ""}`}>
+          <label className="field__label">Asset type <span className="req">*</span></label>
+          <select className="select" value={value.assetType} onChange={e => update("assetType", e.target.value)}>
+            <option value="static-graphic">Static graphic</option>
+            <option value="general-video">General video</option>
+            <option value="motion">Motion</option>
+            <option value="esport-video">Esport video</option>
+            <option value="hybrid">Hybrid (static + video)</option>
+          </select>
+          {errors.assetType && <div className="field__error">{errors.assetType}</div>}
+        </div>
+        <div className={`field ${errors.assetSubtype ? "field--error" : ""}`}>
+          <label className="field__label">Asset subtype <span className="req">*</span></label>
+          <select className="select" value={selectedAssetSubtype} onChange={e => update("assetSubtype", e.target.value)}>
+            {assetSubtypeOptions.map(option => <option key={option} value={option}>{option}</option>)}
+          </select>
+          {errors.assetSubtype && <div className="field__error">{errors.assetSubtype}</div>}
+        </div>
+        <div className={`field ${errors.platforms ? "field--error" : ""}`}>
+          <label className="field__label">Platform <span className="req">*</span></label>
+          <input className="input" value={value.platforms} onChange={e => update("platforms", e.target.value)} placeholder="Instagram, TikTok, YouTube, Web..." />
+          {errors.platforms && <div className="field__error">{errors.platforms}</div>}
+        </div>
+        <div className={`field ${errors.sizeFormat ? "field--error" : ""}`}>
+          <label className="field__label">Size / format <span className="req">*</span></label>
+          <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="e.g. 1080x1350, 1080x1920" />
+          {errors.sizeFormat && <div className="field__error">{errors.sizeFormat}</div>}
+        </div>
+        <div className={`field ${errors.briefLink ? "field--error" : ""}`}>
+          <label className="field__label">Brief link <span className="req">*</span></label>
+          <input className="input" value={value.briefLink} onChange={e => update("briefLink", e.target.value)} placeholder="https://docs.google.com/..." />
+          {errors.briefLink && <div className="field__error">{errors.briefLink}</div>}
+        </div>
+        <div className="field field--full">
+          <label className="field__label">Brief Note</label>
+          <textarea className="textarea" value={value.briefNote} onChange={e => update("briefNote", e.target.value)} placeholder="Short brief context, key message, references, or special instructions."></textarea>
+        </div>
+        <div className="field">
+          <label className="field__label">Reference link</label>
+          <input className="input" value={value.referenceLink} onChange={e => update("referenceLink", e.target.value)} placeholder="Optional - Figma / mood board / past asset" />
+        </div>
+        <div className={`field ${errors.priority ? "field--error" : ""}`}>
+          <label className="field__label">Priority <span className="req">*</span></label>
+          <select className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>
+            <option value="low">Low</option><option value="normal">Normal</option>
+            <option value="high">High</option><option value="urgent">Urgent</option>
+          </select>
+          {errors.priority && <div className="field__error">{errors.priority}</div>}
+        </div>
+        <div className={`field ${errors.urgentReason ? "field--error" : ""}`}>
+          <label className="field__label">Urgent reason {value.priority === "urgent" && <span className="req">*</span>}</label>
+          <input className="input" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} disabled={value.priority !== "urgent"} placeholder={value.priority === "urgent" ? "Why urgent? (visible to supervisor)" : "Only required when priority is Urgent"} />
+          {errors.urgentReason && <div className="field__error">{errors.urgentReason}</div>}
+        </div>
+        <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
+          <label className="field__label">Due date <span className="req">*</span></label>
+          <input className="input" type="date" value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />
+          {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
+        </div>
+        <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
+          <label className="field__label">Launch date <span className="req">*</span></label>
+          <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />
+          {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
+        </div>
+
+        {value.assetType === "hybrid" && (
+          <div className="field field--full">
+            <div className="reason-box reason-box--queued">
+              <strong>Heads up - hybrid requests are queued automatically.</strong> Static and video work are split into separate requests so the assignment engine can route by skill. Effort will be set to 8 with <span className="mono">needs_split = true</span>.
+            </div>
+          </div>
+        )}
+        <div className="field field--full">
+          <div className="reason-box">
+            <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
           </div>
         </div>
-      )}
-      <div className="field field--full">
-        <div className="reason-box">
-          <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
-        </div>
       </div>
+      <CreativeTemplatePanel
+        templates={templates}
+        loadState={templateLoadState}
+        onApply={applyTemplate}
+        onCreate={onTemplateCreated}
+      />
     </div>
+  );
+}
+
+function CreativeTemplatePanel({ templates = [], loadState = {}, onApply, onCreate }) {
+  const [draft, setDraft] = useState({ name: "", platform: "", sizeFormat: "", description: "" });
+  const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const visibleTemplates = templates.length ? templates : (window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
+
+  function updateDraft(field, value) {
+    setDraft(current => ({ ...current, [field]: value }));
+    setMessage("");
+  }
+
+  async function submitTemplate(event) {
+    event.preventDefault();
+    if (!onCreate || isSaving) return;
+    setIsSaving(true);
+    setMessage("");
+    try {
+      const created = await onCreate(draft);
+      setDraft({ name: "", platform: "", sizeFormat: "", description: "" });
+      setMessage("Template saved.");
+      if (created && onApply) onApply(created);
+    } catch (error) {
+      setMessage(error.message || "Could not save template.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <aside className="creative-template-panel">
+      <div className="creative-template-panel__head">
+        <div className="creative-template-panel__title">Platform + size templates</div>
+        <div className="creative-template-panel__sub">{loadState.message || "Choose a preset or save your own."}</div>
+      </div>
+      <div className="creative-template-list">
+        {visibleTemplates.map(template => (
+          <button key={template.id || template.name} className="creative-template-option" type="button" onClick={() => onApply && onApply(template)}>
+            <span>
+              <strong>{template.name}</strong>
+              <small>{template.platform} - {template.sizeFormat}</small>
+              {template.description && <small>{template.description}</small>}
+            </span>
+            <span className="btn btn--xs btn--secondary">Apply</span>
+          </button>
+        ))}
+      </div>
+      <form className="creative-template-form" onSubmit={submitTemplate}>
+        <label className="field">
+          <span className="field__label">Template name</span>
+          <input id="create-template-name" className="input" value={draft.name} onChange={e => updateDraft("name", e.target.value)} placeholder="e.g. Instagram story" />
+        </label>
+        <label className="field">
+          <span className="field__label">Platform</span>
+          <input className="input" value={draft.platform} onChange={e => updateDraft("platform", e.target.value)} placeholder="Instagram, Facebook..." />
+        </label>
+        <label className="field">
+          <span className="field__label">Size / format</span>
+          <input className="input" value={draft.sizeFormat} onChange={e => updateDraft("sizeFormat", e.target.value)} placeholder="1080x1920" />
+        </label>
+        <label className="field">
+          <span className="field__label">Description</span>
+          <textarea className="textarea" value={draft.description} onChange={e => updateDraft("description", e.target.value)} placeholder="Optional note" />
+        </label>
+        {message && <div className="field__hint">{message}</div>}
+        <button className="btn btn--secondary" type="submit" disabled={isSaving || !onCreate}>
+          <Icon name="plus" /> {isSaving ? "Saving..." : "Save template"}
+        </button>
+      </form>
+    </aside>
   );
 }
 
