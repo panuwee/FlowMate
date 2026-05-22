@@ -42,6 +42,20 @@ button:disabled {
   color: var(--garena-light-grey);
   font-weight: var(--weight-light);
 }
+.app__brand-version {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--garena-badge-bg);
+  color: var(--garena-grey);
+  font-size: 10.5px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
 .app__topbar {
   grid-column: 2; grid-row: 1;
   display: flex; align-items: center; gap: var(--s-4);
@@ -414,6 +428,8 @@ button:disabled {
 }
 .field__label .req { color: var(--garena-red); margin-left: 2px; }
 .field__hint { font-size: 11px; color: var(--garena-grey); }
+.field__error { font-size: 11px; color: var(--garena-red); }
+.field--error .field__label { color: var(--garena-red); }
 .input, .select, .textarea {
   width: 100%;
   border: var(--border-hairline);
@@ -428,6 +444,17 @@ button:disabled {
 .input:focus, .select:focus, .textarea:focus {
   border-color: var(--garena-iron);
   box-shadow: var(--shadow-focus);
+}
+.field--error .input,
+.field--error .select,
+.field--error .textarea {
+  border-color: var(--garena-red);
+  background: #FFFBFB;
+}
+.field--error .input:focus,
+.field--error .select:focus,
+.field--error .textarea:focus {
+  border-color: var(--garena-red);
 }
 .textarea { resize: vertical; min-height: 80px; font-family: var(--garena-font-en); }
 .input--readonly { background: var(--garena-badge-bg); color: var(--garena-grey); }

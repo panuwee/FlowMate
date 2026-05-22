@@ -1,6 +1,8 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
+const FLOWMATE_APP_VERSION = "v20260522-01";
+
 const NAV = [
   { group: "Personal", items: [
     { key: "my-work", label: "My work",       icon: "inbox" },
@@ -370,6 +372,7 @@ function App() {
       <div className="app__brand">
         <img src="garena/logo_graphic.png" alt="Garena" />
         <span className="app__brand-name">FlowMate</span>
+        <span className="app__brand-version">{FLOWMATE_APP_VERSION}</span>
       </div>
 
       <div className="app__topbar">
