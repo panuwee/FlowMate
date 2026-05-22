@@ -27,6 +27,23 @@ alter table public.creative_request_details
     or brief_link ~* '^https?://[^[:space:]]{4,}$'
   );
 
+create table if not exists public.leave_requests (
+  id uuid primary key default gen_random_uuid(),
+  team_member_id uuid not null references public.team_members(id) on delete cascade,
+  created_by_user_id uuid not null references public.users(id) on delete restrict,
+  start_date date not null,
+  end_date date not null,
+  reason text,
+  cancelled_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint leave_requests_date_order check (end_date >= start_date)
+);
+
+create index if not exists idx_leave_requests_member_dates
+on public.leave_requests(team_member_id, start_date, end_date)
+where cancelled_at is null;
+
 -- ---------------------------------------------------------------------------
 -- Security helper: trust Supabase Auth, never client-supplied actor ids.
 -- Existing RPC signatures keep p_actor_user_id for backward compatibility,
@@ -79,6 +96,24 @@ end;
 $$;
 
 grant execute on function public.flowmate_assert_actor_matches(uuid, uuid) to anon, authenticated;
+
+create or replace function public.flowmate_is_gdve_member_code(p_member_code text)
+returns boolean
+language sql
+immutable
+as $$
+  select lower(coalesce(p_member_code, '')) = any (array['pond','jo','tong','eye','vee']);
+$$;
+
+update public.team_members tm
+   set backup_skills = (
+     select array(
+       select distinct skill
+       from unnest(coalesce(tm.backup_skills, '{}'::public.asset_type[]) || array['esport-video']::public.asset_type[]) as skill
+     )
+   )
+ where lower(tm.member_code) = 'pond'
+   and not ('esport-video' = any (coalesce(tm.backup_skills, '{}'::public.asset_type[])));
 
 create or replace function public.flowmate_effort_for_subtype(
   p_asset_type public.asset_type,
@@ -211,6 +246,7 @@ declare
   v_reason         text;
   v_has_any_skill  boolean;
   v_has_eligible   boolean;
+  v_allow_backup_pool boolean := false;
   v_creative_owner_codes text[] := array['pond','jo','tong','eye','vee'];
   v_snapshot       jsonb;
 begin
@@ -298,6 +334,7 @@ begin
   v_was_capped  := v_raw_effort > 8;
   v_effort      := least(v_raw_effort, 8);
   v_working_days := public.flowmate_count_working_days(v_today, coalesce(v_wi.due_date, v_today));
+  v_allow_backup_pool := v_det.asset_type = 'esport-video' and v_wi.priority = 'urgent';
 
   -- 4. Candidate filtering + tie-break -------------------------------------
   with base as (
@@ -344,12 +381,12 @@ begin
       ), 0) as overdue_count,
       case
         when v_det.asset_type = any (tm.skills)        then 'primary'
-        when v_det.asset_type = any (tm.backup_skills) then 'backup'
+        when v_allow_backup_pool and v_det.asset_type = any (tm.backup_skills) then 'backup'
         else null
       end as skill_match
     from public.team_members tm
     where tm.active = true
-      and tm.member_code = any (v_creative_owner_codes)
+      and lower(tm.member_code) = any (v_creative_owner_codes)
   ),
   eligible as (
     select
@@ -363,14 +400,22 @@ begin
         or (b.availability = 'partial' and coalesce(b.capacity_override_per_day, 0) > 0)
       )
       and b.wip_now < b.wip_limit
+      and not exists (
+        select 1
+        from public.leave_requests lr
+        where lr.team_member_id = b.id
+          and lr.cancelled_at is null
+          and public.flowmate_is_gdve_member_code(b.member_code)
+          and lr.start_date <= coalesce(v_wi.due_date, v_today)
+          and lr.end_date >= v_today
+      )
   ),
   picked as (
     select e.*,
            case
              when e.skill_match = 'primary' then 0
              when e.skill_match = 'backup'
-                  and v_det.asset_type = 'esport-video'
-                  and v_wi.priority = 'urgent'
+                  and v_allow_backup_pool
                   then 1
              else null
            end as pool_rank
@@ -392,26 +437,41 @@ begin
   -- diagnostic flags for queue reason
   select exists (select 1 from public.team_members tm
                   where tm.active = true
-                    and tm.member_code = any (v_creative_owner_codes)
-                    and (v_det.asset_type = any (tm.skills) or v_det.asset_type = any (tm.backup_skills)))
+                    and lower(tm.member_code) = any (v_creative_owner_codes)
+                    and (
+                      v_det.asset_type = any (tm.skills)
+                      or (v_allow_backup_pool and v_det.asset_type = any (tm.backup_skills))
+                    ))
     into v_has_any_skill;
 
   select exists (
     with base as (
-      select tm.id, tm.skills, tm.backup_skills, tm.availability, tm.capacity_override_per_day,
+      select tm.id, tm.member_code, tm.skills, tm.backup_skills, tm.availability, tm.capacity_override_per_day,
              tm.wip_limit,
              coalesce((select count(*) from public.work_items wi
                          where wi.final_owner_member_id = tm.id
                            and wi.status = 'in_progress' and wi.wip_counted = true), 0) as wip_now
         from public.team_members tm
        where tm.active = true
-         and tm.member_code = any (v_creative_owner_codes)
-         and (v_det.asset_type = any (tm.skills) or v_det.asset_type = any (tm.backup_skills))
+         and lower(tm.member_code) = any (v_creative_owner_codes)
+         and (
+           v_det.asset_type = any (tm.skills)
+           or (v_allow_backup_pool and v_det.asset_type = any (tm.backup_skills))
+         )
     )
     select 1 from base b
      where (b.availability = 'available'
             or (b.availability = 'partial' and coalesce(b.capacity_override_per_day, 0) > 0))
        and b.wip_now < b.wip_limit
+       and not exists (
+         select 1
+         from public.leave_requests lr
+         where lr.team_member_id = b.id
+           and lr.cancelled_at is null
+           and public.flowmate_is_gdve_member_code(b.member_code)
+           and lr.start_date <= coalesce(v_wi.due_date, v_today)
+           and lr.end_date >= v_today
+       )
   ) into v_has_eligible;
 
   -- 5a. Assigned -----------------------------------------------------------
@@ -485,6 +545,15 @@ begin
       'member_code',     tm.member_code,
       'skills',          tm.skills,
       'availability',    tm.availability,
+      'leave_overlap',   exists (
+                           select 1
+                           from public.leave_requests lr
+                           where lr.team_member_id = tm.id
+                             and lr.cancelled_at is null
+                             and public.flowmate_is_gdve_member_code(tm.member_code)
+                             and lr.start_date <= coalesce(v_wi.due_date, v_today)
+                             and lr.end_date >= v_today
+                         ),
       'effective_cap',   case
                             when tm.active = false                  then 0
                             when tm.availability = 'leave'          then 0
@@ -496,7 +565,7 @@ begin
   ) into v_snapshot
   from public.team_members tm
   where tm.active = true
-    and tm.member_code = any (v_creative_owner_codes);
+    and lower(tm.member_code) = any (v_creative_owner_codes);
 
   update public.work_items
      set status                = 'queued',
