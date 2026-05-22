@@ -89,6 +89,7 @@ async function loadFlowMateWorkloadRows() {
       review: Number(row.review_count || 0),
       quick: Number(row.quick_task_count || 0),
       items: openCreativeItems,
+      allItems: memberItems,
       isSupabaseRow: true,
     };
   });

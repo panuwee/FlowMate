@@ -1,6 +1,46 @@
 ﻿// FlowMate - Screens part C: Workload, KPI, Team Settings
 const { useState: useStateC, useEffect: useEffectC } = React;
 
+function exportFlowMateCsvC(filename, columns, rows) {
+  const csv = [columns.map(column => column.label), ...rows.map(row => columns.map(column => {
+    const value = typeof column.value === "function" ? column.value(row) : row[column.value];
+    return value == null ? "" : value;
+  }))]
+    .map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function flowMateRangeLabelC(range) {
+  if (range === "last-week") return "Last week";
+  if (range === "next-week") return "Next week";
+  if (range === "last-4-weeks") return "Last 4 weeks";
+  if (range === "all-active") return "All active";
+  return "This week";
+}
+
+function flowMateRowInRangeC(row, range) {
+  if (!row || row.dueDelta == null || Number.isNaN(Number(row.dueDelta))) return range === "all-active";
+  const delta = Number(row.dueDelta);
+  if (range === "last-week") return delta >= -7 && delta < 0;
+  if (range === "next-week") return delta >= 7 && delta <= 13;
+  if (range === "last-4-weeks") return delta >= -28 && delta <= 0;
+  if (range === "all-active") return true;
+  return delta >= 0 && delta <= 6;
+}
+
+function flowMateFilterRowsByRangeC(rows, range) {
+  return (rows || []).filter(row => flowMateRowInRangeC(row, range));
+}
+
 /* ============================================================
    WORKLOAD VIEW
    ============================================================ */
@@ -28,6 +68,7 @@ function WorkloadScreen({ onOpen }) {
       review: mine.filter(w => w.status === "review").length,
       quick: mine.filter(w => w.type === "quick" && !["delivered","cancelled"].includes(w.status)).length,
       items: openCreative,
+      allItems: mine,
     };
   });
   const [rows, setRows] = useStateC(localRows);
@@ -35,6 +76,7 @@ function WorkloadScreen({ onOpen }) {
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
   const [workloadTab, setWorkloadTab] = useStateC("standard");
   const [teamFilter, setTeamFilter] = useStateC("All");
+  const [workloadRange, setWorkloadRange] = useStateC("this-week");
 
   useEffectC(() => {
     let alive = true;
@@ -79,8 +121,30 @@ function WorkloadScreen({ onOpen }) {
     },
     statusCounts: r.statusCounts || { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 },
     items: r.items || [],
+    allItems: r.allItems || r.items || [],
   }));
-  const tabRows = safeRows.filter(r => {
+  const rangeRows = safeRows.map(r => {
+    const rangeItems = flowMateFilterRowsByRangeC(r.allItems, workloadRange);
+    const rangeOpenCreative = rangeItems.filter(item =>
+      item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
+    );
+    const assignedEffort = rangeOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
+    return {
+      ...r,
+      statusCounts: window.getFlowMateWorkloadStatusCounts
+        ? window.getFlowMateWorkloadStatusCounts(rangeItems)
+        : r.statusCounts,
+      assignedEffort,
+      available: Math.max(0, r.window - assignedEffort),
+      due_soon: rangeItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
+      overdue: rangeItems.filter(item => item.overdue || (item.dueDelta != null && item.dueDelta < 0)).length,
+      blocked: rangeItems.filter(item => item.status === "blocked").length,
+      review: rangeItems.filter(item => item.status === "review").length,
+      quick: rangeItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
+      items: rangeOpenCreative,
+    };
+  });
+  const tabRows = rangeRows.filter(r => {
     const isGdVe = window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(r.m) : false;
     return workloadTab === "gdve" ? isGdVe : !isGdVe;
   });
@@ -109,6 +173,27 @@ function WorkloadScreen({ onOpen }) {
     setExpanded(next);
   }
 
+  function exportWorkloadRows() {
+    exportFlowMateCsvC(
+      `flowmate-workload-${workloadRange}-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { label: "Range", value: () => flowMateRangeLabelC(workloadRange) },
+        { label: "Member", value: row => row.m.name },
+        { label: "Team", value: row => row.m.discipline },
+        { label: "Capacity", value: "window" },
+        { label: "Assigned effort", value: "assignedEffort" },
+        { label: "Available", value: "available" },
+        { label: "WIP", value: "wip" },
+        { label: "Assigned", value: row => row.statusCounts.assigned || 0 },
+        { label: "In progress", value: row => row.statusCounts.in_progress || 0 },
+        { label: "Review", value: row => row.statusCounts.review || 0 },
+        { label: "Blocked", value: row => row.statusCounts.blocked || 0 },
+        { label: "Delivered", value: row => row.statusCounts.delivered || 0 },
+      ],
+      visibleRows,
+    );
+  }
+
   return (
     <div className="page">
       <div className="page__header">
@@ -117,8 +202,12 @@ function WorkloadScreen({ onOpen }) {
           <div className="page__sub">Per-member effort across the next 5 working days - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }} disabled title="Workload date range selector is planned for MVP 1.1"><option>This week (5d) - MVP 1.1</option><option>Next week</option><option>Custom range</option></select>
-          <button className="btn btn--secondary" disabled title="Workload export is planned for MVP 1.1"><Icon name="download" /> Export (MVP 1.1)</button>
+          <select className="select" value={workloadRange} onChange={event => setWorkloadRange(event.target.value)} style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}>
+            <option value="this-week">This week</option>
+            <option value="next-week">Next week</option>
+            <option value="all-active">All active</option>
+          </select>
+          <button className="btn btn--secondary" onClick={exportWorkloadRows}><Icon name="download" /> Export</button>
         </div>
       </div>
 
@@ -303,7 +392,7 @@ function WorkloadScreen({ onOpen }) {
         </>
       )}
 
-      <Source>{loadState.status === "live" ? "Supabase member_workload_v" : "No local fallback data"} - 5-day window - {TODAY}</Source>
+      <Source>{loadState.status === "live" ? "Supabase member_workload_v" : "No local fallback data"} - {flowMateRangeLabelC(workloadRange)} - {TODAY}</Source>
     </div>
   );
 }
@@ -322,6 +411,7 @@ function KpiScreen() {
   }
 
   const [rows, setRows] = useStateC([]);
+  const [kpiRange, setKpiRange] = useStateC("last-week");
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
 
   useEffectC(() => {
@@ -354,8 +444,9 @@ function KpiScreen() {
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const deliveredRows = rows.filter(w => w.status === "delivered" || w.status === "done");
-  const activeRows = rows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
+  const kpiRows = flowMateFilterRowsByRangeC(rows, kpiRange);
+  const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
+  const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
   const blockedRows = activeRows.filter(w => w.status === "blocked");
   const queuedRows = activeRows.filter(w => w.status === "queued");
@@ -394,14 +485,33 @@ function KpiScreen() {
   const maxOwnerDelivered = Math.max(1, ...ownerRows.map(row => row.delivered));
 
   const teamMap = new Map();
-  rows.forEach(w => {
+  kpiRows.forEach(w => {
     const team = w.requesterTeam || "No team";
     teamMap.set(team, (teamMap.get(team) || 0) + 1);
   });
   const teamRows = Array.from(teamMap.entries())
-    .map(([team, count]) => ({ team, count, share: rows.length ? Math.round((count / rows.length) * 100) : 0 }))
+    .map(([team, count]) => ({ team, count, share: kpiRows.length ? Math.round((count / kpiRows.length) * 100) : 0 }))
     .sort((a, b) => b.count - a.count || a.team.localeCompare(b.team));
   const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
+
+  function exportKpiRows() {
+    exportFlowMateCsvC(
+      `flowmate-kpi-${kpiRange}-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { label: "Range", value: () => flowMateRangeLabelC(kpiRange) },
+        { label: "ID", value: "id" },
+        { label: "Title", value: "title" },
+        { label: "Type", value: "type" },
+        { label: "Status", value: "status" },
+        { label: "Assignee", value: row => row.assignee && MEMBERS_BY_ID[row.assignee] ? MEMBERS_BY_ID[row.assignee].name : (row.assigneeOtherName || "Unassigned") },
+        { label: "Requester team", value: "requesterTeam" },
+        { label: "Effort", value: "effort" },
+        { label: "Priority", value: "priority" },
+        { label: "Due", value: row => row.dueFullLabel || row.dueLabel || row.dueDate || "" },
+      ],
+      kpiRows,
+    );
+  }
 
   return (
     <div className="page">
@@ -411,8 +521,12 @@ function KpiScreen() {
           <div className="page__sub">Operational health from live Supabase rows - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <select className="select" style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }} disabled title="KPI date range selector is planned for MVP 1.1"><option>Last 4 weeks - MVP 1.1</option><option>Last 8 weeks</option><option>This quarter</option></select>
-          <button className="btn btn--secondary" disabled title="KPI export is planned for MVP 1.1"><Icon name="download" /> Export (MVP 1.1)</button>
+          <select className="select" value={kpiRange} onChange={event => setKpiRange(event.target.value)} style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}>
+            <option value="last-week">Last week</option>
+            <option value="this-week">This week</option>
+            <option value="last-4-weeks">Last 4 weeks</option>
+          </select>
+          <button className="btn btn--secondary" onClick={exportKpiRows}><Icon name="download" /> Export</button>
         </div>
       </div>
 
@@ -434,8 +548,8 @@ function KpiScreen() {
         </div>
         <div className="kpi">
           <div className="kpi__lbl">Avg review rounds</div>
-          <div className="kpi__num mono">{rows.length ? (rows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / rows.length).toFixed(1) : "0.0"}</div>
-          <div className="kpi__delta">Across loaded rows</div>
+          <div className="kpi__num mono">{kpiRows.length ? (kpiRows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / kpiRows.length).toFixed(1) : "0.0"}</div>
+          <div className="kpi__delta">Across {flowMateRangeLabelC(kpiRange).toLowerCase()} rows</div>
         </div>
       </div>
 
@@ -486,7 +600,7 @@ function KpiScreen() {
         </div>
 
         <div className="card">
-          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">loaded live rows</span></div>
+          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">{flowMateRangeLabelC(kpiRange).toLowerCase()} rows</span></div>
           <div className="card__body" style={{ padding: 0 }}>
             <table className="tbl">
               <thead>
@@ -518,7 +632,7 @@ function KpiScreen() {
         Productivity index is calculated as <span className="mono">delivered_effort x on_time_factor x rework_factor</span> and is intentionally <strong>not displayed as a personal ranking</strong> in MVP - see PRD section 12.
       </div>
 
-      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {TODAY}</Source>
+      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {flowMateRangeLabelC(kpiRange)} - {TODAY}</Source>
     </div>
   );
 }

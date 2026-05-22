@@ -344,6 +344,7 @@ async function loadFlowMateListRows() {
       status: item.status,
       priority: item.priority,
       effort: item.work_type === "quick_task" ? null : item.effort_point,
+      dueDate: item.due_date,
       dueLabel: flowmateDateLabel(item.due_date),
       dueFullLabel: flowmateDateFullLabel(item.due_date),
       dueDelta: flowmateDueDelta(item.due_date),
