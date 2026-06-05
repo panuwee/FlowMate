@@ -15,7 +15,7 @@ create table if not exists public.user_whitelist (
   role           text not null default 'member' check (role in ('admin', 'member')),
   team_member_code text,           -- optional FK-ish link to public.team_members.member_code
   added_at       timestamptz not null default now(),
-  added_by       uuid references public.users(id) on delete set null,
+  added_by       uuid references public.users(id) on update cascade on delete set null,
   constraint user_whitelist_email_shape check (email ~* '^[^@\s]+@garena\.com$')
 );
 
@@ -67,6 +67,68 @@ on conflict (email) do update set
   display_name     = excluded.display_name,
   role             = excluded.role,
   team_member_code = excluded.team_member_code;
+
+-- 3b. Make seeded public.users rows safe to relink to real auth.users IDs ----
+-- Seeded users start with stable UUIDs so tasks can exist before Google login.
+-- When the real Google account signs in, auth.users.id is different. These FK
+-- constraints must cascade on user-id update, otherwise existing seeded rows
+-- block the auth-sync trigger and the user lands back on the login screen.
+create or replace function public.flowmate_recreate_user_fk(
+  p_table_name text,
+  p_constraint_name text,
+  p_column_name text,
+  p_on_delete_clause text default ''
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if to_regclass(format('public.%I', p_table_name)) is null then
+    return;
+  end if;
+
+  if not exists (
+    select 1
+      from information_schema.columns
+     where table_schema = 'public'
+       and table_name = p_table_name
+       and column_name = p_column_name
+  ) then
+    return;
+  end if;
+
+  execute format('alter table public.%I drop constraint if exists %I', p_table_name, p_constraint_name);
+  execute format(
+    'alter table public.%I add constraint %I foreign key (%I) references public.users(id) on update cascade %s',
+    p_table_name,
+    p_constraint_name,
+    p_column_name,
+    p_on_delete_clause
+  );
+end;
+$$;
+
+select public.flowmate_recreate_user_fk('team_members', 'team_members_user_id_fkey', 'user_id', 'on delete set null');
+select public.flowmate_recreate_user_fk('work_items', 'work_items_requester_user_id_fkey', 'requester_user_id', '');
+select public.flowmate_recreate_user_fk('work_items', 'work_items_assignee_user_id_fkey', 'assignee_user_id', '');
+select public.flowmate_recreate_user_fk('work_item_events', 'work_item_events_actor_user_id_fkey', 'actor_user_id', '');
+select public.flowmate_recreate_user_fk('comments', 'comments_author_user_id_fkey', 'author_user_id', '');
+select public.flowmate_recreate_user_fk('checklist_items', 'checklist_items_created_by_user_id_fkey', 'created_by_user_id', '');
+select public.flowmate_recreate_user_fk('notifications', 'notifications_user_id_fkey', 'user_id', 'on delete cascade');
+select public.flowmate_recreate_user_fk('notifications', 'notifications_actor_user_id_fkey', 'actor_user_id', 'on delete set null');
+select public.flowmate_recreate_user_fk('capacity_overrides', 'capacity_overrides_created_by_user_id_fkey', 'created_by_user_id', '');
+select public.flowmate_recreate_user_fk('user_whitelist', 'user_whitelist_added_by_fkey', 'added_by', 'on delete set null');
+select public.flowmate_recreate_user_fk('leave_requests', 'leave_requests_created_by_user_id_fkey', 'created_by_user_id', 'on delete restrict');
+select public.flowmate_recreate_user_fk('work_item_links', 'work_item_links_created_by_user_id_fkey', 'created_by_user_id', '');
+select public.flowmate_recreate_user_fk('work_item_links', 'work_item_links_deleted_by_user_id_fkey', 'deleted_by_user_id', 'on delete set null');
+select public.flowmate_recreate_user_fk('work_item_watchers', 'work_item_watchers_watcher_user_id_fkey', 'watcher_user_id', '');
+select public.flowmate_recreate_user_fk('work_item_watchers', 'work_item_watchers_added_by_user_id_fkey', 'added_by_user_id', '');
+select public.flowmate_recreate_user_fk('work_item_watchers', 'work_item_watchers_removed_by_user_id_fkey', 'removed_by_user_id', 'on delete set null');
+select public.flowmate_recreate_user_fk('creative_request_templates', 'creative_request_templates_created_by_user_id_fkey', 'created_by_user_id', 'on delete set null');
+
+drop function if exists public.flowmate_recreate_user_fk(text, text, text, text);
 
 -- 4. Update domain-enforcement trigger to also check whitelist -------------
 -- This fires BEFORE INSERT on auth.users. If the email is missing from the
@@ -137,6 +199,7 @@ begin
     null
   )
   on conflict (email) do update set
+    id             = excluded.id,
     google_subject = excluded.google_subject,
     display_name   = coalesce(public.users.display_name, excluded.display_name),
     role           = excluded.role,
@@ -158,6 +221,32 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_auth_user();
+
+-- Repair users who already completed Google OAuth before this auth-id sync fix
+-- was installed. This is what allows existing Mac/Gear/Panu auth sessions to
+-- map to the seeded profile rows instead of looping back to Login.
+update public.users u
+   set id             = au.id,
+       google_subject = coalesce(au.raw_user_meta_data->>'sub', u.google_subject),
+       display_name   = coalesce(u.display_name, wl.display_name, au.raw_user_meta_data->>'full_name', au.raw_user_meta_data->>'name', split_part(au.email, '@', 1)),
+       role           = coalesce(wl.role, u.role, 'member'),
+       is_active      = true,
+       updated_at     = now()
+  from auth.users au
+  join public.user_whitelist wl
+    on lower(wl.email) = lower(au.email)
+ where lower(u.email) = lower(au.email)
+   and u.id <> au.id;
+
+update public.team_members tm
+   set user_id = au.id,
+       updated_at = now()
+  from auth.users au
+  join public.user_whitelist wl
+    on lower(wl.email) = lower(au.email)
+ where wl.team_member_code is not null
+   and tm.member_code = wl.team_member_code
+   and tm.user_id is distinct from au.id;
 
 -- 6. Deactivate any existing public.users that are NOT on the whitelist ----
 -- The mock dev users (pond@garena.com, jo@garena.com, …) get deactivated by

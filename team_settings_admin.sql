@@ -4,7 +4,7 @@
 create table if not exists public.leave_requests (
   id uuid primary key default gen_random_uuid(),
   team_member_id uuid not null references public.team_members(id) on delete cascade,
-  created_by_user_id uuid not null references public.users(id) on delete restrict,
+  created_by_user_id uuid not null references public.users(id) on update cascade on delete restrict,
   start_date date not null,
   end_date date not null,
   start_half text not null default 'am',

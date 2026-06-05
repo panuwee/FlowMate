@@ -9,7 +9,7 @@ create extension if not exists pgcrypto;
 -- ---------------------------------------------------------------------------
 alter table public.work_items
   add column if not exists archived_at timestamptz,
-  add column if not exists archived_by_user_id uuid references public.users(id) on delete set null,
+  add column if not exists archived_by_user_id uuid references public.users(id) on update cascade on delete set null,
   add column if not exists archive_reason text;
 
 create index if not exists idx_work_items_archived_at
@@ -23,21 +23,21 @@ create table if not exists public.work_item_links (
   work_item_id uuid not null references public.work_items(id) on delete cascade,
   url text not null,
   description text,
-  created_by_user_id uuid not null references public.users(id),
+  created_by_user_id uuid not null references public.users(id) on update cascade,
   created_at timestamptz not null default now(),
   deleted_at timestamptz,
-  deleted_by_user_id uuid references public.users(id) on delete set null,
+  deleted_by_user_id uuid references public.users(id) on update cascade on delete set null,
   constraint work_item_links_url_check check (url ~* '^https?://[^[:space:]]{4,}$')
 );
 
 create table if not exists public.work_item_watchers (
   id uuid primary key default gen_random_uuid(),
   work_item_id uuid not null references public.work_items(id) on delete cascade,
-  watcher_user_id uuid not null references public.users(id),
-  added_by_user_id uuid not null references public.users(id),
+  watcher_user_id uuid not null references public.users(id) on update cascade,
+  added_by_user_id uuid not null references public.users(id) on update cascade,
   created_at timestamptz not null default now(),
   removed_at timestamptz,
-  removed_by_user_id uuid references public.users(id) on delete set null,
+  removed_by_user_id uuid references public.users(id) on update cascade on delete set null,
   constraint work_item_watchers_not_empty check (watcher_user_id is not null)
 );
 

@@ -95,7 +95,7 @@ create table if not exists public.users (
 create table if not exists public.team_members (
   id uuid primary key default gen_random_uuid(),
   member_code text not null unique,
-  user_id uuid references public.users(id) on delete set null,
+  user_id uuid references public.users(id) on update cascade on delete set null,
   display_name text not null,
   initials text not null,
   color text not null default '#2E546D',
@@ -124,9 +124,9 @@ create table if not exists public.work_items (
   description text,
   project_name text,
   campaign_name text,
-  requester_user_id uuid not null references public.users(id),
+  requester_user_id uuid not null references public.users(id) on update cascade,
   requester_team text,
-  assignee_user_id uuid references public.users(id),
+  assignee_user_id uuid references public.users(id) on update cascade,
   assignee_other_name text,
   final_owner_member_id uuid references public.team_members(id),
   status public.work_status not null default 'new',
@@ -227,7 +227,7 @@ create table if not exists public.assignment_runs (
 create table if not exists public.work_item_events (
   id uuid primary key default gen_random_uuid(),
   work_item_id uuid not null references public.work_items(id) on delete cascade,
-  actor_user_id uuid references public.users(id),
+  actor_user_id uuid references public.users(id) on update cascade,
   event_type public.event_type not null,
   from_status public.work_status,
   to_status public.work_status,
@@ -238,7 +238,7 @@ create table if not exists public.work_item_events (
 create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
   work_item_id uuid not null references public.work_items(id) on delete cascade,
-  author_user_id uuid not null references public.users(id),
+  author_user_id uuid not null references public.users(id) on update cascade,
   body text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz,
@@ -252,7 +252,7 @@ create table if not exists public.checklist_items (
   title text not null,
   is_done boolean not null default false,
   sort_order integer not null default 0,
-  created_by_user_id uuid not null references public.users(id),
+  created_by_user_id uuid not null references public.users(id) on update cascade,
   created_at timestamptz not null default now(),
   completed_at timestamptz,
   constraint checklist_title_not_empty check (length(trim(title)) > 0)
@@ -260,7 +260,7 @@ create table if not exists public.checklist_items (
 
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on update cascade on delete cascade,
   work_item_id uuid references public.work_items(id) on delete cascade,
   type text not null,
   title text not null,
@@ -276,7 +276,7 @@ create table if not exists public.capacity_overrides (
   end_date date not null,
   capacity_per_day numeric(5,2) not null check (capacity_per_day >= 0 and capacity_per_day <= 24),
   reason text,
-  created_by_user_id uuid not null references public.users(id),
+  created_by_user_id uuid not null references public.users(id) on update cascade,
   created_at timestamptz not null default now(),
   constraint capacity_override_date_order check (end_date >= start_date)
 );

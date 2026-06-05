@@ -6,9 +6,9 @@ create extension if not exists pgcrypto;
 
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references public.users(id) on delete cascade,
+  user_id uuid not null references public.users(id) on update cascade on delete cascade,
   work_item_id uuid references public.work_items(id) on delete cascade,
-  actor_user_id uuid references public.users(id) on delete set null,
+  actor_user_id uuid references public.users(id) on update cascade on delete set null,
   event_id uuid references public.work_item_events(id) on delete cascade,
   type text not null,
   title text not null,
@@ -21,7 +21,7 @@ create table if not exists public.notifications (
 );
 
 alter table public.notifications
-  add column if not exists actor_user_id uuid references public.users(id) on delete set null,
+  add column if not exists actor_user_id uuid references public.users(id) on update cascade on delete set null,
   add column if not exists event_id uuid references public.work_item_events(id) on delete cascade,
   add column if not exists metadata jsonb not null default '{}'::jsonb,
   add column if not exists dedupe_key text,

@@ -11,7 +11,7 @@ create table if not exists public.creative_request_templates (
   description text,
   is_system boolean not null default false,
   is_active boolean not null default true,
-  created_by_user_id uuid references public.users(id) on delete set null,
+  created_by_user_id uuid references public.users(id) on update cascade on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint creative_request_templates_name_not_empty check (length(trim(name)) > 0),
