@@ -329,7 +329,8 @@ create index if not exists idx_events_work_item on public.work_item_events(work_
 create index if not exists idx_comments_work_item on public.comments(work_item_id, created_at);
 create index if not exists idx_checklist_work_item on public.checklist_items(work_item_id, sort_order);
 
-create or replace view public.member_workload_v as
+create or replace view public.member_workload_v
+with (security_invoker = true) as
 select
   tm.id as team_member_id,
   tm.member_code,
@@ -371,7 +372,8 @@ from public.team_members tm
 left join public.work_items wi on wi.final_owner_member_id = tm.id
 group by tm.id;
 
-create or replace view public.work_item_flags_v as
+create or replace view public.work_item_flags_v
+with (security_invoker = true) as
 select
   wi.id as work_item_id,
   wi.display_id,
@@ -571,3 +573,8 @@ grant insert, update on public.comments to anon, authenticated;
 grant insert, update, delete on public.checklist_items to anon, authenticated;
 grant update on public.notifications to anon, authenticated;
 grant insert on public.capacity_overrides to anon, authenticated;
+
+revoke all privileges on public.member_workload_v from public, anon, authenticated;
+revoke all privileges on public.work_item_flags_v from public, anon, authenticated;
+grant select on public.member_workload_v to authenticated;
+grant select on public.work_item_flags_v to authenticated;

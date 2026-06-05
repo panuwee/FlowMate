@@ -3,7 +3,10 @@ const fs = require("fs");
 const path = require("path");
 
 const root = __dirname;
-const port = 4174;
+// Default to 3000 so it matches the Supabase Auth "Site URL" / redirect that
+// most teams set up (Next.js default port). Override with `PORT=4174 node local-server.cjs`
+// or `node local-server.cjs 4174`.
+const port = Number(process.env.PORT) || Number(process.argv[2]) || 3000;
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",

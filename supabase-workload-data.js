@@ -24,7 +24,7 @@ async function loadFlowMateWorkloadRows() {
       .select("id,member_code,display_name,initials,color,discipline,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
     window.flowmateSupabase
       .from("leave_requests")
-      .select("team_member_id,start_date,end_date,cancelled_at")
+      .select("team_member_id,start_date,end_date,start_half,end_half,cancelled_at")
       .is("cancelled_at", null)
       .lte("start_date", todayKey)
       .gte("end_date", todayKey),
@@ -43,7 +43,18 @@ async function loadFlowMateWorkloadRows() {
   const queuedEffort = (activeItems || [])
     .filter((item) => item.status === "queued")
     .reduce((sum, item) => sum + (item.effort || 0), 0);
-  const onLeaveToday = new Set((leaveResult.data || []).map((leave) => leave.team_member_id));
+  const leaveCapacityByMemberId = new Map();
+  (leaveResult.data || []).forEach((leave) => {
+    const isStartToday = leave.start_date === todayKey;
+    const isEndToday = leave.end_date === todayKey;
+    const dayStartHalf = isStartToday ? (leave.start_half || "am") : "am";
+    const dayEndHalf = isEndToday ? (leave.end_half || "pm") : "pm";
+    const leaveFraction = dayStartHalf === dayEndHalf ? 0.5 : 1;
+    leaveCapacityByMemberId.set(
+      leave.team_member_id,
+      Math.min(1, (leaveCapacityByMemberId.get(leave.team_member_id) || 0) + leaveFraction),
+    );
+  });
 
   const rows = (workloadResult.data || []).filter((row) => isVisibleMemberCode(row.member_code)).map((row) => {
     const member = membersById[row.team_member_id] || {};
@@ -56,8 +67,8 @@ async function loadFlowMateWorkloadRows() {
         item.type === "creative" &&
         ["assigned", "in_progress", "review", "blocked"].includes(item.status),
     );
-    const isOnLeaveToday = onLeaveToday.has(row.team_member_id);
-    const effectiveCap = isOnLeaveToday ? 0 : Number(row.effective_capacity_per_day || 0);
+    const leaveFractionToday = leaveCapacityByMemberId.get(row.team_member_id) || 0;
+    const effectiveCap = Math.max(0, Number(row.effective_capacity_per_day || 0) * (1 - leaveFractionToday));
     const assignedEffort = Number(row.assigned_effort || 0);
     const windowCapacity = effectiveCap * 5;
 
@@ -73,9 +84,12 @@ async function loadFlowMateWorkloadRows() {
           ...((row.backup_skills || []).map((skill) => `${flowmateToKebab(skill)}-backup`)),
         ],
         capacityPerDay: Number(member.capacity_per_day || effectiveCap),
-        capacityOverride: member.capacity_override_per_day,
+        capacityOverride: leaveFractionToday > 0 && leaveFractionToday < 1
+          ? effectiveCap
+          : member.capacity_override_per_day,
         wipLimit: Number(member.wip_limit || 0),
-        availability: isOnLeaveToday ? "leave" : row.availability,
+        availability: leaveFractionToday >= 1 ? "leave" : (leaveFractionToday > 0 ? "partial" : row.availability),
+        leaveFractionToday,
       },
       statusCounts,
       assignedEffort,

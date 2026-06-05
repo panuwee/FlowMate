@@ -723,6 +723,7 @@ declare
   v_actor_id uuid;
   v_work public.work_items%rowtype;
   v_from_status public.work_status;
+  v_queue_drain jsonb := null;
 begin
   v_actor_id := auth.uid();
 
@@ -827,11 +828,17 @@ begin
     )
   );
 
+  if v_work.work_type = 'creative_request'
+     and p_next_status in ('delivered', 'cancelled') then
+    v_queue_drain := public.flowmate_rerun_queued_creative_requests(10);
+  end if;
+
   return jsonb_build_object(
     'id', v_work.id,
     'display_id', v_work.display_id,
     'status', v_work.status,
-    'admin_override', true
+    'admin_override', true,
+    'queue_drain', v_queue_drain
   );
 end;
 $$;

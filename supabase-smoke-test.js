@@ -27,5 +27,5 @@
     ok: true,
     rows: data,
   };
-  console.log("[FlowMate Supabase] Connected. work_items sample:", data);
+  console.log("[FlowMate Supabase] Connected. work_items preview:", data);
 })();

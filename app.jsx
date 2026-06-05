@@ -705,7 +705,7 @@ function CreateMenuPanel({ onQuick, onCreative, onLeave, onClose }) {
 
 function GlobalLeaveRequestModal({ onClose }) {
   const todayKey = flowMateTodayDateKey();
-  const [leaveForm, setLeaveForm] = useStateApp({ startDate: todayKey, endDate: todayKey, reason: "" });
+  const [leaveForm, setLeaveForm] = useStateApp({ startDate: todayKey, endDate: todayKey, startHalf: "am", endHalf: "pm", reason: "" });
   const [leaveState, setLeaveState] = useStateApp({ status: "idle", message: "" });
 
   async function submitLeaveRequest(event) {
@@ -722,6 +722,17 @@ function GlobalLeaveRequestModal({ onClose }) {
       console.error("[FlowMate Create] Leave request failed:", error);
       setLeaveState({ status: "error", message: error.message || "Leave request failed." });
     }
+  }
+
+  function updateLeaveHalf(half, checked) {
+    setLeaveForm(current => {
+      if (half === "am") {
+        if (checked) return { ...current, startHalf: "am" };
+        return current.endHalf === "pm" ? { ...current, startHalf: "pm" } : current;
+      }
+      if (checked) return { ...current, endHalf: "pm" };
+      return current.startHalf === "am" ? { ...current, endHalf: "am" } : current;
+    });
   }
 
   return (
@@ -743,6 +754,20 @@ function GlobalLeaveRequestModal({ onClose }) {
             <span className="field__label">End date</span>
             <input className="input" type="date" value={leaveForm.endDate} onChange={event => setLeaveForm(current => ({ ...current, endDate: event.target.value }))} />
           </label>
+          <div className="field field--full">
+            <span className="field__label">Leave period</span>
+            <div className="check-row">
+              <label className="check-pill">
+                <input type="checkbox" checked={leaveForm.startHalf === "am"} onChange={event => updateLeaveHalf("am", event.target.checked)} />
+                <span>AM</span>
+              </label>
+              <label className="check-pill">
+                <input type="checkbox" checked={leaveForm.endHalf === "pm"} onChange={event => updateLeaveHalf("pm", event.target.checked)} />
+                <span>PM</span>
+              </label>
+            </div>
+            <span className="field__hint">AM + PM is full day. AM only or PM only counts as half-day capacity.</span>
+          </div>
           <label className="field field--full">
             <span className="field__label">Reason</span>
             <textarea className="textarea" value={leaveForm.reason} onChange={event => setLeaveForm(current => ({ ...current, reason: event.target.value }))} rows="3"></textarea>

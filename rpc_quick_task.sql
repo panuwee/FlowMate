@@ -779,6 +779,7 @@ declare
   v_from_status public.work_status;
   v_wip_now int;
   v_wip_limit int;
+  v_queue_drain jsonb := null;
 begin
   v_actor_id := public.flowmate_actor_user_id();
   perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
@@ -979,11 +980,16 @@ begin
     )
   );
 
+  if p_next_status in ('delivered', 'cancelled') then
+    v_queue_drain := public.flowmate_rerun_queued_creative_requests(10);
+  end if;
+
   return jsonb_build_object(
     'id', v_work.id,
     'display_id', v_work.display_id,
     'status', v_work.status,
-    'review_round', v_work.review_round
+    'review_round', v_work.review_round,
+    'queue_drain', v_queue_drain
   );
 end;
 $$;

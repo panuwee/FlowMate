@@ -33,16 +33,58 @@ create table if not exists public.leave_requests (
   created_by_user_id uuid not null references public.users(id) on delete restrict,
   start_date date not null,
   end_date date not null,
+  start_half text not null default 'am',
+  end_half text not null default 'pm',
   reason text,
   cancelled_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint leave_requests_date_order check (end_date >= start_date)
+  constraint leave_requests_date_order check (end_date >= start_date),
+  constraint leave_requests_start_half_check check (start_half in ('am', 'pm')),
+  constraint leave_requests_end_half_check check (end_half in ('am', 'pm')),
+  constraint leave_requests_same_day_half_order check (
+    start_date <> end_date or start_half <= end_half
+  )
 );
+
+alter table public.leave_requests
+  add column if not exists start_half text not null default 'am',
+  add column if not exists end_half text not null default 'pm';
 
 create index if not exists idx_leave_requests_member_dates
 on public.leave_requests(team_member_id, start_date, end_date)
 where cancelled_at is null;
+
+create or replace function public.flowmate_leave_fraction_for_date(
+  p_team_member_id uuid,
+  p_target_date date
+)
+returns numeric
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with leave_days as (
+    select
+      case
+        when (case when lr.start_date = p_target_date then lr.start_half else 'am' end)
+           = (case when lr.end_date = p_target_date then lr.end_half else 'pm' end)
+          then 0.5::numeric
+        else 1::numeric
+      end as leave_fraction
+    from public.leave_requests lr
+    where lr.team_member_id = p_team_member_id
+      and lr.cancelled_at is null
+      and lr.start_date <= p_target_date
+      and lr.end_date >= p_target_date
+  )
+  select least(1::numeric, coalesce(sum(leave_fraction), 0::numeric))
+  from leave_days;
+$$;
+
+revoke all on function public.flowmate_leave_fraction_for_date(uuid, date) from public, anon, authenticated;
+grant execute on function public.flowmate_leave_fraction_for_date(uuid, date) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Security helper: trust Supabase Auth, never client-supplied actor ids.
@@ -233,7 +275,6 @@ declare
   v_wi             public.work_items%rowtype;
   v_det            public.creative_request_details%rowtype;
   v_today          date := current_date;
-  v_working_days   int;
   v_brief_missing  text;
   v_raw_effort     int;
   v_effort         int;
@@ -333,7 +374,6 @@ begin
   v_raw_effort  := public.flowmate_effort_for_subtype(v_det.asset_type, v_det.asset_subtype);
   v_was_capped  := v_raw_effort > 8;
   v_effort      := least(v_raw_effort, 8);
-  v_working_days := public.flowmate_count_working_days(v_today, coalesce(v_wi.due_date, v_today));
   v_allow_backup_pool := v_det.asset_type = 'esport-video' and v_wi.priority = 'urgent';
 
   -- 4. Candidate filtering + tie-break -------------------------------------
@@ -349,12 +389,15 @@ begin
       tm.wip_limit,
       tm.skills,
       tm.backup_skills,
-      case
-        when tm.active = false                                              then 0::numeric
-        when tm.availability = 'leave'                                      then 0::numeric
-        when tm.availability = 'partial'                                    then coalesce(tm.capacity_override_per_day, 0)
-        else tm.capacity_per_day
-      end as effective_cap,
+      (
+        case
+          when tm.active = false                                            then 0::numeric
+          when tm.availability = 'leave'                                    then 0::numeric
+          when tm.availability = 'partial'                                  then coalesce(tm.capacity_override_per_day, 0)
+          else tm.capacity_per_day
+        end
+        * (1 - public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)))
+      ) as effective_cap,
       coalesce((
         select sum(wi.effort_point)
         from public.work_items wi
@@ -362,7 +405,7 @@ begin
           and wi.work_type = 'creative_request'
           and wi.status in ('assigned','in_progress','review','blocked')
           and wi.id <> p_work_item_id
-          and (wi.due_date is null or wi.due_date <= v_wi.due_date)
+          and coalesce(wi.due_date, v_today) = coalesce(v_wi.due_date, v_today)
       ), 0) as assigned_effort_until_due,
       coalesce((
         select count(*)
@@ -381,7 +424,11 @@ begin
       ), 0) as overdue_count,
       case
         when v_det.asset_type = any (tm.skills)        then 'primary'
-        when v_allow_backup_pool and v_det.asset_type = any (tm.backup_skills) then 'backup'
+        when v_allow_backup_pool
+          and (
+            v_det.asset_type = any (coalesce(tm.backup_skills, '{}'::public.asset_type[]))
+            or lower(tm.member_code) = 'pond'
+          ) then 'backup'
         else null
       end as skill_match
     from public.team_members tm
@@ -391,8 +438,8 @@ begin
   eligible as (
     select
       b.*,
-      (b.effective_cap * v_working_days) as window_cap,
-      ((b.effective_cap * v_working_days) - b.assigned_effort_until_due) as remaining
+      b.effective_cap as window_cap,
+      (b.effective_cap - b.assigned_effort_until_due) as remaining
     from base b
     where b.skill_match is not null
       and (
@@ -400,14 +447,9 @@ begin
         or (b.availability = 'partial' and coalesce(b.capacity_override_per_day, 0) > 0)
       )
       and b.wip_now < b.wip_limit
-      and not exists (
-        select 1
-        from public.leave_requests lr
-        where lr.team_member_id = b.id
-          and lr.cancelled_at is null
-          and public.flowmate_is_gdve_member_code(b.member_code)
-          and lr.start_date <= coalesce(v_wi.due_date, v_today)
-          and lr.end_date >= v_today
+      and (
+        not public.flowmate_is_gdve_member_code(b.member_code)
+        or public.flowmate_leave_fraction_for_date(b.id, coalesce(v_wi.due_date, v_today)) < 1
       )
   ),
   picked as (
@@ -440,7 +482,13 @@ begin
                     and lower(tm.member_code) = any (v_creative_owner_codes)
                     and (
                       v_det.asset_type = any (tm.skills)
-                      or (v_allow_backup_pool and v_det.asset_type = any (tm.backup_skills))
+                      or (
+                        v_allow_backup_pool
+                        and (
+                          v_det.asset_type = any (coalesce(tm.backup_skills, '{}'::public.asset_type[]))
+                          or lower(tm.member_code) = 'pond'
+                        )
+                      )
                     ))
     into v_has_any_skill;
 
@@ -456,21 +504,22 @@ begin
          and lower(tm.member_code) = any (v_creative_owner_codes)
          and (
            v_det.asset_type = any (tm.skills)
-           or (v_allow_backup_pool and v_det.asset_type = any (tm.backup_skills))
+           or (
+             v_allow_backup_pool
+             and (
+               v_det.asset_type = any (coalesce(tm.backup_skills, '{}'::public.asset_type[]))
+               or lower(tm.member_code) = 'pond'
+             )
+           )
          )
     )
     select 1 from base b
      where (b.availability = 'available'
             or (b.availability = 'partial' and coalesce(b.capacity_override_per_day, 0) > 0))
        and b.wip_now < b.wip_limit
-       and not exists (
-         select 1
-         from public.leave_requests lr
-         where lr.team_member_id = b.id
-           and lr.cancelled_at is null
-           and public.flowmate_is_gdve_member_code(b.member_code)
-           and lr.start_date <= coalesce(v_wi.due_date, v_today)
-           and lr.end_date >= v_today
+       and (
+         not public.flowmate_is_gdve_member_code(b.member_code)
+         or public.flowmate_leave_fraction_for_date(b.id, coalesce(v_wi.due_date, v_today)) < 1
        )
   ) into v_has_eligible;
 
@@ -480,11 +529,11 @@ begin
       when v_winner_skill = 'backup' then
         'Auto (urgent fallback): ' || v_det.asset_type::text
         || ' assigned to backup ' || v_winner_name
-        || ' by remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
+        || ' by remaining capacity on ' || to_char(v_wi.due_date, 'Mon DD') || '.'
       else
         'Auto: ' || v_det.asset_type::text
         || ' assigned to ' || v_winner_name
-        || ' by skill, WIP, and remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
+        || ' by skill, WIP, and remaining capacity on ' || to_char(v_wi.due_date, 'Mon DD') || '.'
     end;
 
     update public.work_items
@@ -536,7 +585,7 @@ begin
   elsif not v_has_eligible then
     v_reason := 'Queued: all matching members are at WIP limit or unavailable.';
   else
-    v_reason := 'Queued: matching members are over capacity before the due date.';
+    v_reason := 'Queued: matching members are over capacity on the due date.';
   end if;
 
   -- capacity snapshot (lightweight) for explainability
@@ -545,21 +594,14 @@ begin
       'member_code',     tm.member_code,
       'skills',          tm.skills,
       'availability',    tm.availability,
-      'leave_overlap',   exists (
-                           select 1
-                           from public.leave_requests lr
-                           where lr.team_member_id = tm.id
-                             and lr.cancelled_at is null
-                             and public.flowmate_is_gdve_member_code(tm.member_code)
-                             and lr.start_date <= coalesce(v_wi.due_date, v_today)
-                             and lr.end_date >= v_today
-                         ),
+      'leave_fraction',  public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)),
       'effective_cap',   case
                             when tm.active = false                  then 0
                             when tm.availability = 'leave'          then 0
                             when tm.availability = 'partial'        then coalesce(tm.capacity_override_per_day, 0)
                             else tm.capacity_per_day
                           end
+                          * (1 - public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)))
     )),
     '[]'::jsonb
   ) into v_snapshot
@@ -604,6 +646,57 @@ $$;
 
 grant execute on function public.flowmate_run_assignment(uuid, public.assignment_trigger)
   to anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Queue drain after capacity is released.
+-- Called by status transition RPCs after creative work leaves active capacity
+-- (delivered/cancelled). This keeps Central Queue moving without letting the
+-- browser pick owners or bypass assignment rules.
+-- ---------------------------------------------------------------------------
+create or replace function public.flowmate_rerun_queued_creative_requests(
+  p_limit integer default 10
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row record;
+  v_result jsonb;
+  v_checked integer := 0;
+  v_assigned integer := 0;
+  v_limit integer := least(greatest(coalesce(p_limit, 10), 1), 25);
+begin
+  for v_row in
+    select wi.id
+    from public.work_items wi
+    where wi.work_type = 'creative_request'
+      and wi.status = 'queued'
+      and wi.archived_at is null
+      and coalesce(wi.needs_split, false) = false
+    order by
+      (wi.priority = 'urgent') desc,
+      wi.due_date asc nulls last,
+      wi.created_at asc
+    limit v_limit
+    for update skip locked
+  loop
+    v_checked := v_checked + 1;
+    v_result := public.flowmate_run_assignment(v_row.id, 'capacity_change');
+    if v_result ->> 'result' = 'assigned' then
+      v_assigned := v_assigned + 1;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'checked', v_checked,
+    'assigned', v_assigned
+  );
+end;
+$$;
+
+revoke all on function public.flowmate_rerun_queued_creative_requests(integer)
+  from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- create_creative_request: insert payload, run engine, return result.

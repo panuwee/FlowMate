@@ -708,7 +708,7 @@ function CalendarScreen({ onOpen }) {
   const [filterType, setFilterType] = useStateC("all");
   const [filterPriority, setFilterPriority] = useStateC("all");
   const [leaveModalOpen, setLeaveModalOpen] = useStateC(false);
-  const [leaveForm, setLeaveForm] = useStateC({ startDate: todayKey, endDate: todayKey, reason: "" });
+  const [leaveForm, setLeaveForm] = useStateC({ startDate: todayKey, endDate: todayKey, startHalf: "am", endHalf: "pm", reason: "" });
   const [leaveState, setLeaveState] = useStateC({ status: "idle", message: "" });
 
   async function loadRows() {
@@ -811,11 +811,22 @@ function CalendarScreen({ onOpen }) {
       await loadRows();
       setLeaveModalOpen(false);
       setLeaveState({ status: "idle", message: "" });
-      setLeaveForm({ startDate: todayKey, endDate: todayKey, reason: "" });
+      setLeaveForm({ startDate: todayKey, endDate: todayKey, startHalf: "am", endHalf: "pm", reason: "" });
     } catch (error) {
       console.error("[FlowMate Calendar] Leave request failed:", error);
       setLeaveState({ status: "error", message: error.message || "Leave request failed." });
     }
+  }
+
+  function updateLeaveHalf(half, checked) {
+    setLeaveForm(current => {
+      if (half === "am") {
+        if (checked) return { ...current, startHalf: "am" };
+        return current.endHalf === "pm" ? { ...current, startHalf: "pm" } : current;
+      }
+      if (checked) return { ...current, endHalf: "pm" };
+      return current.startHalf === "am" ? { ...current, endHalf: "am" } : current;
+    });
   }
 
   function calendarTypePill(item) {
@@ -824,7 +835,7 @@ function CalendarScreen({ onOpen }) {
   }
 
   function calendarStatusPill(item) {
-    if (item.type === "leave") return <span className="avail avail--leave"><span className="avail__dot"></span>On leave</span>;
+    if (item.type === "leave") return <span className="avail avail--leave"><span className="avail__dot"></span>{item.leaveUnits === 0.5 ? `${item.halfLabel} leave` : "On leave"}</span>;
     return <StatusBadge status={item.status} />;
   }
 
@@ -889,7 +900,7 @@ function CalendarScreen({ onOpen }) {
             {!compact && calendarTypePill(item)}
           </span>
           <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3, minWidth: 0, ...textClampStyle }}>{item.title}</span>
-          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner} - {item.type === "leave" ? "On leave" : (STATUS_LABEL[item.status] || item.status)}</span>
+          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner} - {item.type === "leave" ? (item.leaveUnits === 0.5 ? `${item.halfLabel} leave` : "AM + PM leave") : (STATUS_LABEL[item.status] || item.status)}</span>
           {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
           {!compact && item.type === "leave" && item.leaveReason && <span className="muted" style={{ fontSize: 11 }}>{item.leaveReason}</span>}
         </span>
@@ -1070,6 +1081,20 @@ function CalendarScreen({ onOpen }) {
                 <span className="field__label">End date</span>
                 <input className="input" type="date" value={leaveForm.endDate} onChange={event => setLeaveForm(current => ({ ...current, endDate: event.target.value }))} />
               </label>
+              <div className="field field--full">
+                <span className="field__label">Leave period</span>
+                <div className="check-row">
+                  <label className="check-pill">
+                    <input type="checkbox" checked={leaveForm.startHalf === "am"} onChange={event => updateLeaveHalf("am", event.target.checked)} />
+                    <span>AM</span>
+                  </label>
+                  <label className="check-pill">
+                    <input type="checkbox" checked={leaveForm.endHalf === "pm"} onChange={event => updateLeaveHalf("pm", event.target.checked)} />
+                    <span>PM</span>
+                  </label>
+                </div>
+                <span className="field__hint">AM + PM is full day. AM only or PM only counts as half-day capacity.</span>
+              </div>
               <label className="field field--full">
                 <span className="field__label">Reason</span>
                 <textarea className="textarea" value={leaveForm.reason} onChange={event => setLeaveForm(current => ({ ...current, reason: event.target.value }))} rows="3"></textarea>

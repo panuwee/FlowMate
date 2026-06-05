@@ -459,7 +459,7 @@ async function loadFlowMateLeaveRows() {
   const [leaveResult, membersResult] = await Promise.all([
     window.flowmateSupabase
       .from("leave_requests")
-      .select("id,team_member_id,start_date,end_date,reason,created_at,cancelled_at")
+      .select("id,team_member_id,start_date,end_date,start_half,end_half,reason,created_at,cancelled_at")
       .is("cancelled_at", null)
       .order("start_date", { ascending: true }),
     window.flowmateSupabase
@@ -476,6 +476,17 @@ async function loadFlowMateLeaveRows() {
   return (leaveResult.data || []).flatMap((leave) => {
     const member = membersById[leave.team_member_id] || {};
     return flowmateExpandLeaveDates(leave.start_date, leave.end_date).map((dateKey) => ({
+      ...(() => {
+        const startHalf = leave.start_half || "am";
+        const endHalf = leave.end_half || "pm";
+        const isFirstDay = dateKey === leave.start_date;
+        const isLastDay = dateKey === leave.end_date;
+        const dayStartHalf = isFirstDay ? startHalf : "am";
+        const dayEndHalf = isLastDay ? endHalf : "pm";
+        const leaveUnits = dayStartHalf === dayEndHalf ? 0.5 : 1;
+        const halfLabel = leaveUnits === 1 ? "AM + PM" : dayStartHalf.toUpperCase();
+        return { dayStartHalf, dayEndHalf, leaveUnits, halfLabel };
+      })(),
       id: `LV-${String(leave.id).slice(0, 8)}-${dateKey}`,
       leaveRequestId: leave.id,
       type: "leave",
@@ -489,6 +500,8 @@ async function loadFlowMateLeaveRows() {
       calendarDate: dateKey,
       startDate: leave.start_date,
       endDate: leave.end_date,
+      startHalf: leave.start_half || "am",
+      endHalf: leave.end_half || "pm",
       leaveReason: leave.reason || "",
       assignee: leave.team_member_id,
       assigneeOtherName: "",

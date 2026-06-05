@@ -15,7 +15,7 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `notification_center.sql` | MVP 1.2 Notification Center table hardening, read-state RPCs, trusted event trigger creation, and due-date notification generator |
 | `collaboration_admin.sql` | MVP 1.2 detail links, watchers, watcher notification recipients, admin status override, and admin soft archive |
 | `view_security_hardening.sql` | Locks public views to authenticated users and forces `security_invoker` so underlying RLS is respected |
-| `team_settings_admin.sql` | MVP 1.2 Team settings admin-only member capacity, availability, and WIP update RPC |
+| `team_settings_admin.sql` | MVP 1.2 Team settings admin-only GD/VE member capacity updates plus own leave request table/RPC |
 
 ## Before Running
 
@@ -46,6 +46,26 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    9. `supabase/view_security_hardening.sql`
    10. `supabase/team_settings_admin.sql`
 
+For an existing MVP 1.2 database that already ran the earlier SQL, apply the leave update in this order:
+
+1. `supabase/team_settings_admin.sql`
+2. `supabase/rpc_assignment.sql`
+
+For the Central Queue auto-rerun update after capacity is released, apply:
+
+1. `supabase/rpc_assignment.sql`
+2. `supabase/rpc_quick_task.sql`
+3. `supabase/collaboration_admin.sql`
+
+For the Calendar, Team settings skill editing, and per-due-date capacity update, apply:
+
+1. `supabase/team_settings_admin.sql`
+2. `supabase/rpc_assignment.sql`
+
+For production go-live reset after all validation is complete, run manually:
+
+1. `supabase/reset_tasks_for_production.sql`
+
 ## Expected Tables
 
 After the full run order, these tables should exist:
@@ -61,6 +81,7 @@ After the full run order, these tables should exist:
 - `notifications`
 - `work_item_links`
 - `work_item_watchers`
+- `leave_requests`
 - `capacity_overrides`
 - `user_whitelist`
 
@@ -105,6 +126,8 @@ select count(*) from public.work_item_watchers;
 select proname from pg_proc where proname in ('add_work_item_link', 'add_work_item_watcher', 'flowmate_admin_transition_work_status', 'flowmate_admin_archive_work_item') order by proname;
 select tgname from pg_trigger where tgname = 'flowmate_collaboration_notifications_after_event';
 select proname from pg_proc where proname = 'flowmate_admin_update_team_member';
+select proname from pg_proc where proname = 'create_leave_request';
+select count(*) from public.leave_requests;
 ```
 
 ## Notification Center Manual Checks

@@ -626,8 +626,6 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
   const [quickDraft, setQuickDraft] = useState(() => readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
   const [creativeDraft, setCreativeDraft] = useState(() => normalizeFlowMateCreativeDraft(readFlowMateCreateDraft("creative", getDefaultCreativeDraft())));
-  const [creativeTemplates, setCreativeTemplates] = useState(() => window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
-  const [templateLoadState, setTemplateLoadState] = useState({ status: "idle", message: "" });
 
   useEffect(() => {
     let alive = true;
@@ -672,37 +670,6 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
 
     return () => { alive = false; };
   }, []);
-
-  async function refreshCreativeTemplates() {
-    if (!window.loadFlowMateCreativeRequestTemplates) {
-      setCreativeTemplates(window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
-      setTemplateLoadState({ status: "error", message: "Template loader is not ready." });
-      return;
-    }
-    setTemplateLoadState({ status: "loading", message: "Loading templates..." });
-    try {
-      const templates = await window.loadFlowMateCreativeRequestTemplates();
-      setCreativeTemplates(templates || []);
-      setTemplateLoadState({ status: "live", message: `${(templates || []).length} templates` });
-    } catch (error) {
-      console.warn("[FlowMate Create] template load failed:", error);
-      setCreativeTemplates(window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
-      setTemplateLoadState({ status: "error", message: error.message || "Template load failed." });
-    }
-  }
-
-  useEffect(() => {
-    refreshCreativeTemplates();
-  }, []);
-
-  async function handleCreateCreativeTemplate(input) {
-    if (!window.createFlowMateCreativeRequestTemplate) {
-      throw new Error("Template RPC is not ready.");
-    }
-    const created = await window.createFlowMateCreativeRequestTemplate(input);
-    await refreshCreativeTemplates();
-    return created;
-  }
 
   async function openCreatedDetail(created, id) {
     const detailId = id || window.getFlowMateCreatedDisplayId(created);
@@ -859,7 +826,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           )}
           {mode === "quick"
             ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />
-            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} templates={creativeTemplates} templateLoadState={templateLoadState} onTemplateCreated={handleCreateCreativeTemplate} />}
+            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />}
         </div>
       </div>
 
@@ -993,7 +960,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
     </div>
   );
 }
-function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, errors = {}, templates = [], templateLoadState = {}, onTemplateCreated }) {
+function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, errors = {} }) {
   const assetSubtypeOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[value.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
   const selectedAssetSubtype = assetSubtypeOptions.includes(value.assetSubtype)
     ? value.assetSubtype
@@ -1006,16 +973,8 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
     }
     onChange({ ...value, [field]: next });
   }
-  function applyTemplate(template) {
-    if (!template) return;
-    onChange({
-      ...value,
-      platforms: template.platform || value.platforms,
-      sizeFormat: template.sizeFormat || value.sizeFormat,
-    });
-  }
   return (
-    <div className="creative-request-layout">
+    <div>
       <div className="form-grid">
         <div className="field field--full">
           <label className="field__label">Title <span className="req">*</span></label>
@@ -1103,85 +1062,7 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
           </div>
         </div>
       </div>
-      <CreativeTemplatePanel
-        templates={templates}
-        loadState={templateLoadState}
-        onApply={applyTemplate}
-        onCreate={onTemplateCreated}
-      />
     </div>
-  );
-}
-
-function CreativeTemplatePanel({ templates = [], loadState = {}, onApply, onCreate }) {
-  const [draft, setDraft] = useState({ name: "", platform: "", sizeFormat: "", description: "" });
-  const [message, setMessage] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const visibleTemplates = templates.length ? templates : (window.FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK || []);
-
-  function updateDraft(field, value) {
-    setDraft(current => ({ ...current, [field]: value }));
-    setMessage("");
-  }
-
-  async function submitTemplate(event) {
-    event.preventDefault();
-    if (!onCreate || isSaving) return;
-    setIsSaving(true);
-    setMessage("");
-    try {
-      const created = await onCreate(draft);
-      setDraft({ name: "", platform: "", sizeFormat: "", description: "" });
-      setMessage("Template saved.");
-      if (created && onApply) onApply(created);
-    } catch (error) {
-      setMessage(error.message || "Could not save template.");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  return (
-    <aside className="creative-template-panel">
-      <div className="creative-template-panel__head">
-        <div className="creative-template-panel__title">Platform + size templates</div>
-        <div className="creative-template-panel__sub">{loadState.message || "Choose a preset or save your own."}</div>
-      </div>
-      <div className="creative-template-list">
-        {visibleTemplates.map(template => (
-          <button key={template.id || template.name} className="creative-template-option" type="button" onClick={() => onApply && onApply(template)}>
-            <span>
-              <strong>{template.name}</strong>
-              <small>{template.platform} - {template.sizeFormat}</small>
-              {template.description && <small>{template.description}</small>}
-            </span>
-            <span className="btn btn--xs btn--secondary">Apply</span>
-          </button>
-        ))}
-      </div>
-      <form className="creative-template-form" onSubmit={submitTemplate}>
-        <label className="field">
-          <span className="field__label">Template name</span>
-          <input id="create-template-name" className="input" value={draft.name} onChange={e => updateDraft("name", e.target.value)} placeholder="e.g. Instagram story" />
-        </label>
-        <label className="field">
-          <span className="field__label">Platform</span>
-          <input className="input" value={draft.platform} onChange={e => updateDraft("platform", e.target.value)} placeholder="Instagram, Facebook..." />
-        </label>
-        <label className="field">
-          <span className="field__label">Size / format</span>
-          <input className="input" value={draft.sizeFormat} onChange={e => updateDraft("sizeFormat", e.target.value)} placeholder="1080x1920" />
-        </label>
-        <label className="field">
-          <span className="field__label">Description</span>
-          <textarea className="textarea" value={draft.description} onChange={e => updateDraft("description", e.target.value)} placeholder="Optional note" />
-        </label>
-        {message && <div className="field__hint">{message}</div>}
-        <button className="btn btn--secondary" type="submit" disabled={isSaving || !onCreate}>
-          <Icon name="plus" /> {isSaving ? "Saving..." : "Save template"}
-        </button>
-      </form>
-    </aside>
   );
 }
 

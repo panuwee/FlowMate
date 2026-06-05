@@ -433,14 +433,21 @@ async function createFlowMateLeaveRequest(input) {
 
   const startDate = input && input.startDate;
   const endDate = input && input.endDate;
+  const startHalf = (input && input.startHalf) || "am";
+  const endHalf = (input && input.endHalf) || "pm";
   const reason = ((input && input.reason) || "").trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate || "")) throw new Error("Start date is required.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate || "")) throw new Error("End date is required.");
   if (endDate < startDate) throw new Error("End date must be on or after start date.");
+  if (!["am", "pm"].includes(startHalf)) throw new Error("Start half must be AM or PM.");
+  if (!["am", "pm"].includes(endHalf)) throw new Error("End half must be AM or PM.");
+  if (startDate === endDate && startHalf > endHalf) throw new Error("For same-day leave, start half must be AM before PM.");
 
   const { data, error } = await window.flowmateSupabase.rpc("create_leave_request", {
     p_start_date: startDate,
     p_end_date: endDate,
+    p_start_half: startHalf,
+    p_end_half: endHalf,
     p_reason: reason || null,
   });
 
@@ -464,89 +471,6 @@ Object.assign(window, {
   splitFlowMateTeamSettingsEditableSkills,
   adminUpdateFlowMateTeamMember,
   createFlowMateLeaveRequest,
-});
-
-// ---------------------------------------------------------------------------
-// Creative request platform + size templates. Reads/writes go through RPCs
-// so the backend resolves the actor from auth.uid().
-// ---------------------------------------------------------------------------
-const FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK = [
-  {
-    id: "preset-instagram-square",
-    name: "Instagram square",
-    platform: "Instagram",
-    sizeFormat: "1080x1080",
-    description: "Feed square post",
-  },
-  {
-    id: "preset-instagram-story",
-    name: "Instagram story",
-    platform: "Instagram",
-    sizeFormat: "1080x1920",
-    description: "Story/Reels vertical",
-  },
-  {
-    id: "preset-facebook-feed",
-    name: "Facebook feed",
-    platform: "Facebook",
-    sizeFormat: "1200x628",
-    description: "Link share / feed creative",
-  },
-];
-
-function normalizeFlowMateCreativeRequestTemplate(row) {
-  return {
-    id: row && row.id ? row.id : "",
-    name: row && row.name ? row.name : "",
-    platform: row && row.platform ? row.platform : "",
-    sizeFormat: row && (row.size_format || row.sizeFormat) ? (row.size_format || row.sizeFormat) : "",
-    description: row && row.description ? row.description : "",
-  };
-}
-
-async function loadFlowMateCreativeRequestTemplates() {
-  if (!window.flowmateSupabase || !window.FLOWMATE_CURRENT_USER) {
-    return FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK;
-  }
-
-  const { data, error } = await window.flowmateSupabase.rpc("flowmate_list_creative_request_templates");
-  if (error) throw error;
-
-  const templates = (data || []).map(normalizeFlowMateCreativeRequestTemplate).filter((template) =>
-    template.name && template.platform && template.sizeFormat
-  );
-  return templates.length ? templates : FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK;
-}
-
-async function createFlowMateCreativeRequestTemplate(input) {
-  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
-  if (!window.FLOWMATE_CURRENT_USER) throw new Error("Sign in is required.");
-
-  const name = ((input && input.name) || "").trim();
-  const platform = ((input && input.platform) || "").trim();
-  const sizeFormat = ((input && input.sizeFormat) || "").trim();
-  const description = ((input && input.description) || "").trim();
-
-  if (!name) throw new Error("Template name is required.");
-  if (!platform) throw new Error("Platform is required.");
-  if (!sizeFormat) throw new Error("Size / format is required.");
-
-  const { data, error } = await window.flowmateSupabase.rpc("flowmate_create_creative_request_template", {
-    p_name: name,
-    p_platform: platform,
-    p_size_format: sizeFormat,
-    p_description: description || null,
-  });
-
-  if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : data;
-  return normalizeFlowMateCreativeRequestTemplate(row || {});
-}
-
-Object.assign(window, {
-  FLOWMATE_CREATIVE_REQUEST_TEMPLATE_FALLBACK,
-  loadFlowMateCreativeRequestTemplates,
-  createFlowMateCreativeRequestTemplate,
 });
 
 // ---------------------------------------------------------------------------
