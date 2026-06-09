@@ -804,6 +804,9 @@ function ganttTaskModelC(row, monthKey) {
     spanDays: Math.max(1, endOffset - startOffset + 1),
     launchOffset,
     spansToLaunch: Boolean(launchKey && launchKey > dueKey),
+    priorityClass: row.priority === "urgent" ? "is-urgent" : row.priority === "high" ? "is-high" : row.priority === "low" ? "is-low" : "is-normal",
+    statusClass: row.status ? `is-status-${row.status}` : "is-status-unknown",
+    displayLabel: row.type === "creative" ? "1st Draft" : "Due",
   };
 }
 
@@ -844,8 +847,14 @@ function TeamGanttScreen({ onOpen }) {
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const monthStart = calendarParseKeyC(`${monthKey}-01`);
+  const monthStartKey = `${monthKey}-01`;
+  const monthStart = calendarParseKeyC(monthStartKey);
+  const monthEndKey = calendarUtcKeyC(new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)));
   const daysInMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+  const todayKey = calendarUtcKeyC(new Date());
+  const todayOffset = todayKey >= monthStartKey && todayKey <= monthEndKey
+    ? Math.floor((calendarParseKeyC(todayKey).getTime() - monthStart.getTime()) / 86400000)
+    : null;
   const dayCells = Array.from({ length: daysInMonth }, (_, index) => {
     const date = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), index + 1));
     return {
@@ -911,6 +920,20 @@ function TeamGanttScreen({ onOpen }) {
         </div>
       </div>
 
+      <div className="gantt__toolbar" aria-label="Gantt read-only controls">
+        <div className="gantt__toolbar-group">
+          <span className="gantt__chip"><Icon name="chart" size={13} /> Trello Power-Up Lite</span>
+          <span className="gantt__chip">Grouped by team / assignee</span>
+          <span className="gantt__chip">Click bar to open task</span>
+        </div>
+        <div className="gantt__legend">
+          <span><i className="gantt__legend-dot gantt__legend-dot--normal"></i>Normal</span>
+          <span><i className="gantt__legend-dot gantt__legend-dot--urgent"></i>Urgent</span>
+          <span><i className="gantt__legend-diamond"></i>Launch</span>
+          <span><i className="gantt__legend-line"></i>Today</span>
+        </div>
+      </div>
+
       <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="stat"><div className="stat__num mono">{ganttTasks.length}</div><div className="stat__lbl">Visible tasks</div></div>
         <div className="stat stat--info"><div className="stat__num mono">{teamGroups.length}</div><div className="stat__lbl">Teams</div></div>
@@ -921,13 +944,14 @@ function TeamGanttScreen({ onOpen }) {
       <div className="gantt" data-testid="flowmate-team-gantt-chart">
         <div className="gantt__header">
           <div className="gantt__owner-head">Team / assignee</div>
-          <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))` }}>
+          <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))`, "--gantt-days": daysInMonth, "--gantt-today-offset": todayOffset ?? 0 }}>
             {dayCells.map(cell => (
               <div key={cell.day} className={`gantt__day ${cell.isWeekend ? "is-weekend" : ""}`}>
                 <span className="mono">{cell.day}</span>
                 <span>{cell.label}</span>
               </div>
             ))}
+            {todayOffset !== null && <div className="gantt__today-line gantt__today-line--header" aria-hidden="true"></div>}
           </div>
         </div>
 
@@ -946,19 +970,21 @@ function TeamGanttScreen({ onOpen }) {
                     <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}</span>
                   </span>
                 </div>
-                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))`, "--gantt-days": daysInMonth }}>
+                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))`, "--gantt-days": daysInMonth, "--gantt-today-offset": todayOffset ?? 0 }}>
+                  {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
                   {assignee.tasks.map(task => (
                     <button
                       key={task.item.id}
                       type="button"
-                      className={`gantt__bar ${task.spansToLaunch ? "gantt__bar--span" : "gantt__bar--marker"} ${task.item.overdue ? "is-overdue" : ""}`}
+                      className={`gantt__bar ${task.spansToLaunch ? "gantt__bar--span" : "gantt__bar--marker"} ${task.priorityClass} ${task.statusClass} ${task.item.overdue ? "is-overdue" : ""}`}
                       style={{ gridColumn: `${task.startOffset + 1} / span ${task.spanDays}` }}
                       onClick={() => openGanttItem(task)}
-                      title={`${task.item.id} - ${task.item.title}`}
+                      title={`${task.item.id} - ${task.item.title} - ${task.displayLabel}: ${calendarDateLabelC(task.dueKey)}`}
                       data-testid="flowmate-gantt-task-bar"
                     >
                       <span className="mono">{task.item.id}</span>
                       <span>{task.item.title}</span>
+                      <span className="gantt__bar-date">{task.displayLabel}</span>
                       {task.launchKey && (
                         <span
                           className="gantt__launch-marker"

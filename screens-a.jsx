@@ -994,13 +994,10 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
       return;
     }
     if (field === "launchDate") {
-      const previousAutoDraftDate = subtractFlowMateWorkingDays(value.launchDate, 5);
-      const nextAutoDraftDate = subtractFlowMateWorkingDays(next, 5);
-      const shouldAutoFillDraftDate = !value.dueDate || value.dueDate === previousAutoDraftDate;
       onChange({
         ...value,
         launchDate: next,
-        dueDate: shouldAutoFillDraftDate ? nextAutoDraftDate : value.dueDate,
+        dueDate: subtractFlowMateWorkingDays(next, 5),
       });
       return;
     }
@@ -1081,7 +1078,8 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
         </div>
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">1st Draft <span className="req">*</span></label>
-          <input className="input" type="date" value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />
+          <input className="input" type="date" value={value.dueDate} readOnly disabled />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Generated from Launch Date minus 5 working days.</div>
           {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
         </div>
         <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
@@ -1478,8 +1476,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so AI tags are disabled." });
       return;
     }
-    const tag = window.prompt("AI tag");
-    if (!tag || !tag.trim()) return;
+    const tag = "AI";
+    const normalizedTag = tag.trim().toLowerCase();
+    if (normalizedTag === "ai" && detailAiTags.some((item) => String(item.tag || "").trim().toLowerCase() === normalizedTag)) {
+      setActionMsg({ tone: "ok", text: "AI tag already added." });
+      return;
+    }
     setPending(true);
     try {
       const data = await window.addFlowMateAiTag({ displayId: w.id }, tag);
@@ -1863,6 +1865,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                         {w.isSupabaseRow && window.removeFlowMateAiTag && (
                           <button type="button" className="ai-tag__remove" onClick={() => removeAiTag(tag)} disabled={pending} aria-label={`Remove ${tag.tag}`}>
                             <Icon name="x" size={10} />
+                            <span>Remove tag</span>
                           </button>
                         )}
                       </span>
