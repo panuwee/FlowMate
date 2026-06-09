@@ -469,16 +469,46 @@ function subtractFlowMateWorkingDays(dateValue, workingDays) {
   return date.toISOString().slice(0, 10);
 }
 
+function getFlowMateTodayDateKey() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function clampFlowMateDateToToday(dateValue) {
+  const todayDate = getFlowMateTodayDateKey();
+  const value = String(dateValue || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return todayDate;
+  return value < todayDate ? todayDate : value;
+}
+
+function getFlowMateDraftDateForLaunchDate(launchDate) {
+  const nextLaunchDate = clampFlowMateDateToToday(launchDate);
+  const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, 5);
+  return clampFlowMateDateToToday(draftDate);
+}
+
+function normalizeFlowMateQuickDraft(draft) {
+  const nextDraft = { ...getDefaultQuickDraft(), ...(draft || {}) };
+  return {
+    ...nextDraft,
+    dueDate: clampFlowMateDateToToday(nextDraft.dueDate),
+    launchDate: clampFlowMateDateToToday(nextDraft.launchDate),
+  };
+}
+
 function normalizeFlowMateCreativeDraft(draft) {
-  const nextDraft = draft || getDefaultCreativeDraft();
+  const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
   const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[nextDraft.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
-  const normalizedDraft = options.includes(nextDraft.assetSubtype)
-    ? nextDraft
-    : { ...nextDraft, assetSubtype: options[0] };
-  if (!normalizedDraft.dueDate && normalizedDraft.launchDate) {
-    return { ...normalizedDraft, dueDate: subtractFlowMateWorkingDays(normalizedDraft.launchDate, 5) };
-  }
-  return normalizedDraft;
+  const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
+  return {
+    ...nextDraft,
+    assetSubtype: options.includes(nextDraft.assetSubtype) ? nextDraft.assetSubtype : options[0],
+    launchDate,
+    dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
+  };
 }
 
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
@@ -513,6 +543,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
 
 function getDefaultQuickDraft() {
   const requesterTeam = getDefaultRequesterTeam();
+  const todayDate = getFlowMateTodayDateKey();
   return {
     title: "",
     note: "",
@@ -520,14 +551,15 @@ function getDefaultQuickDraft() {
     projectName: "",
     assigneeUserId: getDefaultQuickAssignee().userId,
     assigneeOtherName: "",
-    dueDate: "2026-05-18",
-    launchDate: "2026-05-25",
+    dueDate: todayDate,
+    launchDate: todayDate,
     priority: "normal",
   };
 }
 
 function getDefaultCreativeDraft() {
   const requesterTeam = getDefaultRequesterTeam();
+  const todayDate = getFlowMateTodayDateKey();
   return {
     title: "",
     requesterTeam,
@@ -541,8 +573,8 @@ function getDefaultCreativeDraft() {
     referenceLink: "",
     priority: "normal",
     urgentReason: "",
-    dueDate: subtractFlowMateWorkingDays("2026-05-25", 5),
-    launchDate: "2026-05-25",
+    dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
+    launchDate: todayDate,
   };
 }
 
@@ -568,12 +600,20 @@ function getFlowMateCreateValidationErrors(mode, draft) {
       errors[field] = message;
     }
   }
+  function requireNotPast(field, message) {
+    const value = String(row[field] || "").slice(0, 10);
+    if (value && value < getFlowMateTodayDateKey()) {
+      errors[field] = message;
+    }
+  }
 
   if (mode === "quick") {
     requireField("requesterTeam", "Requester team is required.");
     requireField("projectName", "Project / campaign is required.");
     requireField("dueDate", "1st Review / Draft is required.");
     requireField("launchDate", "Launch date is required.");
+    requireNotPast("dueDate", "1st Review / Draft cannot be before today.");
+    requireNotPast("launchDate", "Launch date cannot be before today.");
     return errors;
   }
 
@@ -587,6 +627,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
+  requireNotPast("launchDate", "Launch date cannot be before today.");
 
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
@@ -646,8 +687,28 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   const [createAlert, setCreateAlert] = useState("");
   const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
   const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
-  const [quickDraft, setQuickDraft] = useState(() => readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
-  const [creativeDraft, setCreativeDraft] = useState(() => normalizeFlowMateCreativeDraft(readFlowMateCreateDraft("creative", getDefaultCreativeDraft())));
+  const [quickDraft, setQuickDraft] = useState(() => {
+    const draft = normalizeFlowMateQuickDraft(readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
+    return {
+      ...draft,
+      title: window.buildFlowMateTemplateTitle({
+        launchDate: draft.launchDate,
+        requesterTeam: draft.requesterTeam,
+        projectName: draft.projectName,
+      }),
+    };
+  });
+  const [creativeDraft, setCreativeDraft] = useState(() => {
+    const draft = normalizeFlowMateCreativeDraft(readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
+    return {
+      ...draft,
+      title: window.buildFlowMateTemplateTitle({
+        launchDate: draft.launchDate,
+        requesterTeam: draft.requesterTeam,
+        projectName: draft.campaignName,
+      }),
+    };
+  });
 
   useEffect(() => {
     let alive = true;
@@ -871,13 +932,17 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
     ? window.filterFlowMateAssigneeOptions(options, assigneeQuery)
     : options.filter((option) => option.name.toLowerCase().startsWith((assigneeQuery || "").trim().toLowerCase()));
   const exactAssignee = selectedAssignee && assigneeQuery.trim().toLowerCase() === selectedAssignee.name.toLowerCase();
+  const todayDate = getFlowMateTodayDateKey();
 
   useEffect(() => {
     setAssigneeQuery(selectedAssignee ? selectedAssignee.name : "");
   }, [selectedAssignee && selectedAssignee.userId]);
 
   function update(field, nextValue) {
-    const next = { ...value, [field]: nextValue };
+    const normalizedValue = field === "dueDate" || field === "launchDate"
+      ? clampFlowMateDateToToday(nextValue)
+      : nextValue;
+    const next = { ...value, [field]: normalizedValue };
     if (field === "assigneeUserId") next.assigneeOtherName = "";
     onChange(next);
   }
@@ -963,12 +1028,12 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
       </div>
       <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
         <label className="field__label">1st Review / Draft <span className="req">*</span></label>
-        <input className="input" value={value.dueDate} onChange={(e) => update("dueDate", e.target.value)} type="date" />
+        <input className="input" value={value.dueDate} onChange={(e) => update("dueDate", e.target.value)} type="date" min={todayDate} />
         {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
       </div>
       <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
         <label className="field__label">Launch date <span className="req">*</span></label>
-        <input className="input" value={value.launchDate} onChange={(e) => update("launchDate", e.target.value)} type="date" />
+        <input className="input" value={value.launchDate} onChange={(e) => update("launchDate", e.target.value)} type="date" min={todayDate} />
         {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
       </div>
       <div className="field">
@@ -987,6 +1052,7 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
   const selectedAssetSubtype = assetSubtypeOptions.includes(value.assetSubtype)
     ? value.assetSubtype
     : assetSubtypeOptions[0];
+  const todayDate = getFlowMateTodayDateKey();
   function update(field, next) {
     if (field === "assetType") {
       const nextOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[next] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
@@ -994,10 +1060,11 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
       return;
     }
     if (field === "launchDate") {
+      const nextLaunchDate = clampFlowMateDateToToday(next);
       onChange({
         ...value,
-        launchDate: next,
-        dueDate: subtractFlowMateWorkingDays(next, 5),
+        launchDate: nextLaunchDate,
+        dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate),
       });
       return;
     }
@@ -1078,13 +1145,13 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
         </div>
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">1st Draft <span className="req">*</span></label>
-          <input className="input" type="date" value={value.dueDate} readOnly disabled />
+          <input className="input" type="date" value={value.dueDate} readOnly disabled min={todayDate} />
           <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Generated from Launch Date minus 5 working days.</div>
           {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
         </div>
         <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
           <label className="field__label">Launch date <span className="req">*</span></label>
-          <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />
+          <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} min={todayDate} />
           {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
         </div>
         <div className="field field--full">
