@@ -41,6 +41,42 @@ function flowMateFilterRowsByRangeC(rows, range) {
   return (rows || []).filter(row => flowMateRowInRangeC(row, range));
 }
 
+function flowMateMonthOptionsC() {
+  if (window.getFlowMateMonthOptions) return window.getFlowMateMonthOptions();
+  return Array.from({ length: 24 }, (_, index) => {
+    const year = 2026 + Math.floor(index / 12);
+    const month = (index % 12) + 1;
+    const key = `${year}-${String(month).padStart(2, "0")}`;
+    const label = new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-US", {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    return { key, label };
+  });
+}
+
+function flowMateDefaultExportMonthC() {
+  if (window.getFlowMateDefaultExportMonth) return window.getFlowMateDefaultExportMonth();
+  const now = new Date();
+  const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return key >= "2026-01" && key <= "2027-12" ? key : "2026-01";
+}
+
+function flowMateMonthLabelC(monthKey) {
+  if (window.getFlowMateMonthLabel) return window.getFlowMateMonthLabel(monthKey);
+  const option = flowMateMonthOptionsC().find(item => item.key === monthKey);
+  return option ? option.label : monthKey;
+}
+
+function flowMateFilterRowsByMonthC(rows, monthKey, fields) {
+  if (window.filterFlowMateRowsByMonth) return window.filterFlowMateRowsByMonth(rows, monthKey, fields);
+  return (rows || []).filter(row => {
+    const rawDate = row && (row.calendarDate || row.dueDate);
+    return rawDate && String(rawDate).slice(0, 7) === monthKey;
+  });
+}
+
 /* ============================================================
    WORKLOAD VIEW
    ============================================================ */
@@ -77,6 +113,7 @@ function WorkloadScreen({ onOpen }) {
   const [workloadTab, setWorkloadTab] = useStateC("standard");
   const [teamFilter, setTeamFilter] = useStateC("All");
   const [workloadRange, setWorkloadRange] = useStateC("this-week");
+  const [workloadExportMonth, setWorkloadExportMonth] = useStateC(flowMateDefaultExportMonthC());
 
   useEffectC(() => {
     let alive = true;
@@ -174,10 +211,32 @@ function WorkloadScreen({ onOpen }) {
   }
 
   function exportWorkloadRows() {
+    const exportRows = visibleRows.map(row => {
+      const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], workloadExportMonth, ["calendarDate", "dueDate"]);
+      const monthOpenCreative = monthItems.filter(item =>
+        item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
+      );
+      const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
+      return {
+        ...row,
+        exportMonthLabel: flowMateMonthLabelC(workloadExportMonth),
+        statusCounts: window.getFlowMateWorkloadStatusCounts
+          ? window.getFlowMateWorkloadStatusCounts(monthItems)
+          : row.statusCounts,
+        assignedEffort,
+        available: Math.max(0, row.window - assignedEffort),
+        wip: monthItems.filter(item => item.status === "in_progress" && item.type === "creative").length,
+        due_soon: monthItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
+        overdue: monthItems.filter(item => item.overdue || (item.dueDelta != null && item.dueDelta < 0)).length,
+        blocked: monthItems.filter(item => item.status === "blocked").length,
+        review: monthItems.filter(item => item.status === "review").length,
+        quick: monthItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
+      };
+    });
     exportFlowMateCsvC(
-      `flowmate-workload-${workloadRange}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `flowmate-workload-${workloadExportMonth}-${new Date().toISOString().slice(0, 10)}.csv`,
       [
-        { label: "Range", value: () => flowMateRangeLabelC(workloadRange) },
+        { label: "Export month", value: "exportMonthLabel" },
         { label: "Member", value: row => row.m.name },
         { label: "Team", value: row => row.m.discipline },
         { label: "Capacity", value: "window" },
@@ -190,7 +249,7 @@ function WorkloadScreen({ onOpen }) {
         { label: "Blocked", value: row => row.statusCounts.blocked || 0 },
         { label: "Delivered", value: row => row.statusCounts.delivered || 0 },
       ],
-      visibleRows,
+      exportRows,
     );
   }
 
@@ -206,6 +265,16 @@ function WorkloadScreen({ onOpen }) {
             <option value="this-week">This week</option>
             <option value="next-week">Next week</option>
             <option value="all-active">All active</option>
+          </select>
+          <select
+            className="select"
+            value={workloadExportMonth}
+            onChange={event => setWorkloadExportMonth(event.target.value)}
+            data-testid="flowmate-workload-export-month"
+            aria-label="Workload export month"
+            style={{ width: 132, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}
+          >
+            {flowMateMonthOptionsC().map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
           </select>
           <button className="btn btn--secondary" onClick={exportWorkloadRows}><Icon name="download" /> Export</button>
         </div>
@@ -411,7 +480,7 @@ function KpiScreen() {
   }
 
   const [rows, setRows] = useStateC([]);
-  const [kpiRange, setKpiRange] = useStateC("last-week");
+  const [kpiExportMonth, setKpiExportMonth] = useStateC(flowMateDefaultExportMonthC());
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
 
   useEffectC(() => {
@@ -444,7 +513,7 @@ function KpiScreen() {
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const kpiRows = flowMateFilterRowsByRangeC(rows, kpiRange);
+  const kpiRows = flowMateFilterRowsByMonthC(rows, kpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
@@ -496,9 +565,9 @@ function KpiScreen() {
 
   function exportKpiRows() {
     exportFlowMateCsvC(
-      `flowmate-kpi-${kpiRange}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.csv`,
       [
-        { label: "Range", value: () => flowMateRangeLabelC(kpiRange) },
+        { label: "Export month", value: () => flowMateMonthLabelC(kpiExportMonth) },
         { label: "ID", value: "id" },
         { label: "Title", value: "title" },
         { label: "Type", value: "type" },
@@ -521,10 +590,15 @@ function KpiScreen() {
           <div className="page__sub">Operational health from live Supabase rows - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <select className="select" value={kpiRange} onChange={event => setKpiRange(event.target.value)} style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}>
-            <option value="last-week">Last week</option>
-            <option value="this-week">This week</option>
-            <option value="last-4-weeks">Last 4 weeks</option>
+          <select
+            className="select"
+            value={kpiExportMonth}
+            onChange={event => setKpiExportMonth(event.target.value)}
+            data-testid="flowmate-kpi-export-month"
+            aria-label="KPI export month"
+            style={{ width: 132, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}
+          >
+            {flowMateMonthOptionsC().map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
           </select>
           <button className="btn btn--secondary" onClick={exportKpiRows}><Icon name="download" /> Export</button>
         </div>
@@ -549,7 +623,7 @@ function KpiScreen() {
         <div className="kpi">
           <div className="kpi__lbl">Avg review rounds</div>
           <div className="kpi__num mono">{kpiRows.length ? (kpiRows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / kpiRows.length).toFixed(1) : "0.0"}</div>
-          <div className="kpi__delta">Across {flowMateRangeLabelC(kpiRange).toLowerCase()} rows</div>
+          <div className="kpi__delta">Across {flowMateMonthLabelC(kpiExportMonth)} rows</div>
         </div>
       </div>
 
@@ -600,7 +674,7 @@ function KpiScreen() {
         </div>
 
         <div className="card">
-          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">{flowMateRangeLabelC(kpiRange).toLowerCase()} rows</span></div>
+          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">{flowMateMonthLabelC(kpiExportMonth)} rows</span></div>
           <div className="card__body" style={{ padding: 0 }}>
             <table className="tbl">
               <thead>
@@ -632,7 +706,7 @@ function KpiScreen() {
         Productivity index is calculated as <span className="mono">delivered_effort x on_time_factor x rework_factor</span> and is intentionally <strong>not displayed as a personal ranking</strong> in MVP - see PRD section 12.
       </div>
 
-      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {flowMateRangeLabelC(kpiRange)} - {TODAY}</Source>
+      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {flowMateMonthLabelC(kpiExportMonth)} - {TODAY}</Source>
     </div>
   );
 }
@@ -693,6 +767,224 @@ function calendarMonthCellsC(monthKey) {
       inMonth: date.getUTCMonth() === first.getUTCMonth(),
     };
   });
+}
+
+function ganttDateKeyFromRowC(row, fields) {
+  if (window.getFlowMateDateKeyFromFields) return window.getFlowMateDateKeyFromFields(row, fields);
+  const sourceFields = fields && fields.length ? fields : ["dueDate", "calendarDate"];
+  for (const field of sourceFields) {
+    const value = row && row[field];
+    if (value && /^\d{4}-\d{2}-\d{2}/.test(String(value))) return String(value).slice(0, 10);
+  }
+  return "";
+}
+
+function ganttTaskModelC(row, monthKey) {
+  const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
+  if (!dueKey) return null;
+  const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
+  const rawStartKey = launchKey && launchKey > dueKey ? dueKey : dueKey;
+  const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
+  const monthStartKey = `${monthKey}-01`;
+  const monthStart = calendarParseKeyC(monthStartKey);
+  const monthEndKey = calendarUtcKeyC(new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)));
+  if (rawEndKey < monthStartKey || rawStartKey > monthEndKey) return null;
+  const clampedStartKey = rawStartKey < monthStartKey ? monthStartKey : rawStartKey;
+  const clampedEndKey = rawEndKey > monthEndKey ? monthEndKey : rawEndKey;
+  const startOffset = Math.floor((calendarParseKeyC(clampedStartKey).getTime() - monthStart.getTime()) / 86400000);
+  const endOffset = Math.floor((calendarParseKeyC(clampedEndKey).getTime() - monthStart.getTime()) / 86400000);
+  const launchOffset = launchKey && launchKey >= monthStartKey && launchKey <= monthEndKey
+    ? Math.floor((calendarParseKeyC(launchKey).getTime() - monthStart.getTime()) / 86400000)
+    : null;
+  return {
+    item: row,
+    dueKey,
+    launchKey,
+    startOffset,
+    spanDays: Math.max(1, endOffset - startOffset + 1),
+    launchOffset,
+    spansToLaunch: Boolean(launchKey && launchKey > dueKey),
+  };
+}
+
+function TeamGanttScreen({ onOpen }) {
+  const [sourceRows, setSourceRows] = useStateC(WORK);
+  const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
+  const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
+
+  useEffectC(() => {
+    let alive = true;
+
+    async function loadRowsIfAlive() {
+      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      if (!loader) {
+        if (!alive) return;
+        setSourceRows([]);
+        setLoadState({ status: "error", message: "Live data unavailable: Supabase calendar/list loader is not ready." });
+        return;
+      }
+
+      try {
+        const rows = await loader();
+        if (!alive) return;
+        setSourceRows(rows);
+        setLoadState({ status: "live", message: "Live Supabase data" });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Gantt] Supabase load failed:", error);
+        setSourceRows([]);
+        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+      }
+    }
+
+    loadRowsIfAlive();
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadRowsIfAlive)
+      : () => {};
+    return () => { alive = false; cleanup(); };
+  }, []);
+
+  const monthStart = calendarParseKeyC(`${monthKey}-01`);
+  const daysInMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+  const dayCells = Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), index + 1));
+    return {
+      day: index + 1,
+      label: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }).slice(0, 1),
+      isWeekend: date.getUTCDay() === 0 || date.getUTCDay() === 6,
+    };
+  });
+  const ganttTasks = (sourceRows || [])
+    .filter(row => row && row.type !== "leave" && !["cancelled"].includes(row.status))
+    .map(row => ganttTaskModelC(row, monthKey))
+    .filter(Boolean)
+    .sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
+
+  const teamMap = new Map();
+  ganttTasks.forEach(task => {
+    const assigneeId = task.item.assignee || "unassigned";
+    const member = MEMBERS_BY_ID[assigneeId];
+    const assigneeName = member ? member.name : (task.item.assigneeOtherName || "Unassigned");
+    const teamName = member ? (member.discipline || "No team") : (task.item.requesterTeam || "No team");
+    if (!teamMap.has(teamName)) teamMap.set(teamName, new Map());
+    const assigneeMap = teamMap.get(teamName);
+    if (!assigneeMap.has(assigneeId)) {
+      assigneeMap.set(assigneeId, {
+        assigneeId,
+        assigneeName,
+        member,
+        tasks: [],
+      });
+    }
+    assigneeMap.get(assigneeId).tasks.push(task);
+  });
+  const teamGroups = Array.from(teamMap.entries())
+    .map(([teamName, assigneeMap]) => ({
+      teamName,
+      assignees: Array.from(assigneeMap.values()).sort((a, b) => a.assigneeName.localeCompare(b.assigneeName)),
+    }))
+    .sort((a, b) => a.teamName.localeCompare(b.teamName));
+
+  function openGanttItem(task) {
+    window.flowmateSelectedWorkItem = task.item;
+    onOpen(task.item.id);
+  }
+
+  return (
+    <div className="page" data-testid="flowmate-team-gantt-route" data-flowmate-route="team-gantt">
+      <div className="page__header">
+        <div>
+          <h1 className="page__title">Team Gantt Chart</h1>
+          <div className="page__sub">Read-only work timeline grouped by team and assignee - {loadState.message}</div>
+        </div>
+        <div className="page__actions">
+          <select
+            className="select"
+            value={monthKey}
+            onChange={event => setMonthKey(event.target.value)}
+            data-testid="flowmate-gantt-month"
+            aria-label="Gantt month"
+            style={{ width: 132, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}
+          >
+            {flowMateMonthOptionsC().map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+        <div className="stat"><div className="stat__num mono">{ganttTasks.length}</div><div className="stat__lbl">Visible tasks</div></div>
+        <div className="stat stat--info"><div className="stat__num mono">{teamGroups.length}</div><div className="stat__lbl">Teams</div></div>
+        <div className="stat stat--ok"><div className="stat__num mono">{teamGroups.reduce((sum, team) => sum + team.assignees.length, 0)}</div><div className="stat__lbl">Assignees</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{ganttTasks.filter(task => task.launchKey).length}</div><div className="stat__lbl">With launch date</div></div>
+      </div>
+
+      <div className="gantt" data-testid="flowmate-team-gantt-chart">
+        <div className="gantt__header">
+          <div className="gantt__owner-head">Team / assignee</div>
+          <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))` }}>
+            {dayCells.map(cell => (
+              <div key={cell.day} className={`gantt__day ${cell.isWeekend ? "is-weekend" : ""}`}>
+                <span className="mono">{cell.day}</span>
+                <span>{cell.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {teamGroups.map(team => (
+          <section key={team.teamName} className="gantt__team">
+            <div className="gantt__team-title">
+              <span>{team.teamName}</span>
+              <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks</span>
+            </div>
+            {team.assignees.map(assignee => (
+              <div key={assignee.assigneeId} className="gantt__row">
+                <div className="gantt__owner">
+                  <Avatar memberId={assignee.assigneeId} size="avatar--lg" />
+                  <span>
+                    <span className="gantt__owner-name">{assignee.assigneeName}</span>
+                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}</span>
+                  </span>
+                </div>
+                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))`, "--gantt-days": daysInMonth }}>
+                  {assignee.tasks.map(task => (
+                    <button
+                      key={task.item.id}
+                      type="button"
+                      className={`gantt__bar ${task.spansToLaunch ? "gantt__bar--span" : "gantt__bar--marker"} ${task.item.overdue ? "is-overdue" : ""}`}
+                      style={{ gridColumn: `${task.startOffset + 1} / span ${task.spanDays}` }}
+                      onClick={() => openGanttItem(task)}
+                      title={`${task.item.id} - ${task.item.title}`}
+                      data-testid="flowmate-gantt-task-bar"
+                    >
+                      <span className="mono">{task.item.id}</span>
+                      <span>{task.item.title}</span>
+                      {task.launchKey && (
+                        <span
+                          className="gantt__launch-marker"
+                          title={`Launch: ${calendarDateLabelC(task.launchKey)}`}
+                          data-testid="flowmate-gantt-launch-marker"
+                        ></span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </section>
+        ))}
+
+        {teamGroups.length === 0 && (
+          <div className="gantt__empty">No due-date work items found for {flowMateMonthLabelC(monthKey)}.</div>
+        )}
+      </div>
+
+      <div className="reason-box" style={{ marginTop: 16 }}>
+        Gantt rule: due date is the bar end. Launch date is shown as a marker; when launch date is after due date, the bar spans due date to launch date.
+      </div>
+      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(monthKey)}</Source>
+    </div>
+  );
 }
 
 function CalendarScreen({ onOpen }) {
@@ -1391,4 +1683,4 @@ function SettingsScreen() {
   );
 }
 
-Object.assign(window, { WorkloadScreen, KpiScreen, CalendarScreen, SettingsScreen });
+Object.assign(window, { WorkloadScreen, KpiScreen, CalendarScreen, TeamGanttScreen, SettingsScreen });

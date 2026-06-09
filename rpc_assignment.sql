@@ -736,6 +736,9 @@ declare
   v_display_id    text;
   v_work_item_id  uuid;
   v_assignment    jsonb;
+  v_due_date      date;
+  v_launch_date   date;
+  v_remaining_working_days integer;
 begin
   v_actor_id := public.flowmate_actor_user_id();
   perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
@@ -747,6 +750,20 @@ begin
   if length(trim(coalesce(p_title, ''))) = 0 then
     raise exception 'Creative request title is required';
   end if;
+
+  v_launch_date := coalesce(p_launch_date, p_due_date);
+  v_due_date := p_due_date;
+  if v_due_date is null and p_launch_date is not null then
+    v_due_date := p_launch_date;
+    v_remaining_working_days := 5;
+    while v_remaining_working_days > 0 loop
+      v_due_date := v_due_date - 1;
+      if extract(isodow from v_due_date) between 1 and 5 then
+        v_remaining_working_days := v_remaining_working_days - 1;
+      end if;
+    end loop;
+  end if;
+  v_due_date := coalesce(v_due_date, current_date + 7);
 
   perform pg_advisory_xact_lock(hashtext('flowmate_creative_request_display_id'));
 
@@ -770,7 +787,7 @@ begin
     nullif(trim(coalesce(p_brief_note,'')), ''),
     v_actor_id, nullif(trim(coalesce(p_requester_team,'')), ''),
     'new', coalesce(p_priority, 'normal'), nullif(trim(coalesce(p_urgent_reason,'')), ''),
-    coalesce(p_due_date, current_date + 7), coalesce(p_launch_date, p_due_date),
+    v_due_date, v_launch_date,
     null, null, false, 0, false
   ) returning id into v_work_item_id;
 

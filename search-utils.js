@@ -136,6 +136,71 @@ function getFlowMateCalendarDateKey(row, today = new Date()) {
   return getFlowMateUtcDateKey(new Date(todayUtc + Number(row.dueDelta) * 86400000));
 }
 
+const FLOWMATE_MONTH_EXPORT_START = "2026-01";
+const FLOWMATE_MONTH_EXPORT_END = "2027-12";
+
+function getFlowMateCurrentMonthKey(today = new Date()) {
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function getFlowMateMonthOptions(startMonth = FLOWMATE_MONTH_EXPORT_START, endMonth = FLOWMATE_MONTH_EXPORT_END) {
+  const [startYear, startIndex] = String(startMonth).split("-").map(Number);
+  const [endYear, endIndex] = String(endMonth).split("-").map(Number);
+  const options = [];
+  let year = startYear;
+  let monthIndex = startIndex;
+  while (year < endYear || (year === endYear && monthIndex <= endIndex)) {
+    const key = `${year}-${String(monthIndex).padStart(2, "0")}`;
+    const label = new Date(Date.UTC(year, monthIndex - 1, 1)).toLocaleDateString("en-US", {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    options.push({ key, label });
+    monthIndex += 1;
+    if (monthIndex > 12) {
+      monthIndex = 1;
+      year += 1;
+    }
+  }
+  return options;
+}
+
+function getFlowMateDefaultExportMonth(today = new Date()) {
+  const current = getFlowMateCurrentMonthKey(today);
+  if (current >= FLOWMATE_MONTH_EXPORT_START && current <= FLOWMATE_MONTH_EXPORT_END) return current;
+  return FLOWMATE_MONTH_EXPORT_START;
+}
+
+function getFlowMateMonthLabel(monthKey) {
+  const option = getFlowMateMonthOptions().find((item) => item.key === monthKey);
+  return option ? option.label : monthKey;
+}
+
+function getFlowMateDateKeyFromFields(row, fields, today = new Date()) {
+  if (!row) return "";
+  const sourceFields = fields && fields.length ? fields : ["calendarDate", "dueDate"];
+  for (const field of sourceFields) {
+    const rawDate = row[field];
+    if (rawDate && /^\d{4}-\d{2}-\d{2}/.test(String(rawDate))) return String(rawDate).slice(0, 10);
+  }
+  if (sourceFields.includes("calendarDate") || sourceFields.includes("dueDate")) {
+    return getFlowMateCalendarDateKey(row, today);
+  }
+  return "";
+}
+
+function isFlowMateRowInMonth(row, monthKey, fields, today = new Date()) {
+  const dateKey = getFlowMateDateKeyFromFields(row, fields, today);
+  return Boolean(dateKey && monthKey && dateKey.slice(0, 7) === monthKey);
+}
+
+function filterFlowMateRowsByMonth(rows, monthKey, fields, today = new Date()) {
+  return (rows || []).filter((row) => isFlowMateRowInMonth(row, monthKey, fields, today));
+}
+
 function getFlowMateCalendarWeekBounds(dateKey) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey || "")) return null;
   const [y, m, d] = dateKey.split("-").map(Number);
@@ -226,3 +291,10 @@ window.getFlowMateQueueRows = getFlowMateQueueRows;
 window.getFlowMateNavCounts = getFlowMateNavCounts;
 window.isFlowMateGdVeMember = isFlowMateGdVeMember;
 window.getFlowMateWorkloadStatusCounts = getFlowMateWorkloadStatusCounts;
+window.getFlowMateCurrentMonthKey = getFlowMateCurrentMonthKey;
+window.getFlowMateMonthOptions = getFlowMateMonthOptions;
+window.getFlowMateDefaultExportMonth = getFlowMateDefaultExportMonth;
+window.getFlowMateMonthLabel = getFlowMateMonthLabel;
+window.getFlowMateDateKeyFromFields = getFlowMateDateKeyFromFields;
+window.isFlowMateRowInMonth = isFlowMateRowInMonth;
+window.filterFlowMateRowsByMonth = filterFlowMateRowsByMonth;

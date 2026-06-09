@@ -14,6 +14,7 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `security_hardening.sql` | Re-applies auth-based RLS helpers, policies, and final grants/revokes after RPC + whitelist setup |
 | `notification_center.sql` | MVP 1.2 Notification Center table hardening, read-state RPCs, trusted event trigger creation, and due-date notification generator |
 | `collaboration_admin.sql` | MVP 1.2 detail links, watchers, watcher notification recipients, admin status override, and admin soft archive |
+| `ai_tags.sql` | MVP 1.2 task-level AI tags table and auth-scoped add/list/remove RPCs |
 | `view_security_hardening.sql` | Locks public views to authenticated users and forces `security_invoker` so underlying RLS is respected |
 | `team_settings_admin.sql` | MVP 1.2 Team settings admin-only GD/VE member capacity updates plus own leave request table/RPC |
 
@@ -43,8 +44,9 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    6. `supabase/security_hardening.sql`
    7. `supabase/notification_center.sql`
    8. `supabase/collaboration_admin.sql`
-   9. `supabase/view_security_hardening.sql`
-   10. `supabase/team_settings_admin.sql`
+   9. `supabase/ai_tags.sql`
+   10. `supabase/view_security_hardening.sql`
+   11. `supabase/team_settings_admin.sql`
 
 For an existing MVP 1.2 database that already ran the earlier SQL, apply the leave update in this order:
 
@@ -61,6 +63,11 @@ For the Calendar, Team settings skill editing, and per-due-date capacity update,
 
 1. `supabase/team_settings_admin.sql`
 2. `supabase/rpc_assignment.sql`
+
+For the 1st Draft auto-date and AI Tag update on an existing MVP 1.2 database, apply:
+
+1. `supabase/rpc_assignment.sql`
+2. `supabase/ai_tags.sql`
 
 For production go-live reset after all validation is complete, run manually:
 
@@ -81,6 +88,7 @@ After the full run order, these tables should exist:
 - `notifications`
 - `work_item_links`
 - `work_item_watchers`
+- `work_item_ai_tags`
 - `leave_requests`
 - `capacity_overrides`
 - `user_whitelist`
@@ -152,6 +160,15 @@ After running `collaboration_admin.sql`, confirm:
 6. `flowmate_admin_transition_work_status(...)` works only for admin users and writes `work_item_events.actor_user_id` as the real admin from `auth.uid()`.
 7. `flowmate_admin_archive_work_item(...)` sets `archived_at`, `archived_by_user_id`, and `archive_reason`; it must not delete work rows, comments, links, watchers, events, or notifications.
 8. `member_workload_v` and `work_item_flags_v` exclude archived rows.
+
+## AI Tag Manual Checks
+
+After running `ai_tags.sql`, confirm:
+
+1. `authenticated` can `select` from `public.work_item_ai_tags`, but direct `insert`, `update`, and `delete` are revoked.
+2. `add_work_item_ai_tag(tag, display_id)` uses `auth.uid()` and works for requester, assignee/current owner, and admin.
+3. Adding the same tag text twice on one task returns the existing tag instead of creating a duplicate.
+4. `remove_work_item_ai_tag(ai_tag_id)` removes only through the RPC and writes a collaboration event.
 
 ## Public View Security Checks
 

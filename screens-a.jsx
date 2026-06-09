@@ -452,11 +452,33 @@ function getDefaultFlowMateAssetSubtype(assetType) {
   return options[0];
 }
 
+function subtractFlowMateWorkingDays(dateValue, workingDays) {
+  if (!dateValue) return "";
+  const parts = String(dateValue).split("-").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return "";
+  const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  if (Number.isNaN(date.getTime())) return "";
+
+  let remaining = workingDays;
+  while (remaining > 0) {
+    date.setUTCDate(date.getUTCDate() - 1);
+    const day = date.getUTCDay();
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
 function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = draft || getDefaultCreativeDraft();
   const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[nextDraft.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
-  if (options.includes(nextDraft.assetSubtype)) return nextDraft;
-  return { ...nextDraft, assetSubtype: options[0] };
+  const normalizedDraft = options.includes(nextDraft.assetSubtype)
+    ? nextDraft
+    : { ...nextDraft, assetSubtype: options[0] };
+  if (!normalizedDraft.dueDate && normalizedDraft.launchDate) {
+    return { ...normalizedDraft, dueDate: subtractFlowMateWorkingDays(normalizedDraft.launchDate, 5) };
+  }
+  return normalizedDraft;
 }
 
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
@@ -519,7 +541,7 @@ function getDefaultCreativeDraft() {
     referenceLink: "",
     priority: "normal",
     urgentReason: "",
-    dueDate: "2026-05-22",
+    dueDate: subtractFlowMateWorkingDays("2026-05-25", 5),
     launchDate: "2026-05-25",
   };
 }
@@ -563,7 +585,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
   requireField("priority", "Priority is required.");
-  requireField("dueDate", "Due date is required.");
+  requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
 
   if (row.priority === "urgent") {
@@ -971,6 +993,17 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
       onChange({ ...value, assetType: next, assetSubtype: nextOptions[0] });
       return;
     }
+    if (field === "launchDate") {
+      const previousAutoDraftDate = subtractFlowMateWorkingDays(value.launchDate, 5);
+      const nextAutoDraftDate = subtractFlowMateWorkingDays(next, 5);
+      const shouldAutoFillDraftDate = !value.dueDate || value.dueDate === previousAutoDraftDate;
+      onChange({
+        ...value,
+        launchDate: next,
+        dueDate: shouldAutoFillDraftDate ? nextAutoDraftDate : value.dueDate,
+      });
+      return;
+    }
     onChange({ ...value, [field]: next });
   }
   return (
@@ -1047,7 +1080,7 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
           {errors.urgentReason && <div className="field__error">{errors.urgentReason}</div>}
         </div>
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
-          <label className="field__label">Due date <span className="req">*</span></label>
+          <label className="field__label">1st Draft <span className="req">*</span></label>
           <input className="input" type="date" value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />
           {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
         </div>
@@ -1205,9 +1238,11 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const [detailLinks, setDetailLinks] = useState(w.links || []);
   const [detailComments, setDetailComments] = useState(w.comments || []);
   const [detailWatchers, setDetailWatchers] = useState(w.watchers || []);
+  const [detailAiTags, setDetailAiTags] = useState(w.aiTags || []);
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
+  const visibleAiTags = detailAiTags;
   const mentionQueryMatch = commentBody.match(/(^|\s)@([^\s@]*)$/);
   const mentionQuery = mentionQueryMatch ? mentionQueryMatch[2].toLowerCase() : null;
   const mentionSuggestions = mentionQuery == null ? [] : mentionUsers
@@ -1223,7 +1258,26 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     setDetailLinks(w.links || []);
     setDetailComments(w.comments || []);
     setDetailWatchers(w.watchers || []);
-  }, [w.id, w.links, w.comments, w.watchers]);
+    setDetailAiTags(w.aiTags || []);
+  }, [w.id, w.links, w.comments, w.watchers, w.aiTags]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!w.isSupabaseRow || !window.loadFlowMateAiTags) return () => { alive = false; };
+    window.loadFlowMateAiTags({ displayId: w.id })
+      .then((tags) => {
+        if (!alive) return;
+        setDetailAiTags(tags || []);
+        w.aiTags = tags || [];
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.aiTags = tags || [];
+        }
+      })
+      .catch((error) => {
+        console.warn("[FlowMate AI Tags] Load failed:", error && error.message);
+      });
+    return () => { alive = false; };
+  }, [w.id, w.isSupabaseRow]);
 
   useEffect(() => {
     let alive = true;
@@ -1414,6 +1468,55 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_watchers" } }));
     } catch (error) {
       setActionMsg({ tone: "bad", text: error.message || "Add watcher failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function addAiTag() {
+    if (!w.isSupabaseRow || !window.addFlowMateAiTag) {
+      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so AI tags are disabled." });
+      return;
+    }
+    const tag = window.prompt("AI tag");
+    if (!tag || !tag.trim()) return;
+    setPending(true);
+    try {
+      const data = await window.addFlowMateAiTag({ displayId: w.id }, tag);
+      setDetailAiTags((current) => {
+        const next = current.some((item) => item.id === data.id || item.tag.toLowerCase() === data.tag.toLowerCase())
+          ? current
+          : [...current, data];
+        w.aiTags = next;
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.aiTags = next;
+        }
+        return next;
+      });
+      setActionMsg({ tone: "ok", text: "AI tag added." });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Add AI tag failed." });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function removeAiTag(tag) {
+    if (!tag || !tag.id || !window.removeFlowMateAiTag) return;
+    setPending(true);
+    try {
+      await window.removeFlowMateAiTag(tag.id);
+      setDetailAiTags((current) => {
+        const next = current.filter((item) => item.id !== tag.id);
+        w.aiTags = next;
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.aiTags = next;
+        }
+        return next;
+      });
+      setActionMsg({ tone: "ok", text: "AI tag removed." });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: error.message || "Remove AI tag failed." });
     } finally {
       setPending(false);
     }
@@ -1737,7 +1840,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 </div>
               </div>
                 <div className="meta-row">
-                  <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "Due"}</div>
+                  <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "1st Draft"}</div>
                   <div className="meta-row__val">{w.dueFullLabel || w.dueLabel || "-"}</div>
                 </div>
               {w.type === "quick" && (
@@ -1749,6 +1852,28 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               <div className="meta-row">
                 <div className="meta-row__lbl">Created</div>
                 <div className="meta-row__val">{w.createdLabel || "-"}</div>
+              </div>
+              <div className="meta-row">
+                <div className="meta-row__lbl">AI Tag</div>
+                <div className="meta-row__val">
+                  <div className="ai-tag-list">
+                    {visibleAiTags.length > 0 ? visibleAiTags.map((tag) => (
+                      <span className="tag ai-tag" key={tag.id || tag.tag}>
+                        <Icon name="zap" size={11} /> {tag.tag}
+                        {w.isSupabaseRow && window.removeFlowMateAiTag && (
+                          <button type="button" className="ai-tag__remove" onClick={() => removeAiTag(tag)} disabled={pending} aria-label={`Remove ${tag.tag}`}>
+                            <Icon name="x" size={10} />
+                          </button>
+                        )}
+                      </span>
+                    )) : (
+                      <span className="muted">No AI tags</span>
+                    )}
+                    <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || !w.isSupabaseRow || !window.addFlowMateAiTag}>
+                      <Icon name="plus" /> Add AI Tag
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

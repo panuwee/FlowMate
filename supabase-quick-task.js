@@ -481,7 +481,6 @@ async function createFlowMateCreativeRequest(input) {
     throw new Error("Supabase client is not ready.");
   }
   if (!input || !input.title || !input.title.trim()) throw new Error("Title is required.");
-  if (!input.dueDate) throw new Error("Due date is required.");
 
   const platforms = Array.isArray(input.platforms)
     ? input.platforms
@@ -501,7 +500,7 @@ async function createFlowMateCreativeRequest(input) {
     p_reference_link:   input.referenceLink || null,
     p_priority:         input.priority || "normal",
     p_urgent_reason:    input.urgentReason || null,
-    p_due_date:         input.dueDate,
+    p_due_date:         input.dueDate || null,
     p_launch_date:      input.launchDate || null,
   });
   if (error) throw error;

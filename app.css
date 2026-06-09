@@ -427,6 +427,34 @@ button:disabled {
   color: var(--garena-iron);
   white-space: nowrap;
 }
+.ai-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.ai-tag {
+  background: #EEF2FF;
+  color: #374151;
+  max-width: 100%;
+}
+.ai-tag__remove {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.ai-tag__remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
 
 /* ---------- Avatar ---------- */
 .avatar {
@@ -703,6 +731,166 @@ button:disabled {
 }
 .kpi__delta--up { color: var(--garena-positive); }
 .kpi__delta--down { color: var(--garena-red); }
+
+/* ---------- Team Gantt ---------- */
+.gantt {
+  border: var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--garena-white);
+  overflow: auto;
+}
+.gantt__header,
+.gantt__row {
+  display: grid;
+  grid-template-columns: 220px minmax(840px, 1fr);
+}
+.gantt__header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #FAFAFA;
+  border-bottom: var(--border-hairline);
+}
+.gantt__owner-head {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--garena-grey);
+  border-right: var(--border-hairline);
+}
+.gantt__scale,
+.gantt__lane {
+  display: grid;
+  min-width: 840px;
+}
+.gantt__day {
+  min-height: 42px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-right: var(--border-hairline);
+  color: var(--garena-grey);
+  font-size: 10px;
+}
+.gantt__day.is-weekend {
+  background: var(--garena-badge-bg);
+}
+.gantt__team {
+  border-bottom: var(--border-hairline);
+}
+.gantt__team:last-child {
+  border-bottom: 0;
+}
+.gantt__team-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 14px;
+  background: #FAFAFA;
+  border-bottom: var(--border-hairline);
+  font-size: 12px;
+  font-weight: var(--weight-bold);
+  color: var(--garena-black);
+}
+.gantt__row {
+  min-height: 56px;
+  border-bottom: var(--border-hairline);
+}
+.gantt__row:last-child {
+  border-bottom: 0;
+}
+.gantt__owner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 14px;
+  border-right: var(--border-hairline);
+}
+.gantt__owner > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.gantt__owner-name {
+  color: var(--garena-black);
+  font-weight: var(--weight-bold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gantt__lane {
+  position: relative;
+  align-items: center;
+  grid-auto-rows: 24px;
+  gap: 4px 0;
+  padding: 8px 0;
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc((100% / var(--gantt-days, 31)) - 1px),
+    var(--garena-light-grey) calc((100% / var(--gantt-days, 31)) - 1px),
+    var(--garena-light-grey) calc(100% / var(--gantt-days, 31))
+  );
+}
+.gantt__bar {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 3px;
+  padding: 0 8px;
+  border: 1px solid var(--garena-deep-blue);
+  border-radius: var(--radius-xs);
+  background: #E4ECF2;
+  color: var(--garena-deep-blue);
+  font-size: 11px;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gantt__bar:hover {
+  border-color: var(--garena-iron);
+  color: var(--garena-black);
+}
+.gantt__bar--marker {
+  justify-content: center;
+}
+.gantt__bar--span {
+  background: var(--garena-deep-blue);
+  color: var(--garena-white);
+}
+.gantt__bar.is-overdue {
+  border-color: var(--garena-red);
+  background: var(--garena-red-light-2);
+  color: var(--garena-red);
+}
+.gantt__launch-marker {
+  z-index: 2;
+  justify-self: center;
+  align-self: center;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--garena-orange);
+  background: var(--garena-white);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.gantt__empty {
+  padding: 18px;
+  color: var(--garena-grey);
+  font-size: 13px;
+}
 
 /* ---------- Detail panel ---------- */
 .detail {

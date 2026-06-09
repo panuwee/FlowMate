@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260522-01";
+const FLOWMATE_APP_VERSION = "v20260609-01";
 
 const NAV = [
   { group: "Personal", items: [
@@ -12,6 +12,7 @@ const NAV = [
     { key: "board",    label: "Board",         icon: "board" },
     { key: "list",     label: "List",          icon: "list" },
     { key: "calendar", label: "Calendar",      icon: "calendar" },
+    { key: "gantt",    label: "Gantt Chart",   icon: "chart" },
     { key: "queue",    label: "Central queue", icon: "queue" },
   ]},
   { group: "Supervisor", items: [
@@ -29,7 +30,7 @@ const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || grou
 
 const TITLE_MAP = {
   "my-work": "My work", "create": "Create", "detail": "Work item",
-  "list": "All work", "board": "Board", "calendar": "Team calendar", "queue": "Central queue",
+  "list": "All work", "board": "Board", "calendar": "Team calendar", "gantt": "Team Gantt chart", "queue": "Central queue",
   "workload": "Workload", "kpi": "KPI", "settings": "Team settings",
   "admin-whitelist": "Whitelist",
 };
@@ -482,6 +483,7 @@ function App() {
         {allowedRoute && route === "list"     && <ListScreen     onOpen={open} searchQuery={searchQuery} />}
         {allowedRoute && route === "board"    && <BoardScreen    onOpen={open} />}
         {allowedRoute && route === "calendar" && <CalendarScreen onOpen={open} />}
+        {allowedRoute && route === "gantt"    && <TeamGanttScreen onOpen={open} />}
         {allowedRoute && route === "queue"    && <QueueScreen    onOpen={open} searchQuery={searchQuery} />}
         {allowedRoute && route === "workload" && <WorkloadScreen onOpen={open} />}
         {allowedRoute && route === "kpi"      && <KpiScreen />}
