@@ -69,6 +69,11 @@ For the 1st Draft auto-date and AI Tag update on an existing MVP 1.2 database, a
 1. `supabase/rpc_assignment.sql`
 2. `supabase/ai_tags.sql`
 
+For the Asset Count, multi-day assignment capacity, and leave watcher notification update, apply:
+
+1. `supabase/rpc_assignment.sql`
+2. `supabase/team_settings_admin.sql`
+
 For production go-live reset after all validation is complete, run manually:
 
 1. `supabase/reset_tasks_for_production.sql`

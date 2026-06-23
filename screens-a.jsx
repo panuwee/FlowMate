@@ -503,9 +503,12 @@ function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
   const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[nextDraft.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
+  const assetCountNumber = Number(nextDraft.assetCount);
+  const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
     ...nextDraft,
     assetSubtype: options.includes(nextDraft.assetSubtype) ? nextDraft.assetSubtype : options[0],
+    assetCount,
     launchDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
   };
@@ -529,6 +532,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "campaignName",
     "assetType",
     "assetSubtype",
+    "assetCount",
     "platforms",
     "sizeFormat",
     "briefLink",
@@ -566,6 +570,7 @@ function getDefaultCreativeDraft() {
     campaignName: "",
     assetType: "static-graphic",
     assetSubtype: getDefaultFlowMateAssetSubtype("static-graphic"),
+    assetCount: "1",
     platforms: "Instagram",
     sizeFormat: "1080x1080",
     briefLink: "",
@@ -606,6 +611,12 @@ function getFlowMateCreateValidationErrors(mode, draft) {
       errors[field] = message;
     }
   }
+  function requirePositiveInteger(field, message) {
+    const value = Number(row[field]);
+    if (!Number.isInteger(value) || value < 1) {
+      errors[field] = message;
+    }
+  }
 
   if (mode === "quick") {
     requireField("requesterTeam", "Requester team is required.");
@@ -621,6 +632,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("campaignName", "Project / campaign is required.");
   requireField("assetType", "Asset type is required.");
   requireField("assetSubtype", "Asset subtype is required.");
+  requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
   requireField("platforms", "Platform is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
@@ -1106,6 +1118,11 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
             {assetSubtypeOptions.map(option => <option key={option} value={option}>{option}</option>)}
           </select>
           {errors.assetSubtype && <div className="field__error">{errors.assetSubtype}</div>}
+        </div>
+        <div className={`field ${errors.assetCount ? "field--error" : ""}`}>
+          <label className="field__label">Asset Count <span className="req">*</span></label>
+          <input className="input" type="number" min="1" step="1" value={value.assetCount} onChange={e => update("assetCount", e.target.value)} placeholder="1" />
+          {errors.assetCount && <div className="field__error">{errors.assetCount}</div>}
         </div>
         <div className={`field ${errors.platforms ? "field--error" : ""}`}>
           <label className="field__label">Platform <span className="req">*</span></label>
@@ -1751,6 +1768,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               <div className="card__head"><span className="card__title">Creative details</span></div>
               <div className="card__body">
                 <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType] || w.assetType || "-"}{w.subtype && ` - ${w.subtype}`}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Asset Count</div><div className="meta-row__val">{w.assetCount || 1}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{w.briefLink ? <a href={w.briefLink} target="_blank" rel="noreferrer">Open brief</a> : "-"}</div></div>

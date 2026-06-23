@@ -100,6 +100,7 @@ declare
   v_member public.team_members%rowtype;
   v_leave public.leave_requests%rowtype;
   v_target_work public.work_items%rowtype;
+  v_leave_recipient_id uuid;
 begin
   v_actor_id := auth.uid();
 
@@ -176,27 +177,41 @@ begin
          and wi.status not in ('delivered', 'cancelled')
          and wi.due_date between p_start_date and p_end_date
     loop
-      perform public.flowmate_create_notification(
-        v_target_work.requester_user_id,
-        'leave_overlap',
-        'Leave may affect ' || v_target_work.display_id,
-        v_member.display_name || ' is on leave ' || upper(p_start_half) || ' ' || p_start_date::text || ' to ' || upper(p_end_half) || ' ' || p_end_date::text,
-        v_target_work.id,
-        v_actor_id,
-        null,
-        jsonb_build_object(
-          'leave_request_id', v_leave.id,
-          'team_member_id', v_member.id,
-          'team_member_name', v_member.display_name,
-          'start_date', p_start_date,
-          'end_date', p_end_date,
-          'start_half', p_start_half,
-          'end_half', p_end_half,
-          'display_id', v_target_work.display_id,
-          'due_date', v_target_work.due_date
-        ),
-        'leave:' || v_leave.id::text || ':work:' || v_target_work.id::text || ':requester:' || coalesce(v_target_work.requester_user_id::text, '')
-      );
+      for v_leave_recipient_id in
+        select distinct recipient_id
+        from (
+          select v_target_work.requester_user_id as recipient_id
+          union all
+          select wiw.watcher_user_id
+          from public.work_item_watchers wiw
+          where wiw.work_item_id = v_target_work.id
+            and wiw.removed_at is null
+        ) recipients
+        where recipient_id is not null
+          and recipient_id <> v_actor_id
+      loop
+        perform public.flowmate_create_notification(
+          v_leave_recipient_id,
+          'leave_overlap',
+          'Leave may affect ' || v_target_work.display_id,
+          v_member.display_name || ' is on leave ' || upper(p_start_half) || ' ' || p_start_date::text || ' to ' || upper(p_end_half) || ' ' || p_end_date::text,
+          v_target_work.id,
+          v_actor_id,
+          null,
+          jsonb_build_object(
+            'leave_request_id', v_leave.id,
+            'team_member_id', v_member.id,
+            'team_member_name', v_member.display_name,
+            'start_date', p_start_date,
+            'end_date', p_end_date,
+            'start_half', p_start_half,
+            'end_half', p_end_half,
+            'display_id', v_target_work.display_id,
+            'due_date', v_target_work.due_date
+          ),
+          'leave:' || v_leave.id::text || ':work:' || v_target_work.id::text || ':recipient:' || v_leave_recipient_id::text
+        );
+      end loop;
     end loop;
   end if;
 

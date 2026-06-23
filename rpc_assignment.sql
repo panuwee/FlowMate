@@ -3,7 +3,7 @@
 --
 -- Implements the rules in docs/webdev-handoff/03_Assignment_Rules.md.
 -- - Brief completeness check (UAT-007)
--- - Effort calc with cap at 8 (UAT-009, rules §5)
+-- - Effort calc from request type and asset count (UAT-009, rules §5)
 -- - Hybrid auto-queue (UAT-012, rules §10)
 -- - Skill + WIP + capacity filtering (rules §11)
 -- - Tie-breaker (rules §12)
@@ -26,6 +26,29 @@ alter table public.creative_request_details
     length(trim(coalesce(brief_link, ''))) = 0
     or brief_link ~* '^https?://[^[:space:]]{4,}$'
   );
+
+alter table public.creative_request_details
+  add column if not exists asset_count integer not null default 1;
+
+alter table public.creative_request_details
+  drop constraint if exists creative_details_asset_count_check;
+
+alter table public.creative_request_details
+  add constraint creative_details_asset_count_check check (asset_count >= 1 and asset_count <= 999);
+
+alter table public.work_items
+  drop constraint if exists work_items_effort_point_check;
+
+alter table public.work_items
+  add constraint work_items_effort_point_check check (
+    effort_point is null or (effort_point >= 1 and effort_point <= 999)
+  );
+
+alter table public.assignment_runs
+  drop constraint if exists assignment_runs_effort_point_check;
+
+alter table public.assignment_runs
+  add constraint assignment_runs_effort_point_check check (effort_point >= 1 and effort_point <= 999);
 
 create table if not exists public.leave_requests (
   id uuid primary key default gen_random_uuid(),
@@ -157,36 +180,62 @@ update public.team_members tm
  where lower(tm.member_code) = 'pond'
    and not ('esport-video' = any (coalesce(tm.backup_skills, '{}'::public.asset_type[])));
 
+drop function if exists public.flowmate_effort_for_subtype(public.asset_type, text);
+
 create or replace function public.flowmate_effort_for_subtype(
   p_asset_type public.asset_type,
-  p_asset_subtype text
+  p_asset_subtype text,
+  p_asset_count integer default 1
 ) returns integer
 language sql
 immutable
 as $$
-  select case
-    when p_asset_type = 'hybrid' then 8
-    when p_asset_subtype ilike '%simple banner%' or p_asset_subtype ilike '%ad visual%' then 2
-    when p_asset_subtype ilike '%standard banner%'
-      or p_asset_subtype ilike '%complex social%'
-      or p_asset_subtype ilike '%standard social%' then 4
-    when p_asset_subtype ilike '%esport graphic pack%' and p_asset_subtype ilike '%minor%' then 3
-    when p_asset_subtype ilike '%esport graphic pack%'
-      and (p_asset_subtype ilike '%full%' or p_asset_subtype ilike '%complete%') then 8
-    when p_asset_subtype ilike '%short-form%'
-      or p_asset_subtype ilike '%tiktok%'
-      or p_asset_subtype ilike '%reels%' then 4
-    when p_asset_subtype ilike '%standard video%' or p_asset_subtype ilike '%youtube vlog%' then 6
-    when p_asset_subtype ilike '%high-retention%' then 7
-    when p_asset_subtype ilike '%promotional%'
-      or p_asset_subtype ilike '%highlight reel%' then 8
-    -- fallback by asset_type
-    when p_asset_type = 'static-graphic' then 4
-    when p_asset_type = 'general-video'  then 6
-    when p_asset_type = 'esport-video'   then 7
-    when p_asset_type = 'motion'         then 6
-    else 4
-  end;
+  with input as (
+    select
+      lower(trim(coalesce(p_asset_subtype, ''))) as subtype,
+      greatest(1, coalesce(p_asset_count, 1))::numeric as asset_count
+  ),
+  unit_effort as (
+    select case
+      when p_asset_type = 'hybrid' then 8::numeric
+      when subtype in ('banner', 'logo') then 2::numeric
+      when subtype = 'web reskin' then 24::numeric
+      when subtype = 'new web' then 24::numeric
+      when subtype = 'cdn design' then 1::numeric
+      when subtype = 'resize' then 0.25::numeric
+      when subtype = 'graphic pack' then 0.5::numeric
+      when subtype = 'kv design' then 3::numeric
+      when subtype = 'jersey design' then 2::numeric
+      when subtype = 'jersey in-game' then 1::numeric
+      when subtype = 'merchandise design' then 1::numeric
+      when subtype = 'video standard' then 4::numeric
+      when subtype = 'video under 1 min' then 2::numeric
+      when subtype = 'motion' then 2::numeric
+      when subtype ilike '%simple banner%' or subtype ilike '%ad visual%' then 2::numeric
+      when subtype ilike '%standard banner%'
+        or subtype ilike '%complex social%'
+        or subtype ilike '%standard social%' then 4::numeric
+      when subtype ilike '%esport graphic pack%' and subtype ilike '%minor%' then 3::numeric
+      when subtype ilike '%esport graphic pack%'
+        and (subtype ilike '%full%' or subtype ilike '%complete%') then 8::numeric
+      when subtype ilike '%short-form%'
+        or subtype ilike '%tiktok%'
+        or subtype ilike '%reels%' then 4::numeric
+      when subtype ilike '%standard video%' or subtype ilike '%youtube vlog%' then 6::numeric
+      when subtype ilike '%high-retention%' then 7::numeric
+      when subtype ilike '%promotional%'
+        or subtype ilike '%highlight reel%' then 8::numeric
+      when p_asset_type = 'static-graphic' then 4::numeric
+      when p_asset_type = 'general-video'  then 6::numeric
+      when p_asset_type = 'esport-video'   then 7::numeric
+      when p_asset_type = 'motion'         then 6::numeric
+      else 4::numeric
+    end as unit_point,
+    asset_count
+    from input
+  )
+  select greatest(1, ceil(unit_point * asset_count)::integer)
+  from unit_effort;
 $$;
 
 -- ---------------------------------------------------------------------------
@@ -289,6 +338,9 @@ declare
   v_has_eligible   boolean;
   v_allow_backup_pool boolean := false;
   v_creative_owner_codes text[] := array['pond','jo','tong','eye','vee'];
+  v_assignment_start date;
+  v_assignment_end date;
+  v_working_days integer;
   v_snapshot       jsonb;
 begin
   select * into v_wi  from public.work_items where id = p_work_item_id for update;
@@ -370,14 +422,17 @@ begin
     return jsonb_build_object('result', 'queued', 'reason', 'hybrid', 'effort', 8);
   end if;
 
-  -- 3. Effort calc (cap 8) -------------------------------------------------
-  v_raw_effort  := public.flowmate_effort_for_subtype(v_det.asset_type, v_det.asset_subtype);
-  v_was_capped  := v_raw_effort > 8;
-  v_effort      := least(v_raw_effort, 8);
+  -- 3. Effort calc ---------------------------------------------------------
+  v_effort      := public.flowmate_effort_for_subtype(v_det.asset_type, v_det.asset_subtype, v_det.asset_count);
+  v_raw_effort  := v_effort;
+  v_was_capped  := false;
   v_allow_backup_pool := v_det.asset_type = 'esport-video' and v_wi.priority = 'urgent';
+  v_assignment_start := v_today;
+  v_assignment_end := greatest(v_today, coalesce(v_wi.due_date, v_today));
+  v_working_days := public.flowmate_count_working_days(v_assignment_start, v_assignment_end);
 
   -- 4. Candidate filtering + tie-break -------------------------------------
-  with base as (
+  with base_raw as (
     select
       tm.id,
       tm.member_code,
@@ -396,7 +451,6 @@ begin
           when tm.availability = 'partial'                                  then coalesce(tm.capacity_override_per_day, 0)
           else tm.capacity_per_day
         end
-        * (1 - public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)))
       ) as effective_cap,
       coalesce((
         select sum(wi.effort_point)
@@ -405,8 +459,8 @@ begin
           and wi.work_type = 'creative_request'
           and wi.status in ('assigned','in_progress','review','blocked')
           and wi.id <> p_work_item_id
-          and coalesce(wi.due_date, v_today) = coalesce(v_wi.due_date, v_today)
-      ), 0) as assigned_effort_until_due,
+          and coalesce(wi.due_date, v_today) between v_assignment_start and v_assignment_end
+      ), 0) as window_assigned_effort,
       coalesce((
         select count(*)
         from public.work_items wi
@@ -435,11 +489,21 @@ begin
     where tm.active = true
       and lower(tm.member_code) = any (v_creative_owner_codes)
   ),
+  base as (
+    select
+      br.*,
+      coalesce((
+        select sum(br.effective_cap * public.flowmate_leave_fraction_for_date(br.id, g.d::date))
+        from generate_series(v_assignment_start, v_assignment_end, interval '1 day') as g(d)
+        where extract(isodow from g.d) between 1 and 5
+      ), 0) as leave_capacity_loss
+    from base_raw br
+  ),
   eligible as (
     select
       b.*,
-      b.effective_cap as window_cap,
-      (b.effective_cap - b.assigned_effort_until_due) as remaining
+      greatest(0, b.effective_cap * v_working_days - b.leave_capacity_loss) as window_cap,
+      (greatest(0, b.effective_cap * v_working_days - b.leave_capacity_loss) - b.window_assigned_effort) as remaining
     from base b
     where b.skill_match is not null
       and (
@@ -447,10 +511,7 @@ begin
         or (b.availability = 'partial' and coalesce(b.capacity_override_per_day, 0) > 0)
       )
       and b.wip_now < b.wip_limit
-      and (
-        not public.flowmate_is_gdve_member_code(b.member_code)
-        or public.flowmate_leave_fraction_for_date(b.id, coalesce(v_wi.due_date, v_today)) < 1
-      )
+      and greatest(0, b.effective_cap * v_working_days - b.leave_capacity_loss) > 0
   ),
   picked as (
     select e.*,
@@ -471,7 +532,7 @@ begin
   order by pool_rank asc,
            remaining desc,
            wip_now asc,
-           assigned_effort_until_due asc,
+           window_assigned_effort asc,
            overdue_count asc,
            member_code asc
   limit 1;
@@ -493,9 +554,17 @@ begin
     into v_has_any_skill;
 
   select exists (
-    with base as (
+    with base_raw as (
       select tm.id, tm.member_code, tm.skills, tm.backup_skills, tm.availability, tm.capacity_override_per_day,
              tm.wip_limit,
+             (
+               case
+                 when tm.active = false                                            then 0::numeric
+                 when tm.availability = 'leave'                                    then 0::numeric
+                 when tm.availability = 'partial'                                  then coalesce(tm.capacity_override_per_day, 0)
+                 else tm.capacity_per_day
+               end
+             ) as effective_cap,
              coalesce((select count(*) from public.work_items wi
                          where wi.final_owner_member_id = tm.id
                            and wi.status = 'in_progress' and wi.wip_counted = true), 0) as wip_now
@@ -512,15 +581,22 @@ begin
              )
            )
          )
+    ),
+    base as (
+      select
+        br.*,
+        coalesce((
+          select sum(br.effective_cap * public.flowmate_leave_fraction_for_date(br.id, g.d::date))
+          from generate_series(v_assignment_start, v_assignment_end, interval '1 day') as g(d)
+          where extract(isodow from g.d) between 1 and 5
+        ), 0) as leave_capacity_loss
+      from base_raw br
     )
     select 1 from base b
      where (b.availability = 'available'
             or (b.availability = 'partial' and coalesce(b.capacity_override_per_day, 0) > 0))
        and b.wip_now < b.wip_limit
-       and (
-         not public.flowmate_is_gdve_member_code(b.member_code)
-         or public.flowmate_leave_fraction_for_date(b.id, coalesce(v_wi.due_date, v_today)) < 1
-       )
+       and greatest(0, b.effective_cap * v_working_days - b.leave_capacity_loss) > 0
   ) into v_has_eligible;
 
   -- 5a. Assigned -----------------------------------------------------------
@@ -529,11 +605,11 @@ begin
       when v_winner_skill = 'backup' then
         'Auto (urgent fallback): ' || v_det.asset_type::text
         || ' assigned to backup ' || v_winner_name
-        || ' by remaining capacity on ' || to_char(v_wi.due_date, 'Mon DD') || '.'
+        || ' by remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
       else
         'Auto: ' || v_det.asset_type::text
         || ' assigned to ' || v_winner_name
-        || ' by skill, WIP, and remaining capacity on ' || to_char(v_wi.due_date, 'Mon DD') || '.'
+        || ' by skill, WIP, and remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
     end;
 
     update public.work_items
@@ -585,7 +661,7 @@ begin
   elsif not v_has_eligible then
     v_reason := 'Queued: all matching members are at WIP limit or unavailable.';
   else
-    v_reason := 'Queued: matching members are over capacity on the due date.';
+    v_reason := 'Queued: matching members are over capacity before the 1st Draft date.';
   end if;
 
   -- capacity snapshot (lightweight) for explainability
@@ -594,14 +670,16 @@ begin
       'member_code',     tm.member_code,
       'skills',          tm.skills,
       'availability',    tm.availability,
-      'leave_fraction',  public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)),
-      'effective_cap',   case
+      'window_start',    v_assignment_start,
+      'window_end',      v_assignment_end,
+      'working_days',    v_working_days,
+      'due_leave_fraction', public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)),
+      'daily_cap',       case
                             when tm.active = false                  then 0
                             when tm.availability = 'leave'          then 0
                             when tm.availability = 'partial'        then coalesce(tm.capacity_override_per_day, 0)
                             else tm.capacity_per_day
                           end
-                          * (1 - public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)))
     )),
     '[]'::jsonb
   ) into v_snapshot
@@ -707,6 +785,22 @@ drop function if exists public.create_creative_request(
   uuid, text, text, text, public.asset_type, text, text[], text,
   text, text, public.priority_level, text, date, date
 );
+drop function if exists public.create_creative_request(
+  uuid, text, text, text, public.asset_type, text, text[], text,
+  text, text, text, public.priority_level, text, date, date
+);
+drop function if exists public.create_creative_request(
+  uuid, text, text, text, public.asset_type, text, integer, text[], text,
+  text, text, public.priority_level, text, date, date
+);
+drop function if exists public.create_creative_request(
+  uuid, text, text, text, public.asset_type, text, text[], text,
+  text, text, public.priority_level, text, date, date, integer
+);
+drop function if exists public.create_creative_request(
+  uuid, text, text, text, public.asset_type, text, text[], text,
+  text, text, text, public.priority_level, text, date, date, integer
+);
 
 create or replace function public.create_creative_request(
   p_actor_user_id uuid,
@@ -723,7 +817,8 @@ create or replace function public.create_creative_request(
   p_priority public.priority_level default 'normal',
   p_urgent_reason text default null,
   p_due_date date default null,
-  p_launch_date date default null
+  p_launch_date date default null,
+  p_asset_count integer default 1
 ) returns jsonb
 language plpgsql
 security definer
@@ -749,6 +844,10 @@ begin
 
   if length(trim(coalesce(p_title, ''))) = 0 then
     raise exception 'Creative request title is required';
+  end if;
+
+  if greatest(1, coalesce(p_asset_count, 1)) <> coalesce(p_asset_count, 1) then
+    raise exception 'Asset Count must be at least 1';
   end if;
 
   v_launch_date := coalesce(p_launch_date, p_due_date);
@@ -792,10 +891,10 @@ begin
   ) returning id into v_work_item_id;
 
   insert into public.creative_request_details (
-    work_item_id, asset_type, asset_subtype, platforms, size_format,
+    work_item_id, asset_type, asset_subtype, asset_count, platforms, size_format,
     brief_link, reference_link, brief_completeness_status
   ) values (
-    v_work_item_id, p_asset_type, trim(coalesce(p_asset_subtype, '')),
+    v_work_item_id, p_asset_type, trim(coalesce(p_asset_subtype, '')), greatest(1, coalesce(p_asset_count, 1)),
     coalesce(p_platforms, '{}'::text[]), trim(coalesce(p_size_format, '')),
     trim(coalesce(p_brief_link, '')), nullif(trim(coalesce(p_reference_link, '')), ''),
     'new'
@@ -820,7 +919,7 @@ $$;
 
 grant execute on function public.create_creative_request(
   uuid, text, text, text, public.asset_type, text, text[], text,
-  text, text, text, public.priority_level, text, date, date
+  text, text, text, public.priority_level, text, date, date, integer
 ) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------

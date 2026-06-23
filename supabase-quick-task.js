@@ -493,6 +493,7 @@ async function createFlowMateCreativeRequest(input) {
     p_campaign_name:    input.campaignName || null,
     p_asset_type:       input.assetType,
     p_asset_subtype:    input.assetSubtype || "",
+    p_asset_count:      Number(input.assetCount || 1),
     p_platforms:        platforms,
     p_size_format:      input.sizeFormat || "",
     p_brief_link:       input.briefLink || "",

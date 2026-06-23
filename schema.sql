@@ -134,7 +134,7 @@ create table if not exists public.work_items (
   urgent_reason text,
   due_date date not null,
   launch_date date,
-  effort_point integer check (effort_point is null or (effort_point >= 1 and effort_point <= 8)),
+  effort_point integer check (effort_point is null or (effort_point >= 1 and effort_point <= 999)),
   needs_split boolean not null default false,
   assignment_reason text,
   blocked_reason text,
@@ -188,6 +188,7 @@ create table if not exists public.creative_request_details (
   work_item_id uuid not null unique references public.work_items(id) on delete cascade,
   asset_type public.asset_type not null,
   asset_subtype text not null,
+  asset_count integer not null default 1,
   platforms text[] not null,
   size_format text not null,
   brief_link text not null,
@@ -196,6 +197,7 @@ create table if not exists public.creative_request_details (
   brief_missing_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  constraint creative_details_asset_count_check check (asset_count >= 1 and asset_count <= 999),
   constraint creative_details_platforms_not_empty check (array_length(platforms, 1) is not null),
   constraint creative_details_brief_url check (
     length(trim(coalesce(brief_link, ''))) = 0
@@ -213,7 +215,7 @@ create table if not exists public.assignment_runs (
   final_owner_member_id uuid references public.team_members(id),
   result public.assignment_result not null,
   reason text not null,
-  effort_point integer not null check (effort_point >= 1 and effort_point <= 8),
+  effort_point integer not null check (effort_point >= 1 and effort_point <= 999),
   raw_range_min integer check (raw_range_min is null or raw_range_min >= 1),
   raw_range_max integer check (raw_range_max is null or raw_range_max >= raw_range_min),
   was_capped boolean not null default false,
