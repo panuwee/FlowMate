@@ -779,22 +779,51 @@ function ganttDateKeyFromRowC(row, fields) {
   return "";
 }
 
-function ganttTaskModelC(row, monthKey) {
+function ganttTimelineWindowC(monthKey) {
+  const visibleMonthCount = 2;
+  const startKey = `${monthKey}-01`;
+  const startDate = calendarParseKeyC(startKey);
+  const endDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + visibleMonthCount, 0));
+  const endKey = calendarUtcKeyC(endDate);
+  const totalDays = Math.floor((endDate.getTime() - startDate.getTime()) / 86400000) + 1;
+  const dayCells = Array.from({ length: totalDays }, (_, index) => {
+    const date = new Date(startDate.getTime() + index * 86400000);
+    return {
+      day: date.getUTCDate(),
+      label: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }).slice(0, 1),
+      monthLabel: date.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }),
+      isWeekend: date.getUTCDay() === 0 || date.getUTCDay() === 6,
+    };
+  });
+  const monthGroups = Array.from({ length: visibleMonthCount }, (_, index) => {
+    const groupStart = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + index, 1));
+    const groupEnd = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + index + 1, 0));
+    const startOffset = Math.floor((groupStart.getTime() - startDate.getTime()) / 86400000);
+    const days = Math.floor((groupEnd.getTime() - groupStart.getTime()) / 86400000) + 1;
+    return {
+      key: calendarUtcKeyC(groupStart),
+      label: calendarMonthLabelC(calendarUtcKeyC(groupStart)),
+      startOffset,
+      days,
+    };
+  });
+  return { startKey, endKey, startDate, endDate, totalDays, dayCells, monthGroups };
+}
+
+function ganttTaskModelC(row, monthKey, ganttWindow) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return null;
   const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
   const rawStartKey = launchKey && launchKey > dueKey ? dueKey : dueKey;
   const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
-  const monthStartKey = `${monthKey}-01`;
-  const monthStart = calendarParseKeyC(monthStartKey);
-  const monthEndKey = calendarUtcKeyC(new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)));
-  if (rawEndKey < monthStartKey || rawStartKey > monthEndKey) return null;
-  const clampedStartKey = rawStartKey < monthStartKey ? monthStartKey : rawStartKey;
-  const clampedEndKey = rawEndKey > monthEndKey ? monthEndKey : rawEndKey;
-  const startOffset = Math.floor((calendarParseKeyC(clampedStartKey).getTime() - monthStart.getTime()) / 86400000);
-  const endOffset = Math.floor((calendarParseKeyC(clampedEndKey).getTime() - monthStart.getTime()) / 86400000);
-  const launchOffset = launchKey && launchKey >= monthStartKey && launchKey <= monthEndKey
-    ? Math.floor((calendarParseKeyC(launchKey).getTime() - monthStart.getTime()) / 86400000)
+  const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
+  if (rawEndKey < timeline.startKey || rawStartKey > timeline.endKey) return null;
+  const clampedStartKey = rawStartKey < timeline.startKey ? timeline.startKey : rawStartKey;
+  const clampedEndKey = rawEndKey > timeline.endKey ? timeline.endKey : rawEndKey;
+  const startOffset = Math.floor((calendarParseKeyC(clampedStartKey).getTime() - timeline.startDate.getTime()) / 86400000);
+  const endOffset = Math.floor((calendarParseKeyC(clampedEndKey).getTime() - timeline.startDate.getTime()) / 86400000);
+  const launchOffset = launchKey && launchKey >= timeline.startKey && launchKey <= timeline.endKey
+    ? Math.floor((calendarParseKeyC(launchKey).getTime() - timeline.startDate.getTime()) / 86400000)
     : null;
   return {
     item: row,
@@ -847,25 +876,14 @@ function TeamGanttScreen({ onOpen }) {
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const monthStartKey = `${monthKey}-01`;
-  const monthStart = calendarParseKeyC(monthStartKey);
-  const monthEndKey = calendarUtcKeyC(new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)));
-  const daysInMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+  const ganttWindow = ganttTimelineWindowC(monthKey);
   const todayKey = calendarUtcKeyC(new Date());
-  const todayOffset = todayKey >= monthStartKey && todayKey <= monthEndKey
-    ? Math.floor((calendarParseKeyC(todayKey).getTime() - monthStart.getTime()) / 86400000)
+  const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey
+    ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000)
     : null;
-  const dayCells = Array.from({ length: daysInMonth }, (_, index) => {
-    const date = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), index + 1));
-    return {
-      day: index + 1,
-      label: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }).slice(0, 1),
-      isWeekend: date.getUTCDay() === 0 || date.getUTCDay() === 6,
-    };
-  });
   const ganttTasks = (sourceRows || [])
     .filter(row => row && row.type !== "leave" && !["cancelled"].includes(row.status))
-    .map(row => ganttTaskModelC(row, monthKey))
+    .map(row => ganttTaskModelC(row, monthKey, ganttWindow))
     .filter(Boolean)
     .sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
 
@@ -923,6 +941,8 @@ function TeamGanttScreen({ onOpen }) {
       <div className="gantt__toolbar" aria-label="Gantt read-only controls">
         <div className="gantt__toolbar-group">
           <span className="gantt__chip"><Icon name="chart" size={13} /> Trello Power-Up Lite</span>
+          <span className="gantt__chip">Two-month window</span>
+          <span className="gantt__chip">Scroll right to see the second month</span>
           <span className="gantt__chip">Grouped by team / assignee</span>
           <span className="gantt__chip">Click bar to open task</span>
         </div>
@@ -944,13 +964,27 @@ function TeamGanttScreen({ onOpen }) {
       <div className="gantt" data-testid="flowmate-team-gantt-chart">
         <div className="gantt__header">
           <div className="gantt__owner-head">Team / assignee</div>
-          <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))`, "--gantt-days": daysInMonth, "--gantt-today-offset": todayOffset ?? 0 }}>
-            {dayCells.map(cell => (
-              <div key={cell.day} className={`gantt__day ${cell.isWeekend ? "is-weekend" : ""}`}>
-                <span className="mono">{cell.day}</span>
-                <span>{cell.label}</span>
-              </div>
-            ))}
+          <div className="gantt__timeline-head" style={{ "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
+            <div className="gantt__month-scale" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}>
+              {ganttWindow.monthGroups.map(group => (
+                <div
+                  key={group.key}
+                  className="gantt__month-group"
+                  style={{ gridColumn: `${group.startOffset + 1} / span ${group.days}` }}
+                  data-testid="flowmate-gantt-month-group"
+                >
+                  {group.label}
+                </div>
+              ))}
+            </div>
+            <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`, "--gantt-days": ganttWindow.totalDays }}>
+              {ganttWindow.dayCells.map((cell, index) => (
+                <div key={`${cell.monthLabel}-${cell.day}-${index}`} className={`gantt__day ${cell.isWeekend ? "is-weekend" : ""}`}>
+                  <span className="mono">{cell.day}</span>
+                  <span>{cell.label}</span>
+                </div>
+              ))}
+            </div>
             {todayOffset !== null && <div className="gantt__today-line gantt__today-line--header" aria-hidden="true"></div>}
           </div>
         </div>
@@ -970,7 +1004,7 @@ function TeamGanttScreen({ onOpen }) {
                     <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}</span>
                   </span>
                 </div>
-                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${daysInMonth}, minmax(28px, 1fr))`, "--gantt-days": daysInMonth, "--gantt-today-offset": todayOffset ?? 0 }}>
+                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`, "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
                   {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
                   {assignee.tasks.map(task => (
                     <button
@@ -1006,9 +1040,9 @@ function TeamGanttScreen({ onOpen }) {
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
-        Gantt rule: due date is the bar end. Launch date is shown as a marker; when launch date is after due date, the bar spans due date to launch date.
+        Gantt rule: due date is the bar end. Launch date is shown as a marker; when launch date is after due date, the bar spans due date to launch date. This view shows two months at a time; scroll right to see the second month.
       </div>
-      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(monthKey)}</Source>
+      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(monthKey)} plus next month</Source>
     </div>
   );
 }

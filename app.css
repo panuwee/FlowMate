@@ -839,7 +839,29 @@ button:disabled {
 .gantt__scale,
 .gantt__lane {
   display: grid;
-  min-width: 840px;
+  min-width: calc(var(--gantt-days, 62) * 30px);
+}
+.gantt__timeline-head {
+  position: relative;
+  min-width: calc(var(--gantt-days, 62) * 30px);
+}
+.gantt__month-scale {
+  display: grid;
+  min-width: calc(var(--gantt-days, 62) * 30px);
+  border-bottom: var(--border-hairline);
+  background: #FFFFFF;
+}
+.gantt__month-group {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-right: var(--border-hairline);
+  color: var(--garena-black);
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .gantt__scale {
   position: relative;
