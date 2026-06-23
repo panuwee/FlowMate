@@ -59,6 +59,7 @@ insert into public.user_whitelist (email, display_name, role, team_member_code) 
   ('fco.krittidech@garena.com',   'Tong',    'member', 'tong'),
   ('fco.janyarat@garena.com',     'Eye',     'member', 'eye'),
   ('fco.thanadon@garena.com',     'Vee',     'member', 'vee'),
+  ('fco.thanyaporn@garena.com',   'Ploy',    'member', 'ploy'),
   ('napol.a@garena.com',          'Pluem',   'member', 'pluem'),
   ('fco.piyapat@garena.com',      'Net',     'member', 'net'),
   ('fco.kittipoj@garena.com',     'Ben',     'member', 'ben'),
@@ -67,6 +68,56 @@ on conflict (email) do update set
   display_name     = excluded.display_name,
   role             = excluded.role,
   team_member_code = excluded.team_member_code;
+
+insert into public.team_members (
+  id,
+  member_code,
+  user_id,
+  display_name,
+  initials,
+  color,
+  discipline,
+  discipline_short,
+  skills,
+  backup_skills,
+  capacity_per_day,
+  capacity_override_per_day,
+  wip_limit,
+  availability,
+  active
+)
+values (
+  '10000000-0000-0000-0000-000000000024',
+  'ploy',
+  (select id from public.users where lower(email) = lower('fco.thanyaporn@garena.com')),
+  'Ploy',
+  'PL',
+  '#BF6B00',
+  'GD/VE',
+  'GD/VE',
+  array['static-graphic']::public.asset_type[],
+  '{}'::public.asset_type[],
+  8,
+  null,
+  3,
+  'available',
+  true
+)
+on conflict (member_code) do update set
+  user_id = coalesce(excluded.user_id, public.team_members.user_id),
+  display_name = excluded.display_name,
+  initials = excluded.initials,
+  color = excluded.color,
+  discipline = excluded.discipline,
+  discipline_short = excluded.discipline_short,
+  skills = excluded.skills,
+  backup_skills = excluded.backup_skills,
+  capacity_per_day = excluded.capacity_per_day,
+  capacity_override_per_day = excluded.capacity_override_per_day,
+  wip_limit = excluded.wip_limit,
+  availability = excluded.availability,
+  active = excluded.active,
+  updated_at = now();
 
 -- 3b. Make seeded public.users rows safe to relink to real auth.users IDs ----
 -- Seeded users start with stable UUIDs so tasks can exist before Google login.
