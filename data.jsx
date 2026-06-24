@@ -131,6 +131,24 @@ function flowmateCsvCell(value) {
   return `"${s.replace(/"/g, '""')}"`;
 }
 
+// Q-2: single CSV download helper shared by every export. Takes a header-label
+// array and rows-as-arrays (already extracted); handles injection-safe quoting,
+// blob creation, and the anchor click. Callers keep their own column-shaping.
+function flowmateDownloadCsv(filename, headerLabels, dataRows) {
+  const csv = [headerLabels, ...dataRows]
+    .map((row) => row.map((value) => flowmateCsvCell(value)).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function Effort({ value, lg }) {
   if (value == null) return <span className="muted mono">—</span>;
   return <span className={`effort${lg ? " effort--lg" : ""}`}>{value}</span>;
@@ -166,5 +184,5 @@ Object.assign(window, {
   WORK, WORK_BY_ID,
   STATUS_LABEL, STATUS_CLASS, ASSET_LABEL,
   Avatar, StatusBadge, PriorityBadge, DueBadge, Effort, TypePill, Progress, Source,
-  flowmatePrettifyToken, flowmateCsvCell,
+  flowmatePrettifyToken, flowmateCsvCell, flowmateDownloadCsv,
 });

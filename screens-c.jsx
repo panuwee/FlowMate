@@ -2,21 +2,12 @@
 const { useState: useStateC, useEffect: useEffectC } = React;
 
 function exportFlowMateCsvC(filename, columns, rows) {
-  const csv = [columns.map(column => column.label), ...rows.map(row => columns.map(column => {
+  const headerLabels = columns.map(column => column.label);
+  const dataRows = rows.map(row => columns.map(column => {
     const value = typeof column.value === "function" ? column.value(row) : row[column.value];
     return value == null ? "" : value;
-  }))]
-    .map(row => row.map(value => window.flowmateCsvCell(value)).join(","))
-    .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  }));
+  window.flowmateDownloadCsv(filename, headerLabels, dataRows);
 }
 
 function flowMateRangeLabelC(range) {
