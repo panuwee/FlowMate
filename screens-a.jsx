@@ -991,7 +991,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
+        <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
       </div>
       <div className="field field--full">
@@ -1100,7 +1100,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
       <div className="form-grid">
         <div className="field field--full">
           <label className="field__label">Title <span className="req">*</span></label>
-          <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, your account team, and Project / campaign." />
+          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Project Name]" title="Auto-filled from Launch Date, your account team, and Project / campaign." />
           <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, and Project / campaign.</div>
         </div>
         <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
@@ -1817,7 +1817,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.briefLink) ? <a href={window.flowmateSafeHttpUrl(w.briefLink)} target="_blank" rel="noopener noreferrer">Open brief</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.referenceLink) ? <a href={window.flowmateSafeHttpUrl(w.referenceLink)} target="_blank" rel="noopener noreferrer">Open reference</a> : "-"}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div></div>
               </div>
             </div>
           )}
@@ -1972,19 +1971,17 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   </form>
                 </div>
               </div>
-                <div className="meta-row">
-                  <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "1st Draft"}</div>
-                  <div className="meta-row__val">{w.dueFullLabel || w.dueLabel || "-"}</div>
-                </div>
-              {w.type === "quick" && (
-                <div className="meta-row">
-                  <div className="meta-row__lbl">Launch date</div>
-                  <div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div>
-                </div>
-              )}
               <div className="meta-row">
                 <div className="meta-row__lbl">Created</div>
                 <div className="meta-row__val">{w.createdLabel || "-"}</div>
+              </div>
+              <div className="meta-row">
+                <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "1st Draft"}</div>
+                <div className="meta-row__val">{w.dueFullLabel || w.dueLabel || "-"}</div>
+              </div>
+              <div className="meta-row">
+                <div className="meta-row__lbl">Launch date</div>
+                <div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div>
               </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">AI Tag</div>

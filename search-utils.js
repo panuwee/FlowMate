@@ -43,15 +43,20 @@ function findFlowMateWorkItemById(rows, id) {
   return rows.find((row) => row && row.id === id) || null;
 }
 
-function flowmateDateToDdMmYyyy(dateValue) {
+function flowmateDateToDMmmYyyy(dateValue) {
   if (!dateValue) return "";
   const parts = dateValue.split("-");
   if (parts.length !== 3) return "";
-  return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  const year = parts[0];
+  const monthIndex = Number(parts[1]) - 1;
+  const day = Number(parts[2]);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  if (!Number.isInteger(day) || day < 1 || day > 31 || monthIndex < 0 || monthIndex > 11) return "";
+  return `${day} ${months[monthIndex]} ${year}`;
 }
 
 function buildFlowMateTemplateTitle(input) {
-  const datePart = flowmateDateToDdMmYyyy(input && input.launchDate);
+  const datePart = flowmateDateToDMmmYyyy(input && input.launchDate);
   const functionPart = ((input && input.requesterTeam) || "").trim();
   const projectPart = ((input && input.projectName) || "").trim();
   if (!datePart || !functionPart || !projectPart) return "";
