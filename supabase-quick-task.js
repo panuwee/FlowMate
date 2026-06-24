@@ -294,6 +294,7 @@ const FLOWMATE_TEAM_SETTINGS_FILTERS = [
 ];
 const FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS = [
   { key: "banner", label: "Banner" },
+  { key: "hero-album", label: "Hero Album (Banner x8)" },
   { key: "logo", label: "Logo" },
   { key: "web-reskin", label: "Web Reskin" },
   { key: "new-web", label: "New Web" },

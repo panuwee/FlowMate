@@ -95,7 +95,7 @@ values (
   '#BF6B00',
   'GD/VE',
   'GD/VE',
-  array['banner','logo','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[],
+  array['banner','hero-album','logo','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[],
   '{}'::text[],
   8,
   null,

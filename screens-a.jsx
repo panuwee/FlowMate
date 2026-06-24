@@ -425,6 +425,7 @@ const FLOWMATE_CREATE_DRAFT_KEYS = {
 
 const FLOWMATE_CREATIVE_TYPE_OPTIONS = [
   { key: "banner", label: "Banner", assetType: "static-graphic" },
+  { key: "hero-album", label: "Hero Album (Banner x8)", assetType: "static-graphic" },
   { key: "logo", label: "Logo", assetType: "static-graphic" },
   { key: "web-reskin", label: "Web Reskin", assetType: "static-graphic" },
   { key: "new-web", label: "New Web", assetType: "static-graphic" },

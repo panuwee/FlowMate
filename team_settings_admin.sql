@@ -169,7 +169,7 @@ begin
   )
   returning * into v_leave;
 
-  if lower(v_member.member_code) = any (array['pond','jo','tong','eye','vee']) then
+  if lower(v_member.member_code) = any (array['pond','jo','tong','eye','vee','ploy']) then
     for v_target_work in
       select *
         from public.work_items wi
@@ -299,6 +299,7 @@ declare
   v_next_backup_skills text[];
   v_allowed_skills text[] := array[
     'banner',
+    'hero-album',
     'logo',
     'web-reskin',
     'new-web',
@@ -344,7 +345,7 @@ begin
   select * into v_member
   from public.team_members
   where id = p_team_member_id
-    and lower(member_code) = any (array['pond','jo','tong','eye','vee'])
+    and lower(member_code) = any (array['pond','jo','tong','eye','vee','ploy'])
   for update;
 
   if v_member.id is null then

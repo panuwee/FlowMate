@@ -167,7 +167,7 @@ returns boolean
 language sql
 immutable
 as $$
-  select lower(coalesce(p_member_code, '')) = any (array['pond','jo','tong','eye','vee']);
+  select lower(coalesce(p_member_code, '')) = any (array['pond','jo','tong','eye','vee','ploy']);
 $$;
 
 drop view if exists public.member_workload_v;
@@ -211,7 +211,7 @@ with mapped_skills as (
   cross join lateral unnest(tm.skills) as source(skill)
   cross join lateral unnest(
     case lower(source.skill)
-      when 'static-graphic' then array['banner','logo','web-reskin','new-web','cdn-design','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[]
+      when 'static-graphic' then array['banner','hero-album','logo','web-reskin','new-web','cdn-design','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[]
       when 'general-video' then array['video-standard','video-under-1-min']::text[]
       when 'esport-video' then array['video-standard','video-under-1-min']::text[]
       else array[lower(source.skill)]::text[]
@@ -225,6 +225,15 @@ update public.team_members tm
      where ms.id = tm.id
    ), array['banner']::text[])
  where exists (select 1 from mapped_skills ms where ms.id = tm.id);
+
+update public.team_members tm
+   set skills = (
+     select array_agg(distinct skill order by skill)
+     from unnest(coalesce(tm.skills, '{}'::text[]) || array['hero-album']::text[]) as skill
+   )
+ where lower(tm.member_code) = any (array['pond','jo','tong','eye','ploy'])
+   and 'banner' = any (coalesce(tm.skills, '{}'::text[]))
+   and not ('hero-album' = any (coalesce(tm.skills, '{}'::text[])));
 
 with mapped_backup_skills as (
   select
@@ -321,6 +330,7 @@ as $$
     select case
       when p_asset_type = 'hybrid' then 8::numeric
       when subtype in ('banner', 'logo') then 2::numeric
+      when subtype in ('hero album','hero-album') then 16::numeric
       when subtype in ('web reskin','web-reskin') then 24::numeric
       when subtype in ('new web','new-web') then 24::numeric
       when subtype in ('cdn design','cdn-design') then 1::numeric
@@ -460,7 +470,8 @@ declare
   v_has_eligible   boolean;
   v_allow_backup_pool boolean := false;
   v_required_skill text;
-  v_creative_owner_codes text[] := array['pond','jo','tong','eye','vee'];
+  v_requester_context text := 'ops_marketing';
+  v_creative_owner_codes text[] := array['pond','jo','tong','eye','vee','ploy'];
   v_assignment_start date;
   v_assignment_end date;
   v_working_days integer;
@@ -553,6 +564,7 @@ begin
   v_required_skill := case
     when v_required_skill in (
       'banner',
+      'hero-album',
       'logo',
       'web-reskin',
       'new-web',
@@ -567,6 +579,7 @@ begin
       'video-under-1-min',
       'motion'
     ) then v_required_skill
+    when v_required_skill in ('hero album','hero-album') then 'hero-album'
     when v_required_skill = 'web reskin' then 'web-reskin'
     when v_required_skill = 'new web' then 'new-web'
     when v_required_skill = 'cdn design' then 'cdn-design'
@@ -591,6 +604,22 @@ begin
     when v_det.asset_type = 'motion' then 'motion'
     else 'banner'
   end;
+  select case
+           when lower(coalesce(v_wi.requester_team, '')) in ('esport','esports')
+             or exists (
+               select 1
+               from public.team_members requester_tm
+               where requester_tm.user_id = v_wi.requester_user_id
+                 and (
+                   lower(requester_tm.member_code) = any (array['ben','net','peak','pluem'])
+                   or lower(coalesce(requester_tm.discipline, '')) in ('esport','esports')
+                   or lower(coalesce(requester_tm.discipline_short, '')) in ('esport','esports')
+                 )
+             )
+           then 'esport'
+           else 'ops_marketing'
+         end
+    into v_requester_context;
   v_allow_backup_pool := v_wi.priority = 'urgent' and v_required_skill in ('video-standard','video-under-1-min');
   v_assignment_start := v_today;
   v_assignment_end := greatest(v_today, coalesce(v_wi.due_date, v_today));
@@ -641,6 +670,22 @@ begin
           and wi.status in ('assigned','in_progress','review','blocked')
           and wi.due_date < v_today
       ), 0) as overdue_count,
+      case
+        when v_requester_context = 'esport' and lower(tm.member_code) in ('ploy','vee') then 0
+        when v_requester_context = 'esport' then 1
+        when v_requester_context <> 'esport' and lower(tm.member_code) in ('pond','jo','tong','eye') then 0
+        else 1
+      end as context_rank,
+      case
+        when v_requester_context = 'esport' and lower(tm.member_code) = 'ploy' then 0
+        when v_requester_context = 'esport' and lower(tm.member_code) = 'vee' then 1
+        when v_requester_context <> 'esport' and lower(tm.member_code) = 'pond' and v_required_skill in ('motion','video-standard','video-under-1-min') then 0
+        when v_requester_context <> 'esport' and lower(tm.member_code) = 'jo' then 1
+        when v_requester_context <> 'esport' and lower(tm.member_code) = 'tong' then 2
+        when v_requester_context <> 'esport' and lower(tm.member_code) = 'eye' then 3
+        when v_requester_context <> 'esport' and lower(tm.member_code) = 'pond' then 4
+        else 9
+      end as context_tie_rank,
       case
         when v_required_skill = any (tm.skills)        then 'primary'
         when v_allow_backup_pool
@@ -695,6 +740,8 @@ begin
   from picked
   where pool_rank is not null
   order by pool_rank asc,
+           context_rank asc,
+           context_tie_rank asc,
            remaining desc,
            wip_now asc,
            window_assigned_effort asc,
