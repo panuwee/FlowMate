@@ -276,13 +276,16 @@ drop function if exists public.flowmate_admin_update_team_member(
 drop function if exists public.flowmate_admin_update_team_member(
   uuid, numeric, integer, public.asset_type[], public.asset_type[]
 );
+drop function if exists public.flowmate_admin_update_team_member(
+  uuid, numeric, integer, text[], text[]
+);
 
 create or replace function public.flowmate_admin_update_team_member(
   p_team_member_id uuid,
   p_capacity_per_day numeric,
   p_wip_limit integer default 3,
-  p_skills public.asset_type[] default null,
-  p_backup_skills public.asset_type[] default null
+  p_skills text[] default null,
+  p_backup_skills text[] default null
 )
 returns jsonb
 language plpgsql
@@ -292,8 +295,24 @@ as $$
 declare
   v_actor_id uuid;
   v_member public.team_members%rowtype;
-  v_next_skills public.asset_type[];
-  v_next_backup_skills public.asset_type[];
+  v_next_skills text[];
+  v_next_backup_skills text[];
+  v_allowed_skills text[] := array[
+    'banner',
+    'logo',
+    'web-reskin',
+    'new-web',
+    'cdn-design',
+    'resize',
+    'graphic-pack',
+    'kv-design',
+    'jersey-design',
+    'jersey-in-game',
+    'merchandise-design',
+    'video-standard',
+    'video-under-1-min',
+    'motion'
+  ];
 begin
   v_actor_id := auth.uid();
 
@@ -344,7 +363,7 @@ begin
   if exists (
     select 1
     from unnest(v_next_skills) as selected(skill)
-    where selected.skill <> all (array['static-graphic','general-video','motion','esport-video']::public.asset_type[])
+    where selected.skill <> all (v_allowed_skills)
   ) then
     raise exception 'Unsupported team member skill'
       using errcode = '22023';
@@ -353,7 +372,7 @@ begin
   if exists (
     select 1
     from unnest(v_next_backup_skills) as selected(skill)
-    where selected.skill <> all (array['esport-video']::public.asset_type[])
+    where selected.skill <> all (v_allowed_skills)
   ) then
     raise exception 'Unsupported team member backup skill'
       using errcode = '22023';
@@ -382,8 +401,8 @@ end;
 $$;
 
 revoke all on function public.flowmate_admin_update_team_member(
-  uuid, numeric, integer, public.asset_type[], public.asset_type[]
+  uuid, numeric, integer, text[], text[]
 ) from public, anon, authenticated;
 grant execute on function public.flowmate_admin_update_team_member(
-  uuid, numeric, integer, public.asset_type[], public.asset_type[]
+  uuid, numeric, integer, text[], text[]
 ) to authenticated;

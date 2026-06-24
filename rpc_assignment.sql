@@ -170,15 +170,137 @@ as $$
   select lower(coalesce(p_member_code, '')) = any (array['pond','jo','tong','eye','vee']);
 $$;
 
+drop view if exists public.member_workload_v;
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'team_members'
+      and column_name = 'skills'
+      and udt_name = '_asset_type'
+  ) then
+    alter table public.team_members
+      alter column skills type text[] using skills::text[];
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'team_members'
+      and column_name = 'backup_skills'
+      and udt_name = '_asset_type'
+  ) then
+    alter table public.team_members
+      alter column backup_skills drop default;
+    alter table public.team_members
+      alter column backup_skills type text[] using backup_skills::text[];
+    alter table public.team_members
+      alter column backup_skills set default '{}'::text[];
+  end if;
+end $$;
+
+with mapped_skills as (
+  select
+    tm.id,
+    mapped.skill
+  from public.team_members tm
+  cross join lateral unnest(tm.skills) as source(skill)
+  cross join lateral unnest(
+    case lower(source.skill)
+      when 'static-graphic' then array['banner','logo','web-reskin','new-web','cdn-design','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[]
+      when 'general-video' then array['video-standard','video-under-1-min']::text[]
+      when 'esport-video' then array['video-standard','video-under-1-min']::text[]
+      else array[lower(source.skill)]::text[]
+    end
+  ) as mapped(skill)
+)
+update public.team_members tm
+   set skills = coalesce((
+     select array_agg(distinct ms.skill order by ms.skill)
+     from mapped_skills ms
+     where ms.id = tm.id
+   ), array['banner']::text[])
+ where exists (select 1 from mapped_skills ms where ms.id = tm.id);
+
+with mapped_backup_skills as (
+  select
+    tm.id,
+    mapped.skill
+  from public.team_members tm
+  cross join lateral unnest(coalesce(tm.backup_skills, '{}'::text[])) as source(skill)
+  cross join lateral unnest(
+    case lower(source.skill)
+      when 'esport-video' then array['video-standard','video-under-1-min']::text[]
+      when 'general-video' then array['video-standard','video-under-1-min']::text[]
+      else array[lower(source.skill)]::text[]
+    end
+  ) as mapped(skill)
+)
+update public.team_members tm
+   set backup_skills = coalesce((
+     select array_agg(distinct mbs.skill order by mbs.skill)
+     from mapped_backup_skills mbs
+     where mbs.id = tm.id
+   ), '{}'::text[])
+ where exists (select 1 from mapped_backup_skills mbs where mbs.id = tm.id);
+
 update public.team_members tm
    set backup_skills = (
-     select array(
-       select distinct skill
-       from unnest(coalesce(tm.backup_skills, '{}'::public.asset_type[]) || array['esport-video']::public.asset_type[]) as skill
-     )
+     select array_agg(distinct skill order by skill)
+     from unnest(coalesce(tm.backup_skills, '{}'::text[]) || array['video-standard','video-under-1-min']::text[]) as skill
    )
  where lower(tm.member_code) = 'pond'
-   and not ('esport-video' = any (coalesce(tm.backup_skills, '{}'::public.asset_type[])));
+   and not ('video-standard' = any (coalesce(tm.backup_skills, '{}'::text[])));
+
+create or replace view public.member_workload_v
+with (security_invoker = true) as
+select
+  tm.id as team_member_id,
+  tm.member_code,
+  tm.display_name,
+  tm.discipline_short,
+  tm.skills,
+  tm.backup_skills,
+  tm.availability,
+  tm.capacity_per_day,
+  tm.capacity_override_per_day,
+  case
+    when tm.active = false then 0::numeric
+    when tm.availability = 'leave' then 0::numeric
+    when tm.availability = 'partial' then tm.capacity_override_per_day
+    else tm.capacity_per_day
+  end as effective_capacity_per_day,
+  coalesce(sum(wi.effort_point) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status in ('assigned', 'in_progress', 'review', 'blocked')
+  ), 0) as assigned_effort,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'in_progress'
+      and wi.wip_counted = true
+  ) as current_wip,
+  count(wi.id) filter (
+    where wi.status in ('assigned', 'in_progress', 'review', 'blocked')
+      and wi.due_date < current_date
+  ) as overdue_count,
+  count(wi.id) filter (
+    where wi.status in ('assigned', 'in_progress', 'review')
+      and wi.due_date >= current_date
+      and wi.due_date <= current_date + interval '2 days'
+  ) as due_soon_count,
+  count(wi.id) filter (where wi.status = 'blocked') as blocked_count,
+  count(wi.id) filter (where wi.status = 'review') as review_count,
+  count(wi.id) filter (where wi.work_type = 'quick_task' and wi.status not in ('delivered', 'cancelled')) as quick_task_count
+from public.team_members tm
+left join public.work_items wi on wi.final_owner_member_id = tm.id
+group by tm.id;
+
+revoke all privileges on public.member_workload_v from public, anon, authenticated;
+grant select on public.member_workload_v to authenticated;
 
 drop function if exists public.flowmate_effort_for_subtype(public.asset_type, text);
 
@@ -199,17 +321,17 @@ as $$
     select case
       when p_asset_type = 'hybrid' then 8::numeric
       when subtype in ('banner', 'logo') then 2::numeric
-      when subtype = 'web reskin' then 24::numeric
-      when subtype = 'new web' then 24::numeric
-      when subtype = 'cdn design' then 1::numeric
+      when subtype in ('web reskin','web-reskin') then 24::numeric
+      when subtype in ('new web','new-web') then 24::numeric
+      when subtype in ('cdn design','cdn-design') then 1::numeric
       when subtype = 'resize' then 0.25::numeric
-      when subtype = 'graphic pack' then 0.5::numeric
-      when subtype = 'kv design' then 3::numeric
-      when subtype = 'jersey design' then 2::numeric
-      when subtype = 'jersey in-game' then 1::numeric
-      when subtype = 'merchandise design' then 1::numeric
-      when subtype = 'video standard' then 4::numeric
-      when subtype = 'video under 1 min' then 2::numeric
+      when subtype in ('graphic pack','graphic-pack') then 0.5::numeric
+      when subtype in ('kv design','kv-design') then 3::numeric
+      when subtype in ('jersey design','jersey-design') then 2::numeric
+      when subtype in ('jersey in-game','jersey-in-game') then 1::numeric
+      when subtype in ('merchandise design','merchandise-design') then 1::numeric
+      when subtype in ('video standard','video-standard') then 4::numeric
+      when subtype in ('video under 1 min','video-under-1-min') then 2::numeric
       when subtype = 'motion' then 2::numeric
       when subtype ilike '%simple banner%' or subtype ilike '%ad visual%' then 2::numeric
       when subtype ilike '%standard banner%'
@@ -337,6 +459,7 @@ declare
   v_has_any_skill  boolean;
   v_has_eligible   boolean;
   v_allow_backup_pool boolean := false;
+  v_required_skill text;
   v_creative_owner_codes text[] := array['pond','jo','tong','eye','vee'];
   v_assignment_start date;
   v_assignment_end date;
@@ -426,7 +549,49 @@ begin
   v_effort      := public.flowmate_effort_for_subtype(v_det.asset_type, v_det.asset_subtype, v_det.asset_count);
   v_raw_effort  := v_effort;
   v_was_capped  := false;
-  v_allow_backup_pool := v_det.asset_type = 'esport-video' and v_wi.priority = 'urgent';
+  v_required_skill := lower(trim(coalesce(v_det.asset_subtype, '')));
+  v_required_skill := case
+    when v_required_skill in (
+      'banner',
+      'logo',
+      'web-reskin',
+      'new-web',
+      'cdn-design',
+      'resize',
+      'graphic-pack',
+      'kv-design',
+      'jersey-design',
+      'jersey-in-game',
+      'merchandise-design',
+      'video-standard',
+      'video-under-1-min',
+      'motion'
+    ) then v_required_skill
+    when v_required_skill = 'web reskin' then 'web-reskin'
+    when v_required_skill = 'new web' then 'new-web'
+    when v_required_skill = 'cdn design' then 'cdn-design'
+    when v_required_skill = 'graphic pack' then 'graphic-pack'
+    when v_required_skill = 'kv design' then 'kv-design'
+    when v_required_skill = 'jersey design' then 'jersey-design'
+    when v_required_skill = 'jersey in-game' then 'jersey-in-game'
+    when v_required_skill = 'merchandise design' then 'merchandise-design'
+    when v_required_skill = 'video standard' then 'video-standard'
+    when v_required_skill = 'video under 1 min' then 'video-under-1-min'
+    when v_required_skill ilike '%graphic pack%' then 'graphic-pack'
+    when v_required_skill ilike '%motion%' or v_det.asset_type = 'motion' then 'motion'
+    when v_required_skill ilike '%short-form%'
+      or v_required_skill ilike '%tiktok%'
+      or v_required_skill ilike '%reels%'
+      or v_required_skill ilike '%under 1 min%' then 'video-under-1-min'
+    when v_required_skill ilike '%standard video%'
+      or v_required_skill ilike '%youtube vlog%'
+      or v_required_skill ilike '%highlight reel%'
+      or v_required_skill ilike '%high-retention%' then 'video-standard'
+    when v_det.asset_type in ('general-video','esport-video') then 'video-standard'
+    when v_det.asset_type = 'motion' then 'motion'
+    else 'banner'
+  end;
+  v_allow_backup_pool := v_wi.priority = 'urgent' and v_required_skill in ('video-standard','video-under-1-min');
   v_assignment_start := v_today;
   v_assignment_end := greatest(v_today, coalesce(v_wi.due_date, v_today));
   v_working_days := public.flowmate_count_working_days(v_assignment_start, v_assignment_end);
@@ -477,10 +642,10 @@ begin
           and wi.due_date < v_today
       ), 0) as overdue_count,
       case
-        when v_det.asset_type = any (tm.skills)        then 'primary'
+        when v_required_skill = any (tm.skills)        then 'primary'
         when v_allow_backup_pool
           and (
-            v_det.asset_type = any (coalesce(tm.backup_skills, '{}'::public.asset_type[]))
+            v_required_skill = any (coalesce(tm.backup_skills, '{}'::text[]))
             or lower(tm.member_code) = 'pond'
           ) then 'backup'
         else null
@@ -542,11 +707,11 @@ begin
                   where tm.active = true
                     and lower(tm.member_code) = any (v_creative_owner_codes)
                     and (
-                      v_det.asset_type = any (tm.skills)
+                      v_required_skill = any (tm.skills)
                       or (
                         v_allow_backup_pool
                         and (
-                          v_det.asset_type = any (coalesce(tm.backup_skills, '{}'::public.asset_type[]))
+                          v_required_skill = any (coalesce(tm.backup_skills, '{}'::text[]))
                           or lower(tm.member_code) = 'pond'
                         )
                       )
@@ -572,11 +737,11 @@ begin
        where tm.active = true
          and lower(tm.member_code) = any (v_creative_owner_codes)
          and (
-           v_det.asset_type = any (tm.skills)
+           v_required_skill = any (tm.skills)
            or (
              v_allow_backup_pool
              and (
-               v_det.asset_type = any (coalesce(tm.backup_skills, '{}'::public.asset_type[]))
+               v_required_skill = any (coalesce(tm.backup_skills, '{}'::text[]))
                or lower(tm.member_code) = 'pond'
              )
            )
@@ -603,11 +768,11 @@ begin
   if v_winner_id is not null then
     v_reason := case
       when v_winner_skill = 'backup' then
-        'Auto (urgent fallback): ' || v_det.asset_type::text
+        'Auto (urgent fallback): ' || v_required_skill
         || ' assigned to backup ' || v_winner_name
         || ' by remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
       else
-        'Auto: ' || v_det.asset_type::text
+        'Auto: ' || v_required_skill
         || ' assigned to ' || v_winner_name
         || ' by skill, WIP, and remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
     end;
@@ -656,8 +821,7 @@ begin
 
   -- 5b. Queued -------------------------------------------------------------
   if not v_has_any_skill then
-    v_reason := 'Queued: no team member has the skill required for '
-                || v_det.asset_type::text || '.';
+    v_reason := 'Queued: no team member has the skill required for ' || v_required_skill || '.';
   elsif not v_has_eligible then
     v_reason := 'Queued: all matching members are at WIP limit or unavailable.';
   else

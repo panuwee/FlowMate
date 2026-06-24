@@ -1728,7 +1728,7 @@ function SettingsScreen() {
                     </label>
                   ))}
                 </div>
-                <span className="field__hint">Keep at least one normal skill. Esport video backup is used only for urgent fallback.</span>
+                <span className="field__hint">Select the production types this GD/VE member can own. These skills drive auto assignment.</span>
               </div>
             </div>
             {saveState.status === "error" && <div className="reason-box reason-box--need" style={{ marginTop: 12 }}>{saveState.message}</div>}

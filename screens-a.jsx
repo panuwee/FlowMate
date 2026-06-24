@@ -423,34 +423,30 @@ const FLOWMATE_CREATE_DRAFT_KEYS = {
   creative: "flowmate:create:creativeDraft:v1",
 };
 
-const FLOWMATE_ASSET_SUBTYPE_OPTIONS = {
-  "static-graphic": [
-    "Simple banner / ad visual",
-    "Standard banner / complex social content",
-    "Esport graphic pack - minor",
-    "Esport graphic pack - full set",
-    "Web Assets",
-  ],
-  "general-video": [
-    "Short-form (TikTok / Reels)",
-    "Standard video / YouTube vlog",
-    "High-retention short video",
-  ],
-  motion: [
-    "Short-form motion",
-    "Standard motion graphic",
-    "High-retention short video",
-  ],
-  "esport-video": [
-    "Short-form esport clip",
-    "Promotional esport / highlight reel",
-    "High-retention short video",
-  ],
-};
+const FLOWMATE_CREATIVE_TYPE_OPTIONS = [
+  { key: "banner", label: "Banner", assetType: "static-graphic" },
+  { key: "logo", label: "Logo", assetType: "static-graphic" },
+  { key: "web-reskin", label: "Web Reskin", assetType: "static-graphic" },
+  { key: "new-web", label: "New Web", assetType: "static-graphic" },
+  { key: "cdn-design", label: "CDN Design", assetType: "static-graphic" },
+  { key: "resize", label: "Resize", assetType: "static-graphic" },
+  { key: "graphic-pack", label: "Graphic Pack", assetType: "static-graphic" },
+  { key: "kv-design", label: "KV Design", assetType: "static-graphic" },
+  { key: "jersey-design", label: "Jersey Design", assetType: "static-graphic" },
+  { key: "jersey-in-game", label: "Jersey In-game", assetType: "static-graphic" },
+  { key: "merchandise-design", label: "Merchandise Design", assetType: "static-graphic" },
+  { key: "video-standard", label: "Video Standard", assetType: "general-video" },
+  { key: "video-under-1-min", label: "Video Under 1 Min", assetType: "general-video" },
+  { key: "motion", label: "Motion", assetType: "motion" },
+];
 
-function getDefaultFlowMateAssetSubtype(assetType) {
-  const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
-  return options[0];
+function getFlowMateCreativeTypeOption(typeKey) {
+  return FLOWMATE_CREATIVE_TYPE_OPTIONS.find((option) => option.key === typeKey) || FLOWMATE_CREATIVE_TYPE_OPTIONS[0];
+}
+
+function getFlowMateCreativeTypeLabel(typeKey) {
+  const option = FLOWMATE_CREATIVE_TYPE_OPTIONS.find((item) => item.key === typeKey);
+  return option ? option.label : typeKey;
 }
 
 function subtractFlowMateWorkingDays(dateValue, workingDays) {
@@ -502,13 +498,14 @@ function normalizeFlowMateQuickDraft(draft) {
 
 function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
-  const options = FLOWMATE_ASSET_SUBTYPE_OPTIONS[nextDraft.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
+  const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
     ...nextDraft,
-    assetSubtype: options.includes(nextDraft.assetSubtype) ? nextDraft.assetSubtype : options[0],
+    assetType: creativeType.assetType,
+    assetSubtype: creativeType.key,
     assetCount,
     launchDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
@@ -570,7 +567,7 @@ function getDefaultCreativeDraft() {
     requesterTeam,
     campaignName: "",
     assetType: "static-graphic",
-    assetSubtype: getDefaultFlowMateAssetSubtype("static-graphic"),
+    assetSubtype: FLOWMATE_CREATIVE_TYPE_OPTIONS[0].key,
     assetCount: "1",
     platforms: "Instagram",
     sizeFormat: "1080x1080",
@@ -631,8 +628,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
 
   requireField("requesterTeam", "Requester team is required.");
   requireField("campaignName", "Project / campaign is required.");
-  requireField("assetType", "Asset type is required.");
-  requireField("assetSubtype", "Asset subtype is required.");
+  requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
   requireField("platforms", "Platform is required.");
   requireField("sizeFormat", "Size / format is required.");
@@ -1061,15 +1057,12 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
   );
 }
 function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, errors = {} }) {
-  const assetSubtypeOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[value.assetType] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
-  const selectedAssetSubtype = assetSubtypeOptions.includes(value.assetSubtype)
-    ? value.assetSubtype
-    : assetSubtypeOptions[0];
+  const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const todayDate = getFlowMateTodayDateKey();
   function update(field, next) {
-    if (field === "assetType") {
-      const nextOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[next] || FLOWMATE_ASSET_SUBTYPE_OPTIONS["static-graphic"];
-      onChange({ ...value, assetType: next, assetSubtype: nextOptions[0] });
+    if (field === "assetSubtype") {
+      const nextType = getFlowMateCreativeTypeOption(next);
+      onChange({ ...value, assetType: nextType.assetType, assetSubtype: nextType.key });
       return;
     }
     if (field === "launchDate") {
@@ -1103,20 +1096,10 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
           <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
           {errors.campaignName && <div className="field__error">{errors.campaignName}</div>}
         </div>
-        <div className={`field ${errors.assetType ? "field--error" : ""}`}>
-          <label className="field__label">Asset type <span className="req">*</span></label>
-          <select className="select" value={value.assetType} onChange={e => update("assetType", e.target.value)}>
-            <option value="static-graphic">Static graphic</option>
-            <option value="general-video">General video</option>
-            <option value="motion">Motion</option>
-            <option value="esport-video">Esport video</option>
-          </select>
-          {errors.assetType && <div className="field__error">{errors.assetType}</div>}
-        </div>
         <div className={`field ${errors.assetSubtype ? "field--error" : ""}`}>
-          <label className="field__label">Asset subtype <span className="req">*</span></label>
-          <select className="select" value={selectedAssetSubtype} onChange={e => update("assetSubtype", e.target.value)}>
-            {assetSubtypeOptions.map(option => <option key={option} value={option}>{option}</option>)}
+          <label className="field__label">Type / Skill <span className="req">*</span></label>
+          <select className="select" value={selectedCreativeType.key} onChange={e => update("assetSubtype", e.target.value)}>
+            {FLOWMATE_CREATIVE_TYPE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
           </select>
           {errors.assetSubtype && <div className="field__error">{errors.assetSubtype}</div>}
         </div>
@@ -1768,7 +1751,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             <div className="card">
               <div className="card__head"><span className="card__title">Creative details</span></div>
               <div className="card__body">
-                <div className="meta-row"><div className="meta-row__lbl">Asset type</div><div className="meta-row__val">{ASSET_LABEL[w.assetType] || w.assetType || "-"}{w.subtype && ` - ${w.subtype}`}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Type / Skill</div><div className="meta-row__val">{w.subtype ? getFlowMateCreativeTypeLabel(w.subtype) : (ASSET_LABEL[w.assetType] || w.assetType || "-")}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Asset Count</div><div className="meta-row__val">{w.assetCount || 1}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>

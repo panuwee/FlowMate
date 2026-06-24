@@ -293,14 +293,23 @@ const FLOWMATE_TEAM_SETTINGS_FILTERS = [
   { key: "leave", label: "On leave" },
 ];
 const FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS = [
-  { key: "static-graphic", label: "Static" },
-  { key: "general-video", label: "General video" },
+  { key: "banner", label: "Banner" },
+  { key: "logo", label: "Logo" },
+  { key: "web-reskin", label: "Web Reskin" },
+  { key: "new-web", label: "New Web" },
+  { key: "cdn-design", label: "CDN Design" },
+  { key: "resize", label: "Resize" },
+  { key: "graphic-pack", label: "Graphic Pack" },
+  { key: "kv-design", label: "KV Design" },
+  { key: "jersey-design", label: "Jersey Design" },
+  { key: "jersey-in-game", label: "Jersey In-game" },
+  { key: "merchandise-design", label: "Merchandise Design" },
+  { key: "video-standard", label: "Video Standard" },
+  { key: "video-under-1-min", label: "Video Under 1 Min" },
   { key: "motion", label: "Motion" },
-  { key: "esport-video", label: "Esport video" },
-  { key: "esport-video-backup", label: "Esport video (backup)" },
 ];
-const FLOWMATE_TEAM_SETTINGS_PRIMARY_SKILLS = ["static-graphic", "general-video", "motion", "esport-video"];
-const FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS = ["esport-video-backup"];
+const FLOWMATE_TEAM_SETTINGS_PRIMARY_SKILLS = FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS.map(option => option.key);
+const FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS = [];
 
 function normalizeFlowMateTeamSettingsTeam(member) {
   const raw = String((member && (member.discipline || member.discipline_short)) || "").trim();
@@ -374,9 +383,7 @@ function splitFlowMateTeamSettingsEditableSkills(skills) {
     throw new Error(`Unsupported skill: ${invalid.join(", ")}`);
   }
   const primarySkills = selected.filter(skill => FLOWMATE_TEAM_SETTINGS_PRIMARY_SKILLS.includes(skill));
-  const backupSkills = selected
-    .filter(skill => FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS.includes(skill))
-    .map(skill => skill.replace("-backup", ""));
+  const backupSkills = selected.filter(skill => FLOWMATE_TEAM_SETTINGS_BACKUP_SKILLS.includes(skill));
   if (primarySkills.length === 0) {
     throw new Error("Select at least one normal skill.");
   }
