@@ -256,7 +256,7 @@ function getFlowMateNavCounts(rows, currentUser, members) {
   };
 }
 
-const FLOWMATE_GD_VE_NAMES = ["pond", "joe", "jo", "tong", "eye", "vee"];
+const FLOWMATE_GD_VE_NAMES = ["pond", "joe", "jo", "tong", "eye", "vee", "ploy"];
 
 function isFlowMateGdVeMember(member) {
   const name = String((member && member.name) || (member && member.display_name) || "").toLowerCase();
