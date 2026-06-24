@@ -908,14 +908,31 @@ window.flowmateInitAuth         = flowmateInitAuth;
 window.flowmateSignInWithGoogle = flowmateSignInWithGoogle;
 window.flowmateSignOut          = flowmateSignOut;
 
+// H-14: react to the full set of auth lifecycle events, not just SIGNED_OUT.
+// supabase-js auto-refreshes the access token (autoRefreshToken default), and
+// emits SIGNED_OUT when the refresh token is revoked/expired — so an expired
+// session no longer leaves an authenticated-looking shell whose mutations
+// silently fail. SIGNED_IN handles signing in from another tab.
 try {
   if (window.flowmateSupabase && window.flowmateSupabase.auth
       && typeof window.flowmateSupabase.auth.onAuthStateChange === "function") {
     window.flowmateSupabase.auth.onAuthStateChange(function (event) {
       if (event === "SIGNED_OUT") {
+        var wasSignedIn = Boolean(window.FLOWMATE_CURRENT_USER);
         window.FLOWMATE_CURRENT_USER = null;
-        window.location.reload();
+        // Only reload if we were actually signed in (session expired/revoked).
+        // Avoids a reload loop while already sitting on the login screen.
+        if (wasSignedIn) window.location.reload();
+      } else if (event === "SIGNED_IN") {
+        // Adopt a session created in another tab — but ignore the SIGNED_IN
+        // that fires during this tab's own initial OAuth/init handshake
+        // (guarded by the settled flag set after the first init resolves).
+        if (window.flowmateInitialAuthSettled && !window.FLOWMATE_CURRENT_USER) {
+          window.location.reload();
+        }
       }
+      // TOKEN_REFRESHED / USER_UPDATED: no action — the client keeps the
+      // session current and FLOWMATE_CURRENT_USER stays valid.
     });
   }
 } catch (error) {

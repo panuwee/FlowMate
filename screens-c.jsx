@@ -6,7 +6,7 @@ function exportFlowMateCsvC(filename, columns, rows) {
     const value = typeof column.value === "function" ? column.value(row) : row[column.value];
     return value == null ? "" : value;
   }))]
-    .map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(","))
+    .map(row => row.map(value => window.flowmateCsvCell(value)).join(","))
     .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);

@@ -820,7 +820,7 @@ begin
   v_from_status := v_work.status;
 
   if p_next_status = 'in_progress' and v_from_status = 'assigned' then
-    if v_owner_user_id <> v_actor_id then
+    if v_owner_user_id is null or v_owner_user_id <> v_actor_id then
       raise exception 'Only owner can start this work';
     end if;
     if v_work.final_owner_member_id is not null and v_wip_now >= v_wip_limit then
@@ -835,7 +835,7 @@ begin
     returning * into v_work;
 
   elsif p_next_status = 'review' and v_from_status = 'in_progress' then
-    if v_owner_user_id <> v_actor_id then
+    if v_owner_user_id is null or v_owner_user_id <> v_actor_id then
       raise exception 'Only owner can submit this work for review';
     end if;
 
@@ -882,7 +882,7 @@ begin
     returning * into v_work;
 
   elsif p_next_status = 'blocked' and v_from_status in ('assigned', 'in_progress', 'review') then
-    if v_owner_user_id <> v_actor_id then
+    if v_owner_user_id is null or v_owner_user_id <> v_actor_id then
       raise exception 'Only owner can block this work';
     end if;
 
@@ -901,7 +901,7 @@ begin
 
   -- Unblock paths --------------------------------------------------------
   elsif p_next_status = 'in_progress' and v_from_status = 'blocked' then
-    if v_owner_user_id <> v_actor_id then
+    if v_owner_user_id is null or v_owner_user_id <> v_actor_id then
       raise exception 'Only owner can resume this work';
     end if;
     if v_work.final_owner_member_id is not null and v_wip_now >= v_wip_limit then
@@ -918,7 +918,7 @@ begin
     returning * into v_work;
 
   elsif p_next_status = 'assigned' and v_from_status = 'blocked' then
-    if v_owner_user_id <> v_actor_id then
+    if v_owner_user_id is null or v_owner_user_id <> v_actor_id then
       raise exception 'Only owner can resume this work';
     end if;
 

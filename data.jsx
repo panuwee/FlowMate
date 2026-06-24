@@ -84,16 +84,35 @@ function Avatar({ memberId, size = "" }) {
   return <span className={`avatar ${size}`} style={{ background: m.color }}>{m.initials}</span>;
 }
 
+// H-9: turn an unknown snake/kebab token into a readable Title Case label so
+// new backend statuses/priorities never render blank.
+function flowmatePrettifyToken(token) {
+  if (token == null || token === "") return "";
+  return String(token)
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function StatusBadge({ status }) {
-  return <span className={`badge ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>;
+  // Fall back to a readable label + neutral class for any status not in the
+  // map (e.g. a status added on the backend) instead of rendering blank.
+  const label = STATUS_LABEL[status] || flowmatePrettifyToken(status) || "—";
+  const cls = STATUS_CLASS[status] || "badge--new";
+  return <span className={`badge ${cls}`}>{label}</span>;
 }
 
 function PriorityBadge({ level }) {
-  const label = { urgent: "Urgent", high: "High", normal: "Normal", low: "Low" }[level];
-  return <span className={`prio prio--${level}`}><span className="prio__mark"></span>{label}</span>;
+  const label = { urgent: "Urgent", high: "High", normal: "Normal", low: "Low" }[level]
+    || flowmatePrettifyToken(level) || "—";
+  return <span className={`prio prio--${level || "normal"}`}><span className="prio__mark"></span>{label}</span>;
 }
 
 function DueBadge({ delta, label, status }) {
+  // H-9: undated items (delta null/undefined) must not fall into the
+  // "due soon" branch (null <= 2 is true in JS). Render neutral.
+  if (delta == null) {
+    return <span className="mono muted">{label || "—"}</span>;
+  }
   if (delta < 0) {
     return <span className="badge badge--overdue">{label} · {Math.abs(delta)}d late</span>;
   }
@@ -101,6 +120,15 @@ function DueBadge({ delta, label, status }) {
     return <span className="badge badge--soon">{label} · {delta === 0 ? "today" : `${delta}d`}</span>;
   }
   return <span className="mono muted">{label}</span>;
+}
+
+// H-4: CSV-injection-safe cell. Excel/Sheets treat a cell starting with
+// = + - @ (or tab/CR) as a formula; prefix those with a single quote so
+// user-entered titles/reasons can't execute. Then quote/escape normally.
+function flowmateCsvCell(value) {
+  let s = value == null ? "" : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
 }
 
 function Effort({ value, lg }) {
@@ -138,4 +166,5 @@ Object.assign(window, {
   WORK, WORK_BY_ID,
   STATUS_LABEL, STATUS_CLASS, ASSET_LABEL,
   Avatar, StatusBadge, PriorityBadge, DueBadge, Effort, TypePill, Progress, Source,
+  flowmatePrettifyToken, flowmateCsvCell,
 });

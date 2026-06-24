@@ -62,7 +62,7 @@ function exportRowsCsv(rows) {
     w.dueLabel || "",
   ]);
   const csv = [columns, ...csvRows]
-    .map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","))
+    .map((row) => row.map((value) => window.flowmateCsvCell(value)).join(","))
     .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -402,7 +402,9 @@ function BoardScreen({ onOpen }) {
         await runMutate(completeQuickTask,
                         `${row.id} marked done.`);
       } else if (targetStatus === "cancelled") {
-        const reason = window.prompt("Cancel reason is required");
+        const reason = await window.flowmatePrompt({
+          title: "Cancel work", label: "Cancel reason", multiline: true, required: true,
+        });
         if (!reason) return;
         await runMutate(() => window.cancelFlowMateWorkItem(row, reason),
                         `${row.id} cancelled.`);
@@ -415,17 +417,27 @@ function BoardScreen({ onOpen }) {
     // Creative requests — collect required reason / link based on target.
     const options = {};
     if (targetStatus === "review") {
-      const link = window.prompt("Delivery link is required to submit for review");
+      const link = await window.flowmatePrompt({
+        title: "Submit for review",
+        label: "Delivery link",
+        placeholder: "https://drive.google.com/…",
+        required: true,
+        validate: (value) => (window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."),
+      });
       if (!link) return;
       options.deliveryLink = link;
     }
     if (targetStatus === "blocked") {
-      const reason = window.prompt("Blocked reason is required");
+      const reason = await window.flowmatePrompt({
+        title: "Block work", label: "Blocked reason", multiline: true, required: true,
+      });
       if (!reason) return;
       options.blockedReason = reason;
     }
     if (targetStatus === "cancelled") {
-      const reason = window.prompt("Cancel reason is required");
+      const reason = await window.flowmatePrompt({
+        title: "Cancel work", label: "Cancel reason", multiline: true, required: true,
+      });
       if (!reason) return;
       options.cancelReason = reason;
     }

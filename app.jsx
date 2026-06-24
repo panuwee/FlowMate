@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260624-02";
+const FLOWMATE_APP_VERSION = "v20260624-03";
 
 const NAV = [
   { group: "Personal", items: [
@@ -216,37 +216,50 @@ function App() {
       return;
     }
 
-    // 5s safety timeout — if Supabase is unreachable we fall back to the
-    // Login screen rather than leaving the user staring at a spinner.
-    const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 5000));
+    // H-13: do NOT race the whole init against a hard timeout that commits to
+    // "signed-out" — a slow-but-valid session would then be stuck on the login
+    // screen with its real result discarded. Instead:
+    //  - `decided` flips true when init resolves (the authoritative result).
+    //  - the timeout only shows the login screen PROVISIONALLY while init is
+    //    still in flight (so the user isn't stuck on a spinner).
+    //  - init's resolution always applies, upgrading login -> app if a valid
+    //    session arrives late. It never downgrades a resolved signed-in state.
+    let decided = false;
 
-    Promise.race([
-      Promise.resolve().then(() => window.flowmateInitAuth()).catch((error) => {
+    setTimeout(() => {
+      if (!alive || decided) return;
+      setAuthState({ status: "signed-out", user: null });
+    }, 5000);
+
+    Promise.resolve()
+      .then(() => window.flowmateInitAuth())
+      .catch((error) => {
         console.error("[FlowMate Auth] init failed:", error);
         return null;
-      }),
-      timeoutPromise,
-    ]).then((realUser) => {
-      if (!alive) return;
-      if (realUser) {
-        setAuthState({ status: "signed-in", user: realUser });
+      })
+      .then((realUser) => {
+        decided = true;
+        window.flowmateInitialAuthSettled = true;
+        if (!alive) return;
+        if (realUser) {
+          setAuthState({ status: "signed-in", user: realUser });
 
-        // Restore the post-login route (set by flowmateSignInWithGoogle
-        // before redirect). The OAuth callback lands us on the origin
-        // with the access_token hash that Supabase has just cleared, so
-        // without this step we'd never reach #my-work.
-        let postLoginHash = null;
-        try { postLoginHash = sessionStorage.getItem("flowmate:postLoginHash"); } catch (e) {}
-        if (postLoginHash) {
-          try { sessionStorage.removeItem("flowmate:postLoginHash"); } catch (e) {}
-          if (TITLE_MAP[postLoginHash]) {
-            window.location.hash = postLoginHash;
+          // Restore the post-login route (set by flowmateSignInWithGoogle
+          // before redirect). The OAuth callback lands us on the origin
+          // with the access_token hash that Supabase has just cleared, so
+          // without this step we'd never reach #my-work.
+          let postLoginHash = null;
+          try { postLoginHash = sessionStorage.getItem("flowmate:postLoginHash"); } catch (e) {}
+          if (postLoginHash) {
+            try { sessionStorage.removeItem("flowmate:postLoginHash"); } catch (e) {}
+            if (TITLE_MAP[postLoginHash]) {
+              window.location.hash = postLoginHash;
+            }
           }
+        } else {
+          setAuthState({ status: "signed-out", user: null });
         }
-      } else {
-        setAuthState({ status: "signed-out", user: null });
-      }
-    });
+      });
 
     return () => { alive = false; };
   }, []);
@@ -360,6 +373,7 @@ function App() {
 
   return (
     <div className="app">
+      <FlowMatePromptHost />
       <div className="app__brand">
         <img src="garena/logo_graphic.png" alt="Garena" />
         <span className="app__brand-name">FlowMate</span>
@@ -1733,5 +1747,117 @@ const WHA_STYLES = `
   .wha-ink-draw { stroke-dashoffset: 0; }
 }
 `;
+
+// ===========================================================================
+// H-11: promise-based prompt modal — replaces window.prompt (which blocks the
+// UI, can't validate, and is suppressed by some enterprise browsers).
+//   const value = await window.flowmatePrompt({ title, label, required, ... });
+//   -> resolves the trimmed string, or null if cancelled.
+// A single <FlowMatePromptHost/> mounted in App renders the dialog.
+// ===========================================================================
+window.flowmatePrompt = function (opts) {
+  return new Promise(function (resolve) {
+    window.__flowmatePromptResolve = resolve;
+    try {
+      window.dispatchEvent(new CustomEvent("flowmate:prompt-open", { detail: opts || {} }));
+    } catch (e) {
+      // If events are unavailable for any reason, fail closed (cancel).
+      window.__flowmatePromptResolve = null;
+      resolve(null);
+    }
+  });
+};
+
+function FlowMatePromptHost() {
+  const [req, setReq] = useStateApp(null);
+  const [value, setValue] = useStateApp("");
+  const [error, setError] = useStateApp("");
+
+  useEffectApp(() => {
+    function onOpen(e) {
+      const opts = e.detail || {};
+      setReq(opts);
+      setValue(opts.defaultValue || "");
+      setError("");
+    }
+    window.addEventListener("flowmate:prompt-open", onOpen);
+    return () => window.removeEventListener("flowmate:prompt-open", onOpen);
+  }, []);
+
+  useEffectApp(() => {
+    if (!req) return;
+    function onKey(e) { if (e.key === "Escape") settle(null); }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [req]);
+
+  if (!req) return null;
+
+  function settle(result) {
+    const resolve = window.__flowmatePromptResolve;
+    window.__flowmatePromptResolve = null;
+    setReq(null);
+    setValue("");
+    setError("");
+    if (resolve) resolve(result);
+  }
+
+  function onSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const trimmed = (value || "").trim();
+    if (req.required && !trimmed) { setError("This field is required."); return; }
+    if (typeof req.validate === "function") {
+      const v = req.validate(trimmed);
+      if (v) { setError(v); return; }
+    }
+    settle(trimmed);
+  }
+
+  const overlayStyle = {
+    position: "fixed", inset: 0, zIndex: 1000,
+    background: "rgba(20, 24, 32, 0.45)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    padding: 20,
+  };
+  const modalStyle = {
+    background: "var(--garena-white, #fff)", color: "var(--garena-iron, #2b2f36)",
+    width: "100%", maxWidth: 460, borderRadius: 10,
+    boxShadow: "0 18px 48px rgba(0,0,0,0.28)",
+    padding: 20, boxSizing: "border-box",
+    fontFamily: "inherit",
+  };
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", marginTop: 6,
+    padding: "9px 11px", fontSize: 14,
+    border: "1px solid var(--garena-light-grey, #d8dce3)", borderRadius: 6,
+    fontFamily: "inherit",
+  };
+
+  return (
+    <div style={overlayStyle} onMouseDown={() => settle(null)}>
+      <div role="dialog" aria-modal="true" style={modalStyle} onMouseDown={(e) => e.stopPropagation()}>
+        <form onSubmit={onSubmit}>
+          {req.title ? <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>{req.title}</div> : null}
+          {req.label ? (
+            <label style={{ fontSize: 13, fontWeight: 600, display: "block" }}>
+              {req.label}{req.required ? <span style={{ color: "var(--garena-red, #c0504d)" }}> *</span> : null}
+            </label>
+          ) : null}
+          {req.multiline
+            ? <textarea autoFocus rows={4} style={inputStyle} value={value} placeholder={req.placeholder || ""}
+                onChange={(e) => { setValue(e.target.value); if (error) setError(""); }} />
+            : <input autoFocus type="text" style={inputStyle} value={value} placeholder={req.placeholder || ""}
+                onChange={(e) => { setValue(e.target.value); if (error) setError(""); }} />}
+          {req.note ? <div style={{ fontSize: 12, color: "var(--garena-grey, #6b7280)", marginTop: 8, lineHeight: 1.5 }}>{req.note}</div> : null}
+          {error ? <div style={{ fontSize: 12.5, color: "var(--garena-red, #c0504d)", marginTop: 8 }}>{error}</div> : null}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <button type="button" className="btn btn--ghost" onClick={() => settle(null)}>Cancel</button>
+            <button type="submit" className="btn btn--primary">{req.confirmText || "OK"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

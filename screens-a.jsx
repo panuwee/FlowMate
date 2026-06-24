@@ -96,7 +96,10 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   }
 
   async function handleCommentEdit(comment) {
-    const nextBody = window.prompt("Edit comment", comment.body);
+    const nextBody = await window.flowmatePrompt({
+      title: "Edit comment", label: "Comment", defaultValue: comment.body,
+      multiline: true, required: true,
+    });
     if (nextBody == null) return;
 
     try {
@@ -127,19 +130,30 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
     const options = {};
     if (nextStatus === "review") {
-      const deliveryLink = window.prompt("Delivery link is required");
+      const deliveryLink = await window.flowmatePrompt({
+        title: "Submit for review",
+        label: "Delivery link",
+        placeholder: "https://drive.google.com/…",
+        required: true,
+        validate: (value) => (window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."),
+      });
       if (!deliveryLink) return;
       options.deliveryLink = deliveryLink;
     }
 
     if (nextStatus === "blocked") {
-      const blockedReason = window.prompt("Blocked reason is required");
+      const blockedReason = await window.flowmatePrompt({
+        title: "Block work", label: "Blocked reason", multiline: true, required: true,
+      });
       if (!blockedReason) return;
       options.blockedReason = blockedReason;
     }
 
     try {
-      await window.transitionFlowMateCreativeStatus(work.id, nextStatus, options);
+      // H-12: single transition entry point (routes admins to the admin RPC,
+      // everyone else to the owner/requester-guarded RPC) so the same action
+      // behaves identically from My Work, Detail, and Board.
+      await window.transitionFlowMateWorkStatus(work.id, nextStatus, options);
       await loadMyWorkRows();
       setLoadState({ status: "live", message: `${work.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}` });
     } catch (error) {
@@ -1266,6 +1280,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   // cannot change hook order.
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
+  // H-10: bumping this re-renders the detail after a mutation refreshes the
+  // selected item, so status/owner/buttons reflect the DB without a manual reload.
+  const [detailRefreshTick, setDetailRefreshTick] = useState(0);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkDescription, setLinkDescription] = useState("");
   const [commentBody, setCommentBody] = useState("");
@@ -1404,6 +1421,24 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     });
   }
 
+  // H-10: re-fetch the open work item after a mutation and swap it into the
+  // selected-item global, then bump the tick so the detail re-renders with
+  // fresh status/owner/flags. The list refresh event is dispatched by the RPC
+  // wrappers; this keeps the detail view itself in sync.
+  async function refreshDetailItem() {
+    if (!w || !window.loadFlowMateListRows) return;
+    try {
+      const rows = await window.loadFlowMateListRows();
+      const updated = (rows || []).find((row) => row.id === w.id);
+      if (updated) {
+        window.flowmateSelectedWorkItem = updated;
+        setDetailRefreshTick((tick) => tick + 1);
+      }
+    } catch (error) {
+      console.warn("[FlowMate Detail] refresh after mutation failed:", error && error.message);
+    }
+  }
+
   async function runCreativeTransition(nextStatus) {
     if (!w.isSupabaseRow) {
       setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so status changes are disabled." });
@@ -1411,19 +1446,28 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
     const options = {};
     if (nextStatus === "review") {
-      const link = window.prompt("Delivery link is required");
+      const link = await window.flowmatePrompt({
+        title: "Submit for review",
+        label: "Delivery link",
+        placeholder: "https://drive.google.com/…",
+        required: true,
+        validate: (value) => (window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."),
+      });
       if (!link) return;
       options.deliveryLink = link;
     }
     if (nextStatus === "blocked") {
-      const reason = window.prompt("Blocked reason is required");
+      const reason = await window.flowmatePrompt({
+        title: "Block work", label: "Blocked reason", multiline: true, required: true,
+      });
       if (!reason) return;
       options.blockedReason = reason;
     }
     setPending(true);
     try {
       await window.transitionFlowMateWorkStatus(w.id, nextStatus, options);
-      setActionMsg({ tone: "ok", text: `${w.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}. Refresh the list to see the update.` });
+      await refreshDetailItem();
+      setActionMsg({ tone: "ok", text: `${w.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}.` });
     } catch (error) {
       setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Status change failed.") });
     } finally {
@@ -1610,7 +1654,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     try {
       const data = await window.rerunFlowMateAssignment(w.id);
       const r = data && data.result;
-      setActionMsg({ tone: "ok", text: `Rerun result: ${r || "ok"} — refresh to see latest.` });
+      await refreshDetailItem();
+      setActionMsg({ tone: "ok", text: `Rerun result: ${r || "ok"}.` });
     } catch (error) {
       setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Rerun failed.") });
     } finally {
@@ -1623,11 +1668,14 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so cancel is disabled." });
       return;
     }
-    const reason = window.prompt("Cancel reason is required");
+    const reason = await window.flowmatePrompt({
+      title: "Cancel work", label: "Cancel reason", multiline: true, required: true,
+    });
     if (!reason) return;
     setPending(true);
     try {
       await window.cancelFlowMateWorkItem(w, reason);
+      await refreshDetailItem();
       setActionMsg({ tone: "ok", text: `${w.id} cancelled.` });
     } catch (error) {
       setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Cancel failed.") });
@@ -1642,10 +1690,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so admin archive is disabled." });
       return;
     }
-    const reason = window.prompt("Archive reason is required. This is a soft archive, not a permanent delete.");
+    const reason = await window.flowmatePrompt({
+      title: "Archive work item",
+      label: "Archive reason",
+      note: "Soft archive, not a permanent delete. History, comments, links, watchers, and audit stay preserved.",
+      multiline: true,
+      required: true,
+      confirmText: "Archive",
+    });
     if (!reason || !reason.trim()) return;
-    const confirmed = window.confirm(`Archive ${w.id}? This is a soft archive, not a permanent delete. History, comments, links, watchers, and audit stay preserved.`);
-    if (!confirmed) return;
     setPending(true);
     try {
       await window.adminArchiveFlowMateWorkItem(w.id, reason);
@@ -1716,6 +1769,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               setPending(true);
               try {
                 const data = await window.recheckFlowMateBrief(w.id);
+                await refreshDetailItem();
                 setActionMsg({ tone: "ok", text: `Brief rechecked: ${data && data.result || "ok"}.` });
               } catch (error) {
                 setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Recheck failed.") });

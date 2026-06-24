@@ -128,7 +128,10 @@ create table if not exists public.work_items (
   requester_team text,
   assignee_user_id uuid references public.users(id) on update cascade,
   assignee_other_name text,
-  final_owner_member_id uuid references public.team_members(id),
+  -- H-8: on member delete, unset the owner (item becomes reassignable by an
+  -- admin) instead of NO ACTION, which would block the delete or strand the
+  -- item. Transition RPCs deny owner-only actions when the owner is null.
+  final_owner_member_id uuid references public.team_members(id) on delete set null,
   status public.work_status not null default 'new',
   priority public.priority_level not null default 'normal',
   urgent_reason text,
@@ -458,6 +461,14 @@ alter table public.capacity_overrides enable row level security;
 -- - Reads require a real Supabase Auth session mapped to an active public.users row.
 -- - Signed-out anon requests must not see application data.
 -- - Writes normally go through security-definer RPCs that resolve auth.uid().
+--
+-- H-3 (read visibility — DELIBERATE): FlowMate is a shared team board. Every
+-- active, whitelisted member is meant to see all work items, comments, events,
+-- and team data (List / Board / Central Queue / Workload all depend on this).
+-- So read policies intentionally gate on is_active_app_user() only, NOT on
+-- per-row participation. There is no per-item confidentiality by design. If
+-- private work items are ever required, these SELECT policies (and the
+-- comments policy below) must be scoped to participants/watchers/admins.
 
 drop policy if exists "active users can read users" on public.users;
 create policy "active users can read users"
@@ -509,8 +520,11 @@ create policy "active users can read events"
 on public.work_item_events for select
 using (public.is_active_app_user());
 
+-- Named for what it actually does: all active users can read all comments
+-- (shared-board model, see H-3 note above) — not per-participant.
 drop policy if exists "participants can read comments" on public.comments;
-create policy "participants can read comments"
+drop policy if exists "active users can read comments" on public.comments;
+create policy "active users can read comments"
 on public.comments for select
 using (public.is_active_app_user());
 
