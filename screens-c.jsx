@@ -10,28 +10,6 @@ function exportFlowMateCsvC(filename, columns, rows) {
   window.flowmateDownloadCsv(filename, headerLabels, dataRows);
 }
 
-function flowMateRangeLabelC(range) {
-  if (range === "last-week") return "Last week";
-  if (range === "next-week") return "Next week";
-  if (range === "last-4-weeks") return "Last 4 weeks";
-  if (range === "all-active") return "All active";
-  return "This week";
-}
-
-function flowMateRowInRangeC(row, range) {
-  if (!row || row.dueDelta == null || Number.isNaN(Number(row.dueDelta))) return range === "all-active";
-  const delta = Number(row.dueDelta);
-  if (range === "last-week") return delta >= -7 && delta < 0;
-  if (range === "next-week") return delta >= 7 && delta <= 13;
-  if (range === "last-4-weeks") return delta >= -28 && delta <= 0;
-  if (range === "all-active") return true;
-  return delta >= 0 && delta <= 6;
-}
-
-function flowMateFilterRowsByRangeC(rows, range) {
-  return (rows || []).filter(row => flowMateRowInRangeC(row, range));
-}
-
 function flowMateMonthOptionsC() {
   if (window.getFlowMateMonthOptions) return window.getFlowMateMonthOptions();
   return Array.from({ length: 24 }, (_, index) => {
@@ -63,9 +41,41 @@ function flowMateMonthLabelC(monthKey) {
 function flowMateFilterRowsByMonthC(rows, monthKey, fields) {
   if (window.filterFlowMateRowsByMonth) return window.filterFlowMateRowsByMonth(rows, monthKey, fields);
   return (rows || []).filter(row => {
-    const rawDate = row && (row.calendarDate || row.dueDate);
+    const fieldList = fields && fields.length ? fields : ["calendarDate", "dueDate"];
+    const rawDate = row && fieldList.map(field => row[field]).find(Boolean);
     return rawDate && String(rawDate).slice(0, 7) === monthKey;
   });
+}
+
+function flowMateWorkingDaysInMonthC(monthKey) {
+  const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
+  if (!match) return 0;
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  let workingDays = 0;
+  for (let day = 1; day <= lastDay; day += 1) {
+    const dow = new Date(Date.UTC(year, monthIndex, day)).getUTCDay();
+    if (dow >= 1 && dow <= 5) workingDays += 1;
+  }
+  return workingDays;
+}
+
+function flowMateWorkloadMonthOptionsC(rows) {
+  const monthKeys = new Set();
+  (rows || []).forEach(row => {
+    (row.allItems || row.items || []).forEach(item => {
+      ["calendarDate", "dueDate", "launchDate"].forEach(field => {
+        const value = item && item[field];
+        if (value && /^\d{4}-\d{2}/.test(String(value))) {
+          monthKeys.add(String(value).slice(0, 7));
+        }
+      });
+    });
+  });
+  return Array.from(monthKeys)
+    .sort()
+    .map(key => ({ key, label: flowMateMonthLabelC(key) }));
 }
 
 /* ============================================================
@@ -103,8 +113,7 @@ function WorkloadScreen({ onOpen }) {
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
   const [workloadTab, setWorkloadTab] = useStateC("standard");
   const [teamFilter, setTeamFilter] = useStateC("All");
-  const [workloadRange, setWorkloadRange] = useStateC("this-week");
-  const [workloadExportMonth, setWorkloadExportMonth] = useStateC(flowMateDefaultExportMonthC());
+  const [workloadMonth, setWorkloadMonth] = useStateC(flowMateDefaultExportMonthC());
 
   useEffectC(() => {
     let alive = true;
@@ -151,27 +160,38 @@ function WorkloadScreen({ onOpen }) {
     items: r.items || [],
     allItems: r.allItems || r.items || [],
   }));
-  const rangeRows = safeRows.map(r => {
-    const rangeItems = flowMateFilterRowsByRangeC(r.allItems, workloadRange);
-    const activeOpenCreative = (r.allItems || r.items || []).filter(item =>
+  const workloadMonthOptions = flowMateWorkloadMonthOptionsC(safeRows);
+  const effectiveWorkloadMonthOptions = workloadMonthOptions.length
+    ? workloadMonthOptions
+    : [{ key: workloadMonth, label: flowMateMonthLabelC(workloadMonth) }];
+  const selectedWorkloadMonth = effectiveWorkloadMonthOptions.some(option => option.key === workloadMonth)
+    ? workloadMonth
+    : effectiveWorkloadMonthOptions[0].key;
+  const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth);
+  const monthRows = safeRows.map(r => {
+    const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
+    const monthOpenCreative = monthItems.filter(item =>
       item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
     );
-    const activeAssignedEffort = activeOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
-    const assignedEffort = activeOpenCreative.length ? activeAssignedEffort : Number(r.assignedEffort || 0);
+    const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
+    const capacityWindow = r.effectiveCap * selectedMonthWorkingDays;
     return {
       ...r,
-      statusCounts: r.statusCounts,
+      statusCounts: window.getFlowMateWorkloadStatusCounts
+        ? window.getFlowMateWorkloadStatusCounts(monthItems)
+        : r.statusCounts,
       assignedEffort,
-      available: Math.max(0, r.window - assignedEffort),
-      due_soon: rangeItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
-      overdue: rangeItems.filter(item => item.overdue || (item.dueDelta != null && item.dueDelta < 0)).length,
-      blocked: rangeItems.filter(item => item.status === "blocked").length,
-      review: rangeItems.filter(item => item.status === "review").length,
-      quick: rangeItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
-      items: activeOpenCreative.length ? activeOpenCreative : (r.items || []),
+      window: capacityWindow,
+      available: Math.max(0, capacityWindow - assignedEffort),
+      due_soon: monthItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
+      overdue: monthItems.filter(item => item.overdue || (item.dueDelta != null && item.dueDelta < 0)).length,
+      blocked: monthItems.filter(item => item.status === "blocked").length,
+      review: monthItems.filter(item => item.status === "review").length,
+      quick: monthItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
+      items: monthOpenCreative,
     };
   });
-  const tabRows = rangeRows.filter(r => {
+  const tabRows = monthRows.filter(r => {
     const isGdVe = window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(r.m) : false;
     return workloadTab === "gdve" ? isGdVe : !isGdVe;
   });
@@ -202,14 +222,14 @@ function WorkloadScreen({ onOpen }) {
 
   function exportWorkloadRows() {
     const exportRows = visibleRows.map(row => {
-      const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], workloadExportMonth, ["calendarDate", "dueDate"]);
+      const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
       const monthOpenCreative = monthItems.filter(item =>
         item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
       );
       const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
       return {
         ...row,
-        exportMonthLabel: flowMateMonthLabelC(workloadExportMonth),
+        exportMonthLabel: flowMateMonthLabelC(selectedWorkloadMonth),
         statusCounts: window.getFlowMateWorkloadStatusCounts
           ? window.getFlowMateWorkloadStatusCounts(monthItems)
           : row.statusCounts,
@@ -224,7 +244,7 @@ function WorkloadScreen({ onOpen }) {
       };
     });
     exportFlowMateCsvC(
-      `flowmate-workload-${workloadExportMonth}-${new Date().toISOString().slice(0, 10)}.csv`,
+      `flowmate-workload-${selectedWorkloadMonth}-${new Date().toISOString().slice(0, 10)}.csv`,
       [
         { label: "Export month", value: "exportMonthLabel" },
         { label: "Member", value: row => row.m.name },
@@ -248,23 +268,18 @@ function WorkloadScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Workload</h1>
-          <div className="page__sub">Per-member effort across the next 5 working days - {loadState.message}</div>
+          <div className="page__sub">Per-member effort for {flowMateMonthLabelC(selectedWorkloadMonth)} ({selectedMonthWorkingDays} working days) - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <select className="select" value={workloadRange} onChange={event => setWorkloadRange(event.target.value)} style={{ width: 160, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}>
-            <option value="this-week">This week</option>
-            <option value="next-week">Next week</option>
-            <option value="all-active">All active</option>
-          </select>
           <select
             className="select"
-            value={workloadExportMonth}
-            onChange={event => setWorkloadExportMonth(event.target.value)}
+            value={selectedWorkloadMonth}
+            onChange={event => setWorkloadMonth(event.target.value)}
             data-testid="flowmate-workload-export-month"
-            aria-label="Workload export month"
+            aria-label="Workload month"
             style={{ width: 132, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}
           >
-            {flowMateMonthOptionsC().map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+            {effectiveWorkloadMonthOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
           </select>
           <button className="btn btn--secondary" onClick={exportWorkloadRows}><Icon name="download" /> Export</button>
         </div>
@@ -330,7 +345,7 @@ function WorkloadScreen({ onOpen }) {
       ) : (
         <>
           <div className="stat-strip" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-            <div className="stat"><div className="stat__num mono">{totals.capacity}</div><div className="stat__lbl">Total capacity (pt)</div><div className="stat__delta">across {visibleRows.length} members - 5 working days</div></div>
+            <div className="stat"><div className="stat__num mono">{totals.capacity}</div><div className="stat__lbl">Total capacity (pt)</div><div className="stat__delta">across {visibleRows.length} members - {selectedMonthWorkingDays} working days</div></div>
             <div className="stat stat--info"><div className="stat__num mono">{totals.assigned}</div><div className="stat__lbl">Assigned effort</div></div>
             <div className="stat stat--ok"><div className="stat__num mono">{totals.available}</div><div className="stat__lbl">Available</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{totals.queued}</div><div className="stat__lbl">Queued effort</div></div>
@@ -347,7 +362,7 @@ function WorkloadScreen({ onOpen }) {
               <th>Availability</th>
               <th>Cap / day</th>
               <th>Assigned effort</th>
-              <th style={{ width: 200 }}>Load (5d)</th>
+              <th style={{ width: 200 }}>Load ({selectedMonthWorkingDays}wd)</th>
               <th>WIP</th>
               <th>Due soon</th>
               <th>Overdue</th>
@@ -451,7 +466,7 @@ function WorkloadScreen({ onOpen }) {
         </>
       )}
 
-      <Source>{loadState.status === "live" ? "Supabase member_workload_v" : "No local fallback data"} - {flowMateRangeLabelC(workloadRange)} - {TODAY}</Source>
+      <Source>{loadState.status === "live" ? "Supabase member_workload_v" : "No local fallback data"} - {flowMateMonthLabelC(selectedWorkloadMonth)} - {TODAY}</Source>
     </div>
   );
 }
