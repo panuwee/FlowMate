@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260624-03";
+const FLOWMATE_APP_VERSION = "v20260624-04";
 
 const NAV = [
   { group: "Personal", items: [
@@ -52,6 +52,10 @@ function App() {
     return h && TITLE_MAP[h.split("/")[0]] ? h.split("/")[0] : "my-work";
   });
   const [focusId, setFocusId] = useStateApp(null);
+  // O-6: `searchInput` is bound to the box (instant typing); `searchQuery` is
+  // the debounced value passed to the screens. This stops every keystroke from
+  // re-rendering the whole signed-in tree and re-running the O(n) grouping.
+  const [searchInput, setSearchInput] = useStateApp("");
   const [searchQuery, setSearchQuery] = useStateApp("");
   const [navCounts, setNavCounts] = useStateApp({});
   const [notifications, setNotifications] = useStateApp([]);
@@ -205,6 +209,13 @@ function App() {
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // O-6: debounce search input -> searchQuery (200ms) so the screens only
+  // re-filter once the user pauses typing.
+  useEffectApp(() => {
+    const id = setTimeout(() => setSearchQuery(searchInput), 200);
+    return () => clearTimeout(id);
+  }, [searchInput]);
 
   // Initialise Supabase Auth in the background. If a Google session exists,
   // upgrade the topbar to "signed-in". Never blocks initial render so a
@@ -384,8 +395,8 @@ function App() {
         <div className="searchbar">
           <Icon name="search" size={14} />
           <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search by ID, title, campaign, requester, assignee..."
           />
         </div>

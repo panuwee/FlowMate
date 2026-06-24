@@ -625,12 +625,15 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
           <button className="btn btn--secondary" onClick={async () => {
             const targets = queued.filter(w => w.isSupabaseRow && w.status === "queued" && !w.needsSplit);
             if (!targets.length) { window.alert("Nothing to rerun."); return; }
+            let failed = 0;
             for (const w of targets) {
               try {
                 await window.rerunFlowMateAssignment(w.id);
-              } catch (error) { console.error("[FlowMate Queue] rerun failed for", w.id, error); }
+              } catch (error) { failed += 1; console.error("[FlowMate Queue] rerun failed for", w.id, error); }
             }
-            window.location.reload();
+            // O-4: rerunFlowMateAssignment dispatches a live refresh per call;
+            // no full-page reload needed. Surface any failures.
+            if (failed > 0) window.alert(`${failed} of ${targets.length} reruns failed. Check the console.`);
           }}>
             <Icon name="rerun" /> Rerun all
           </button>
@@ -696,7 +699,7 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
                 <div style={{ display: "inline-flex", gap: 4 }}>
                   {w.status === "queued" && !w.needsSplit && w.isSupabaseRow && (
                     <button className="btn btn--xs btn--secondary" onClick={async () => {
-                      try { await window.rerunFlowMateAssignment(w.id); window.location.reload(); }
+                      try { await window.rerunFlowMateAssignment(w.id); }
                       catch (error) { window.alert(window.flowmateUserError(error, "Rerun failed.")); }
                     }}>
                       <Icon name="rerun" size={11} /> Rerun

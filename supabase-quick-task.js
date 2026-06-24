@@ -578,6 +578,11 @@ async function rerunFlowMateAssignment(displayId) {
     p_display_id: displayId,
   });
   if (error) throw error;
+  // O-4: trigger a live refresh instead of callers doing window.location.reload().
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "rerun_assignment" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
   return data;
 }
 window.rerunFlowMateAssignment = rerunFlowMateAssignment;
@@ -590,6 +595,11 @@ async function recheckFlowMateBrief(displayId) {
     p_display_id: displayId,
   });
   if (error) throw error;
+  // O-4: trigger a live refresh instead of callers doing window.location.reload().
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "recheck_brief" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
   return data;
 }
 window.recheckFlowMateBrief = recheckFlowMateBrief;

@@ -174,9 +174,13 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0)));
   const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned","in_progress","review"].includes(w.status)));
   const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)));
-  const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueToday.includes(w) && !dueSoon.includes(w));
-  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueToday.includes(w) && !dueSoon.includes(w));
-  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueToday.includes(w) && !dueSoon.includes(w));
+  // O-6: membership via id-Sets instead of Array.includes(object) inside a
+  // filter (which was O(n²) over the grouped lists).
+  const dueTodayIds = new Set(dueToday.map(w => w.id));
+  const dueSoonIds = new Set(dueSoon.map(w => w.id));
+  const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
+  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
+  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
   const blocked = mine.filter(w => w.status === "blocked" && !w.overdue);
   const activeGroupIds = new Set([...overdue, ...dueToday, ...dueSoon, ...inProgress, ...assigned, ...review, ...blocked].map(w => w.id));
   const quick = mine.filter(w => w.type === "quick" && !activeGroupIds.has(w.id));

@@ -104,11 +104,40 @@ function stopFlowMateRealtime() {
 }
 
 function attachFlowMateLiveRefresh(refreshFn, options = {}) {
-  const intervalMs = options.intervalMs || FLOWMATE_REFRESH_POLL_MS;
+  // O-2/O-3: self-scheduling poller that
+  //  - pauses entirely while the tab is hidden (no background polling storm),
+  //  - refreshes immediately when the tab regains focus,
+  //  - backs off exponentially (up to 8x) when a refresh fails, resetting on
+  //    success, so a backend outage doesn't turn into a fixed retry storm.
+  // Event-driven refreshes (mutations / realtime via flowmate:refresh-request)
+  // still fire immediately regardless of the timer.
+  const baseMs = options.intervalMs || FLOWMATE_REFRESH_POLL_MS;
+  const maxMs = baseMs * 8;
   let running = false;
   let queued = false;
+  let stopped = false;
+  let timer = null;
+  let delay = baseMs;
+
+  function schedule() {
+    if (stopped) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(tick, delay);
+  }
+
+  async function tick() {
+    timer = null;
+    // Don't poll a hidden/background tab — just wait for it to become visible.
+    if (typeof document !== "undefined" && document.hidden) {
+      schedule();
+      return;
+    }
+    await runRefresh();
+    schedule();
+  }
 
   async function runRefresh() {
+    if (stopped) return;
     if (running) {
       queued = true;
       return;
@@ -116,6 +145,10 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
     running = true;
     try {
       await refreshFn();
+      delay = baseMs;
+    } catch (error) {
+      delay = Math.min(delay * 2, maxMs);
+      console.warn("[FlowMate LiveRefresh] refresh failed; backing off to", delay, "ms:", error && error.message);
     } finally {
       running = false;
       if (queued) {
@@ -125,11 +158,26 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
     }
   }
 
+  function onVisibility() {
+    if (typeof document !== "undefined" && !document.hidden) {
+      delay = baseMs;
+      runRefresh();
+    }
+  }
+
   window.addEventListener("flowmate:refresh-request", runRefresh);
-  const intervalId = setInterval(runRefresh, intervalMs);
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", onVisibility);
+  }
+  schedule();
+
   return () => {
+    stopped = true;
     window.removeEventListener("flowmate:refresh-request", runRefresh);
-    clearInterval(intervalId);
+    if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+      document.removeEventListener("visibilitychange", onVisibility);
+    }
+    if (timer) clearTimeout(timer);
   };
 }
 
@@ -189,6 +237,22 @@ function flowmateDueDelta(dateValue) {
   return Math.round((dueUtc - todayUtc) / 86400000);
 }
 
+// O-5: prefer the deduped latest_assignment_run_v view (one row per work item)
+// over transferring the entire assignment_runs history. Falls back to the raw
+// table if the view isn't deployed yet, so frontend/SQL upload order is safe.
+async function loadFlowMateLatestAssignmentRuns() {
+  let res = await window.flowmateSupabase
+    .from("latest_assignment_run_v")
+    .select("work_item_id,ran_at");
+  if (res.error) {
+    res = await window.flowmateSupabase
+      .from("assignment_runs")
+      .select("work_item_id,ran_at")
+      .order("ran_at", { ascending: false });
+  }
+  return res;
+}
+
 async function loadFlowMateListRows() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -198,6 +262,9 @@ async function loadFlowMateListRows() {
     window.flowmateSupabase
       .from("work_items")
       .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
+      // O-5: exclude archived items at the DB instead of fetching then dropping
+      // them client-side. (List/Board/Queue/My Work never show archived rows.)
+      .is("archived_at", null)
       .order("due_date", { ascending: true }),
     window.flowmateSupabase
       .from("work_item_flags_v")
@@ -230,10 +297,7 @@ async function loadFlowMateListRows() {
       .select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at")
       .is("removed_at", null)
       .order("created_at", { ascending: true }),
-    window.flowmateSupabase
-      .from("assignment_runs")
-      .select("work_item_id,ran_at")
-      .order("ran_at", { ascending: false }),
+    loadFlowMateLatestAssignmentRuns(),
   ]);
 
   const firstError =
