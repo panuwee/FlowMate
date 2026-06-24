@@ -523,6 +523,7 @@ function normalizeFlowMateCreativeDraft(draft) {
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
     ...nextDraft,
+    requesterTeam: getDefaultRequesterTeam(),
     assetType: creativeType.assetType,
     assetSubtype: creativeType.key,
     assetCount,
@@ -645,7 +646,6 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     return errors;
   }
 
-  requireField("requesterTeam", "Requester team is required.");
   requireField("campaignName", "Project / campaign is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
@@ -937,7 +937,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           )}
           {mode === "quick"
             ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />
-            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />}
+            : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} errors={validationErrors} />}
         </div>
       </div>
 
@@ -1075,7 +1075,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
     </div>
   );
 }
-function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, errors = {} }) {
+function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const todayDate = getFlowMateTodayDateKey();
   function update(field, next) {
@@ -1100,15 +1100,8 @@ function CreativeRequestForm({ value, onChange, requesterTeamOptions = TEAMS, er
       <div className="form-grid">
         <div className="field field--full">
           <label className="field__label">Title <span className="req">*</span></label>
-          <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
-        </div>
-        <div className={`field ${errors.requesterTeam ? "field--error" : ""}`}>
-          <label className="field__label">Requester Team / Function <span className="req">*</span></label>
-          <select className="select" value={value.requesterTeam} onChange={e => update("requesterTeam", e.target.value)}>
-            {requesterTeamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
-          </select>
-          {errors.requesterTeam && <div className="field__error">{errors.requesterTeam}</div>}
+          <input className="input" value={value.title} readOnly placeholder="[DD-MM-YYYY][Function][Project Name]" title="Auto-filled from Launch Date, your account team, and Project / campaign." />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, and Project / campaign.</div>
         </div>
         <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
           <label className="field__label">Project / campaign <span className="req">*</span></label>

@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260624-06";
+const FLOWMATE_APP_VERSION = "v20260624-08";
 
 const NAV = [
   { group: "Personal", items: [

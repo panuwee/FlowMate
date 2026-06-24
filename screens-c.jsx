@@ -153,15 +153,14 @@ function WorkloadScreen({ onOpen }) {
   }));
   const rangeRows = safeRows.map(r => {
     const rangeItems = flowMateFilterRowsByRangeC(r.allItems, workloadRange);
-    const rangeOpenCreative = rangeItems.filter(item =>
+    const activeOpenCreative = (r.allItems || r.items || []).filter(item =>
       item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
     );
-    const assignedEffort = rangeOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
+    const activeAssignedEffort = activeOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
+    const assignedEffort = activeOpenCreative.length ? activeAssignedEffort : Number(r.assignedEffort || 0);
     return {
       ...r,
-      statusCounts: window.getFlowMateWorkloadStatusCounts
-        ? window.getFlowMateWorkloadStatusCounts(rangeItems)
-        : r.statusCounts,
+      statusCounts: r.statusCounts,
       assignedEffort,
       available: Math.max(0, r.window - assignedEffort),
       due_soon: rangeItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
@@ -169,7 +168,7 @@ function WorkloadScreen({ onOpen }) {
       blocked: rangeItems.filter(item => item.status === "blocked").length,
       review: rangeItems.filter(item => item.status === "review").length,
       quick: rangeItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
-      items: rangeOpenCreative,
+      items: activeOpenCreative.length ? activeOpenCreative : (r.items || []),
     };
   });
   const tabRows = rangeRows.filter(r => {

@@ -839,15 +839,22 @@ button:disabled {
 .gantt__scale,
 .gantt__lane {
   display: grid;
+  width: calc(var(--gantt-days, 62) * 30px);
   min-width: calc(var(--gantt-days, 62) * 30px);
+  box-sizing: border-box;
 }
 .gantt__timeline-head {
   position: relative;
+  width: calc(var(--gantt-days, 62) * 30px);
   min-width: calc(var(--gantt-days, 62) * 30px);
+  box-sizing: border-box;
+  background-color: var(--garena-white);
 }
 .gantt__month-scale {
   display: grid;
+  width: calc(var(--gantt-days, 62) * 30px);
   min-width: calc(var(--gantt-days, 62) * 30px);
+  box-sizing: border-box;
   border-bottom: var(--border-hairline);
   background: #FFFFFF;
 }
@@ -856,7 +863,9 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
+  border-left: var(--border-hairline);
   border-right: var(--border-hairline);
+  background-color: var(--garena-white);
   color: var(--garena-black);
   font-size: 11px;
   font-weight: var(--weight-bold);
@@ -936,13 +945,15 @@ button:disabled {
   grid-auto-rows: 24px;
   gap: 4px 0;
   padding: 8px 0;
+  background-color: var(--garena-white);
   background-image: repeating-linear-gradient(
     to right,
     transparent 0,
-    transparent calc((100% / var(--gantt-days, 31)) - 1px),
-    var(--garena-light-grey) calc((100% / var(--gantt-days, 31)) - 1px),
-    var(--garena-light-grey) calc(100% / var(--gantt-days, 31))
+    transparent calc((100% / var(--gantt-days, 62)) - 1px),
+    var(--garena-light-grey) calc((100% / var(--gantt-days, 62)) - 1px),
+    var(--garena-light-grey) calc(100% / var(--gantt-days, 62))
   );
+  background-size: calc(100% / var(--gantt-days, 62)) 100%;
 }
 .gantt__today-line {
   position: absolute;
