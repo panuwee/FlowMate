@@ -101,8 +101,8 @@ create table if not exists public.team_members (
   color text not null default '#2E546D',
   discipline text not null,
   discipline_short text not null,
-  skills public.asset_type[] not null,
-  backup_skills public.asset_type[] not null default '{}',
+  skills text[] not null,
+  backup_skills text[] not null default '{}',
   capacity_per_day numeric(5,2) not null default 8 check (capacity_per_day >= 0 and capacity_per_day <= 24),
   capacity_override_per_day numeric(5,2) check (capacity_override_per_day is null or (capacity_override_per_day >= 0 and capacity_override_per_day <= 24)),
   wip_limit integer not null default 3 check (wip_limit >= 0 and wip_limit <= 20),
@@ -569,12 +569,16 @@ with check (
 
 grant usage on schema public to anon, authenticated;
 grant select on all tables in schema public to anon, authenticated;
-grant insert, update, delete on public.work_items to anon, authenticated;
-grant insert, update, delete on public.creative_request_details to anon, authenticated;
-grant insert, update on public.comments to anon, authenticated;
-grant insert, update, delete on public.checklist_items to anon, authenticated;
+-- CR-1: Writes go EXCLUSIVELY through SECURITY DEFINER RPCs. Those functions
+-- run as the function owner and bypass table-level grants, so direct
+-- INSERT/UPDATE/DELETE are intentionally NOT granted to anon/authenticated.
+-- Granting direct DML here would let any signed-in user PATCH work_items
+-- (status, effort_point, final_owner_member_id, review_round, wip_counted)
+-- straight through PostgREST, bypassing the status machine, assignment
+-- engine, and WIP/effort integrity guards. Do NOT re-add these grants.
+-- (If a DB was already deployed with the old grants, run
+--  supabase/phase1_security_fixes.sql once to revoke them.)
 grant update on public.notifications to anon, authenticated;
-grant insert on public.capacity_overrides to anon, authenticated;
 
 revoke all privileges on public.member_workload_v from public, anon, authenticated;
 revoke all privileges on public.work_item_flags_v from public, anon, authenticated;

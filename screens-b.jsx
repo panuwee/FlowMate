@@ -115,7 +115,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
         if (!alive) return;
         console.error("[FlowMate List] Supabase load failed:", error);
         setSourceRows([]);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -275,8 +275,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
                 <td><StatusBadge status={w.status} /></td>
                 <td>
                   {w.assignee ? (
-                    <span className="row" style={{ gap: 6 }}><Avatar memberId={w.assignee} /> <span>{MEMBERS_BY_ID[w.assignee].name}</span></span>
-                  ) : <span className="muted">Unassigned</span>}
+                    <span className="row" style={{ gap: 6 }}><Avatar memberId={w.assignee} /> <span>{(MEMBERS_BY_ID[w.assignee] && MEMBERS_BY_ID[w.assignee].name) || w.assigneeOtherName || "Unassigned"}</span></span>
+                  ) : <span className="muted">{w.assigneeOtherName || "Unassigned"}</span>}
                 </td>
                 <td><div style={{ fontSize: 12 }}>{w.requester || "-"}</div><div className="muted" style={{ fontSize: 11 }}>{w.requesterTeam}</div></td>
                 <td><span className="muted" style={{ fontSize: 12 }}>{ASSET_LABEL[w.assetType] || "-"}</span></td>
@@ -334,7 +334,7 @@ function BoardScreen({ onOpen }) {
       if (!isAlive()) return;
       console.error("[FlowMate Board] Supabase load failed:", error);
       setSourceRows([]);
-      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+      setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
     }
   }
 
@@ -444,7 +444,7 @@ function BoardScreen({ onOpen }) {
       setFlash({ tone: "ok", text: successText });
     } catch (error) {
       console.error("[FlowMate Board] transition failed:", error);
-      setFlash({ tone: "bad", text: error.message || "Transition rejected by backend." });
+      setFlash({ tone: "bad", text: window.flowmateUserError(error, "Transition rejected by backend.") });
     } finally {
       setBusy(false);
     }
@@ -583,7 +583,7 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
         if (!alive) return;
         console.error("[FlowMate Queue] Supabase load failed:", error);
         setSourceRows([]);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -685,7 +685,7 @@ function QueueGroup({ title, items, hint, onOpen, tone }) {
                   {w.status === "queued" && !w.needsSplit && w.isSupabaseRow && (
                     <button className="btn btn--xs btn--secondary" onClick={async () => {
                       try { await window.rerunFlowMateAssignment(w.id); window.location.reload(); }
-                      catch (error) { window.alert(error.message || "Rerun failed."); }
+                      catch (error) { window.alert(window.flowmateUserError(error, "Rerun failed.")); }
                     }}>
                       <Icon name="rerun" size={11} /> Rerun
                     </button>
@@ -724,7 +724,7 @@ function AdminWhitelistScreen() {
     } catch (error) {
       console.error("[FlowMate Admin] Whitelist load failed:", error);
       setRows([]);
-      setLoadState({ status: "error", message: error.message || "Whitelist RPC failed." });
+      setLoadState({ status: "error", message: window.flowmateUserError(error, "Whitelist RPC failed.") });
     }
   }
 
@@ -757,7 +757,7 @@ function AdminWhitelistScreen() {
       await loadWhitelist();
     } catch (error) {
       console.error("[FlowMate Admin] Whitelist save failed:", error);
-      setLoadState({ status: "error", message: error.message || "Whitelist RPC failed." });
+      setLoadState({ status: "error", message: window.flowmateUserError(error, "Whitelist RPC failed.") });
     } finally {
       setPending(false);
     }
@@ -778,7 +778,7 @@ function AdminWhitelistScreen() {
       await loadWhitelist();
     } catch (error) {
       console.error("[FlowMate Admin] Whitelist deactivate failed:", error);
-      setLoadState({ status: "error", message: error.message || "Whitelist RPC failed." });
+      setLoadState({ status: "error", message: window.flowmateUserError(error, "Whitelist RPC failed.") });
     } finally {
       setPending(false);
     }

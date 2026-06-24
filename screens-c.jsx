@@ -137,7 +137,7 @@ function WorkloadScreen({ onOpen }) {
         console.error("[FlowMate Workload] Supabase load failed:", error);
         setRows([]);
         setQueuedEffort(0);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -502,7 +502,7 @@ function KpiScreen() {
         if (!alive) return;
         console.error("[FlowMate KPI] Supabase load failed:", error);
         setRows([]);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -865,7 +865,7 @@ function TeamGanttScreen({ onOpen }) {
         if (!alive) return;
         console.error("[FlowMate Gantt] Supabase load failed:", error);
         setSourceRows([]);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -1078,7 +1078,7 @@ function CalendarScreen({ onOpen }) {
     } catch (error) {
       console.error("[FlowMate Calendar] Supabase load failed:", error);
       setSourceRows([]);
-      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+      setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
     }
   }
 
@@ -1103,7 +1103,7 @@ function CalendarScreen({ onOpen }) {
         if (!alive) return;
         console.error("[FlowMate Calendar] Supabase load failed:", error);
         setSourceRows([]);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -1166,7 +1166,7 @@ function CalendarScreen({ onOpen }) {
       setLeaveForm({ startDate: todayKey, endDate: todayKey, startHalf: "am", endHalf: "pm", reason: "" });
     } catch (error) {
       console.error("[FlowMate Calendar] Leave request failed:", error);
-      setLeaveState({ status: "error", message: error.message || "Leave request failed." });
+      setLeaveState({ status: "error", message: window.flowmateUserError(error, "Leave request failed.") });
     }
   }
 
@@ -1489,7 +1489,7 @@ function SettingsScreen() {
     } catch (error) {
       console.error("[FlowMate Settings] Supabase load failed:", error);
       setMembers([]);
-      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+      setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
     }
   }
 
@@ -1513,7 +1513,7 @@ function SettingsScreen() {
         if (!alive) return;
         console.error("[FlowMate Settings] Supabase load failed:", error);
         setMembers([]);
-        setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+        setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
 
@@ -1586,7 +1586,7 @@ function SettingsScreen() {
       setSaveState({ status: "idle", message: "" });
     } catch (error) {
       console.error("[FlowMate Settings] Admin member update failed:", error);
-      setSaveState({ status: "error", message: error.message || "Team member update failed." });
+      setSaveState({ status: "error", message: window.flowmateUserError(error, "Team member update failed.") });
     }
   }
 

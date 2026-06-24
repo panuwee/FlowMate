@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260624-01";
+const FLOWMATE_APP_VERSION = "v20260624-02";
 
 const NAV = [
   { group: "Personal", items: [
@@ -106,7 +106,7 @@ function App() {
     } catch (error) {
       console.error("[FlowMate Notifications] Load failed:", error);
       setNotifications([]);
-      setNotificationLoadState({ status: "error", message: error.message || "Notification load failed." });
+      setNotificationLoadState({ status: "error", message: window.flowmateUserError(error, "Notification load failed.") });
       return [];
     }
   }
@@ -122,7 +122,7 @@ function App() {
       )));
     } catch (error) {
       console.error("[FlowMate Notifications] Mark read failed:", error);
-      setNotificationLoadState({ status: "error", message: error.message || "Mark read failed." });
+      setNotificationLoadState({ status: "error", message: window.flowmateUserError(error, "Mark read failed.") });
     } finally {
       setMarkingNotificationId(null);
     }
@@ -138,7 +138,7 @@ function App() {
       refreshNotifications({ showLoading: false });
     } catch (error) {
       console.error("[FlowMate Notifications] Mark all read failed:", error);
-      setNotificationLoadState({ status: "error", message: error.message || "Mark all read failed." });
+      setNotificationLoadState({ status: "error", message: window.flowmateUserError(error, "Mark all read failed.") });
     } finally {
       setIsMarkingAllNotifications(false);
     }
@@ -152,7 +152,7 @@ function App() {
       await refreshNotifications({ showLoading: false });
     } catch (error) {
       console.error("[FlowMate Notifications] Dismiss read failed:", error);
-      setNotificationLoadState({ status: "error", message: error.message || "Clear read failed." });
+      setNotificationLoadState({ status: "error", message: window.flowmateUserError(error, "Clear read failed.") });
     } finally {
       setIsDismissingReadNotifications(false);
     }
@@ -191,7 +191,7 @@ function App() {
       setIsNotificationCenterOpen(false);
     } catch (error) {
       console.error("[FlowMate Notifications] Open detail failed:", error);
-      setNotificationLoadState({ status: "error", message: error.message || "Open notification failed." });
+      setNotificationLoadState({ status: "error", message: window.flowmateUserError(error, "Open notification failed.") });
     }
   }
 
@@ -259,7 +259,7 @@ function App() {
       // the button stays in its "Redirecting…" state until navigation.
     } catch (error) {
       console.error("[FlowMate Auth] sign-in failed:", error);
-      window.alert("Sign-in failed: " + (error.message || "unknown error"));
+      window.alert("Sign-in failed: " + window.flowmateUserError(error, "unknown error"));
       setIsSigningIn(false);
     }
   }
@@ -722,7 +722,7 @@ function GlobalLeaveRequestModal({ onClose }) {
       onClose();
     } catch (error) {
       console.error("[FlowMate Create] Leave request failed:", error);
-      setLeaveState({ status: "error", message: error.message || "Leave request failed." });
+      setLeaveState({ status: "error", message: window.flowmateUserError(error, "Leave request failed.") });
     }
   }
 

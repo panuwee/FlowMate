@@ -477,6 +477,14 @@ declare
   v_working_days integer;
   v_snapshot       jsonb;
 begin
+  -- CR-4: Serialize the whole assignment decision. Without this, two
+  -- concurrent submits each lock only their own work_item row, then read the
+  -- same candidate's capacity/WIP without seeing the other's uncommitted
+  -- assignment -- so both can pick the same owner and breach wip_limit /
+  -- remaining capacity. The owner pool is tiny, so a single transaction-scoped
+  -- advisory lock (auto-released at commit/rollback) is the simplest correct fix.
+  perform pg_advisory_xact_lock(hashtext('flowmate_assignment_engine'));
+
   select * into v_wi  from public.work_items where id = p_work_item_id for update;
   if v_wi.id is null then raise exception 'Work item not found'; end if;
   if v_wi.work_type <> 'creative_request' then

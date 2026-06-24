@@ -466,6 +466,26 @@ describe("MVP 1.1 create form draft saving", () => {
 
     expect(draftSource).not.toMatch(/password|token|api[_-]?key|authorization|secret/i);
   });
+
+  it("defaults and clamps create form dates to today so stale drafts cannot submit past dates", () => {
+    const quickFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"), createScreenJsx.indexOf("function CreativeRequestForm"));
+    const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
+
+    expect(createScreenJsx).toContain("function getFlowMateTodayDateKey()");
+    expect(createScreenJsx).toContain("function clampFlowMateDateToToday(dateValue)");
+    expect(createScreenJsx).toContain("function getFlowMateDraftDateForLaunchDate(launchDate)");
+    expect(createScreenJsx).toContain("function normalizeFlowMateQuickDraft(draft)");
+    expect(createScreenJsx).toContain("readFlowMateCreateDraft(\"quick\", getDefaultQuickDraft()))");
+    expect(createScreenJsx).toContain("normalizeFlowMateQuickDraft(readFlowMateCreateDraft");
+    expect(createScreenJsx).not.toContain('dueDate: "2026-05-18"');
+    expect(createScreenJsx).not.toContain('launchDate: "2026-05-25"');
+    expect(createScreenJsx).not.toContain('subtractFlowMateWorkingDays("2026-05-25", 5)');
+    expect(quickFormSource).toContain("const todayDate = getFlowMateTodayDateKey()");
+    expect(quickFormSource).toContain("min={todayDate}");
+    expect(creativeFormSource).toContain("const todayDate = getFlowMateTodayDateKey()");
+    expect(creativeFormSource).toContain("min={todayDate}");
+    expect(creativeFormSource).toContain("dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate)");
+  });
 });
 
 describe("quick task Other assignee SQL support", () => {
@@ -474,10 +494,12 @@ describe("quick task Other assignee SQL support", () => {
     const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
     const indexHtml = readFileSync(join(process.cwd(), "github", "index.html"), "utf8");
 
-    expect(appJsx).toContain('const FLOWMATE_APP_VERSION = "v20260609-01";');
+    // Version-agnostic: the deploy stamp changes on every cache-bust, so
+    // assert the shape, not a specific value.
+    expect(appJsx).toMatch(/const FLOWMATE_APP_VERSION = "v\d{8}-\d+";/);
     expect(appJsx).toContain('<span className="app__brand-version">{FLOWMATE_APP_VERSION}</span>');
     expect(appCss).toContain(".app__brand-version");
-    expect(indexHtml).toContain("v=20260609-01");
+    expect(indexHtml).toMatch(/v=\d{8}-\d+/);
   });
 
   it("schema and RPC store Other assignee names without trusting client actor ids", () => {
@@ -534,10 +556,14 @@ describe("quick task Other assignee SQL support", () => {
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"), createScreenJsx.indexOf("function CreativeRequestForm"));
 
-    expect(createScreenJsx).toContain("subtractFlowMateWorkingDays(value.launchDate, 5)");
-    expect(createScreenJsx).toContain("const shouldAutoFillDraftDate = !value.dueDate || value.dueDate === previousAutoDraftDate");
+    expect(createScreenJsx).toContain("function subtractFlowMateWorkingDays");
+    expect(createScreenJsx).toContain("dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate)");
+    expect(createScreenJsx).not.toContain("const shouldAutoFillDraftDate = !value.dueDate || value.dueDate === previousAutoDraftDate");
     expect(createScreenJsx).toContain('requireField("dueDate", "1st Draft is required.")');
     expect(creativeFormSource).toContain("1st Draft");
+    expect(creativeFormSource).toContain("readOnly");
+    expect(creativeFormSource).toContain("disabled");
+    expect(creativeFormSource).toContain("Generated from Launch Date minus 5 working days.");
     expect(creativeFormSource).not.toContain("Due date");
     expect(quickTaskFormSource).toContain("1st Review / Draft");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
@@ -561,16 +587,42 @@ describe("quick task Other assignee SQL support", () => {
     expect(assignmentSql).toContain("nullif(trim(coalesce(p_brief_note,'')), '')");
   });
 
-  it("creative request asset subtype options are filtered by the selected asset type", () => {
+  it("creative request uses the agreed Type / Skill picker instead of asset type and subtype fields", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
 
-    expect(createScreenJsx).toContain("const FLOWMATE_ASSET_SUBTYPE_OPTIONS =");
-    expect(creativeFormSource).toContain("const assetSubtypeOptions = FLOWMATE_ASSET_SUBTYPE_OPTIONS[value.assetType]");
-    expect(creativeFormSource).toContain('if (field === "assetType")');
-    expect(creativeFormSource).toContain("assetSubtype: nextOptions[0]");
-    expect(creativeFormSource).toContain("assetSubtypeOptions.map");
-    expect(creativeFormSource).not.toContain("<option>Simple banner / ad visual</option>");
+    expect(createScreenJsx).toContain("const FLOWMATE_CREATIVE_TYPE_OPTIONS =");
+    expect(createScreenJsx).toContain('key: "banner", label: "Banner", assetType: "static-graphic"');
+    expect(createScreenJsx).toContain('key: "hero-album", label: "Hero Album (Banner x8)", assetType: "static-graphic"');
+    expect(createScreenJsx).toContain('key: "video-under-1-min", label: "Video Under 1 Min", assetType: "general-video"');
+    expect(createScreenJsx).toContain('key: "jersey-in-game", label: "Jersey In-game", assetType: "static-graphic"');
+    expect(creativeFormSource).toContain("Type / Skill");
+    expect(creativeFormSource).toContain("FLOWMATE_CREATIVE_TYPE_OPTIONS.map");
+    expect(creativeFormSource).toContain("getFlowMateCreativeTypeOption(next)");
+    expect(creativeFormSource).not.toContain("Asset type");
+    expect(creativeFormSource).not.toContain("Asset subtype");
+  });
+
+  it("creative request captures Asset Count and sends it to the assignment RPC", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+    const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
+    const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
+
+    expect(createScreenJsx).toContain("assetCount: \"1\"");
+    expect(createScreenJsx).toContain("\"assetCount\"");
+    expect(createScreenJsx).toContain('requirePositiveInteger("assetCount", "Asset Count must be at least 1.")');
+    expect(creativeFormSource).toContain("Asset Count");
+    expect(creativeFormSource).toContain('type="number"');
+    expect(creativeFormSource).toContain("min=\"1\"");
+    expect(quickTaskJs).toContain("p_asset_count:      Number(input.assetCount || 1)");
+    expect(listDataJs).toContain("asset_count");
+    expect(listDataJs).toContain("assetCount: details.asset_count || 1");
+    expect(schemaSql).toContain("asset_count integer not null default 1");
+    expect(assignmentSql).toContain("p_asset_count integer default 1");
+    expect(assignmentSql).toContain("greatest(1, coalesce(p_asset_count, 1))");
   });
 
   it("removes Hybrid from the Creative Request asset type picker", () => {
@@ -855,7 +907,7 @@ describe("full assignee roster", () => {
   const assigneeCodes = [
     "gear", "panu", "big", "mark", "po", "aof", "folk", "mac", "no", "may",
     "boss", "mag", "real", "pointer", "pond", "jo", "tong", "eye", "vee",
-    "pluem", "net", "ben", "peak",
+    "ploy", "pluem", "net", "ben", "peak",
   ];
 
   it("seeds every assignee as a team member", () => {
@@ -922,7 +974,7 @@ describe("full assignee roster", () => {
     for (const name of [
       "Gear", "Panu", "Big", "Mark", "Po", "Aof", "Folk", "Mac", "No", "May",
       "Boss", "Mag", "Real", "Pointer", "Pond", "Joe", "Tong", "Eye", "Vee",
-      "Pluem", "Net", "Ben", "Peak",
+      "Ploy", "Pluem", "Net", "Ben", "Peak",
     ]) {
       expect(createScreenJsx).toContain(`name: "${name}"`);
     }
@@ -1016,6 +1068,7 @@ describe("requester function sync", () => {
     ["fco.krittidech@garena.com", "tong", "GD/VE"],
     ["fco.janyarat@garena.com", "eye", "GD/VE"],
     ["fco.thanadon@garena.com", "vee", "GD/VE"],
+    ["fco.thanyaporn@garena.com", "ploy", "GD/VE"],
     ["napol.a@garena.com", "pluem", "Esport"],
     ["fco.piyapat@garena.com", "net", "Esport"],
     ["fco.kittipoj@garena.com", "ben", "Esport"],
@@ -1121,12 +1174,13 @@ describe("UAT-007 incomplete creative brief persistence", () => {
   it("assignment eligibility diagnostics select member_code when checking leave overlap", () => {
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const diagnosticBase = assignmentSql.slice(
-      assignmentSql.indexOf("select exists (\n    with base as ("),
+      assignmentSql.indexOf("select exists (\n    with base_raw as ("),
       assignmentSql.indexOf(") into v_has_eligible;"),
     );
 
     expect(diagnosticBase).toContain("tm.member_code");
-    expect(diagnosticBase).toContain("public.flowmate_is_gdve_member_code(b.member_code)");
+    expect(diagnosticBase).toContain("generate_series(v_assignment_start, v_assignment_end, interval '1 day')");
+    expect(diagnosticBase).toContain("leave_capacity_loss");
     expect(diagnosticBase).not.toMatch(/select\s+tm\.id,\s+tm\.skills,\s+tm\.backup_skills,\s+tm\.availability/i);
   });
 });
@@ -1447,14 +1501,18 @@ describe("MVP 1.2 collaboration/admin backend SQL", () => {
     expect(adminSql).toContain("and p_next_status in ('delivered', 'cancelled') then");
   });
 
-  it("checks creative capacity per due date instead of multiplying by a date window", () => {
+  it("checks creative capacity across working days when effort is larger than one day", () => {
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
 
-    expect(assignmentSql).toContain("coalesce(wi.due_date, v_today) = coalesce(v_wi.due_date, v_today)");
-    expect(assignmentSql).toContain("b.effective_cap as window_cap");
-    expect(assignmentSql).toContain("(b.effective_cap - b.assigned_effort_until_due) as remaining");
-    expect(assignmentSql).toContain("over capacity on the due date");
-    expect(assignmentSql).not.toContain("effective_cap * v_working_days");
+    expect(assignmentSql).toContain("v_assignment_start date");
+    expect(assignmentSql).toContain("v_assignment_end date");
+    expect(assignmentSql).toContain("v_working_days := public.flowmate_count_working_days(v_assignment_start, v_assignment_end)");
+    expect(assignmentSql).toContain("effective_cap * v_working_days");
+    expect(assignmentSql).toContain("window_assigned_effort");
+    expect(assignmentSql).toContain("coalesce(wi.due_date, v_today) between v_assignment_start and v_assignment_end");
+    expect(assignmentSql).toContain("over capacity before the 1st Draft date");
+    expect(assignmentSql).not.toContain("v_effort      := least(v_raw_effort, 8)");
+    expect(assignmentSql).not.toContain("v_was_capped  := v_raw_effort > 8");
   });
 });
 
@@ -1491,7 +1549,7 @@ describe("MVP 1.2 AI Tag backend and detail UI", () => {
     const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
-    expect(indexHtml).toContain("supabase-ai-tags.js?v=20260609-01");
+    expect(indexHtml).toMatch(/supabase-ai-tags\.js\?v=\d{8}-\d+/);
     expect(helperJs).toContain("async function loadFlowMateAiTags");
     expect(helperJs).toContain("async function addFlowMateAiTag");
     expect(helperJs).toContain("async function removeFlowMateAiTag");
@@ -1502,9 +1560,13 @@ describe("MVP 1.2 AI Tag backend and detail UI", () => {
     expect(detailSource).toContain("const [detailAiTags, setDetailAiTags]");
     expect(detailSource).toContain("window.loadFlowMateAiTags({ displayId: w.id })");
     expect(detailSource).toContain("function addAiTag()");
+    expect(detailSource).toContain('const tag = "AI";');
+    expect(detailSource).toContain("normalizedTag === \"ai\"");
+    expect(detailSource).not.toContain("window.prompt(\"AI tag\")");
     expect(detailSource).toContain("function removeAiTag(tag)");
     expect(detailSource).toContain("AI Tag");
     expect(detailSource).toContain("Add AI Tag");
+    expect(detailSource).toContain("Remove tag");
     expect(detailSource.indexOf('<div className="meta-row__lbl">Created</div>')).toBeLessThan(
       detailSource.indexOf('<div className="meta-row__lbl">AI Tag</div>'),
     );
@@ -1682,11 +1744,21 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(ganttSource).toContain("function TeamGanttScreen({ onOpen })");
     expect(ganttSource).toContain("data-testid=\"flowmate-team-gantt-route\"");
     expect(ganttSource).toContain("data-testid=\"flowmate-team-gantt-chart\"");
+    expect(ganttSource).toContain("Trello Power-Up Lite");
+    expect(ganttSource).toContain("todayOffset");
+    expect(ganttSource).toContain("gantt__today-line");
+    expect(ganttSource).toContain("gantt__toolbar");
+    expect(ganttSource).toContain("gantt__legend");
+    expect(ganttSource).toContain("priorityClass");
     expect(ganttSource).toContain("Gantt rule: due date is the bar end");
     expect(ganttSource).toContain("window.flowmateSelectedWorkItem = task.item");
     expect(ganttSource).toContain("onOpen(task.item.id)");
     expect(appCss).toContain(".gantt");
     expect(appCss).toContain(".gantt__bar");
+    expect(appCss).toContain(".gantt__today-line");
+    expect(appCss).toContain(".gantt__toolbar");
+    expect(appCss).toContain(".gantt__legend");
+    expect(appCss).toContain(".gantt__bar.is-urgent");
   });
 
   it("Gantt month dropdown uses Jan 2026 through Dec 2027 options", () => {
@@ -1699,6 +1771,25 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(searchUtils).toContain("options.push({ key, label })");
     expect(ganttSource).toContain("data-testid=\"flowmate-gantt-month\"");
     expect(ganttSource).toContain("flowMateMonthOptionsC().map");
+  });
+
+  it("Gantt renders a horizontally scrollable two-month timeline", () => {
+    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
+
+    expect(screensC).toContain("function ganttTimelineWindowC(monthKey)");
+    expect(screensC).toContain("const visibleMonthCount = 2");
+    expect(ganttSource).toContain("const ganttWindow = ganttTimelineWindowC(monthKey)");
+    expect(ganttSource).toContain("ganttWindow.totalDays");
+    expect(ganttSource).toContain("ganttWindow.dayCells");
+    expect(ganttSource).toContain("ganttWindow.monthGroups");
+    expect(ganttSource).toContain("data-testid=\"flowmate-gantt-month-group\"");
+    expect(ganttSource).toContain("Scroll right to see the second month");
+    expect(ganttSource).toContain("ganttTaskModelC(row, monthKey, ganttWindow)");
+    expect(appCss).toContain(".gantt__month-scale");
+    expect(appCss).toContain("min-width: calc(var(--gantt-days, 62) * 30px)");
+    expect(appCss).toContain("overflow: auto");
   });
 
   it("builds calendar date keys from due dates without timezone shifting", () => {
@@ -2028,9 +2119,11 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
     const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
-    expect(detailSource).toContain("const [detailLinks, setDetailLinks] = useState(w.links || [])");
-    expect(detailSource).toContain("const [detailWatchers, setDetailWatchers] = useState(w.watchers || [])");
-    expect(detailSource).toContain("const [detailComments, setDetailComments] = useState(w.comments || [])");
+    // CR-2: initializers are null-safe ((w && w.links) || []) so the hooks can
+    // run before the not-loaded early return without dereferencing a null `w`.
+    expect(detailSource).toContain("const [detailLinks, setDetailLinks] = useState((w && w.links) || [])");
+    expect(detailSource).toContain("const [detailWatchers, setDetailWatchers] = useState((w && w.watchers) || [])");
+    expect(detailSource).toContain("const [detailComments, setDetailComments] = useState((w && w.comments) || [])");
     expect(detailSource).toContain("setDetailLinks((current) =>");
     expect(detailSource).toContain("setDetailWatchers((current) =>");
     expect(detailSource).toContain("setDetailComments((current) =>");
@@ -2210,7 +2303,8 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
     expect(screensB).toContain("deleteFlowMateWhitelistUser");
     expect(screensB).toContain("Deactivate");
     expect(screensB).toContain("Admin access required.");
-    expect(screensB).toContain("error.message || \"Whitelist RPC failed.\"");
+    // H-5: raw RPC errors are routed through flowmateUserError before display.
+    expect(screensB).toContain("window.flowmateUserError(error, \"Whitelist RPC failed.\")");
   });
 });
 
@@ -2293,7 +2387,7 @@ describe("MVP 1.2 Chat H team settings frontend", () => {
     await window.adminUpdateFlowMateTeamMember("member-1", {
       capacityPerDay: 8,
       wipLimit: 3,
-      skills: ["static-graphic", "general-video", "motion", "esport-video-backup"],
+      skills: ["banner", "video-standard", "motion"],
       p_actor_user_id: "spoofed-user",
       availability: "leave",
       capacityOverride: 0,
@@ -2306,8 +2400,8 @@ describe("MVP 1.2 Chat H team settings frontend", () => {
           p_team_member_id: "member-1",
           p_capacity_per_day: 8,
           p_wip_limit: 3,
-          p_skills: ["static-graphic", "general-video", "motion"],
-          p_backup_skills: ["esport-video"],
+          p_skills: ["banner", "video-standard", "motion"],
+          p_backup_skills: [],
         },
       },
     ]);
@@ -2323,7 +2417,7 @@ describe("MVP 1.2 Chat H team settings frontend", () => {
     await expect(window.adminUpdateFlowMateTeamMember("member-1", {
       capacityPerDay: 8,
       wipLimit: 3,
-      skills: ["esport-video-backup"],
+      skills: [],
     })).rejects.toThrow("Select at least one normal skill.");
     expect(rpcCalls).toEqual([]);
   });
@@ -2342,6 +2436,19 @@ describe("MVP 1.2 Chat H team settings frontend", () => {
     expect(editModalSource).toContain("toggleEditSkill(option.key)");
     expect(editModalSource).not.toContain("Availability");
     expect(editModalSource).not.toContain("Override pt/day");
+  });
+
+  it("renders the agreed GD/VE skill set in Team settings and removes legacy skill labels", () => {
+    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+
+    expect(quickTaskJs).toContain('key: "banner", label: "Banner"');
+    expect(quickTaskJs).toContain('key: "hero-album", label: "Hero Album (Banner x8)"');
+    expect(quickTaskJs).toContain('key: "video-under-1-min", label: "Video Under 1 Min"');
+    expect(quickTaskJs).toContain('key: "jersey-design", label: "Jersey Design"');
+    expect(quickTaskJs).toContain('key: "jersey-in-game", label: "Jersey In-game"');
+    expect(quickTaskJs).not.toContain('label: "Static"');
+    expect(quickTaskJs).not.toContain('label: "General video"');
+    expect(quickTaskJs).not.toContain('label: "Esport video (backup)"');
   });
 
   it("creates own leave requests through an auth.uid-scoped RPC without accepting actor or member ids", async () => {
@@ -2382,11 +2489,14 @@ describe("MVP 1.2 Chat H team settings backend SQL", () => {
     expect(sql).toContain("if v_actor_id is null then");
     expect(sql).toContain("if not public.is_admin_app_user() then");
     expect(sql).toContain("update public.team_members");
-    expect(sql).toContain("and lower(member_code) = any (array['pond','jo','tong','eye','vee'])");
+    expect(sql).toContain("and lower(member_code) = any (array['pond','jo','tong','eye','vee','ploy'])");
     expect(sql).toContain("skills = v_next_skills");
     expect(sql).toContain("backup_skills = v_next_backup_skills");
-    expect(sql).toContain("array['static-graphic','general-video','motion','esport-video']::public.asset_type[]");
-    expect(sql).toContain("array['esport-video']::public.asset_type[]");
+    expect(sql).toContain("p_skills text[] default null");
+    expect(sql).toContain("'hero-album'");
+    expect(sql).toContain("'video-under-1-min'");
+    expect(sql).not.toContain("array['static-graphic','general-video','motion','esport-video']::public.asset_type[]");
+    expect(sql).not.toContain("array['esport-video']::public.asset_type[]");
     expect(sql).toContain("revoke insert, update, delete on public.team_members from anon, authenticated");
     expect(sql).toContain("grant execute on function public.flowmate_admin_update_team_member(");
     expect(sql).not.toContain("p_actor_user_id");
@@ -2416,6 +2526,9 @@ describe("MVP 1.2 Chat H team settings backend SQL", () => {
     expect(createLeaveSql).toContain("'end_half', p_end_half");
     expect(createLeaveSql).toContain("wi.due_date between p_start_date and p_end_date");
     expect(createLeaveSql).toContain("v_target_work.requester_user_id");
+    expect(createLeaveSql).toContain("v_leave_recipient_id");
+    expect(createLeaveSql).toContain("from public.work_item_watchers wiw");
+    expect(createLeaveSql).toContain("wiw.watcher_user_id");
     expect(createLeaveSql).toContain("'leave:' || v_leave.id::text || ':work:' || v_target_work.id::text");
     expect(sql).toContain("revoke insert, update, delete on public.leave_requests from anon, authenticated");
     expect(sql).toContain("grant execute on function public.create_leave_request(");
@@ -2426,24 +2539,90 @@ describe("MVP 1.2 Chat H team settings backend SQL", () => {
   it("makes assignment avoid GD/VE members with overlapping leave requests", () => {
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
 
-    expect(assignmentSql).toContain("public.flowmate_is_gdve_member_code(b.member_code)");
     expect(assignmentSql).toContain("public.flowmate_leave_fraction_for_date");
     expect(assignmentSql).toContain("from public.leave_requests lr");
     expect(assignmentSql).toContain("then 0.5::numeric");
-    expect(assignmentSql).toContain("or public.flowmate_leave_fraction_for_date(b.id, coalesce(v_wi.due_date, v_today)) < 1");
-    expect(assignmentSql).toContain("* (1 - public.flowmate_leave_fraction_for_date(tm.id, coalesce(v_wi.due_date, v_today)))");
+    expect(assignmentSql).toContain("generate_series(v_assignment_start, v_assignment_end, interval '1 day')");
+    expect(assignmentSql).toContain("leave_capacity_loss");
+    expect(assignmentSql).toContain("greatest(0, b.effective_cap * v_working_days - b.leave_capacity_loss) > 0");
   });
 
-  it("keeps Pond eligible as urgent esport-video backup and seeds the compatibility backup skill", () => {
+  it("matches assignment candidates by Creative Request Type / Skill", () => {
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+
+    expect(assignmentSql).toContain("v_required_skill text");
+    expect(assignmentSql).toContain("v_required_skill := lower(trim(coalesce(v_det.asset_subtype, '')))");
+    expect(assignmentSql).toContain("when v_required_skill ilike '%graphic pack%' then 'graphic-pack'");
+    expect(assignmentSql).toContain("when v_required_skill in ('hero album','hero-album') then 'hero-album'");
+    expect(assignmentSql).toContain("when v_det.asset_type in ('general-video','esport-video') then 'video-standard'");
+    expect(assignmentSql).toContain("v_required_skill = any (tm.skills)");
+    expect(assignmentSql).toContain("'Queued: no team member has the skill required for ' || v_required_skill || '.'");
+    expect(assignmentSql).not.toContain("v_det.asset_type = any (tm.skills)");
+  });
+
+  it("sets Hero Album effort to 16 points", () => {
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+
+    expect(assignmentSql).toContain("when subtype in ('hero album','hero-album') then 16::numeric");
+    expect(assignmentSql).toContain("array['hero-album']::text[]");
+    expect(assignmentSql).toContain("and 'banner' = any (coalesce(tm.skills, '{}'::text[]))");
+  });
+
+  it("lets Team settings admins edit Ploy as a GD/VE owner", () => {
+    const adminSql = readFileSync(join(process.cwd(), "supabase", "team_settings_admin.sql"), "utf8");
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+
+    expect(adminSql).toContain("array['pond','jo','tong','eye','vee','ploy']");
+    expect(assignmentSql).toContain("array['pond','jo','tong','eye','vee','ploy']");
+    expect(assignmentSql).toContain("select lower(coalesce(p_member_code, '')) = any (array['pond','jo','tong','eye','vee','ploy'])");
+  });
+
+  it("prioritizes Ploy and Vee when the requester is from Esport", () => {
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+
+    expect(assignmentSql).toContain("v_requester_context text := 'ops_marketing'");
+    expect(assignmentSql).toContain("then 'esport'");
+    expect(assignmentSql).toContain("lower(requester_tm.member_code) = any (array['ben','net','peak','pluem'])");
+    expect(assignmentSql).toContain("when v_requester_context = 'esport' and lower(tm.member_code) in ('ploy','vee') then 0");
+    expect(assignmentSql).toContain("when v_requester_context = 'esport' and lower(tm.member_code) = 'ploy' then 0");
+    expect(assignmentSql).toContain("when v_requester_context = 'esport' and lower(tm.member_code) = 'vee' then 1");
+  });
+
+  it("prioritizes Ops and Marketing requests by Pond video/motion, then Joe, Tong, Eye", () => {
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+
+    expect(assignmentSql).toContain("when v_requester_context <> 'esport' and lower(tm.member_code) in ('pond','jo','tong','eye') then 0");
+    expect(assignmentSql).toContain("when v_requester_context <> 'esport' and lower(tm.member_code) = 'pond' and v_required_skill in ('motion','video-standard','video-under-1-min') then 0");
+    expect(assignmentSql).toContain("when v_requester_context <> 'esport' and lower(tm.member_code) = 'jo' then 1");
+    expect(assignmentSql).toContain("when v_requester_context <> 'esport' and lower(tm.member_code) = 'tong' then 2");
+    expect(assignmentSql).toContain("when v_requester_context <> 'esport' and lower(tm.member_code) = 'eye' then 3");
+    expect(assignmentSql).toContain("when v_requester_context <> 'esport' and lower(tm.member_code) = 'pond' then 4");
+    expect(assignmentSql).toContain("order by pool_rank asc,\n           context_rank asc,\n           context_tie_rank asc,");
+  });
+
+  it("drops and recreates member_workload_v around the team_members.skills type migration", () => {
+    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
+    const dropIndex = assignmentSql.indexOf("drop view if exists public.member_workload_v;");
+    const alterIndex = assignmentSql.indexOf("alter column skills type text[] using skills::text[];");
+    const recreateIndex = assignmentSql.indexOf("create or replace view public.member_workload_v");
+
+    expect(dropIndex).toBeGreaterThan(-1);
+    expect(alterIndex).toBeGreaterThan(dropIndex);
+    expect(recreateIndex).toBeGreaterThan(alterIndex);
+    expect(assignmentSql).toContain("revoke all privileges on public.member_workload_v from public, anon, authenticated");
+    expect(assignmentSql).toContain("grant select on public.member_workload_v to authenticated");
+  });
+
+  it("keeps Pond eligible as urgent video fallback and seeds the compatibility backup skill", () => {
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
 
     expect(assignmentSql).toContain("v_allow_backup_pool boolean");
-    expect(assignmentSql).toContain("v_allow_backup_pool := v_det.asset_type = 'esport-video' and v_wi.priority = 'urgent';");
+    expect(assignmentSql).toContain("v_allow_backup_pool := v_wi.priority = 'urgent' and v_required_skill in ('video-standard','video-under-1-min');");
     expect(assignmentSql).toContain("when v_allow_backup_pool");
     expect(assignmentSql).toContain("or lower(tm.member_code) = 'pond'");
     expect(assignmentSql).toContain("where lower(tm.member_code) = 'pond'");
     expect(assignmentSql).toContain("and lower(tm.member_code) = any (v_creative_owner_codes)");
-    expect(assignmentSql).toContain("array['esport-video']::public.asset_type[]");
+    expect(assignmentSql).toContain("array['video-standard','video-under-1-min']::text[]");
     expect(assignmentSql).toContain("Auto (urgent fallback)");
   });
 

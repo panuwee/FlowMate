@@ -31,7 +31,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       if (!isAlive()) return;
       console.error("[FlowMate My Work] Supabase load failed:", error);
       setSourceRows([]);
-      setLoadState({ status: "error", message: `Live data unavailable: ${error.message || "Supabase query failed."}` });
+      setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
     }
   }
 
@@ -54,7 +54,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: `Completed ${work.id}` });
     } catch (error) {
       console.error("[FlowMate My Work] Complete quick task failed:", error);
-      setLoadState({ status: "error", message: `Could not complete ${work.id}: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not complete ${work.id}: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -67,7 +67,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: `Added checklist item to ${work.id}` });
     } catch (error) {
       console.error("[FlowMate My Work] Add checklist item failed:", error);
-      setLoadState({ status: "error", message: `Could not add checklist item: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not add checklist item: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -78,7 +78,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: "Checklist updated" });
     } catch (error) {
       console.error("[FlowMate My Work] Toggle checklist item failed:", error);
-      setLoadState({ status: "error", message: `Could not update checklist: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not update checklist: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -91,7 +91,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: `Added comment to ${work.id}` });
     } catch (error) {
       console.error("[FlowMate My Work] Add comment failed:", error);
-      setLoadState({ status: "error", message: `Could not add comment: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not add comment: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -105,7 +105,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: "Comment updated" });
     } catch (error) {
       console.error("[FlowMate My Work] Edit comment failed:", error);
-      setLoadState({ status: "error", message: `Could not edit comment: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not edit comment: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -118,7 +118,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: "Comment deleted" });
     } catch (error) {
       console.error("[FlowMate My Work] Delete comment failed:", error);
-      setLoadState({ status: "error", message: `Could not delete comment: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not delete comment: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -144,7 +144,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       setLoadState({ status: "live", message: `${work.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}` });
     } catch (error) {
       console.error("[FlowMate My Work] Creative status transition failed:", error);
-      setLoadState({ status: "error", message: `Could not update ${work.id}: ${error.message || "RPC failed."}` });
+      setLoadState({ status: "error", message: `Could not update ${work.id}: ${window.flowmateUserError(error, "RPC failed.")}` });
     }
   }
 
@@ -833,7 +833,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
       }
     } catch (error) {
       console.error("[FlowMate Create] submit failed:", error);
-      setResult({ kind: "error", id: "Not saved", message: error.message || "Submit failed." });
+      setResult({ kind: "error", id: "Not saved", message: window.flowmateUserError(error, "Submit failed.") });
     } finally {
       if (shouldShowResult) {
         setIsSubmitting(false);
@@ -1258,6 +1258,64 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   // If we genuinely have nothing, render an empty state below.
   const w = selected || WORK_BY_ID[id] || null;
 
+  // CR-2: ALL hooks must run unconditionally and BEFORE any early return
+  // (Rules of Hooks). When a live refresh clears the selected item, `w` can
+  // go from object -> null on a re-render of this same instance; returning
+  // early before the hooks would run fewer hooks than the prior render and
+  // crash the screen. Bodies and deps are null-safe so an unresolved `w`
+  // cannot change hook order.
+  const [actionMsg, setActionMsg] = useState(null);
+  const [pending, setPending] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkDescription, setLinkDescription] = useState("");
+  const [commentBody, setCommentBody] = useState("");
+  const [mentionUsers, setMentionUsers] = useState(window.FLOWMATE_MENTION_USERS || []);
+  const [watcherUserId, setWatcherUserId] = useState("");
+  const [detailLinks, setDetailLinks] = useState((w && w.links) || []);
+  const [detailComments, setDetailComments] = useState((w && w.comments) || []);
+  const [detailWatchers, setDetailWatchers] = useState((w && w.watchers) || []);
+  const [detailAiTags, setDetailAiTags] = useState((w && w.aiTags) || []);
+
+  useEffect(() => {
+    if (!w) return;
+    setDetailLinks(w.links || []);
+    setDetailComments(w.comments || []);
+    setDetailWatchers(w.watchers || []);
+    setDetailAiTags(w.aiTags || []);
+  }, [w && w.id, w && w.links, w && w.comments, w && w.watchers, w && w.aiTags]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!w || !w.isSupabaseRow || !window.loadFlowMateAiTags) return () => { alive = false; };
+    window.loadFlowMateAiTags({ displayId: w.id })
+      .then((tags) => {
+        if (!alive) return;
+        setDetailAiTags(tags || []);
+        w.aiTags = tags || [];
+        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
+          window.flowmateSelectedWorkItem.aiTags = tags || [];
+        }
+      })
+      .catch((error) => {
+        console.warn("[FlowMate AI Tags] Load failed:", error && error.message);
+      });
+    return () => { alive = false; };
+  }, [w && w.id, w && w.isSupabaseRow]);
+
+  useEffect(() => {
+    let alive = true;
+    if (window.FLOWMATE_MENTION_USERS && window.FLOWMATE_MENTION_USERS.length > 0) {
+      setMentionUsers(window.FLOWMATE_MENTION_USERS);
+    }
+    if (!window.loadFlowMateMentionUsers) return () => { alive = false; };
+    window.loadFlowMateMentionUsers()
+      .then((users) => { if (alive) setMentionUsers(users || []); })
+      .catch((error) => {
+        console.warn("[FlowMate Mentions] Load failed:", error && error.message);
+      });
+    return () => { alive = false; };
+  }, [w && w.id]);
+
   if (!w) {
     return (
       <div className="page" style={{ maxWidth: 640 }}>
@@ -1295,17 +1353,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     currentUserId === w.assigneeUserId ||
     owner?.userId === currentUserId
   ));
-  const [actionMsg, setActionMsg] = useState(null);
-  const [pending, setPending] = useState(false);
-  const [linkUrl, setLinkUrl] = useState("");
-  const [linkDescription, setLinkDescription] = useState("");
-  const [commentBody, setCommentBody] = useState("");
-  const [mentionUsers, setMentionUsers] = useState(window.FLOWMATE_MENTION_USERS || []);
-  const [watcherUserId, setWatcherUserId] = useState("");
-  const [detailLinks, setDetailLinks] = useState(w.links || []);
-  const [detailComments, setDetailComments] = useState(w.comments || []);
-  const [detailWatchers, setDetailWatchers] = useState(w.watchers || []);
-  const [detailAiTags, setDetailAiTags] = useState(w.aiTags || []);
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
@@ -1320,45 +1367,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       return !mentionQuery || name.includes(mentionQuery) || email.includes(mentionQuery);
     })
     .slice(0, 6);
-
-  useEffect(() => {
-    setDetailLinks(w.links || []);
-    setDetailComments(w.comments || []);
-    setDetailWatchers(w.watchers || []);
-    setDetailAiTags(w.aiTags || []);
-  }, [w.id, w.links, w.comments, w.watchers, w.aiTags]);
-
-  useEffect(() => {
-    let alive = true;
-    if (!w.isSupabaseRow || !window.loadFlowMateAiTags) return () => { alive = false; };
-    window.loadFlowMateAiTags({ displayId: w.id })
-      .then((tags) => {
-        if (!alive) return;
-        setDetailAiTags(tags || []);
-        w.aiTags = tags || [];
-        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
-          window.flowmateSelectedWorkItem.aiTags = tags || [];
-        }
-      })
-      .catch((error) => {
-        console.warn("[FlowMate AI Tags] Load failed:", error && error.message);
-      });
-    return () => { alive = false; };
-  }, [w.id, w.isSupabaseRow]);
-
-  useEffect(() => {
-    let alive = true;
-    if (window.FLOWMATE_MENTION_USERS && window.FLOWMATE_MENTION_USERS.length > 0) {
-      setMentionUsers(window.FLOWMATE_MENTION_USERS);
-    }
-    if (!window.loadFlowMateMentionUsers) return () => { alive = false; };
-    window.loadFlowMateMentionUsers()
-      .then((users) => { if (alive) setMentionUsers(users || []); })
-      .catch((error) => {
-        console.warn("[FlowMate Mentions] Load failed:", error && error.message);
-      });
-    return () => { alive = false; };
-  }, [w.id]);
 
   function flowmateFormatCommentTime(dateValue) {
     if (!dateValue) return "";
@@ -1417,7 +1425,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       await window.transitionFlowMateWorkStatus(w.id, nextStatus, options);
       setActionMsg({ tone: "ok", text: `${w.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}. Refresh the list to see the update.` });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Status change failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Status change failed.") });
     } finally {
       setPending(false);
     }
@@ -1456,7 +1464,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "ok", text: "Link added." });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_links" } }));
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Add link failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Add link failed.") });
     } finally {
       setPending(false);
     }
@@ -1495,7 +1503,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "ok", text: "Comment added." });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "comments" } }));
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Add comment failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Add comment failed.") });
     } finally {
       setPending(false);
     }
@@ -1534,7 +1542,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "ok", text: "Watcher added." });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_item_watchers" } }));
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Add watcher failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Add watcher failed.") });
     } finally {
       setPending(false);
     }
@@ -1566,7 +1574,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       });
       setActionMsg({ tone: "ok", text: "AI tag added." });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Add AI tag failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Add AI tag failed.") });
     } finally {
       setPending(false);
     }
@@ -1587,7 +1595,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       });
       setActionMsg({ tone: "ok", text: "AI tag removed." });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Remove AI tag failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Remove AI tag failed.") });
     } finally {
       setPending(false);
     }
@@ -1604,7 +1612,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       const r = data && data.result;
       setActionMsg({ tone: "ok", text: `Rerun result: ${r || "ok"} — refresh to see latest.` });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Rerun failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Rerun failed.") });
     } finally {
       setPending(false);
     }
@@ -1622,7 +1630,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       await window.cancelFlowMateWorkItem(w, reason);
       setActionMsg({ tone: "ok", text: `${w.id} cancelled.` });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Cancel failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Cancel failed.") });
     } finally {
       setPending(false);
     }
@@ -1649,7 +1657,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "admin_archive" } }));
       window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
     } catch (error) {
-      setActionMsg({ tone: "bad", text: error.message || "Admin archive failed." });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Admin archive failed.") });
     } finally {
       setPending(false);
     }
@@ -1710,7 +1718,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 const data = await window.recheckFlowMateBrief(w.id);
                 setActionMsg({ tone: "ok", text: `Brief rechecked: ${data && data.result || "ok"}.` });
               } catch (error) {
-                setActionMsg({ tone: "bad", text: error.message || "Recheck failed." });
+                setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Recheck failed.") });
               } finally { setPending(false); }
             }} disabled={pending}><Icon name="rerun" /> Recheck brief</button>
           )}
@@ -1756,8 +1764,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Asset Count</div><div className="meta-row__val">{w.assetCount || 1}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{w.briefLink ? <a href={w.briefLink} target="_blank" rel="noreferrer">Open brief</a> : "-"}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{w.referenceLink ? <a href={w.referenceLink} target="_blank" rel="noreferrer">Open reference</a> : "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.briefLink) ? <a href={window.flowmateSafeHttpUrl(w.briefLink)} target="_blank" rel="noopener noreferrer">Open brief</a> : "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.referenceLink) ? <a href={window.flowmateSafeHttpUrl(w.referenceLink)} target="_blank" rel="noopener noreferrer">Open reference</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div></div>
               </div>
             </div>
@@ -1772,7 +1780,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row" key={link.id}>
                   <div className="meta-row__lbl">{link.createdByName || "Link"}</div>
                   <div className="meta-row__val">
-                    <a href={link.url} target="_blank" rel="noreferrer">{link.description || link.url}</a>
+                    {window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(link.url)
+                      ? <a href={window.flowmateSafeHttpUrl(link.url)} target="_blank" rel="noopener noreferrer">{link.description || link.url}</a>
+                      : <span style={{ wordBreak: "break-all" }}>{link.description || link.url}</span>}
                     {link.description && <div className="muted" style={{ fontSize: 11, wordBreak: "break-all" }}>{link.url}</div>}
                   </div>
                 </div>

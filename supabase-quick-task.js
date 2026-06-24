@@ -5,6 +5,37 @@ function flowmateActorId() {
 }
 window.flowmateActorId = flowmateActorId;
 
+// H-5: Convert a raw Supabase/Postgres error into a safe, human-readable
+// message. Our own RPCs raise friendly `raise exception` text (and supabase-js
+// surfaces it as error.message), so we keep messages we authored but hide raw
+// driver noise (constraint names, column lists, RLS/policy text, SQLSTATE).
+// Always logs the raw error to the console for debugging.
+function flowmateUserError(error, fallback) {
+  const fallbackMessage = fallback || "Something went wrong. Please try again.";
+  if (!error) return fallbackMessage;
+  try { console.error("[FlowMate]", error); } catch (e) {}
+
+  const raw = (error.message || error.error_description || error.msg || "").trim();
+  if (!raw) return fallbackMessage;
+
+  // Postgres/PostgREST internals we never want to show the user.
+  const looksInternal =
+    /violates|constraint|relation|column|permission denied|policy|row-level|rls|jwt|sqlstate|syntax error|function .* does not exist|operator does not exist|duplicate key|null value in column|foreign key/i.test(raw)
+    || /^[A-Z0-9]{5}:/.test(raw)            // SQLSTATE prefix like "23505: ..."
+    || raw.length > 200;
+  if (looksInternal) {
+    if (/permission denied|policy|row-level|rls|jwt/i.test(raw)) {
+      return "You do not have permission to do that.";
+    }
+    if (/duplicate key|already exists/i.test(raw)) {
+      return "That already exists.";
+    }
+    return fallbackMessage;
+  }
+  return raw;
+}
+window.flowmateUserError = flowmateUserError;
+
 async function createFlowMateQuickTask(input) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -162,19 +193,41 @@ window.addFlowMateWorkItemComment = addFlowMateWorkItemComment;
 window.updateFlowMateOwnComment = updateFlowMateOwnComment;
 window.deleteFlowMateOwnComment = deleteFlowMateOwnComment;
 
+// H-1: Only allow http/https links. Stored links are rendered as <a href>
+// for every viewer of a work item, so a "javascript:" / "data:" URL would be
+// a stored-XSS vector. Returns the normalized href, or null if unsafe.
+function flowmateSafeHttpUrl(raw) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return null;
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch (e) {
+    // Allow scheme-less input like "docs.google.com/x" by assuming https.
+    try {
+      parsed = new URL("https://" + trimmed);
+    } catch (e2) {
+      return null;
+    }
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  return parsed.href;
+}
+window.flowmateSafeHttpUrl = flowmateSafeHttpUrl;
+
 async function addFlowMateWorkItemLink(displayId, url, description) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
 
-  const trimmedUrl = (url || "").trim();
   const trimmedDescription = (description || "").trim();
   if (!displayId) throw new Error("Work item ID is required.");
-  if (!trimmedUrl) throw new Error("URL is required.");
+  const safeUrl = flowmateSafeHttpUrl(url);
+  if (!safeUrl) throw new Error("Enter a valid http(s) link.");
 
   const { data, error } = await window.flowmateSupabase.rpc("add_work_item_link", {
     p_display_id: displayId,
-    p_url: trimmedUrl,
+    p_url: safeUrl,
     p_description: trimmedDescription || null,
   });
 

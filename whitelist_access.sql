@@ -191,6 +191,13 @@ security definer
 set search_path = public
 as $$
 begin
+  -- On UPDATE only re-validate when the email actually changes. GoTrue
+  -- updates auth.users on every login / token refresh; re-checking those
+  -- would be wasteful and could reject benign metadata updates.
+  if tg_op = 'UPDATE' and new.email is not distinct from old.email then
+    return new;
+  end if;
+
   if new.email is null or new.email !~* '@garena\.com$' then
     raise exception 'Only @garena.com accounts are allowed';
   end if;
@@ -206,10 +213,18 @@ begin
 end;
 $$;
 
--- Make sure the trigger is attached (idempotent).
+-- CR-6: enforce on INSERT *and* email change. GoTrue updates (not re-inserts)
+-- auth.users on logins, identity linking, and email changes, so an
+-- INSERT-only gate let a user move off-whitelist / off-domain after first
+-- login. Both triggers share the function above (idempotent).
 drop trigger if exists enforce_garena_domain_trg on auth.users;
 create trigger enforce_garena_domain_trg
   before insert on auth.users
+  for each row execute function public.enforce_garena_domain();
+
+drop trigger if exists enforce_garena_domain_update_trg on auth.users;
+create trigger enforce_garena_domain_update_trg
+  before update of email on auth.users
   for each row execute function public.enforce_garena_domain();
 
 -- 5. Update auth-sync trigger to pull display_name + role + team link ------
