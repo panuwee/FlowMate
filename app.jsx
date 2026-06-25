@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260625-06";
+const FLOWMATE_APP_VERSION = "v20260625-07";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1059,49 +1059,74 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     }
   }, []);
 
-  // Bioluminescent orb spawner — uses the Web Animations API rather than
-  // CSS keyframes + custom properties. Some desktop Chrome builds refuse
-  // to interpolate var(--wha-drift) inside a keyframe, leaving the orbs
-  // stuck below the viewport so they were never visible on PC.
+  // Cursor-following bioluminescent orbs (Antigravity-style). A fixed cloud of
+  // orbs eases toward the pointer with a per-orb lag, so they trail and swirl
+  // behind the cursor with delay. Before the first move they gather at center.
   useEffectApp(() => {
     const stage = document.getElementById("wha-orb-stage");
     if (!stage) return;
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
     const colors = [
       "rgba(40,80,160,0.90)",    // cobalt
       "rgba(30,100,60,0.90)",    // forest
       "rgba(196,114,42,0.92)",   // amber
       "rgba(120,50,150,0.85)",   // violet
     ];
+    const COUNT = 18;
+    const orbs = [];
+    const target = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
-    function spawn() {
-      const orb = document.createElement("span");
-      orb.className = "wha-orb";
-      const size  = 18 + Math.random() * 20;                  // 18–38px
-      const c     = colors[Math.floor(Math.random() * colors.length)];
-      const drift = Math.random() * 160 - 80;                 // ±80px
-      const duration = 9000 + Math.random() * 7000;           // 9–16s
-
-      orb.style.width = orb.style.height = size + "px";
-      orb.style.left  = (3 + Math.random() * 94) + "%";
-      orb.style.background = `radial-gradient(circle, ${c} 0%, transparent 70%)`;
-      stage.appendChild(orb);
-
-      const anim = orb.animate(
-        [
-          { opacity: 0,    transform: "translate(0, 0)" },
-          { opacity: 0.95, offset: 0.08, transform: `translate(${drift * 0.1}px, -8vh)` },
-          { opacity: 0.78, offset: 0.55, transform: `translate(${drift * 0.6}px, -60vh)` },
-          { opacity: 0,    transform: `translate(${drift}px, -115vh)` },
-        ],
-        { duration: duration, easing: "ease-out", fill: "forwards" },
-      );
-      anim.onfinish = () => orb.remove();
+    for (let i = 0; i < COUNT; i++) {
+      const el = document.createElement("span");
+      el.className = "wha-orb";
+      const size = 14 + Math.random() * 24;
+      el.style.width = el.style.height = size + "px";
+      el.style.background = `radial-gradient(circle, ${colors[i % colors.length]} 0%, transparent 70%)`;
+      stage.appendChild(el);
+      orbs.push({
+        el,
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        // Lower ease = more lag/delay before catching up to the cursor.
+        ease: 0.012 + Math.random() * 0.045,
+        // Each orb orbits its own offset around the cursor so they form a
+        // loose swirling cloud rather than stacking on one point.
+        radius: 24 + Math.random() * 190,
+        ang: Math.random() * Math.PI * 2,
+        angSpeed: (0.15 + Math.random() * 0.5) * (Math.random() < 0.5 ? 1 : -1),
+      });
     }
 
-    // Immediate burst so first impression already has motion
-    for (let i = 0; i < 10; i++) setTimeout(spawn, i * 180);
-    const intervalId = setInterval(spawn, 700);
-    return () => clearInterval(intervalId);
+    function onMove(e) {
+      target.x = e.clientX;
+      target.y = e.clientY;
+    }
+    window.addEventListener("pointermove", onMove, { passive: true });
+
+    let raf = null;
+    let last = performance.now();
+    function frame(now) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      for (let k = 0; k < orbs.length; k++) {
+        const o = orbs[k];
+        o.ang += o.angSpeed * dt;
+        const tx = target.x + Math.cos(o.ang) * o.radius;
+        const ty = target.y + Math.sin(o.ang) * o.radius;
+        o.x += (tx - o.x) * o.ease;
+        o.y += (ty - o.y) * o.ease;
+        o.el.style.transform = `translate(${o.x}px, ${o.y}px)`;
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      if (raf) cancelAnimationFrame(raf);
+      orbs.forEach((o) => o.el.remove());
+    };
   }, []);
 
   // IntersectionObserver for scroll reveals
@@ -1124,27 +1149,10 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     <div className="wha">
       <style>{WHA_STYLES}</style>
 
-      {/* Floating orb stage */}
+      {/* Floating orb stage (cursor-following) */}
       <div id="wha-orb-stage" className="wha-orb-stage" aria-hidden="true" />
 
-      {/* HEADER ------------------------------------------------------- */}
-      <header className="wha-header">
-        <div className="wha-header__mark" aria-hidden="true">
-          <svg viewBox="0 0 40 40">
-            <circle cx="20" cy="20" r="16" fill="none" stroke="var(--ink)" strokeWidth="1.2"/>
-            <circle cx="20" cy="20" r="11" fill="none" stroke="var(--sienna)" strokeWidth="0.6" strokeDasharray="2 3"/>
-            <path d="M 20,7 L 25,18 L 33,18 L 27,25 L 30,33 L 20,28 L 10,33 L 13,25 L 7,18 L 15,18 Z"
-                  fill="var(--sienna)" stroke="var(--ink)" strokeWidth="0.7"/>
-          </svg>
-        </div>
-        <nav className="wha-header__nav" aria-label="flowmate">
-          <a href="#atelier" className="wha-nav-link">Task</a>
-          <a href="#grimoire" className="wha-nav-link">Request</a>
-          <a href="#threshold" className="wha-nav-link">Workload</a>
-        </nav>
-      </header>
-
-      {/* HERO --------------------------------------------------------- */}
+      {/* HERO (single screen, no header/nav) -------------------------- */}
       <main className="wha-hero" id="threshold">
         <div className="wha-sigil-stage" aria-hidden="true">
           {/* Stained-glass accent (behind) */}
@@ -1244,63 +1252,6 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
 
         <p className="wha-runes wha-runes--small">⚝ Garena Workspace only ⚝</p>
       </main>
-
-      {/* INK DIVIDER */}
-      <InkDivider />
-
-      {/* CARDS -------------------------------------------------------- */}
-      <section className="wha-cards" id="atelier">
-        {[
-          { glyph: "quill",   title: "Brief Gate",       phrase: "Every request begins with clarity." },
-          { glyph: "glass",   title: "Capacity Oracle",  phrase: "Work flows by skill, effort, and load." },
-          { glyph: "compass", title: "Team Compass",     phrase: "Every task finds the right owner." },
-        ].map((c, i) => (
-          <article key={c.title} className="wha-card wha-reveal" style={{ transitionDelay: (0.18 * i) + "s" }}>
-            <div className="wha-card__hatch" aria-hidden="true"></div>
-            <div className="wha-card__glyph" aria-hidden="true">
-              <CardGlyph kind={c.glyph} />
-            </div>
-            <h3 className="wha-card__title">{c.title}</h3>
-            <p className="wha-card__phrase">{c.phrase}</p>
-            <div className="wha-card__seal" aria-hidden="true">✦</div>
-          </article>
-        ))}
-      </section>
-
-      {/* INK DIVIDER */}
-      <InkDivider />
-
-      {/* BOTANICAL SHELF --------------------------------------------- */}
-      <section className="wha-shelf wha-reveal" id="grimoire" aria-hidden="true">
-        <ShelfRow />
-      </section>
-
-      {/* FOOTER ------------------------------------------------------- */}
-      <footer className="wha-footer wha-reveal">
-        <div className="wha-footer__ring">
-          <svg viewBox="0 0 120 120">
-            <defs>
-              <path id="wha-footer-arc" d="M 60,60 m -42,0 a 42,42 0 1,1 84,0 a 42,42 0 1,1 -84,0"/>
-            </defs>
-            {/* Rotating sub-group via SMIL — reliable across desktop browsers
-                where CSS transform-origin on SVG root is flaky. */}
-            <g>
-              <animateTransform attributeName="transform" attributeType="XML"
-                type="rotate" from="0 60 60" to="360 60 60"
-                dur="60s" repeatCount="indefinite"/>
-              <circle cx="60" cy="60" r="50" fill="none" stroke="var(--ink)" strokeWidth="0.8"/>
-              <circle cx="60" cy="60" r="42" fill="none" stroke="var(--sienna)" strokeWidth="0.4" strokeDasharray="2 3"/>
-              <text className="wha-footer__runes">
-                <textPath href="#wha-footer-arc">⚝ INSCRIBED · BY · HAND · PANU · ⚝ · GARENA · FCO · ⚝</textPath>
-              </text>
-            </g>
-            {/* Center star stays still */}
-            <text x="60" y="68" textAnchor="middle" fontFamily="Cinzel Decorative" fontSize="24"
-                  fontWeight="700" fill="var(--ink)">⚝</text>
-          </svg>
-        </div>
-        <p className="wha-footer__credit">Inscribed by hand · Panu</p>
-      </footer>
     </div>
   );
 }
@@ -1517,7 +1468,7 @@ const WHA_STYLES = `
 
 .wha {
   position: fixed; inset: 0;
-  overflow-y: auto; overflow-x: hidden;
+  overflow: hidden;
   color: var(--ink);
   font-family: 'Cormorant Garamond', 'EB Garamond', 'Garamond', 'Times New Roman', serif;
   font-weight: 300; font-style: italic;
@@ -1542,16 +1493,17 @@ const WHA_STYLES = `
 .wha-orb-stage {
   position: fixed; inset: 0;
   pointer-events: none; overflow: hidden;
-  /* Above all decorative content. Animation timing/transform is now driven
-     entirely by the Web Animations API (see useEffect in LoginScreen). */
-  z-index: 50;
+  /* Behind the hero content (sigil + sign-in) so orbs swirl in the
+     background. Positions are transform-driven by the rAF loop in LoginScreen. */
+  z-index: 0;
 }
 .wha-orb {
   position: absolute;
-  bottom: -40px;
+  top: 0; left: 0;
   border-radius: 50%;
+  opacity: 0.85;
   filter: blur(2.5px) saturate(110%);
-  will-change: transform, opacity;
+  will-change: transform;
 }
 
 /* HEADER --------------------------------------------------------------- */
@@ -1597,16 +1549,19 @@ const WHA_STYLES = `
 /* HERO ----------------------------------------------------------------- */
 .wha-hero {
   position: relative; z-index: 1;
-  min-height: 78vh;
+  height: 100vh;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  padding: 30px 24px 60px;
+  padding: 24px;
+  box-sizing: border-box;
   text-align: center;
 }
 .wha-sigil-stage {
   position: relative;
-  width: 460px; height: 460px;
-  max-width: 86vw; max-height: 86vw;
+  /* Square, but capped by viewport height so the sigil + runes + button all
+     fit on a single screen without scrolling. */
+  width: min(460px, 86vw, 52vh);
+  height: min(460px, 86vw, 52vh);
   margin: 0 auto 28px;
 }
 .wha-glass {
