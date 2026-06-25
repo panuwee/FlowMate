@@ -1435,7 +1435,15 @@ function LoginScreen({
     d: "M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"
   })), React.createElement("g", {
     className: "wha-sigil__outer"
-  }, React.createElement("circle", {
+  }, React.createElement("animateTransform", {
+    attributeName: "transform",
+    attributeType: "XML",
+    type: "rotate",
+    from: "0 250 250",
+    to: "360 250 250",
+    dur: "34s",
+    repeatCount: "indefinite"
+  }), React.createElement("circle", {
     cx: "250",
     cy: "250",
     r: "200",
@@ -1493,7 +1501,15 @@ function LoginScreen({
     kind: i
   }))))), React.createElement("g", {
     className: "wha-sigil__penta"
-  }, React.createElement("path", {
+  }, React.createElement("animateTransform", {
+    attributeName: "transform",
+    attributeType: "XML",
+    type: "rotate",
+    from: "360 250 250",
+    to: "0 250 250",
+    dur: "50s",
+    repeatCount: "indefinite"
+  }), React.createElement("path", {
     d: "M 250,120 L 326,355 L 126,210 L 374,210 L 174,355 Z",
     fill: "none",
     stroke: "var(--sienna)",
@@ -2243,27 +2259,11 @@ const WHA_STYLES = `
   transition: filter 700ms ease;
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
-/* Rotation via CSS (reliable on every load path, incl. logout reload).
-   transform-box: fill-box anchors transform-origin to each group's own
-   bounding box (centered at the sigil center, since the rings/pentagram are
-   symmetric about 250,250). fill-box is used over view-box because some
-   desktop Chrome/Edge builds fail to animate view-box groups (the ring stays
-   frozen on PC while mobile rotates fine); fill-box is widely supported and
-   already drives .wha-sigil__glyphs reliably here. */
-.wha-sigil__outer {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: wha-spin 34s linear infinite;
-  /* No will-change: transform here. On desktop Chrome/Edge it promotes the
-     <g> to a GPU layer whose SVG transform animation is not composited, so the
-     ring freezes on PC while mobile rotates fine. Main-thread animation (no
-     will-change) works everywhere — matching .wha-sigil__glyphs which has none. */
-}
-.wha-sigil__penta {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: wha-spin-rev 50s linear infinite;
-}
+/* Rotation is driven by SMIL <animateTransform> inside the SVG (see the
+   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS —
+   desktop Chrome/Edge here would not animate these <g> groups via CSS
+   transform (both transform-box: view-box and fill-box stayed frozen on PC
+   while mobile rotated). No CSS animation here on purpose. */
 .wha-sigil__glyphs {
   /* The glyphs ride along the outer rotating group, so they revolve with
      the ring. They draw themselves in after the ink ring strokes finish. */
