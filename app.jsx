@@ -1046,18 +1046,6 @@ function GoogleLogo() {
   );
 }
 
-// Hand-drawn Witch Hat Atelier pointed hat used as the custom cursor. The tip
-// (top-left, ~7,6) is the pointer hotspot. Cream front + grey shade, ink
-// outline, gold tip cap and a gold button on the brim.
-const WHA_HAT_SVG =
-  '<svg viewBox="0 0 44 54" xmlns="http://www.w3.org/2000/svg">' +
-    '<path d="M9 6 C12 3 17 3 18 7 C19 10 20 14 21 18 L33 39 C35 42 33 46 28 47 C20 49 11 48 7 44 C5 42 6 38 7 35 L12 13 C12 10 11 8 9 6 Z" fill="#f5ead0" stroke="#1a1410" stroke-width="2" stroke-linejoin="round"/>' +
-    '<path d="M18 7 C19 10 20 14 21 18 L33 39 C35 42 33 46 28 47 C24 48 20 48 17 47 L15 16 C16 11 16 8 18 7 Z" fill="#a9b0b8" opacity="0.85"/>' +
-    '<path d="M6 38 C16 45 28 44 34 38" fill="none" stroke="#1a1410" stroke-width="1.6" stroke-linecap="round"/>' +
-    '<circle cx="16" cy="35" r="1.8" fill="#cf9b46"/>' +
-    '<circle cx="10" cy="5.5" r="2.6" fill="#cf9b46" stroke="#1a1410" stroke-width="1"/>' +
-  '</svg>';
-
 function LoginScreen({ onSignIn, isSigningIn, authError }) {
   // Inject Google Fonts once
   useEffectApp(() => {
@@ -1071,131 +1059,50 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     }
   }, []);
 
-  // Cursor-following bioluminescent orbs (Antigravity-style). A fixed cloud of
-  // orbs eases toward the pointer with a per-orb lag, so they trail and swirl
-  // behind the cursor with delay. Before the first move they gather at center.
+  // Bioluminescent orb spawner — orbs rise on their own from the bottom of the
+  // screen and drift up past the top, independent of the pointer. Uses the Web
+  // Animations API rather than CSS keyframes + custom properties because some
+  // desktop Chrome builds refuse to interpolate var(--wha-drift) inside a
+  // keyframe, which left the orbs stuck below the viewport on PC.
   useEffectApp(() => {
     const stage = document.getElementById("wha-orb-stage");
     if (!stage) return;
-
     const colors = [
       "rgba(40,80,160,0.90)",    // cobalt
       "rgba(30,100,60,0.90)",    // forest
       "rgba(196,114,42,0.92)",   // amber
       "rgba(120,50,150,0.85)",   // violet
     ];
-    const COUNT = 10;
-    const orbs = [];
-    const target = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
-    for (let i = 0; i < COUNT; i++) {
-      const el = document.createElement("span");
-      el.className = "wha-orb";
-      const size = 14 + Math.random() * 24;
-      el.style.width = el.style.height = size + "px";
-      el.style.background = `radial-gradient(circle, ${colors[i % colors.length]} 0%, transparent 70%)`;
-      const startX = Math.random() * window.innerWidth;
-      const startY = Math.random() * window.innerHeight;
-      el.style.transform = `translate(${startX}px, ${startY}px)`;
-      stage.appendChild(el);
-      orbs.push({
-        el,
-        x: startX,
-        y: startY,
-        // Lower ease = more lag/delay before catching up to the cursor.
-        ease: 0.012 + Math.random() * 0.045,
-        // Each orb orbits its own offset around the cursor so they form a
-        // loose swirling cloud rather than stacking on one point.
-        radius: 24 + Math.random() * 190,
-        ang: Math.random() * Math.PI * 2,
-        angSpeed: (0.15 + Math.random() * 0.5) * (Math.random() < 0.5 ? 1 : -1),
-      });
+    function spawn() {
+      const orb = document.createElement("span");
+      orb.className = "wha-orb";
+      const size  = 18 + Math.random() * 20;                  // 18–38px
+      const c     = colors[Math.floor(Math.random() * colors.length)];
+      const drift = Math.random() * 160 - 80;                 // ±80px
+      const duration = 9000 + Math.random() * 7000;           // 9–16s
+
+      orb.style.width = orb.style.height = size + "px";
+      orb.style.left  = (3 + Math.random() * 94) + "%";
+      orb.style.background = `radial-gradient(circle, ${c} 0%, transparent 70%)`;
+      stage.appendChild(orb);
+
+      const anim = orb.animate(
+        [
+          { opacity: 0,    transform: "translate(0, 0)" },
+          { opacity: 0.95, offset: 0.08, transform: `translate(${drift * 0.1}px, -8vh)` },
+          { opacity: 0.78, offset: 0.55, transform: `translate(${drift * 0.6}px, -60vh)` },
+          { opacity: 0,    transform: `translate(${drift}px, -115vh)` },
+        ],
+        { duration: duration, easing: "ease-out", fill: "forwards" },
+      );
+      anim.onfinish = () => orb.remove();
     }
 
-    function onMove(e) {
-      target.x = e.clientX;
-      target.y = e.clientY;
-    }
-    window.addEventListener("pointermove", onMove, { passive: true });
-
-    let raf = null;
-    let last = performance.now();
-    function frame(now) {
-      const dt = Math.min((now - last) / 1000, 0.05);
-      last = now;
-      for (let k = 0; k < orbs.length; k++) {
-        const o = orbs[k];
-        o.ang += o.angSpeed * dt;
-        const tx = target.x + Math.cos(o.ang) * o.radius;
-        const ty = target.y + Math.sin(o.ang) * o.radius;
-        o.x += (tx - o.x) * o.ease;
-        o.y += (ty - o.y) * o.ease;
-        o.el.style.transform = `translate(${o.x}px, ${o.y}px)`;
-      }
-      raf = requestAnimationFrame(frame);
-    }
-    raf = requestAnimationFrame(frame);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      if (raf) cancelAnimationFrame(raf);
-      orbs.forEach((o) => o.el.remove());
-    };
-  }, []);
-
-  // Custom animated cursor (login page only, fine pointers only): a hand-drawn
-  // Witch Hat Atelier pointed hat that tracks the pointer (hat tip = hotspot)
-  // and gently sways. Grows/wiggles faster over interactive elements and
-  // squashes on press. The OS arrow is hidden via the wha--custom-cursor class.
-  useEffectApp(() => {
-    if (!window.matchMedia || !window.matchMedia("(pointer: fine)").matches) return;
-    const root = document.querySelector(".wha");
-    if (!root) return;
-
-    const cur = document.createElement("div");
-    cur.className = "wha-cursor";
-    cur.setAttribute("aria-hidden", "true");
-    cur.innerHTML = '<div class="wha-cursor__hat">' + WHA_HAT_SVG + '</div>';
-    root.appendChild(cur);
-    root.classList.add("wha--custom-cursor");
-
-    let shown = false;
-    function onMove(e) {
-      cur.style.left = e.clientX + "px";
-      cur.style.top = e.clientY + "px";
-      if (!shown) { shown = true; cur.style.opacity = "1"; }
-    }
-    function onDown() { cur.classList.add("is-down"); }
-    function onUp() { cur.classList.remove("is-down"); }
-    function onOver(e) {
-      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,input,[role='button']")) {
-        cur.classList.add("is-active");
-      }
-    }
-    function onOut(e) {
-      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,input,[role='button']")) {
-        cur.classList.remove("is-active");
-      }
-    }
-    function onLeave() { cur.style.opacity = "0"; shown = false; }
-
-    window.addEventListener("pointermove", onMove, { passive: true });
-    window.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointerup", onUp);
-    document.addEventListener("pointerover", onOver, true);
-    document.addEventListener("pointerout", onOut, true);
-    document.addEventListener("pointerleave", onLeave);
-
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointerover", onOver, true);
-      document.removeEventListener("pointerout", onOut, true);
-      document.removeEventListener("pointerleave", onLeave);
-      cur.remove();
-      root.classList.remove("wha--custom-cursor");
-    };
+    // Immediate burst so the first impression already has motion
+    for (let i = 0; i < 10; i++) setTimeout(spawn, i * 180);
+    const intervalId = setInterval(spawn, 700);
+    return () => clearInterval(intervalId);
   }, []);
 
   // IntersectionObserver for scroll reveals
@@ -1218,7 +1125,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     <div className="wha">
       <style>{WHA_STYLES}</style>
 
-      {/* Floating orb stage (cursor-following) */}
+      {/* Floating orb stage (self-rising) */}
       <div id="wha-orb-stage" className="wha-orb-stage" aria-hidden="true" />
 
       {/* HERO (single screen, no header/nav) -------------------------- */}
@@ -1556,59 +1463,16 @@ const WHA_STYLES = `
 .wha-orb-stage {
   position: fixed; inset: 0;
   pointer-events: none; overflow: hidden;
-  /* In front of the hero so the cursor-following orbs are actually visible;
-     pointer-events:none keeps the Sign-in button clickable. Positions are
-     transform-driven by the rAF loop in LoginScreen. */
-  z-index: 60;
+  /* Above all decorative content. Animation timing/transform is driven
+     entirely by the Web Animations API (see useEffect in LoginScreen). */
+  z-index: 50;
 }
 .wha-orb {
   position: absolute;
-  top: 0; left: 0;
+  bottom: -40px;
   border-radius: 50%;
-  opacity: 0.6;
-  /* No CSS blur: the radial-gradient already fades to transparent, and
-     blurring 10+ moving layers every frame was the main cause of the jank. */
-  will-change: transform;
-}
-
-/* Custom animated cursor ----------------------------------------------- */
-/* Hide the OS arrow only while the custom cursor is active (fine pointers). */
-.wha--custom-cursor,
-.wha--custom-cursor a,
-.wha--custom-cursor button,
-.wha--custom-cursor .wha-cta,
-.wha--custom-cursor [role="button"] {
-  cursor: none;
-}
-.wha-cursor {
-  position: fixed; top: 0; left: 0;
-  z-index: 9999;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .2s ease;
-  will-change: left, top;
-}
-/* The hat tip is the hotspot — nudge so the SVG point sits at the pointer. */
-.wha-cursor__hat {
-  margin: -3px 0 0 -4px;
-  transform-origin: 7px 6px;            /* the hat tip, for the sway */
-  animation: wha-hat-sway 2.6s ease-in-out infinite;
-}
-.wha-cursor__hat svg {
-  display: block;
-  width: 40px; height: auto;
-  filter: drop-shadow(0 3px 3px rgba(26, 20, 16, 0.30));
-}
-/* Hover: wiggle faster + lift slightly. */
-.wha-cursor.is-active .wha-cursor__hat { animation-duration: 1.1s; }
-/* Press: pause the sway and squash. */
-.wha-cursor.is-down .wha-cursor__hat {
-  animation-play-state: paused;
-  transform: rotate(-3deg) scale(0.88);
-}
-@keyframes wha-hat-sway {
-  0%, 100% { transform: rotate(-6deg); }
-  50%      { transform: rotate(5deg); }
+  filter: blur(2.5px) saturate(110%);
+  will-change: transform, opacity;
 }
 
 /* HEADER --------------------------------------------------------------- */
