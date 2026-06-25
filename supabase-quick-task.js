@@ -827,11 +827,14 @@ async function loadFlowMateWhitelistUsers() {
 
   const { data, error } = await window.flowmateSupabase
     .from("user_whitelist")
-    .select("email,display_name,role,team_member_code,created_at,added_by")
+    .select("email,display_name,role,team_member_code,added_at,added_by")
     .order("email", { ascending: true });
 
   if (error) throw error;
-  return data || [];
+  return (data || []).map((row) => ({
+    ...row,
+    created_at: row.created_at || row.added_at,
+  }));
 }
 
 async function upsertFlowMateWhitelistUser(input) {
