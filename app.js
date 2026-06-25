@@ -2254,13 +2254,15 @@ const WHA_STYLES = `
   transform-box: fill-box;
   transform-origin: center;
   animation: wha-spin 34s linear infinite;
-  will-change: transform;
+  /* No will-change: transform here. On desktop Chrome/Edge it promotes the
+     <g> to a GPU layer whose SVG transform animation is not composited, so the
+     ring freezes on PC while mobile rotates fine. Main-thread animation (no
+     will-change) works everywhere — matching .wha-sigil__glyphs which has none. */
 }
 .wha-sigil__penta {
   transform-box: fill-box;
   transform-origin: center;
   animation: wha-spin-rev 50s linear infinite;
-  will-change: transform;
 }
 .wha-sigil__glyphs {
   /* The glyphs ride along the outer rotating group, so they revolve with
