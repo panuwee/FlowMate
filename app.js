@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260625-11";
+const FLOWMATE_APP_VERSION = "v20260625-12";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1319,7 +1319,7 @@ function LoginScreen({
     const stage = document.getElementById("wha-orb-stage");
     if (!stage) return;
     const colors = ["rgba(40,80,160,0.90)", "rgba(30,100,60,0.90)", "rgba(196,114,42,0.92)", "rgba(120,50,150,0.85)"];
-    const COUNT = 18;
+    const COUNT = 10;
     const orbs = [];
     const target = {
       x: window.innerWidth / 2,
@@ -2196,8 +2196,8 @@ const WHA_STYLES = `
   animation: wha-page-in 0.8s ease-out;
 }
 @keyframes wha-page-in {
-  from { filter: sepia(1) brightness(1.3); }
-  to   { filter: sepia(0) brightness(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .wha h1, .wha h2, .wha h3, .wha .wha-cta__label {
   font-family: 'Cinzel Decorative', 'Trajan Pro', serif;
@@ -2219,8 +2219,9 @@ const WHA_STYLES = `
   position: absolute;
   top: 0; left: 0;
   border-radius: 50%;
-  opacity: 0.7;
-  filter: blur(2px) saturate(115%);
+  opacity: 0.6;
+  /* No CSS blur: the radial-gradient already fades to transparent, and
+     blurring 10+ moving layers every frame was the main cause of the jank. */
   will-change: transform;
 }
 
@@ -2348,8 +2349,8 @@ const WHA_STYLES = `
 .wha-lantern {
   position: absolute; inset: 6%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(196,114,42,0.55) 0%, rgba(196,114,42,0.18) 35%, transparent 65%);
-  filter: blur(24px);
+  /* Softer gradient stops replace the expensive filter: blur(24px). */
+  background: radial-gradient(circle, rgba(196,114,42,0.45) 0%, rgba(196,114,42,0.14) 42%, transparent 72%);
   z-index: 1;
   animation: wha-flicker 3s ease-in-out infinite, wha-glass-in 1.4s ease-out 1.2s both;
 }
@@ -2370,12 +2371,14 @@ const WHA_STYLES = `
 .wha-sigil__outer {
   transform-box: view-box;
   transform-origin: 250px 250px;
-  animation: wha-spin 40s linear infinite;
+  animation: wha-spin 34s linear infinite;
+  will-change: transform;
 }
 .wha-sigil__penta {
   transform-box: view-box;
   transform-origin: 250px 250px;
-  animation: wha-spin-rev 60s linear infinite;
+  animation: wha-spin-rev 50s linear infinite;
+  will-change: transform;
 }
 .wha-sigil__glyphs {
   /* The glyphs ride along the outer rotating group, so they revolve with
