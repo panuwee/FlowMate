@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260625-09";
+const FLOWMATE_APP_VERSION = "v20260625-12";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1046,6 +1046,18 @@ function GoogleLogo() {
   );
 }
 
+// Hand-drawn Witch Hat Atelier pointed hat used as the custom cursor. The tip
+// (top-left, ~7,6) is the pointer hotspot. Cream front + grey shade, ink
+// outline, gold tip cap and a gold button on the brim.
+const WHA_HAT_SVG =
+  '<svg viewBox="0 0 44 54" xmlns="http://www.w3.org/2000/svg">' +
+    '<path d="M9 6 C12 3 17 3 18 7 C19 10 20 14 21 18 L33 39 C35 42 33 46 28 47 C20 49 11 48 7 44 C5 42 6 38 7 35 L12 13 C12 10 11 8 9 6 Z" fill="#f5ead0" stroke="#1a1410" stroke-width="2" stroke-linejoin="round"/>' +
+    '<path d="M18 7 C19 10 20 14 21 18 L33 39 C35 42 33 46 28 47 C24 48 20 48 17 47 L15 16 C16 11 16 8 18 7 Z" fill="#a9b0b8" opacity="0.85"/>' +
+    '<path d="M6 38 C16 45 28 44 34 38" fill="none" stroke="#1a1410" stroke-width="1.6" stroke-linecap="round"/>' +
+    '<circle cx="16" cy="35" r="1.8" fill="#cf9b46"/>' +
+    '<circle cx="10" cy="5.5" r="2.6" fill="#cf9b46" stroke="#1a1410" stroke-width="1"/>' +
+  '</svg>';
+
 function LoginScreen({ onSignIn, isSigningIn, authError }) {
   // Inject Google Fonts once
   useEffectApp(() => {
@@ -1072,7 +1084,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
       "rgba(196,114,42,0.92)",   // amber
       "rgba(120,50,150,0.85)",   // violet
     ];
-    const COUNT = 18;
+    const COUNT = 10;
     const orbs = [];
     const target = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
 
@@ -1131,56 +1143,41 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     };
   }, []);
 
-  // Custom animated cursor (login page only, fine pointers only). A precise
-  // diamond "dot" tracks the pointer exactly; a dashed ring lags behind with
-  // easing and spins, growing on hover over interactive elements and shrinking
-  // on press. The OS arrow is hidden via the wha--custom-cursor class.
+  // Custom animated cursor (login page only, fine pointers only): a hand-drawn
+  // Witch Hat Atelier pointed hat that tracks the pointer (hat tip = hotspot)
+  // and gently sways. Grows/wiggles faster over interactive elements and
+  // squashes on press. The OS arrow is hidden via the wha--custom-cursor class.
   useEffectApp(() => {
     if (!window.matchMedia || !window.matchMedia("(pointer: fine)").matches) return;
     const root = document.querySelector(".wha");
     if (!root) return;
 
-    const ring = document.createElement("span");
-    ring.className = "wha-cursor__ring";
-    const dot = document.createElement("span");
-    dot.className = "wha-cursor__dot";
-    ring.setAttribute("aria-hidden", "true");
-    dot.setAttribute("aria-hidden", "true");
-    root.appendChild(ring);
-    root.appendChild(dot);
+    const cur = document.createElement("div");
+    cur.className = "wha-cursor";
+    cur.setAttribute("aria-hidden", "true");
+    cur.innerHTML = '<div class="wha-cursor__hat">' + WHA_HAT_SVG + '</div>';
+    root.appendChild(cur);
     root.classList.add("wha--custom-cursor");
 
-    let mx = window.innerWidth / 2;
-    let my = window.innerHeight / 2;
-    let rx = mx;
-    let ry = my;
     let shown = false;
-
-    function show() {
-      if (shown) return;
-      shown = true;
-      ring.style.opacity = "1";
-      dot.style.opacity = "1";
-    }
     function onMove(e) {
-      mx = e.clientX; my = e.clientY;
-      dot.style.left = mx + "px";
-      dot.style.top = my + "px";
-      show();
+      cur.style.left = e.clientX + "px";
+      cur.style.top = e.clientY + "px";
+      if (!shown) { shown = true; cur.style.opacity = "1"; }
     }
-    function onDown() { ring.classList.add("is-down"); }
-    function onUp() { ring.classList.remove("is-down"); }
+    function onDown() { cur.classList.add("is-down"); }
+    function onUp() { cur.classList.remove("is-down"); }
     function onOver(e) {
-      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,[role='button']")) {
-        ring.classList.add("is-active");
+      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,input,[role='button']")) {
+        cur.classList.add("is-active");
       }
     }
     function onOut(e) {
-      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,[role='button']")) {
-        ring.classList.remove("is-active");
+      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,input,[role='button']")) {
+        cur.classList.remove("is-active");
       }
     }
-    function onLeave() { ring.style.opacity = "0"; dot.style.opacity = "0"; shown = false; }
+    function onLeave() { cur.style.opacity = "0"; shown = false; }
 
     window.addEventListener("pointermove", onMove, { passive: true });
     window.addEventListener("pointerdown", onDown);
@@ -1189,16 +1186,6 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     document.addEventListener("pointerout", onOut, true);
     document.addEventListener("pointerleave", onLeave);
 
-    let raf = null;
-    function frame() {
-      rx += (mx - rx) * 0.18;
-      ry += (my - ry) * 0.18;
-      ring.style.left = rx + "px";
-      ring.style.top = ry + "px";
-      raf = requestAnimationFrame(frame);
-    }
-    raf = requestAnimationFrame(frame);
-
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerdown", onDown);
@@ -1206,9 +1193,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
       document.removeEventListener("pointerover", onOver, true);
       document.removeEventListener("pointerout", onOut, true);
       document.removeEventListener("pointerleave", onLeave);
-      if (raf) cancelAnimationFrame(raf);
-      ring.remove();
-      dot.remove();
+      cur.remove();
       root.classList.remove("wha--custom-cursor");
     };
   }, []);
@@ -1263,14 +1248,11 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
             <defs>
               <path id="wha-rune-arc" d="M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"/>
             </defs>
-            {/* outer ring + sigil glyphs — both rotate CW together via SMIL.
-                We use animateTransform rather than CSS transform because
-                transform-origin on SVG <g> is unreliable across browsers
-                and was leaving the group rotating around (0,0). */}
+            {/* outer ring + sigil glyphs — rotate CW together via CSS
+                (transform-box: view-box keeps the origin at the viewBox
+                center). CSS is used over SMIL because SMIL does not reliably
+                restart after a programmatic reload (e.g. after logout). */}
             <g className="wha-sigil__outer">
-              <animateTransform attributeName="transform" attributeType="XML"
-                type="rotate" from="0 250 250" to="360 250 250"
-                dur="40s" repeatCount="indefinite"/>
               <circle cx="250" cy="250" r="200" fill="none" stroke="var(--ink)" strokeWidth="0.5" strokeDasharray="1 5"/>
               <circle cx="250" cy="250" r="190" fill="none" stroke="var(--ink)" strokeWidth="1.5"
                       pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.4s" }}/>
@@ -1298,11 +1280,8 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                 ))}
               </g>
             </g>
-            {/* pentagram — rotates CCW via SMIL animateTransform */}
+            {/* pentagram — rotates CCW via CSS (see note above) */}
             <g className="wha-sigil__penta">
-              <animateTransform attributeName="transform" attributeType="XML"
-                type="rotate" from="0 250 250" to="-360 250 250"
-                dur="60s" repeatCount="indefinite"/>
               <path d="M 250,120 L 326,355 L 126,210 L 374,210 L 174,355 Z"
                     fill="none" stroke="var(--sienna)" strokeWidth="1.6" strokeLinejoin="round"
                     pathLength="1000" className="wha-ink-draw" style={{ animationDelay: "0.9s" }}/>
@@ -1563,8 +1542,8 @@ const WHA_STYLES = `
   animation: wha-page-in 0.8s ease-out;
 }
 @keyframes wha-page-in {
-  from { filter: sepia(1) brightness(1.3); }
-  to   { filter: sepia(0) brightness(1); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .wha h1, .wha h2, .wha h3, .wha .wha-cta__label {
   font-family: 'Cinzel Decorative', 'Trajan Pro', serif;
@@ -1586,8 +1565,9 @@ const WHA_STYLES = `
   position: absolute;
   top: 0; left: 0;
   border-radius: 50%;
-  opacity: 0.7;
-  filter: blur(2px) saturate(115%);
+  opacity: 0.6;
+  /* No CSS blur: the radial-gradient already fades to transparent, and
+     blurring 10+ moving layers every frame was the main cause of the jank. */
   will-change: transform;
 }
 
@@ -1600,43 +1580,36 @@ const WHA_STYLES = `
 .wha--custom-cursor [role="button"] {
   cursor: none;
 }
-.wha-cursor__ring,
-.wha-cursor__dot {
+.wha-cursor {
   position: fixed; top: 0; left: 0;
-  pointer-events: none;
   z-index: 9999;
+  pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, -50%);
-  will-change: left, top, width, height;
-}
-.wha-cursor__ring {
-  width: 34px; height: 34px;
-  transition: width .22s ease, height .22s ease, opacity .25s ease;
-}
-.wha-cursor__ring::before {
-  content: "";
-  position: absolute; inset: 0;
-  border: 1.5px dashed var(--sienna);
-  border-radius: 50%;
-  animation: wha-cursor-spin 6s linear infinite;
-}
-.wha-cursor__ring::after {
-  content: "";
-  position: absolute; inset: 5px;
-  border-radius: 50%;
-  border: 1px solid rgba(122, 59, 30, 0.25);
-}
-.wha-cursor__ring.is-active { width: 54px; height: 54px; }
-.wha-cursor__ring.is-down   { width: 24px; height: 24px; }
-.wha-cursor__dot {
-  width: 8px; height: 8px;
-  background: var(--sienna);
-  /* small grimoire diamond to echo the central sigil */
-  transform: translate(-50%, -50%) rotate(45deg);
-  box-shadow: 0 0 6px rgba(196, 114, 42, 0.7);
   transition: opacity .2s ease;
+  will-change: left, top;
 }
-@keyframes wha-cursor-spin { to { transform: rotate(360deg); } }
+/* The hat tip is the hotspot — nudge so the SVG point sits at the pointer. */
+.wha-cursor__hat {
+  margin: -3px 0 0 -4px;
+  transform-origin: 7px 6px;            /* the hat tip, for the sway */
+  animation: wha-hat-sway 2.6s ease-in-out infinite;
+}
+.wha-cursor__hat svg {
+  display: block;
+  width: 40px; height: auto;
+  filter: drop-shadow(0 3px 3px rgba(26, 20, 16, 0.30));
+}
+/* Hover: wiggle faster + lift slightly. */
+.wha-cursor.is-active .wha-cursor__hat { animation-duration: 1.1s; }
+/* Press: pause the sway and squash. */
+.wha-cursor.is-down .wha-cursor__hat {
+  animation-play-state: paused;
+  transform: rotate(-3deg) scale(0.88);
+}
+@keyframes wha-hat-sway {
+  0%, 100% { transform: rotate(-6deg); }
+  50%      { transform: rotate(5deg); }
+}
 
 /* HEADER --------------------------------------------------------------- */
 .wha-header {
@@ -1722,8 +1695,8 @@ const WHA_STYLES = `
 .wha-lantern {
   position: absolute; inset: 6%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(196,114,42,0.55) 0%, rgba(196,114,42,0.18) 35%, transparent 65%);
-  filter: blur(24px);
+  /* Softer gradient stops replace the expensive filter: blur(24px). */
+  background: radial-gradient(circle, rgba(196,114,42,0.45) 0%, rgba(196,114,42,0.14) 42%, transparent 72%);
   z-index: 1;
   animation: wha-flicker 3s ease-in-out infinite, wha-glass-in 1.4s ease-out 1.2s both;
 }
@@ -1738,10 +1711,21 @@ const WHA_STYLES = `
   transition: filter 700ms ease;
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
-/* Rotation now driven by SMIL <animateTransform> inside the SVG so the
-   spin is reliable regardless of transform-origin quirks. */
-.wha-sigil__outer { }
-.wha-sigil__penta { }
+/* Rotation via CSS (reliable on every load path, incl. logout reload).
+   transform-box: view-box anchors transform-origin to the SVG viewBox, so
+   the origin is the exact sigil center (250,250 of the 500x500 viewBox). */
+.wha-sigil__outer {
+  transform-box: view-box;
+  transform-origin: 250px 250px;
+  animation: wha-spin 34s linear infinite;
+  will-change: transform;
+}
+.wha-sigil__penta {
+  transform-box: view-box;
+  transform-origin: 250px 250px;
+  animation: wha-spin-rev 50s linear infinite;
+  will-change: transform;
+}
 .wha-sigil__glyphs {
   /* The glyphs ride along the outer rotating group, so they revolve with
      the ring. They draw themselves in after the ink ring strokes finish. */
