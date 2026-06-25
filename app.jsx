@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
-const { useState: useStateApp, useEffect: useEffectApp } = React;
+const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260625-04";
+const FLOWMATE_APP_VERSION = "v20260625-06";
 
 const NAV = [
   { group: "Personal", items: [
@@ -57,6 +57,8 @@ function App() {
   // re-rendering the whole signed-in tree and re-running the O(n) grouping.
   const [searchInput, setSearchInput] = useStateApp("");
   const [searchQuery, setSearchQuery] = useStateApp("");
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useStateApp(false);
+  const searchWrapRef = useRefApp(null);
   const [navCounts, setNavCounts] = useStateApp({});
   const [notifications, setNotifications] = useStateApp([]);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useStateApp(false);
@@ -218,6 +220,16 @@ function App() {
     const id = setTimeout(() => setSearchQuery(searchInput), 200);
     return () => clearTimeout(id);
   }, [searchInput]);
+
+  useEffectApp(() => {
+    function onSearchOutsideMouseDown(event) {
+      if (searchWrapRef.current && !searchWrapRef.current.contains(event.target)) {
+        setIsGlobalSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onSearchOutsideMouseDown);
+    return () => document.removeEventListener("mousedown", onSearchOutsideMouseDown);
+  }, []);
 
   // Initialise Supabase Auth in the background. If a Google session exists,
   // upgrade the topbar to "signed-in". Never blocks initial render so a
@@ -430,6 +442,7 @@ function App() {
     window.flowmateSelectedWorkItem = row;
     setSearchInput("");
     setSearchQuery("");
+    setIsGlobalSearchOpen(false);
     open(row.id);
   }
 
@@ -443,12 +456,16 @@ function App() {
       </div>
 
       <div className="app__topbar">
-        <div className="searchbar-wrap">
+        <div className="searchbar-wrap" ref={searchWrapRef}>
           <div className="searchbar">
             <Icon name="search" size={14} />
             <input
               value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
+              onChange={(e) => {
+                setSearchInput(e.target.value);
+                setIsGlobalSearchOpen(true);
+              }}
+              onFocus={() => setIsGlobalSearchOpen(true)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && globalSearchResults[0]) {
                   event.preventDefault();
@@ -457,12 +474,13 @@ function App() {
                 if (event.key === "Escape") {
                   setSearchInput("");
                   setSearchQuery("");
+                  setIsGlobalSearchOpen(false);
                 }
               }}
               placeholder="Search by ID, title, campaign, requester, assignee..."
             />
           </div>
-          {normalizedGlobalSearch && (
+          {isGlobalSearchOpen && normalizedGlobalSearch && (
             <GlobalSearchResultsPanel
               query={normalizedGlobalSearch}
               results={globalSearchResults}
