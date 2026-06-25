@@ -166,42 +166,228 @@ function flowmateWorkbookSheetName(name, fallback) {
   return cleaned || "Sheet";
 }
 
+function flowmateZipLe16(value) {
+  return [value & 255, (value >>> 8) & 255];
+}
+
+function flowmateZipLe32(value) {
+  return [value & 255, (value >>> 8) & 255, (value >>> 16) & 255, (value >>> 24) & 255];
+}
+
+const FLOWMATE_CRC32_TABLE = (() => {
+  const table = [];
+  for (let n = 0; n < 256; n += 1) {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+
+function flowmateCrc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let index = 0; index < bytes.length; index += 1) {
+    crc = FLOWMATE_CRC32_TABLE[(crc ^ bytes[index]) & 255] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function flowmateZipBytes(parts) {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  parts.forEach((part) => {
+    out.set(part, offset);
+    offset += part.length;
+  });
+  return out;
+}
+
+function flowmateCreateZipBlob(files, mimeType) {
+  const encoder = new TextEncoder();
+  const localParts = [];
+  const centralParts = [];
+  const entries = [];
+  let localOffset = 0;
+
+  (files || []).forEach((file) => {
+    const pathBytes = encoder.encode(file.path);
+    const dataBytes = typeof file.content === "string" ? encoder.encode(file.content) : file.content;
+    const crc = flowmateCrc32(dataBytes);
+    const localHeader = Uint8Array.from([
+      ...flowmateZipLe32(0x04034B50),
+      ...flowmateZipLe16(20),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe32(crc),
+      ...flowmateZipLe32(dataBytes.length),
+      ...flowmateZipLe32(dataBytes.length),
+      ...flowmateZipLe16(pathBytes.length),
+      ...flowmateZipLe16(0),
+    ]);
+
+    localParts.push(localHeader, pathBytes, dataBytes);
+    entries.push({ pathBytes, crc, size: dataBytes.length, offset: localOffset });
+    localOffset += localHeader.length + pathBytes.length + dataBytes.length;
+  });
+
+  const centralOffset = localOffset;
+  entries.forEach((entry) => {
+    const centralHeader = Uint8Array.from([
+      ...flowmateZipLe32(0x02014B50),
+      ...flowmateZipLe16(20),
+      ...flowmateZipLe16(20),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe32(entry.crc),
+      ...flowmateZipLe32(entry.size),
+      ...flowmateZipLe32(entry.size),
+      ...flowmateZipLe16(entry.pathBytes.length),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe16(0),
+      ...flowmateZipLe32(0),
+      ...flowmateZipLe32(entry.offset),
+    ]);
+    centralParts.push(centralHeader, entry.pathBytes);
+  });
+
+  const centralBytes = flowmateZipBytes(centralParts);
+  const endRecord = Uint8Array.from([
+    ...flowmateZipLe32(0x06054B50),
+    ...flowmateZipLe16(0),
+    ...flowmateZipLe16(0),
+    ...flowmateZipLe16(entries.length),
+    ...flowmateZipLe16(entries.length),
+    ...flowmateZipLe32(centralBytes.length),
+    ...flowmateZipLe32(centralOffset),
+    ...flowmateZipLe16(0),
+  ]);
+
+  return new Blob([flowmateZipBytes([...localParts, centralBytes, endRecord])], { type: mimeType });
+}
+
+function flowmateXlsxCellRef(columnIndex, rowIndex) {
+  let column = "";
+  let n = columnIndex + 1;
+  while (n > 0) {
+    const remainder = (n - 1) % 26;
+    column = String.fromCharCode(65 + remainder) + column;
+    n = Math.floor((n - 1) / 26);
+  }
+  return `${column}${rowIndex + 1}`;
+}
+
+function flowmateXlsxWorksheetXml(sheet) {
+  const rows = sheet.rows.length ? sheet.rows : [["No rows"]];
+  const rowXml = rows.map((row, rowIndex) => (
+    `<row r="${rowIndex + 1}">${(row || []).map((cell, columnIndex) => (
+      `<c r="${flowmateXlsxCellRef(columnIndex, rowIndex)}" t="inlineStr"><is><t xml:space="preserve">${flowmateWorkbookXmlText(cell)}</t></is></c>`
+    )).join("")}</row>`
+  )).join("");
+  return [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    "<sheetData>",
+    rowXml,
+    "</sheetData>",
+    "</worksheet>",
+  ].join("");
+}
+
 function flowmateDownloadWorkbook(filename, sheets) {
   const safeSheets = (sheets || []).filter((sheet) => sheet && sheet.name && Array.isArray(sheet.rows));
   if (!safeSheets.length) return;
 
-  const worksheets = safeSheets.map((sheet, index) => {
-    const rows = sheet.rows.length ? sheet.rows : [["No rows"]];
-    const rowXml = rows.map((row) => (
-      `<Row>${(row || []).map((cell) => (
-        `<Cell><Data ss:Type="String">${flowmateWorkbookXmlText(cell)}</Data></Cell>`
-      )).join("")}</Row>`
-    )).join("");
-    return [
-      `<Worksheet ss:Name="${flowmateWorkbookXmlText(flowmateWorkbookSheetName(sheet.name, `Sheet ${index + 1}`))}">`,
-      "<Table>",
-      rowXml,
-      "</Table>",
-      "</Worksheet>",
-    ].join("");
-  }).join("");
+  const workbookSheets = safeSheets.map((sheet, index) => (
+    `<sheet name="${flowmateWorkbookXmlText(flowmateWorkbookSheetName(sheet.name, `Sheet ${index + 1}`))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`
+  )).join("");
+  const workbookRels = safeSheets.map((sheet, index) => (
+    `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`
+  )).join("");
+  const sheetContentTypes = safeSheets.map((sheet, index) => (
+    `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+  )).join("");
 
-  const workbook = [
-    '<?xml version="1.0"?>',
-    '<?mso-application progid="Excel.Sheet"?>',
-    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"',
-    ' xmlns:o="urn:schemas-microsoft-com:office:office"',
-    ' xmlns:x="urn:schemas-microsoft-com:office:excel"',
-    ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">',
-    worksheets,
-    "</Workbook>",
-  ].join("");
+  const files = [
+    {
+      path: "[Content_Types].xml",
+      content: [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+        '<Default Extension="xml" ContentType="application/xml"/>',
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
+        sheetContentTypes,
+        "</Types>",
+      ].join(""),
+    },
+    {
+      path: "_rels/.rels",
+      content: [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>',
+        "</Relationships>",
+      ].join(""),
+    },
+    {
+      path: "xl/workbook.xml",
+      content: [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+        "<sheets>",
+        workbookSheets,
+        "</sheets>",
+        "</workbook>",
+      ].join(""),
+    },
+    {
+      path: "xl/_rels/workbook.xml.rels",
+      content: [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+        workbookRels,
+        `<Relationship Id="rId${safeSheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`,
+        "</Relationships>",
+      ].join(""),
+    },
+    {
+      path: "xl/styles.xml",
+      content: [
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>',
+        '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>',
+        '<borders count="1"><border/></borders>',
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>',
+        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>',
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>',
+        "</styleSheet>",
+      ].join(""),
+    },
+  ];
 
-  const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8" });
+  safeSheets.forEach((sheet, index) => {
+    files.push({
+      path: `xl/worksheets/sheet${index + 1}.xml`,
+      content: flowmateXlsxWorksheetXml(sheet),
+    });
+  });
+
+  const blob = flowmateCreateZipBlob(files, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename.endsWith(".xls") ? filename : `${filename}.xls`;
+  link.download = filename.endsWith(".xlsx") ? filename : `${filename}.xlsx`;
   document.body.appendChild(link);
   link.click();
   link.remove();

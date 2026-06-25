@@ -702,7 +702,7 @@ function KpiScreen() {
   const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
 
   function exportKpiRows() {
-    const filename = `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xls`;
+    const filename = `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     const allWorkRows = [
       ["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "AI Tag", "Campaign / project", "Platform", "Size / format"],
       ...kpiRows.map(row => [
@@ -764,7 +764,7 @@ function KpiScreen() {
       return;
     }
 
-    exportFlowMateCsvC(filename.replace(/\.xls$/, ".csv"), [
+    exportFlowMateCsvC(filename.replace(/\.xlsx$/, ".csv"), [
       { label: "ID", value: "id" },
       { label: "Title", value: "title" },
       { label: "AI Tag", value: row => flowMateKpiAiTagTextC(row) },
