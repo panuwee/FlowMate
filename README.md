@@ -17,6 +17,10 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `ai_tags.sql` | MVP 1.2 task-level AI tags table and auth-scoped add/list/remove RPCs |
 | `view_security_hardening.sql` | Locks public views to authenticated users and forces `security_invoker` so underlying RLS is respected |
 | `team_settings_admin.sql` | MVP 1.2 Team settings admin-only GD/VE member capacity updates plus own leave request table/RPC |
+| `phase1_security_fixes.sql` | Post-review **Phase 1** patch for an already-deployed DB: revoke direct table DML (writes go only through RPCs) + enforce the whitelist on `auth.users` email change |
+| `phase2_stability_fixes.sql` | Post-review **Phase 2** patch: `work_items.final_owner_member_id` FK → `on delete set null`; rename the comments read policy. (Also re-run `rpc_quick_task.sql` for the null-safe owner guards.) |
+| `phase3_performance.sql` | Post-review **Phase 3** patch: `latest_assignment_run_v` view + composite/partial indexes for the hottest queries |
+| `reset_tasks_for_production.sql` | Archive-first go-live reset for tasks/requests only; keeps users, whitelist, team settings, capacity, leave requests, and security/RLS |
 
 ## Before Running
 
@@ -74,9 +78,20 @@ For the Asset Count, multi-day assignment capacity, and leave watcher notificati
 1. `supabase/rpc_assignment.sql`
 2. `supabase/team_settings_admin.sql`
 
-For production go-live reset after all validation is complete, run manually:
+For production go-live reset after all validation is complete, run manually. This creates `flowmate_archive` audit tables, archives task/request rows, clears only active task/request data, keeps leave requests, and lets new display IDs start again at `CR-1001` / `QT-2001`:
 
 1. `supabase/reset_tasks_for_production.sql`
+
+### Post-review hardening patches (already-deployed DB)
+
+These are idempotent one-time patches from the production-readiness review.
+Run each once, in order:
+
+1. `supabase/phase1_security_fixes.sql`, then re-run `supabase/rpc_assignment.sql` (assignment-engine advisory lock).
+2. `supabase/phase2_stability_fixes.sql`, then re-run `supabase/rpc_quick_task.sql` (null-safe owner guards).
+3. `supabase/phase3_performance.sql` (view + indexes).
+
+For a brand-new database the canonical `schema.sql` / `rpc_*` / `whitelist_access.sql` already include the Phase 1–2 fixes, so only `phase3_performance.sql` (view + indexes) needs to be added.
 
 ## Expected Tables
 
