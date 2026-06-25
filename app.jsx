@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260624-10";
+const FLOWMATE_APP_VERSION = "v20260625-03";
 
 const NAV = [
   { group: "Personal", items: [
@@ -76,6 +76,8 @@ function App() {
     status: "idle",
     message: "Realtime not started",
   });
+  const [globalSearchRows, setGlobalSearchRows] = useStateApp([]);
+  const [globalSearchLoadState, setGlobalSearchLoadState] = useStateApp({ status: "idle", message: "" });
 
   function nav(key) {
     setRoute(key);
@@ -363,6 +365,41 @@ function App() {
     };
   }, [authState.status]);
 
+  useEffectApp(() => {
+    if (authState.status !== "signed-in") {
+      setGlobalSearchRows([]);
+      setGlobalSearchLoadState({ status: "idle", message: "" });
+      return;
+    }
+
+    let alive = true;
+    async function refreshGlobalSearchRows() {
+      if (!window.loadFlowMateListRows) {
+        setGlobalSearchRows([]);
+        setGlobalSearchLoadState({ status: "error", message: "Search loader is not ready." });
+        return;
+      }
+      try {
+        const rows = await window.loadFlowMateListRows();
+        if (!alive) return;
+        setGlobalSearchRows(rows || []);
+        setGlobalSearchLoadState({ status: "live", message: "Search ready" });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Search] Global search load failed:", error);
+        setGlobalSearchRows([]);
+        setGlobalSearchLoadState({ status: "error", message: window.flowmateUserError(error, "Search load failed.") });
+      }
+    }
+
+    refreshGlobalSearchRows();
+    window.addEventListener("flowmate:refresh-request", refreshGlobalSearchRows);
+    return () => {
+      alive = false;
+      window.removeEventListener("flowmate:refresh-request", refreshGlobalSearchRows);
+    };
+  }, [authState.status]);
+
   // Gate the whole app on auth status.
   if (authState.status === "loading") {
     return <LoadingScreen />;
@@ -381,6 +418,20 @@ function App() {
   const visibleNavGroups = getVisibleNavGroups(user.role);
   const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route);
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
+  const normalizedGlobalSearch = searchInput.trim();
+  const globalSearchResults = normalizedGlobalSearch
+    ? (globalSearchRows || [])
+      .filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false)
+      .slice(0, 8)
+    : [];
+
+  function openGlobalSearchResult(row) {
+    if (!row || !row.id) return;
+    window.flowmateSelectedWorkItem = row;
+    setSearchInput("");
+    setSearchQuery("");
+    open(row.id);
+  }
 
   return (
     <div className="app">
@@ -392,13 +443,33 @@ function App() {
       </div>
 
       <div className="app__topbar">
-        <div className="searchbar">
-          <Icon name="search" size={14} />
-          <input
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by ID, title, campaign, requester, assignee..."
-          />
+        <div className="searchbar-wrap">
+          <div className="searchbar">
+            <Icon name="search" size={14} />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && globalSearchResults[0]) {
+                  event.preventDefault();
+                  openGlobalSearchResult(globalSearchResults[0]);
+                }
+                if (event.key === "Escape") {
+                  setSearchInput("");
+                  setSearchQuery("");
+                }
+              }}
+              placeholder="Search by ID, title, campaign, requester, assignee..."
+            />
+          </div>
+          {normalizedGlobalSearch && (
+            <GlobalSearchResultsPanel
+              query={normalizedGlobalSearch}
+              results={globalSearchResults}
+              loadState={globalSearchLoadState}
+              onOpen={openGlobalSearchResult}
+            />
+          )}
         </div>
         <span className="topbar__spacer"></span>
         <div className="topbar__menu-wrap">
@@ -519,6 +590,46 @@ function App() {
       {isGlobalLeaveModalOpen && (
         <GlobalLeaveRequestModal onClose={() => setIsGlobalLeaveModalOpen(false)} />
       )}
+    </div>
+  );
+}
+
+function GlobalSearchResultsPanel({ query, results, loadState, onOpen }) {
+  const safeResults = results || [];
+  return (
+    <div className="searchbar-results" role="listbox" aria-label="Search results">
+      <div className="searchbar-results__head">
+        <span>Search results</span>
+        <span className="mono">{safeResults.length}</span>
+      </div>
+      {loadState && loadState.status === "error" && (
+        <div className="searchbar-results__empty">{loadState.message}</div>
+      )}
+      {loadState && loadState.status !== "error" && safeResults.length === 0 && (
+        <div className="searchbar-results__empty">No results for "{query}".</div>
+      )}
+      {safeResults.map(row => (
+        <button
+          key={row.id}
+          type="button"
+          className="searchbar__result"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            onOpen(row);
+          }}
+          role="option"
+        >
+          <span className="searchbar__result-main">
+            <span className="searchbar__result-id mono">{row.id}</span>
+            <span className="searchbar__result-title">{row.title}</span>
+          </span>
+          <span className="searchbar__result-meta">
+            <TypePill type={row.type} />
+            <StatusBadge status={row.status} />
+            <span>{row.assignee && MEMBERS_BY_ID[row.assignee] ? MEMBERS_BY_ID[row.assignee].name : (row.assigneeOtherName || "Unassigned")}</span>
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

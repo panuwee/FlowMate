@@ -149,6 +149,65 @@ function flowmateDownloadCsv(filename, headerLabels, dataRows) {
   URL.revokeObjectURL(url);
 }
 
+function flowmateWorkbookXmlText(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function flowmateWorkbookSheetName(name, fallback) {
+  const cleaned = String(name || fallback || "Sheet")
+    .replace(/[\[\]\*\/\\\?:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 31);
+  return cleaned || "Sheet";
+}
+
+function flowmateDownloadWorkbook(filename, sheets) {
+  const safeSheets = (sheets || []).filter((sheet) => sheet && sheet.name && Array.isArray(sheet.rows));
+  if (!safeSheets.length) return;
+
+  const worksheets = safeSheets.map((sheet, index) => {
+    const rows = sheet.rows.length ? sheet.rows : [["No rows"]];
+    const rowXml = rows.map((row) => (
+      `<Row>${(row || []).map((cell) => (
+        `<Cell><Data ss:Type="String">${flowmateWorkbookXmlText(cell)}</Data></Cell>`
+      )).join("")}</Row>`
+    )).join("");
+    return [
+      `<Worksheet ss:Name="${flowmateWorkbookXmlText(flowmateWorkbookSheetName(sheet.name, `Sheet ${index + 1}`))}">`,
+      "<Table>",
+      rowXml,
+      "</Table>",
+      "</Worksheet>",
+    ].join("");
+  }).join("");
+
+  const workbook = [
+    '<?xml version="1.0"?>',
+    '<?mso-application progid="Excel.Sheet"?>',
+    '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"',
+    ' xmlns:o="urn:schemas-microsoft-com:office:office"',
+    ' xmlns:x="urn:schemas-microsoft-com:office:excel"',
+    ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">',
+    worksheets,
+    "</Workbook>",
+  ].join("");
+
+  const blob = new Blob([workbook], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename.endsWith(".xls") ? filename : `${filename}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function Effort({ value, lg }) {
   if (value == null) return <span className="muted mono">—</span>;
   return <span className={`effort${lg ? " effort--lg" : ""}`}>{value}</span>;
@@ -184,5 +243,5 @@ Object.assign(window, {
   WORK, WORK_BY_ID,
   STATUS_LABEL, STATUS_CLASS, ASSET_LABEL,
   Avatar, StatusBadge, PriorityBadge, DueBadge, Effort, TypePill, Progress, Source,
-  flowmatePrettifyToken, flowmateCsvCell, flowmateDownloadCsv,
+  flowmatePrettifyToken, flowmateCsvCell, flowmateDownloadCsv, flowmateDownloadWorkbook,
 });

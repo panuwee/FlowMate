@@ -12,6 +12,7 @@ const FLOWMATE_REALTIME_TABLES = [
   "comments",
   "work_item_links",
   "work_item_watchers",
+  "work_item_ai_tags",
   "assignment_runs",
   "work_item_events",
   "notifications",
@@ -253,12 +254,27 @@ async function loadFlowMateLatestAssignmentRuns() {
   return res;
 }
 
+async function loadFlowMateAiTagRowsForList() {
+  const res = await window.flowmateSupabase
+    .from("work_item_ai_tags")
+    .select("id,work_item_id,tag,created_by_user_id,created_at")
+    .order("created_at", { ascending: true });
+
+  if (res.error) {
+    // Older deployments may not have ai_tags.sql yet. Keep the list/KPI usable
+    // and let the dedicated AI Tag UI surface direct RPC errors.
+    console.warn("[FlowMate AI Tags] list preload skipped:", res.error.message);
+    return { data: [], error: null };
+  }
+  return res;
+}
+
 async function loadFlowMateListRows() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
 
-  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, assignmentRunsResult] = await Promise.all([
+  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
       .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
@@ -297,6 +313,7 @@ async function loadFlowMateListRows() {
       .select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at")
       .is("removed_at", null)
       .order("created_at", { ascending: true }),
+    loadFlowMateAiTagRowsForList(),
     loadFlowMateLatestAssignmentRuns(),
   ]);
 
@@ -310,6 +327,7 @@ async function loadFlowMateListRows() {
     commentsResult.error ||
     linksResult.error ||
     watchersResult.error ||
+    aiTagsResult.error ||
     assignmentRunsResult.error;
 
   if (firstError) throw firstError;
@@ -360,6 +378,17 @@ async function loadFlowMateListRows() {
       watcherName: usersById[watcher.watcher_user_id]?.display_name || membersByUserId[watcher.watcher_user_id]?.display_name || "Unknown",
       addedByName: usersById[watcher.added_by_user_id]?.display_name || "Unknown",
       createdLabel: flowmateDateTimeLabel(watcher.created_at),
+    });
+  });
+  const aiTagsByWorkItemId = {};
+  (aiTagsResult.data || []).forEach((tag) => {
+    if (!aiTagsByWorkItemId[tag.work_item_id]) aiTagsByWorkItemId[tag.work_item_id] = [];
+    aiTagsByWorkItemId[tag.work_item_id].push({
+      id: tag.id,
+      workItemId: tag.work_item_id,
+      tag: tag.tag,
+      createdByUserId: tag.created_by_user_id,
+      createdAt: tag.created_at,
     });
   });
   const assignmentRunByWorkItemId = {};
@@ -446,6 +475,7 @@ async function loadFlowMateListRows() {
       comments: commentsByWorkItemId[item.id] || [],
       links: linksByWorkItemId[item.id] || [],
       watchers: watchersByWorkItemId[item.id] || [],
+      aiTags: aiTagsByWorkItemId[item.id] || [],
       overdue: Boolean(flags.is_overdue),
       dueSoon: Boolean(flags.is_due_soon),
       isSupabaseRow: true,

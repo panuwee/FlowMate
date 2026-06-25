@@ -47,6 +47,22 @@ function flowMateFilterRowsByMonthC(rows, monthKey, fields) {
   });
 }
 
+function flowMateRowsMonthOptionsC(rows, fields) {
+  const monthKeys = new Set();
+  const fieldList = fields && fields.length ? fields : ["calendarDate", "dueDate", "launchDate"];
+  (rows || []).forEach(row => {
+    fieldList.forEach(field => {
+      const value = row && row[field];
+      if (value && /^\d{4}-\d{2}/.test(String(value))) {
+        monthKeys.add(String(value).slice(0, 7));
+      }
+    });
+  });
+  return Array.from(monthKeys)
+    .sort()
+    .map(key => ({ key, label: flowMateMonthLabelC(key) }));
+}
+
 function flowMateWorkingDaysInMonthC(monthKey) {
   const match = String(monthKey || "").match(/^(\d{4})-(\d{2})$/);
   if (!match) return 0;
@@ -507,6 +523,69 @@ function WorkloadScreen({ onOpen }) {
 /* ============================================================
    KPI VIEW
    ============================================================ */
+function flowMateKpiAiTagsC(row) {
+  return Array.isArray(row && row.aiTags) ? row.aiTags : [];
+}
+
+function flowMateKpiAiTagTextC(row) {
+  return flowMateKpiAiTagsC(row)
+    .map(tag => (tag && tag.tag) || tag)
+    .filter(Boolean)
+    .join(", ");
+}
+
+function flowMateKpiOwnerNameC(row) {
+  if (row && row.assignee && MEMBERS_BY_ID[row.assignee]) return MEMBERS_BY_ID[row.assignee].name;
+  return (row && row.assigneeOtherName) || "Unassigned";
+}
+
+function flowMateKpiIsGdVeOwnerC(row) {
+  const member = row && row.assignee ? MEMBERS_BY_ID[row.assignee] : null;
+  return window.isFlowMateGdVeMember
+    ? window.isFlowMateGdVeMember(member || { id: row && row.assignee, name: flowMateKpiOwnerNameC(row) })
+    : false;
+}
+
+function flowMateKpiGdVeAiSheets(rows) {
+  const grouped = new Map();
+  (rows || []).forEach(row => {
+    if (!flowMateKpiAiTagsC(row).length || !flowMateKpiIsGdVeOwnerC(row)) return;
+    const ownerName = flowMateKpiOwnerNameC(row);
+    if (!grouped.has(ownerName)) grouped.set(ownerName, []);
+    grouped.get(ownerName).push(row);
+  });
+
+  return Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([ownerName, memberRows]) => ({
+      name: `AI - ${ownerName}`,
+      rows: [
+        ["Task ID", "Task name", "Status", "Assignee", "Requester", "Requester team", "Type", "Priority", "Effort", "1st Draft / Due", "Launch", "AI Tag", "Campaign / project", "Platform", "Size / format", "Brief link"],
+        ...memberRows
+          .slice()
+          .sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")))
+          .map(row => [
+            row.id || "",
+            row.title || "",
+            row.status || "",
+            ownerName,
+            row.requester || "",
+            row.requesterTeam || "",
+            row.type || "",
+            row.priority || "",
+            row.effort || "",
+            row.dueFullLabel || row.dueDate || "",
+            row.launchFullLabel || row.launchDate || "",
+            flowMateKpiAiTagTextC(row),
+            row.campaign || "",
+            row.platform || "",
+            row.size || "",
+            row.briefLink || "",
+          ]),
+      ],
+    }));
+}
+
 function KpiScreen() {
   function Bar({ value, max, color = "var(--garena-deep-blue)" }) {
     const pct = max ? (value / max) * 100 : 0;
@@ -570,6 +649,8 @@ function KpiScreen() {
       delivered: 0,
       items: 0,
       blocked: 0,
+      aiTagged: 0,
+      aiTaggedItems: [],
     };
     current.delivered += w.effort || 0;
     current.items += 1;
@@ -584,8 +665,27 @@ function KpiScreen() {
       delivered: 0,
       items: 0,
       blocked: 0,
+      aiTagged: 0,
+      aiTaggedItems: [],
     };
     current.blocked += 1;
+    ownerMap.set(id, current);
+  });
+  kpiRows.forEach(w => {
+    if (!flowMateKpiAiTagsC(w).length) return;
+    const id = w.assignee || "unassigned";
+    const owner = MEMBERS_BY_ID[id];
+    const current = ownerMap.get(id) || {
+      id,
+      name: owner?.name || w.assigneeOtherName || "Unassigned",
+      delivered: 0,
+      items: 0,
+      blocked: 0,
+      aiTagged: 0,
+      aiTaggedItems: [],
+    };
+    current.aiTagged += 1;
+    current.aiTaggedItems.push(w);
     ownerMap.set(id, current);
   });
   const ownerRows = Array.from(ownerMap.values()).sort((a, b) => b.delivered - a.delivered || a.name.localeCompare(b.name));
@@ -602,22 +702,73 @@ function KpiScreen() {
   const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
 
   function exportKpiRows() {
-    exportFlowMateCsvC(
-      `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.csv`,
-      [
-        { label: "Export month", value: () => flowMateMonthLabelC(kpiExportMonth) },
-        { label: "ID", value: "id" },
-        { label: "Title", value: "title" },
-        { label: "Type", value: "type" },
-        { label: "Status", value: "status" },
-        { label: "Assignee", value: row => row.assignee && MEMBERS_BY_ID[row.assignee] ? MEMBERS_BY_ID[row.assignee].name : (row.assigneeOtherName || "Unassigned") },
-        { label: "Requester team", value: "requesterTeam" },
-        { label: "Effort", value: "effort" },
-        { label: "Priority", value: "priority" },
-        { label: "Due", value: row => row.dueFullLabel || row.dueLabel || row.dueDate || "" },
-      ],
-      kpiRows,
-    );
+    const filename = `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xls`;
+    const allWorkRows = [
+      ["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "AI Tag", "Campaign / project", "Platform", "Size / format"],
+      ...kpiRows.map(row => [
+        flowMateMonthLabelC(kpiExportMonth),
+        row.id || "",
+        row.title || "",
+        row.type || "",
+        row.status || "",
+        flowMateKpiOwnerNameC(row),
+        row.requester || "",
+        row.requesterTeam || "",
+        row.effort || "",
+        row.priority || "",
+        row.dueFullLabel || row.dueDate || "",
+        row.launchFullLabel || row.launchDate || "",
+        flowMateKpiAiTagTextC(row),
+        row.campaign || "",
+        row.platform || "",
+        row.size || "",
+      ]),
+    ];
+    const perMemberRows = [
+      ["Member", "Delivered effort", "Delivered items", "Blocked", "AI Tagged", "AI tagged task IDs"],
+      ...ownerRows.map(row => [
+        row.name,
+        row.delivered,
+        row.items,
+        row.blocked,
+        row.aiTagged,
+        (row.aiTaggedItems || []).map(item => item.id).join(", "),
+      ]),
+    ];
+    const requesterTeamRows = [
+      ["Requester team", "Requests", "Share"],
+      ...teamRows.map(row => [row.team, row.count, `${row.share}%`]),
+    ];
+    const summaryRows = [
+      ["Metric", "Value"],
+      ["Export month", flowMateMonthLabelC(kpiExportMonth)],
+      ["Delivered effort", deliveredEffort],
+      ["Delivered items", deliveredRows.length],
+      ["Active work", activeRows.length],
+      ["Blocked", blockedRows.length],
+      ["Queued", queuedRows.length],
+      ["Need brief", needBriefRows.length],
+      ["Quick tasks closed", quickClosedRows.length],
+      ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length],
+    ];
+    const sheets = [
+      { name: "Summary", rows: summaryRows },
+      { name: "All work", rows: allWorkRows },
+      { name: "Per member", rows: perMemberRows },
+      { name: "Requester team", rows: requesterTeamRows },
+      ...flowMateKpiGdVeAiSheets(kpiRows),
+    ];
+
+    if (window.flowmateDownloadWorkbook) {
+      window.flowmateDownloadWorkbook(filename, sheets);
+      return;
+    }
+
+    exportFlowMateCsvC(filename.replace(/\.xls$/, ".csv"), [
+      { label: "ID", value: "id" },
+      { label: "Title", value: "title" },
+      { label: "AI Tag", value: row => flowMateKpiAiTagTextC(row) },
+    ], kpiRows);
   }
 
   return (
@@ -687,6 +838,7 @@ function KpiScreen() {
                   <th>Distribution</th>
                   <th>Delivered items</th>
                   <th>Blocked</th>
+                  <th>AI Tagged</th>
                 </tr>
               </thead>
               <tbody>
@@ -701,10 +853,11 @@ function KpiScreen() {
                     <td><Bar value={r.delivered} max={maxOwnerDelivered} /></td>
                     <td className="mono">{r.items}</td>
                     <td className="mono">{r.blocked}</td>
+                    <td className="mono">{r.aiTagged}</td>
                   </tr>
                 ))}
                 {ownerRows.length === 0 && (
-                  <tr><td colSpan="5" className="muted">No delivered or blocked rows loaded.</td></tr>
+                  <tr><td colSpan="6" className="muted">No delivered, blocked, or AI-tagged rows loaded.</td></tr>
                 )}
               </tbody>
             </table>
@@ -914,14 +1067,29 @@ function TeamGanttScreen({ onOpen }) {
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const ganttWindow = ganttTimelineWindowC(monthKey);
+  const ganttMonthOptions = flowMateRowsMonthOptionsC(sourceRows, ["calendarDate", "dueDate", "launchDate"]);
+  const effectiveGanttMonthOptions = ganttMonthOptions.length
+    ? ganttMonthOptions
+    : [{ key: monthKey, label: flowMateMonthLabelC(monthKey) }];
+  const selectedGanttMonth = effectiveGanttMonthOptions.some(option => option.key === monthKey)
+    ? monthKey
+    : effectiveGanttMonthOptions[0].key;
+
+  useEffectC(() => {
+    if (!ganttMonthOptions.length) return;
+    if (!ganttMonthOptions.some(option => option.key === monthKey)) {
+      setMonthKey(ganttMonthOptions[0].key);
+    }
+  }, [sourceRows, monthKey]);
+
+  const ganttWindow = ganttTimelineWindowC(selectedGanttMonth);
   const todayKey = calendarUtcKeyC(new Date());
   const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey
     ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000)
     : null;
   const ganttTasks = (sourceRows || [])
     .filter(row => row && row.type !== "leave" && !["cancelled"].includes(row.status))
-    .map(row => ganttTaskModelC(row, monthKey, ganttWindow))
+    .map(row => ganttTaskModelC(row, selectedGanttMonth, ganttWindow))
     .filter(Boolean)
     .sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
 
@@ -965,13 +1133,13 @@ function TeamGanttScreen({ onOpen }) {
         <div className="page__actions">
           <select
             className="select"
-            value={monthKey}
+            value={selectedGanttMonth}
             onChange={event => setMonthKey(event.target.value)}
             data-testid="flowmate-gantt-month"
             aria-label="Gantt month"
             style={{ width: 132, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}
           >
-            {flowMateMonthOptionsC().map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+            {effectiveGanttMonthOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
           </select>
         </div>
       </div>
@@ -1073,14 +1241,14 @@ function TeamGanttScreen({ onOpen }) {
         ))}
 
         {teamGroups.length === 0 && (
-          <div className="gantt__empty">No due-date work items found for {flowMateMonthLabelC(monthKey)}.</div>
+          <div className="gantt__empty">No due-date work items found for {flowMateMonthLabelC(selectedGanttMonth)}.</div>
         )}
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
         Gantt rule: due date is the bar end. Launch date is shown as a marker; when launch date is after due date, the bar spans due date to launch date. This view shows two months at a time; scroll right to see the second month.
       </div>
-      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(monthKey)} plus next month</Source>
+      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(selectedGanttMonth)} plus next month</Source>
     </div>
   );
 }

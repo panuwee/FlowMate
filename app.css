@@ -106,6 +106,91 @@ button:disabled {
   color: var(--garena-grey);
   background: var(--garena-badge-bg);
 }
+.searchbar-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 520px;
+}
+.searchbar-wrap .searchbar {
+  max-width: none;
+}
+.searchbar-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 60;
+  border: var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--garena-white);
+  box-shadow: 0 18px 48px rgba(46, 84, 109, 0.18);
+  overflow: hidden;
+}
+.searchbar-results__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: var(--border-hairline);
+  color: var(--garena-grey);
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.searchbar-results__empty {
+  padding: 14px 12px;
+  color: var(--garena-grey);
+  font-size: 12px;
+}
+.searchbar__result {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: var(--border-hairline);
+  background: var(--garena-white);
+  text-align: left;
+}
+.searchbar__result:last-child {
+  border-bottom: 0;
+}
+.searchbar__result:hover,
+.searchbar__result:focus {
+  outline: 0;
+  background: var(--garena-badge-bg);
+}
+.searchbar__result-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.searchbar__result-id {
+  flex: 0 0 auto;
+  color: var(--garena-deep-blue);
+  font-size: 12px;
+}
+.searchbar__result-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--garena-black);
+  font-size: 13px;
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.searchbar__result-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--garena-grey);
+  font-size: 11px;
+  white-space: nowrap;
+}
 
 .topbar__spacer { flex: 1; }
 .topbar__btn {
@@ -819,14 +904,14 @@ button:disabled {
 .gantt__header {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 8;
   background: #FAFAFA;
   border-bottom: var(--border-hairline);
 }
 .gantt__owner-head {
   position: sticky;
   left: 0;
-  z-index: 4;
+  z-index: 10;
   padding: 10px 14px;
   font-size: 11px;
   font-weight: var(--weight-bold);
@@ -896,12 +981,18 @@ button:disabled {
   border-bottom: 0;
 }
 .gantt__team-title {
+  position: sticky;
+  left: 0;
+  z-index: 6;
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 220px;
+  box-sizing: border-box;
   min-height: 34px;
   padding: 8px 14px;
   background: #FAFAFA;
+  border-right: var(--border-hairline);
   border-bottom: var(--border-hairline);
   font-size: 12px;
   font-weight: var(--weight-bold);
@@ -917,7 +1008,7 @@ button:disabled {
 .gantt__owner {
   position: sticky;
   left: 0;
-  z-index: 2;
+  z-index: 7;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -971,7 +1062,7 @@ button:disabled {
 }
 .gantt__bar {
   position: relative;
-  z-index: 3;
+  z-index: 1;
   min-width: 0;
   height: 24px;
   display: inline-flex;
