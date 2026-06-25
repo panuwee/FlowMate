@@ -1156,7 +1156,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
               <path id="wha-rune-arc" d="M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"/>
             </defs>
             {/* outer ring + sigil glyphs — rotate CW together via CSS
-                (transform-box: view-box keeps the origin at the viewBox
+                (transform-box: fill-box keeps the origin at the group's own
                 center). CSS is used over SMIL because SMIL does not reliably
                 restart after a programmatic reload (e.g. after logout). */}
             <g className="wha-sigil__outer">
@@ -1576,17 +1576,21 @@ const WHA_STYLES = `
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
 /* Rotation via CSS (reliable on every load path, incl. logout reload).
-   transform-box: view-box anchors transform-origin to the SVG viewBox, so
-   the origin is the exact sigil center (250,250 of the 500x500 viewBox). */
+   transform-box: fill-box anchors transform-origin to each group's own
+   bounding box (centered at the sigil center, since the rings/pentagram are
+   symmetric about 250,250). fill-box is used over view-box because some
+   desktop Chrome/Edge builds fail to animate view-box groups (the ring stays
+   frozen on PC while mobile rotates fine); fill-box is widely supported and
+   already drives .wha-sigil__glyphs reliably here. */
 .wha-sigil__outer {
-  transform-box: view-box;
-  transform-origin: 250px 250px;
+  transform-box: fill-box;
+  transform-origin: center;
   animation: wha-spin 34s linear infinite;
   will-change: transform;
 }
 .wha-sigil__penta {
-  transform-box: view-box;
-  transform-origin: 250px 250px;
+  transform-box: fill-box;
+  transform-origin: center;
   animation: wha-spin-rev 50s linear infinite;
   will-change: transform;
 }
