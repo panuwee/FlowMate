@@ -1480,7 +1480,7 @@ function CalendarScreen({ onOpen }) {
         </div>
       </div>
 
-      <div className="grid grid--4" style={{ marginBottom: 14 }}>
+      <div className="calendar-metrics">
         <div className="stat"><div className="stat__num mono">{selectedCalendarRows.length}</div><div className="stat__lbl">Scheduled items</div></div>
         <div className="stat stat--accent"><div className="stat__num mono">{selectedCalendarRows.filter(row => row.type === "quick").length}</div><div className="stat__lbl">Quick Tasks</div></div>
         <div className="stat stat--warn"><div className="stat__num mono">{dueSoonCount}</div><div className="stat__lbl">Due soon</div></div>
