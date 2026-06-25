@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260625-07";
+const FLOWMATE_APP_VERSION = "v20260625-09";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1065,7 +1065,6 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
   useEffectApp(() => {
     const stage = document.getElementById("wha-orb-stage");
     if (!stage) return;
-    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     const colors = [
       "rgba(40,80,160,0.90)",    // cobalt
@@ -1083,11 +1082,14 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
       const size = 14 + Math.random() * 24;
       el.style.width = el.style.height = size + "px";
       el.style.background = `radial-gradient(circle, ${colors[i % colors.length]} 0%, transparent 70%)`;
+      const startX = Math.random() * window.innerWidth;
+      const startY = Math.random() * window.innerHeight;
+      el.style.transform = `translate(${startX}px, ${startY}px)`;
       stage.appendChild(el);
       orbs.push({
         el,
-        x: Math.random() * window.innerWidth,
-        y: Math.random() * window.innerHeight,
+        x: startX,
+        y: startY,
         // Lower ease = more lag/delay before catching up to the cursor.
         ease: 0.012 + Math.random() * 0.045,
         // Each orb orbits its own offset around the cursor so they form a
@@ -1126,6 +1128,88 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
       window.removeEventListener("pointermove", onMove);
       if (raf) cancelAnimationFrame(raf);
       orbs.forEach((o) => o.el.remove());
+    };
+  }, []);
+
+  // Custom animated cursor (login page only, fine pointers only). A precise
+  // diamond "dot" tracks the pointer exactly; a dashed ring lags behind with
+  // easing and spins, growing on hover over interactive elements and shrinking
+  // on press. The OS arrow is hidden via the wha--custom-cursor class.
+  useEffectApp(() => {
+    if (!window.matchMedia || !window.matchMedia("(pointer: fine)").matches) return;
+    const root = document.querySelector(".wha");
+    if (!root) return;
+
+    const ring = document.createElement("span");
+    ring.className = "wha-cursor__ring";
+    const dot = document.createElement("span");
+    dot.className = "wha-cursor__dot";
+    ring.setAttribute("aria-hidden", "true");
+    dot.setAttribute("aria-hidden", "true");
+    root.appendChild(ring);
+    root.appendChild(dot);
+    root.classList.add("wha--custom-cursor");
+
+    let mx = window.innerWidth / 2;
+    let my = window.innerHeight / 2;
+    let rx = mx;
+    let ry = my;
+    let shown = false;
+
+    function show() {
+      if (shown) return;
+      shown = true;
+      ring.style.opacity = "1";
+      dot.style.opacity = "1";
+    }
+    function onMove(e) {
+      mx = e.clientX; my = e.clientY;
+      dot.style.left = mx + "px";
+      dot.style.top = my + "px";
+      show();
+    }
+    function onDown() { ring.classList.add("is-down"); }
+    function onUp() { ring.classList.remove("is-down"); }
+    function onOver(e) {
+      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,[role='button']")) {
+        ring.classList.add("is-active");
+      }
+    }
+    function onOut(e) {
+      if (e.target && e.target.closest && e.target.closest("a,button,.wha-cta,[role='button']")) {
+        ring.classList.remove("is-active");
+      }
+    }
+    function onLeave() { ring.style.opacity = "0"; dot.style.opacity = "0"; shown = false; }
+
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("pointerup", onUp);
+    document.addEventListener("pointerover", onOver, true);
+    document.addEventListener("pointerout", onOut, true);
+    document.addEventListener("pointerleave", onLeave);
+
+    let raf = null;
+    function frame() {
+      rx += (mx - rx) * 0.18;
+      ry += (my - ry) * 0.18;
+      ring.style.left = rx + "px";
+      ring.style.top = ry + "px";
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointerover", onOver, true);
+      document.removeEventListener("pointerout", onOut, true);
+      document.removeEventListener("pointerleave", onLeave);
+      if (raf) cancelAnimationFrame(raf);
+      ring.remove();
+      dot.remove();
+      root.classList.remove("wha--custom-cursor");
     };
   }, []);
 
@@ -1493,18 +1577,66 @@ const WHA_STYLES = `
 .wha-orb-stage {
   position: fixed; inset: 0;
   pointer-events: none; overflow: hidden;
-  /* Behind the hero content (sigil + sign-in) so orbs swirl in the
-     background. Positions are transform-driven by the rAF loop in LoginScreen. */
-  z-index: 0;
+  /* In front of the hero so the cursor-following orbs are actually visible;
+     pointer-events:none keeps the Sign-in button clickable. Positions are
+     transform-driven by the rAF loop in LoginScreen. */
+  z-index: 60;
 }
 .wha-orb {
   position: absolute;
   top: 0; left: 0;
   border-radius: 50%;
-  opacity: 0.85;
-  filter: blur(2.5px) saturate(110%);
+  opacity: 0.7;
+  filter: blur(2px) saturate(115%);
   will-change: transform;
 }
+
+/* Custom animated cursor ----------------------------------------------- */
+/* Hide the OS arrow only while the custom cursor is active (fine pointers). */
+.wha--custom-cursor,
+.wha--custom-cursor a,
+.wha--custom-cursor button,
+.wha--custom-cursor .wha-cta,
+.wha--custom-cursor [role="button"] {
+  cursor: none;
+}
+.wha-cursor__ring,
+.wha-cursor__dot {
+  position: fixed; top: 0; left: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  will-change: left, top, width, height;
+}
+.wha-cursor__ring {
+  width: 34px; height: 34px;
+  transition: width .22s ease, height .22s ease, opacity .25s ease;
+}
+.wha-cursor__ring::before {
+  content: "";
+  position: absolute; inset: 0;
+  border: 1.5px dashed var(--sienna);
+  border-radius: 50%;
+  animation: wha-cursor-spin 6s linear infinite;
+}
+.wha-cursor__ring::after {
+  content: "";
+  position: absolute; inset: 5px;
+  border-radius: 50%;
+  border: 1px solid rgba(122, 59, 30, 0.25);
+}
+.wha-cursor__ring.is-active { width: 54px; height: 54px; }
+.wha-cursor__ring.is-down   { width: 24px; height: 24px; }
+.wha-cursor__dot {
+  width: 8px; height: 8px;
+  background: var(--sienna);
+  /* small grimoire diamond to echo the central sigil */
+  transform: translate(-50%, -50%) rotate(45deg);
+  box-shadow: 0 0 6px rgba(196, 114, 42, 0.7);
+  transition: opacity .2s ease;
+}
+@keyframes wha-cursor-spin { to { transform: rotate(360deg); } }
 
 /* HEADER --------------------------------------------------------------- */
 .wha-header {
