@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260625-10";
+const FLOWMATE_APP_VERSION = "v20260625-11";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1514,15 +1514,7 @@ function LoginScreen({
     d: "M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"
   })), React.createElement("g", {
     className: "wha-sigil__outer"
-  }, React.createElement("animateTransform", {
-    attributeName: "transform",
-    attributeType: "XML",
-    type: "rotate",
-    from: "0 250 250",
-    to: "360 250 250",
-    dur: "40s",
-    repeatCount: "indefinite"
-  }), React.createElement("circle", {
+  }, React.createElement("circle", {
     cx: "250",
     cy: "250",
     r: "200",
@@ -1580,15 +1572,7 @@ function LoginScreen({
     kind: i
   }))))), React.createElement("g", {
     className: "wha-sigil__penta"
-  }, React.createElement("animateTransform", {
-    attributeName: "transform",
-    attributeType: "XML",
-    type: "rotate",
-    from: "0 250 250",
-    to: "-360 250 250",
-    dur: "60s",
-    repeatCount: "indefinite"
-  }), React.createElement("path", {
+  }, React.createElement("path", {
     d: "M 250,120 L 326,355 L 126,210 L 374,210 L 174,355 Z",
     fill: "none",
     stroke: "var(--sienna)",
@@ -2380,10 +2364,19 @@ const WHA_STYLES = `
   transition: filter 700ms ease;
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
-/* Rotation now driven by SMIL <animateTransform> inside the SVG so the
-   spin is reliable regardless of transform-origin quirks. */
-.wha-sigil__outer { }
-.wha-sigil__penta { }
+/* Rotation via CSS (reliable on every load path, incl. logout reload).
+   transform-box: view-box anchors transform-origin to the SVG viewBox, so
+   the origin is the exact sigil center (250,250 of the 500x500 viewBox). */
+.wha-sigil__outer {
+  transform-box: view-box;
+  transform-origin: 250px 250px;
+  animation: wha-spin 40s linear infinite;
+}
+.wha-sigil__penta {
+  transform-box: view-box;
+  transform-origin: 250px 250px;
+  animation: wha-spin-rev 60s linear infinite;
+}
 .wha-sigil__glyphs {
   /* The glyphs ride along the outer rotating group, so they revolve with
      the ring. They draw themselves in after the ink ring strokes finish. */
