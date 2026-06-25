@@ -1815,6 +1815,7 @@ function FlowMatePromptHost() {
 
   function onSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
+    if (req.hideInput) { settle(""); return; }
     const trimmed = (value || "").trim();
     if (req.required && !trimmed) { setError("This field is required."); return; }
     if (typeof req.validate === "function") {
@@ -1854,11 +1855,11 @@ function FlowMatePromptHost() {
               {req.label}{req.required ? <span style={{ color: "var(--garena-red, #c0504d)" }}> *</span> : null}
             </label>
           ) : null}
-          {req.multiline
+          {!req.hideInput && (req.multiline
             ? <textarea autoFocus rows={4} style={inputStyle} value={value} placeholder={req.placeholder || ""}
                 onChange={(e) => { setValue(e.target.value); if (error) setError(""); }} />
             : <input autoFocus type="text" style={inputStyle} value={value} placeholder={req.placeholder || ""}
-                onChange={(e) => { setValue(e.target.value); if (error) setError(""); }} />}
+                onChange={(e) => { setValue(e.target.value); if (error) setError(""); }} />)}
           {req.note ? <div style={{ fontSize: 12, color: "var(--garena-grey, #6b7280)", marginTop: 8, lineHeight: 1.5 }}>{req.note}</div> : null}
           {error ? <div style={{ fontSize: 12.5, color: "var(--garena-red, #c0504d)", marginTop: 8 }}>{error}</div> : null}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

@@ -64,7 +64,10 @@ function flowMateWorkingDaysInMonthC(monthKey) {
 function flowMateWorkloadMonthOptionsC(rows) {
   const monthKeys = new Set();
   (rows || []).forEach(row => {
-    (row.allItems || row.items || []).forEach(item => {
+    [
+      ...((row.allItems || row.items || [])),
+      ...((row.requestedItems || [])),
+    ].forEach(item => {
       ["calendarDate", "dueDate", "launchDate"].forEach(field => {
         const value = item && item[field];
         if (value && /^\d{4}-\d{2}/.test(String(value))) {
@@ -85,6 +88,7 @@ function WorkloadScreen({ onOpen }) {
   const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
+    const requestedItems = WORK.filter(w => w.requesterUserId && w.requesterUserId === (m.userId || m.id));
     const openCreative = mine.filter(w => w.type === "creative" && ["assigned","in_progress","review","blocked"].includes(w.status));
     const wip = mine.filter(w => w.status === "in_progress" && w.type === "creative").length;
     const assignedEffort = openCreative.reduce((s, w) => s + (w.effort || 0), 0);
@@ -106,6 +110,7 @@ function WorkloadScreen({ onOpen }) {
       quick: mine.filter(w => w.type === "quick" && !["delivered","cancelled"].includes(w.status)).length,
       items: openCreative,
       allItems: mine,
+      requestedItems,
     };
   });
   const [rows, setRows] = useStateC(localRows);
@@ -159,6 +164,7 @@ function WorkloadScreen({ onOpen }) {
     statusCounts: r.statusCounts || { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 },
     items: r.items || [],
     allItems: r.allItems || r.items || [],
+    requestedItems: r.requestedItems || [],
   }));
   const workloadMonthOptions = flowMateWorkloadMonthOptionsC(safeRows);
   const effectiveWorkloadMonthOptions = workloadMonthOptions.length
@@ -170,11 +176,14 @@ function WorkloadScreen({ onOpen }) {
   const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth);
   const monthRows = safeRows.map(r => {
     const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
+    const monthRequestedItems = flowMateFilterRowsByMonthC(r.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthOpenCreative = monthItems.filter(item =>
       item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
     );
     const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
     const capacityWindow = r.effectiveCap * selectedMonthWorkingDays;
+    const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
+    const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
     return {
       ...r,
       statusCounts: window.getFlowMateWorkloadStatusCounts
@@ -188,7 +197,10 @@ function WorkloadScreen({ onOpen }) {
       blocked: monthItems.filter(item => item.status === "blocked").length,
       review: monthItems.filter(item => item.status === "review").length,
       quick: monthItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
+      urgentAssigned,
+      urgentRequested,
       items: monthOpenCreative,
+      requestedItems: monthRequestedItems,
     };
   });
   const tabRows = monthRows.filter(r => {
@@ -203,13 +215,17 @@ function WorkloadScreen({ onOpen }) {
     totals.review += r.statusCounts.review || 0;
     totals.blocked += r.statusCounts.blocked || 0;
     totals.delivered += r.statusCounts.delivered || 0;
+    totals.urgentAssigned += r.urgentAssigned || 0;
+    totals.urgentRequested += r.urgentRequested || 0;
     return totals;
-  }, { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 });
+  }, { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0, urgentAssigned: 0, urgentRequested: 0 });
   const totals = {
     capacity: visibleRows.reduce((s, r) => s + r.window, 0),
     assigned: visibleRows.reduce((s, r) => s + r.assignedEffort, 0),
     queued: queuedEffort,
     overdue: visibleRows.reduce((s, r) => s + r.overdue, 0),
+    urgentAssigned: visibleRows.reduce((s, r) => s + (r.urgentAssigned || 0), 0),
+    urgentRequested: visibleRows.reduce((s, r) => s + (r.urgentRequested || 0), 0),
   };
   totals.available = totals.capacity - totals.assigned;
 
@@ -223,10 +239,13 @@ function WorkloadScreen({ onOpen }) {
   function exportWorkloadRows() {
     const exportRows = visibleRows.map(row => {
       const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
+      const monthRequestedItems = flowMateFilterRowsByMonthC(row.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
       const monthOpenCreative = monthItems.filter(item =>
         item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
       );
       const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
+      const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
+      const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
       return {
         ...row,
         exportMonthLabel: flowMateMonthLabelC(selectedWorkloadMonth),
@@ -241,6 +260,8 @@ function WorkloadScreen({ onOpen }) {
         blocked: monthItems.filter(item => item.status === "blocked").length,
         review: monthItems.filter(item => item.status === "review").length,
         quick: monthItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
+        urgentAssigned,
+        urgentRequested,
       };
     });
     exportFlowMateCsvC(
@@ -258,6 +279,8 @@ function WorkloadScreen({ onOpen }) {
         { label: "Review", value: row => row.statusCounts.review || 0 },
         { label: "Blocked", value: row => row.statusCounts.blocked || 0 },
         { label: "Delivered", value: row => row.statusCounts.delivered || 0 },
+        { label: "Urgent assigned", value: "urgentAssigned" },
+        { label: "Urgent requested", value: "urgentRequested" },
       ],
       exportRows,
     );
@@ -300,12 +323,14 @@ function WorkloadScreen({ onOpen }) {
 
       {workloadTab === "standard" ? (
         <>
-          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
             <div className="stat"><div className="stat__num mono">{statusTotals.assigned}</div><div className="stat__lbl">Assigned</div></div>
             <div className="stat stat--info"><div className="stat__num mono">{statusTotals.in_progress}</div><div className="stat__lbl">In progress</div></div>
             <div className="stat"><div className="stat__num mono">{statusTotals.review}</div><div className="stat__lbl">Review</div></div>
             <div className="stat stat--accent"><div className="stat__num mono">{statusTotals.blocked}</div><div className="stat__lbl">Blocked</div></div>
             <div className="stat stat--ok"><div className="stat__num mono">{statusTotals.delivered}</div><div className="stat__lbl">Delivered</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{statusTotals.urgentAssigned}</div><div className="stat__lbl">Urgent assigned</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{statusTotals.urgentRequested}</div><div className="stat__lbl">Urgent requested</div></div>
           </div>
 
           <div className="card card__body--flush">
@@ -318,6 +343,8 @@ function WorkloadScreen({ onOpen }) {
                   <th>Review</th>
                   <th>Blocked</th>
                   <th>Delivered</th>
+                  <th>Urgent assigned</th>
+                  <th>Urgent requested</th>
                 </tr>
               </thead>
               <tbody>
@@ -333,10 +360,12 @@ function WorkloadScreen({ onOpen }) {
                     <td className="mono">{r.statusCounts.review}</td>
                     <td className="mono">{r.statusCounts.blocked}</td>
                     <td className="mono">{r.statusCounts.delivered}</td>
+                    <td className="mono">{r.urgentAssigned}</td>
+                    <td className="mono">{r.urgentRequested}</td>
                   </tr>
                 ))}
                 {visibleRows.length === 0 && (
-                  <tr><td colSpan="6" className="muted">No Non GD/VE workload rows loaded.</td></tr>
+                  <tr><td colSpan="8" className="muted">No Non GD/VE workload rows loaded.</td></tr>
                 )}
               </tbody>
             </table>
@@ -344,12 +373,14 @@ function WorkloadScreen({ onOpen }) {
         </>
       ) : (
         <>
-          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
             <div className="stat"><div className="stat__num mono">{totals.capacity}</div><div className="stat__lbl">Total capacity (pt)</div><div className="stat__delta">across {visibleRows.length} members - {selectedMonthWorkingDays} working days</div></div>
             <div className="stat stat--info"><div className="stat__num mono">{totals.assigned}</div><div className="stat__lbl">Assigned effort</div></div>
             <div className="stat stat--ok"><div className="stat__num mono">{totals.available}</div><div className="stat__lbl">Available</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{totals.queued}</div><div className="stat__lbl">Queued effort</div></div>
             <div className="stat stat--accent"><div className="stat__num mono">{totals.overdue}</div><div className="stat__lbl">Overdue</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{totals.urgentAssigned}</div><div className="stat__lbl">Urgent assigned</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{totals.urgentRequested}</div><div className="stat__lbl">Urgent requested</div></div>
           </div>
 
           <div className="card card__body--flush">
@@ -369,6 +400,7 @@ function WorkloadScreen({ onOpen }) {
               <th>Blocked</th>
               <th>Review</th>
               <th>Quick</th>
+              <th>Urgent</th>
               <th>Flags</th>
             </tr>
           </thead>
@@ -416,6 +448,7 @@ function WorkloadScreen({ onOpen }) {
                     <td><span className={r.blocked > 0 ? "cell-bad" : "cell-grey"}>{r.blocked}</span></td>
                     <td className="cell-grey">{r.review}</td>
                     <td className="cell-grey">{r.quick}</td>
+                    <td><span className={r.urgentAssigned > 0 ? "cell-warn" : "cell-grey"}>{r.urgentAssigned}</span></td>
                     <td>
                       <span className="row" style={{ gap: 4, flexWrap: "wrap" }}>
                         {over && <span className="tag" style={{ background: "var(--garena-red-light-2)", color: "var(--garena-red)" }}>Over cap</span>}
@@ -428,7 +461,7 @@ function WorkloadScreen({ onOpen }) {
                   {isOpen && (
                     <tr style={{ background: "#FCFCFC" }}>
                       <td></td>
-                      <td colSpan="13" style={{ padding: "12px 14px" }}>
+                      <td colSpan="14" style={{ padding: "12px 14px" }}>
                         <div className="muted" style={{ fontSize: 11, marginBottom: 8, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
                           Active creative work - {r.items.length}
                         </div>
@@ -458,7 +491,7 @@ function WorkloadScreen({ onOpen }) {
               );
             })}
                 {visibleRows.length === 0 && (
-                  <tr><td colSpan="14" className="muted">No GD/VE workload rows loaded.</td></tr>
+                  <tr><td colSpan="15" className="muted">No GD/VE workload rows loaded.</td></tr>
                 )}
           </tbody>
         </table>

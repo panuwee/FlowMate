@@ -21,7 +21,7 @@ async function loadFlowMateWorkloadRows() {
       .order("member_code", { ascending: true }),
     window.flowmateSupabase
       .from("team_members")
-      .select("id,member_code,display_name,initials,color,discipline,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
+      .select("id,user_id,member_code,display_name,initials,color,discipline,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
     window.flowmateSupabase
       .from("leave_requests")
       .select("team_member_id,start_date,end_date,start_half,end_half,cancelled_at")
@@ -59,6 +59,7 @@ async function loadFlowMateWorkloadRows() {
   const rows = (workloadResult.data || []).filter((row) => isVisibleMemberCode(row.member_code)).map((row) => {
     const member = membersById[row.team_member_id] || {};
     const memberItems = (activeItems || []).filter((item) => item.assignee === row.team_member_id);
+    const requestedItems = (activeItems || []).filter((item) => item.requesterUserId && item.requesterUserId === member.user_id);
     const statusCounts = window.getFlowMateWorkloadStatusCounts
       ? window.getFlowMateWorkloadStatusCounts(memberItems)
       : { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 };
@@ -79,6 +80,7 @@ async function loadFlowMateWorkloadRows() {
         initials: member.initials || row.member_code,
         color: member.color || "#2E546D",
         discipline: member.discipline || row.discipline_short,
+        userId: member.user_id || null,
         skills: [
           ...((row.skills || []).map(flowmateToKebab)),
           ...((row.backup_skills || []).map((skill) => `${flowmateToKebab(skill)}-backup`)),
@@ -104,6 +106,7 @@ async function loadFlowMateWorkloadRows() {
       quick: Number(row.quick_task_count || 0),
       items: openCreativeItems,
       allItems: memberItems,
+      requestedItems,
       isSupabaseRow: true,
     };
   });

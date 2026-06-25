@@ -468,6 +468,25 @@ function getFlowMateCreativeTypeLabel(typeKey) {
   return option ? option.label : typeKey;
 }
 
+const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
+const FLOWMATE_CREATIVE_UNIT_EFFORT = {
+  banner: 2,
+  "hero-album": 16,
+  logo: 2,
+  "web-reskin": 24,
+  "new-web": 24,
+  "cdn-design": 1,
+  resize: 0.25,
+  "graphic-pack": 0.5,
+  "kv-design": 3,
+  "jersey-design": 2,
+  "jersey-in-game": 1,
+  "merchandise-design": 1,
+  "video-standard": 4,
+  "video-under-1-min": 2,
+  motion: 2,
+};
+
 function subtractFlowMateWorkingDays(dateValue, workingDays) {
   if (!dateValue) return "";
   const parts = String(dateValue).split("-").map((part) => Number(part));
@@ -482,6 +501,15 @@ function subtractFlowMateWorkingDays(dateValue, workingDays) {
     if (day !== 0 && day !== 6) remaining -= 1;
   }
 
+  return date.toISOString().slice(0, 10);
+}
+
+function addFlowMateCalendarDays(dateValue, days) {
+  const parts = String(dateValue || "").slice(0, 10).split("-").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return "";
+  const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  if (Number.isNaN(date.getTime())) return "";
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -504,6 +532,56 @@ function getFlowMateDraftDateForLaunchDate(launchDate) {
   const nextLaunchDate = clampFlowMateDateToToday(launchDate);
   const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, 5);
   return clampFlowMateDateToToday(draftDate);
+}
+
+function countFlowMateWorkingDaysInclusive(startDate, endDate) {
+  const startValue = clampFlowMateDateToToday(startDate);
+  const endValue = String(endDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(endValue) || endValue < startValue) return 0;
+
+  const startParts = startValue.split("-").map((part) => Number(part));
+  const endParts = endValue.split("-").map((part) => Number(part));
+  const cursor = new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2]));
+  const end = new Date(Date.UTC(endParts[0], endParts[1] - 1, endParts[2]));
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) return 0;
+
+  let workingDays = 0;
+  while (cursor <= end) {
+    const day = cursor.getUTCDay();
+    if (day >= 1 && day <= 5) workingDays += 1;
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return workingDays;
+}
+
+function getFlowMateCreativeEffortEstimate(draft) {
+  const typeKey = getFlowMateCreativeTypeOption(draft?.assetSubtype).key;
+  const unitEffort = FLOWMATE_CREATIVE_UNIT_EFFORT[typeKey] || 4;
+  const assetCount = Math.max(1, Number(draft?.assetCount || 1));
+  return Math.max(1, Math.ceil(unitEffort * assetCount));
+}
+
+function getFlowMateCreativeTimePressure(draft) {
+  const launchDate = clampFlowMateDateToToday(draft?.launchDate);
+  const lastWorkDate = addFlowMateCalendarDays(launchDate, -1);
+  const workingDays = countFlowMateWorkingDaysInclusive(getFlowMateTodayDateKey(), lastWorkDate);
+  const normalCapacity = workingDays * FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY;
+  const effort = getFlowMateCreativeEffortEstimate(draft);
+  const assetCount = Math.max(1, Number(draft?.assetCount || 1));
+  const skillLabel = getFlowMateCreativeTypeLabel(draft?.assetSubtype);
+  return {
+    effort,
+    workingDays,
+    normalCapacity,
+    assetCount,
+    skillLabel,
+    launchDate,
+    isInsufficient: effort > normalCapacity,
+  };
+}
+
+function getFlowMateAutoUrgentReason(timePressure) {
+  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before launch.`;
 }
 
 function normalizeFlowMateQuickDraft(draft) {
@@ -807,11 +885,37 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   async function handleSubmit() {
     if (isSubmitting) return;
     const activeDraft = mode === "quick" ? quickDraft : creativeDraft;
+    let submissionDraft = activeDraft;
     const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);
     if (Object.keys(nextValidationErrors).length > 0) {
       setValidationErrors(nextValidationErrors);
       setCreateAlert("Please complete the highlighted required fields.");
       return;
+    }
+
+    const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
+    if (timePressure && timePressure.isInsufficient && submissionDraft.priority !== "urgent") {
+      const autoUrgentReason = getFlowMateAutoUrgentReason(timePressure);
+      const confirmed = window.flowmatePrompt
+        ? await window.flowmatePrompt({
+            title: "เวลาไม่เพียงพอ",
+            hideInput: true,
+            note: `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before Launch Date. Priority will be set to Urgent.`,
+            confirmText: "Set Urgent and submit",
+          })
+        : "";
+      if (confirmed === null) {
+        setCreateAlert("Submit cancelled. Please adjust Launch date, Asset Count, or Priority.");
+        return;
+      }
+      const urgentDraft = {
+        ...submissionDraft,
+        priority: "urgent",
+        urgentReason: submissionDraft.urgentReason || autoUrgentReason,
+      };
+      submissionDraft = urgentDraft;
+      setCreativeDraft(urgentDraft);
+      saveFlowMateCreateDraft("creative", urgentDraft);
     }
 
     setValidationErrors({});
@@ -822,10 +926,10 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
       let created;
       let nextResult;
       if (mode === "quick") {
-        created = await window.createFlowMateQuickTask(quickDraft);
+        created = await window.createFlowMateQuickTask(submissionDraft);
         nextResult = { kind: "quick_created", id: window.getFlowMateCreatedDisplayId(created) };
       } else {
-        created = await window.createFlowMateCreativeRequest(creativeDraft);
+        created = await window.createFlowMateCreativeRequest(submissionDraft);
         const assignment = created.assignment || {};
         const result = assignment.result || "queued";
         nextResult = {

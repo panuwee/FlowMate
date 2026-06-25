@@ -226,14 +226,19 @@ update public.team_members tm
    ), array['banner']::text[])
  where exists (select 1 from mapped_skills ms where ms.id = tm.id);
 
+with gdve_default_skills(member_code, skills) as (
+  values
+    ('pond', array['banner','hero-album','logo','web-reskin','new-web','cdn-design','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design','video-standard','video-under-1-min','motion']::text[]),
+    ('jo', array['banner','logo','new-web','web-reskin','cdn-design','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[]),
+    ('tong', array['banner','logo','web-reskin','cdn-design','resize','graphic-pack','kv-design','jersey-design','jersey-in-game','merchandise-design']::text[]),
+    ('eye', array['banner','logo','web-reskin','cdn-design','resize','jersey-in-game']::text[]),
+    ('vee', array['video-standard','video-under-1-min','motion']::text[]),
+    ('ploy', array['banner','logo','resize','graphic-pack','video-standard','video-under-1-min','motion']::text[])
+)
 update public.team_members tm
-   set skills = (
-     select array_agg(distinct skill order by skill)
-     from unnest(coalesce(tm.skills, '{}'::text[]) || array['hero-album']::text[]) as skill
-   )
- where lower(tm.member_code) = any (array['pond','jo','tong','eye','ploy'])
-   and 'banner' = any (coalesce(tm.skills, '{}'::text[]))
-   and not ('hero-album' = any (coalesce(tm.skills, '{}'::text[])));
+   set skills = defaults.skills
+  from gdve_default_skills defaults
+ where lower(tm.member_code) = defaults.member_code;
 
 with mapped_backup_skills as (
   select
@@ -630,7 +635,7 @@ begin
     into v_requester_context;
   v_allow_backup_pool := v_wi.priority = 'urgent' and v_required_skill in ('video-standard','video-under-1-min');
   v_assignment_start := v_today;
-  v_assignment_end := greatest(v_today, coalesce(v_wi.due_date, v_today));
+  v_assignment_end := greatest(v_today, coalesce(v_wi.launch_date, v_wi.due_date, v_today));
   v_working_days := public.flowmate_count_working_days(v_assignment_start, v_assignment_end);
 
   -- 4. Candidate filtering + tie-break -------------------------------------
@@ -688,10 +693,7 @@ begin
         when v_requester_context = 'esport' and lower(tm.member_code) = 'ploy' then 0
         when v_requester_context = 'esport' and lower(tm.member_code) = 'vee' then 1
         when v_requester_context <> 'esport' and lower(tm.member_code) = 'pond' and v_required_skill in ('motion','video-standard','video-under-1-min') then 0
-        when v_requester_context <> 'esport' and lower(tm.member_code) = 'jo' then 1
-        when v_requester_context <> 'esport' and lower(tm.member_code) = 'tong' then 2
-        when v_requester_context <> 'esport' and lower(tm.member_code) = 'eye' then 3
-        when v_requester_context <> 'esport' and lower(tm.member_code) = 'pond' then 4
+        when v_requester_context <> 'esport' then 1
         else 9
       end as context_tie_rank,
       case
@@ -751,8 +753,8 @@ begin
            context_rank asc,
            context_tie_rank asc,
            remaining desc,
-           wip_now asc,
            window_assigned_effort asc,
+           wip_now asc,
            overdue_count asc,
            member_code asc
   limit 1;
@@ -825,11 +827,11 @@ begin
       when v_winner_skill = 'backup' then
         'Auto (urgent fallback): ' || v_required_skill
         || ' assigned to backup ' || v_winner_name
-        || ' by remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
+        || ' by remaining capacity through ' || to_char(coalesce(v_wi.launch_date, v_wi.due_date), 'Mon DD') || '.'
       else
         'Auto: ' || v_required_skill
         || ' assigned to ' || v_winner_name
-        || ' by skill, WIP, and remaining capacity through ' || to_char(v_wi.due_date, 'Mon DD') || '.'
+        || ' by skill, WIP, and remaining capacity through ' || to_char(coalesce(v_wi.launch_date, v_wi.due_date), 'Mon DD') || '.'
     end;
 
     update public.work_items
@@ -880,7 +882,7 @@ begin
   elsif not v_has_eligible then
     v_reason := 'Queued: all matching members are at WIP limit or unavailable.';
   else
-    v_reason := 'Queued: matching members are over capacity before the 1st Draft date.';
+    v_reason := 'Queued: matching members are over capacity before the Launch date.';
   end if;
 
   -- capacity snapshot (lightweight) for explainability
@@ -1053,6 +1055,12 @@ declare
   v_due_date      date;
   v_launch_date   date;
   v_remaining_working_days integer;
+  v_requested_priority public.priority_level;
+  v_urgent_reason text;
+  v_time_pressure_effort integer;
+  v_time_pressure_working_days integer;
+  v_time_pressure_capacity integer;
+  v_time_pressure_asset_count integer;
 begin
   v_actor_id := public.flowmate_actor_user_id();
   perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
@@ -1068,6 +1076,7 @@ begin
   if greatest(1, coalesce(p_asset_count, 1)) <> coalesce(p_asset_count, 1) then
     raise exception 'Asset Count must be at least 1';
   end if;
+  v_time_pressure_asset_count := greatest(1, coalesce(p_asset_count, 1));
 
   v_launch_date := coalesce(p_launch_date, p_due_date);
   v_due_date := p_due_date;
@@ -1082,6 +1091,26 @@ begin
     end loop;
   end if;
   v_due_date := coalesce(v_due_date, current_date + 7);
+  v_launch_date := coalesce(v_launch_date, v_due_date);
+
+  v_requested_priority := coalesce(p_priority, 'normal');
+  v_urgent_reason := nullif(trim(coalesce(p_urgent_reason, '')), '');
+  v_time_pressure_effort := public.flowmate_effort_for_subtype(p_asset_type, p_asset_subtype, v_time_pressure_asset_count);
+  v_time_pressure_working_days := case
+    when v_launch_date <= current_date then 0
+    else public.flowmate_count_working_days(current_date, v_launch_date - 1)
+  end;
+  v_time_pressure_capacity := v_time_pressure_working_days * 8;
+
+  if v_requested_priority <> 'urgent' and v_time_pressure_effort > v_time_pressure_capacity then
+    v_requested_priority := 'urgent';
+    v_urgent_reason := coalesce(
+      v_urgent_reason,
+      'Auto urgent: requested effort ' || v_time_pressure_effort::text || ' pt exceeds ' ||
+      v_time_pressure_working_days::text || ' working day(s) / ' ||
+      v_time_pressure_capacity::text || ' pt before launch.'
+    );
+  end if;
 
   perform pg_advisory_xact_lock(hashtext('flowmate_creative_request_display_id'));
 
@@ -1104,7 +1133,7 @@ begin
     v_display_id, 'creative_request', trim(p_title), nullif(trim(coalesce(p_campaign_name,'')), ''),
     nullif(trim(coalesce(p_brief_note,'')), ''),
     v_actor_id, nullif(trim(coalesce(p_requester_team,'')), ''),
-    'new', coalesce(p_priority, 'normal'), nullif(trim(coalesce(p_urgent_reason,'')), ''),
+    'new', v_requested_priority, v_urgent_reason,
     v_due_date, v_launch_date,
     null, null, false, 0, false
   ) returning id into v_work_item_id;
@@ -1113,7 +1142,7 @@ begin
     work_item_id, asset_type, asset_subtype, asset_count, platforms, size_format,
     brief_link, reference_link, brief_completeness_status
   ) values (
-    v_work_item_id, p_asset_type, trim(coalesce(p_asset_subtype, '')), greatest(1, coalesce(p_asset_count, 1)),
+    v_work_item_id, p_asset_type, trim(coalesce(p_asset_subtype, '')), v_time_pressure_asset_count,
     coalesce(p_platforms, '{}'::text[]), trim(coalesce(p_size_format, '')),
     trim(coalesce(p_brief_link, '')), nullif(trim(coalesce(p_reference_link, '')), ''),
     'new'
