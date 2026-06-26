@@ -564,6 +564,7 @@ async function createFlowMateCreativeRequest(input) {
     p_urgent_reason:    input.urgentReason || null,
     p_due_date:         input.dueDate || null,
     p_launch_date:      input.launchDate || null,
+    p_publish_date:    input.publishDate || null,
   });
   if (error) throw error;
   return data;

@@ -95,6 +95,242 @@ function flowMateWorkloadMonthOptionsC(rows) {
     label: flowMateMonthLabelC(key)
   }));
 }
+const FLOWMATE_PLANNING_CHANNELS_C = ["Facebook", "Instagram", "TikTok", "YouTube", "Website", "In-game", "LINE", "Other"];
+function normalizeFlowMatePlanningChannelC(value) {
+  const raw = String(value || "").trim();
+  const lower = raw.toLowerCase();
+  const compact = lower.replace(/\s+/g, "");
+  if (!raw) return "Other";
+  if (["facebook", "fb", "meta facebook"].includes(lower)) return "Facebook";
+  if (["instagram", "ig", "insta", "reels", "instagram reels"].includes(lower)) return "Instagram";
+  if (["tiktok", "tik-tok"].includes(compact)) return "TikTok";
+  if (["youtube", "yt", "youtube shorts", "shorts"].includes(lower)) return "YouTube";
+  if (["website", "web", "landing page", "microsite"].includes(lower)) return "Website";
+  if (["in-game", "ingame", "in game", "game", "in-app", "in app"].includes(lower)) return "In-game";
+  if (["line", "line oa", "line official", "line official account"].includes(lower)) return "LINE";
+  return "Other";
+}
+function flowMateDateLabelPlanningC(dateValue) {
+  if (!dateValue) return "";
+  const date = new Date(`${String(dateValue).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric"
+  });
+}
+function flowMateDateFullLabelPlanningC(dateValue) {
+  if (!dateValue) return "";
+  const date = new Date(`${String(dateValue).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+function getFlowMatePlanningChannelsC(row) {
+  if (!row) return ["Other"];
+  const source = Array.isArray(row.normalizedChannels) ? row.normalizedChannels : Array.isArray(row.normalized_channels) ? row.normalized_channels : Array.isArray(row.channels) ? row.channels : Array.isArray(row.platforms) ? row.platforms : Array.isArray(row.raw_platforms) ? row.raw_platforms : String(row.channel || row.platform || "").split(",");
+  const normalized = source.map(normalizeFlowMatePlanningChannelC).filter(Boolean);
+  const unique = Array.from(new Set(normalized));
+  return unique.length ? unique : ["Other"];
+}
+function getFlowMatePlanningOwnerLabelC(row) {
+  if (!row) return "Unassigned";
+  if (row.ownerName) return row.ownerName;
+  if (row.final_owner_name) return row.final_owner_name;
+  if (row.assignee && window.MEMBERS_BY_ID && window.MEMBERS_BY_ID[row.assignee]) return window.MEMBERS_BY_ID[row.assignee].name;
+  if (row.assigneeOtherName) return row.assigneeOtherName;
+  if (row.assignee_other_name) return row.assignee_other_name;
+  return "Unassigned";
+}
+function getFlowMatePlanningTypeSkillC(row) {
+  if (!row) return "";
+  const subtype = row.subtype || row.asset_subtype || "";
+  if (subtype && typeof getFlowMateCreativeTypeLabel === "function") return getFlowMateCreativeTypeLabel(subtype);
+  if (subtype) return ASSET_LABEL[subtype] || subtype;
+  return ASSET_LABEL[row.assetType || row.asset_type] || row.assetType || row.asset_type || "";
+}
+function deriveFlowMatePlanningReadinessC(row, today = new Date()) {
+  if (!row) return "Planned";
+  if (row.planningReadiness || row.planning_readiness) return row.planningReadiness || row.planning_readiness;
+  const status = String(row.status || "").toLowerCase();
+  const planningDate = row.planningDate || row.planning_date || row.publishDate || row.publish_date || row.launchDate || row.launch_date || "";
+  if (status === "blocked") return "Blocked";
+  if (status === "need_brief") return "Need Brief";
+  if (status === "cancelled") return "Cancelled";
+  if (status === "delivered") {
+    const dateKey = String(planningDate).slice(0, 10);
+    const todayKey = today.toISOString().slice(0, 10);
+    return dateKey && dateKey <= todayKey ? "Published" : "Ready";
+  }
+  if (planningDate) {
+    const [y, m, d] = String(planningDate).slice(0, 10).split("-").map(Number);
+    const planUtc = Date.UTC(y, (m || 1) - 1, d || 1);
+    const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+    const days = Math.round((planUtc - todayUtc) / 86400000);
+    if (days <= 7) return "At Risk";
+  }
+  if (status === "review") return "In Review";
+  if (status === "assigned" || status === "in_progress") return "In Production";
+  return "Planned";
+}
+function mapFlowMatePlanningViewRowC(item) {
+  const rawPlatforms = item.raw_platforms || [];
+  const normalizedChannels = getFlowMatePlanningChannelsC({
+    normalizedChannels: item.normalized_channels,
+    raw_platforms: rawPlatforms
+  });
+  const planningDate = item.planning_date || item.publish_date || item.launch_date || "";
+  return {
+    id: item.display_id || item.id,
+    workItemId: item.id,
+    type: "creative",
+    title: item.title || "",
+    status: item.status || "",
+    priority: item.priority || "normal",
+    dueDate: item.first_draft_date || "",
+    dueLabel: flowMateDateLabelPlanningC(item.first_draft_date),
+    dueFullLabel: flowMateDateFullLabelPlanningC(item.first_draft_date),
+    launchDate: item.launch_date || "",
+    launchLabel: flowMateDateLabelPlanningC(item.launch_date),
+    launchFullLabel: flowMateDateFullLabelPlanningC(item.launch_date),
+    publishDate: item.publish_date || "",
+    publishLabel: flowMateDateLabelPlanningC(item.publish_date),
+    publishFullLabel: flowMateDateFullLabelPlanningC(item.publish_date),
+    planningDate,
+    planningLabel: flowMateDateLabelPlanningC(planningDate),
+    planningFullLabel: flowMateDateFullLabelPlanningC(planningDate),
+    campaign: item.campaign_name || "",
+    requesterUserId: item.requester_user_id || "",
+    requesterTeam: item.requester_team || "No team",
+    assigneeUserId: item.assignee_user_id || "",
+    assignee: item.final_owner_member_id || "",
+    ownerName: item.final_owner_name || "",
+    assigneeOtherName: item.assignee_other_name || "",
+    assetType: item.asset_type || "",
+    subtype: item.asset_subtype || "",
+    assetCount: item.asset_count || 1,
+    platforms: rawPlatforms,
+    channel: normalizedChannels.join(", "),
+    normalizedChannels,
+    planningReadiness: item.planning_readiness || deriveFlowMatePlanningReadinessC({
+      status: item.status,
+      planningDate
+    }),
+    comments: [],
+    links: [],
+    watchers: [],
+    checklistItems: [],
+    aiTags: [],
+    isSupabaseRow: true
+  };
+}
+async function loadFlowMatePlanningRowsC() {
+  if (!window.flowmateSupabase && !window.loadFlowMateListRows) {
+    throw new Error("Planning data loader is not ready.");
+  }
+  if (window.flowmateSupabase) {
+    try {
+      const result = await window.flowmateSupabase.from("planning_work_items_v").select("*").order("planning_date", {
+        ascending: true
+      });
+      if (!result.error) {
+        return (result.data || []).map(mapFlowMatePlanningViewRowC);
+      }
+      console.warn("[FlowMate Planning] planning_work_items_v unavailable; using live list rows:", result.error.message);
+    } catch (error) {
+      console.warn("[FlowMate Planning] planning_work_items_v query failed; using live list rows:", error && error.message);
+    }
+  }
+  if (!window.loadFlowMateListRows) {
+    throw new Error("Planning view is unavailable and live list loader is not ready.");
+  }
+  const rows = await window.loadFlowMateListRows();
+  return (rows || []).filter(row => row && row.type === "creative" && !row.archivedAt).map(row => ({
+    ...row,
+    planningDate: row.planningDate || row.publishDate || row.launchDate || "",
+    planningLabel: row.planningLabel || flowMateDateLabelPlanningC(row.publishDate || row.launchDate),
+    planningFullLabel: row.planningFullLabel || flowMateDateFullLabelPlanningC(row.publishDate || row.launchDate),
+    normalizedChannels: getFlowMatePlanningChannelsC(row),
+    planningReadiness: deriveFlowMatePlanningReadinessC(row)
+  }));
+}
+function filterFlowMatePlanningRowsC(rows, filters) {
+  const activeFilters = filters || {};
+  return (rows || []).filter(row => {
+    if (!row || row.type !== "creative" || row.archivedAt) return false;
+    if (activeFilters.month && activeFilters.month !== "all") {
+      const planningDate = row.planningDate || row.publishDate || row.launchDate || "";
+      if (!planningDate || String(planningDate).slice(0, 7) !== activeFilters.month) return false;
+    }
+    if (activeFilters.campaign && activeFilters.campaign !== "all" && getFlowMatePlanningCampaignNameC(row) !== activeFilters.campaign) return false;
+    if (activeFilters.channel && activeFilters.channel !== "all" && !getFlowMatePlanningChannelsC(row).includes(activeFilters.channel)) return false;
+    if (activeFilters.status && activeFilters.status !== "all" && row.status !== activeFilters.status) return false;
+    if (activeFilters.requesterTeam && activeFilters.requesterTeam !== "all" && (row.requesterTeam || "No team") !== activeFilters.requesterTeam) return false;
+    if (activeFilters.priority && activeFilters.priority !== "all" && row.priority !== activeFilters.priority) return false;
+    if (activeFilters.typeSkill && activeFilters.typeSkill !== "all") {
+      const typeSkill = row.subtype || row.assetType || "";
+      if (typeSkill !== activeFilters.typeSkill) return false;
+    }
+    return true;
+  });
+}
+function groupFlowMatePlanningRowsByChannelC(rows) {
+  const grouped = Object.fromEntries(FLOWMATE_PLANNING_CHANNELS_C.map(channel => [channel, []]));
+  (rows || []).forEach(row => {
+    getFlowMatePlanningChannelsC(row).forEach(channel => {
+      const key = FLOWMATE_PLANNING_CHANNELS_C.includes(channel) ? channel : "Other";
+      grouped[key].push(row);
+    });
+  });
+  return grouped;
+}
+function flowMatePlanningOptionsC(rows, getter) {
+  return Array.from(new Set((rows || []).map(getter).filter(Boolean))).sort();
+}
+function flowMatePlanningChannelPlacementCountC(grouped) {
+  return Object.values(grouped || {}).reduce((sum, rows) => sum + rows.length, 0);
+}
+function getFlowMatePlanningCampaignNameC(row) {
+  return row && (row.campaign || row.campaign_name) || "No campaign";
+}
+function getFlowMatePlanningCalendarDateC(row) {
+  if (!row) return "";
+  return row.publishDate || row.publish_date || row.launchDate || row.launch_date || row.planningDate || row.planning_date || "";
+}
+function groupFlowMatePlanningRowsByCampaignC(rows) {
+  return (rows || []).reduce((grouped, row) => {
+    if (!row || row.type !== "creative" || row.archivedAt) return grouped;
+    const campaign = getFlowMatePlanningCampaignNameC(row);
+    if (!grouped[campaign]) grouped[campaign] = [];
+    grouped[campaign].push(row);
+    return grouped;
+  }, {});
+}
+function summarizeFlowMatePlanningCampaignC(rows) {
+  const channelNames = new Set();
+  const safeRows = (rows || []).filter(row => row && row.type === "creative" && !row.archivedAt);
+  safeRows.forEach(row => getFlowMatePlanningChannelsC(row).forEach(channel => channelNames.add(channel)));
+  return {
+    totalAssets: safeRows.length,
+    channelsCovered: channelNames.size,
+    readyDelivered: safeRows.filter(row => ["Ready", "Published"].includes(deriveFlowMatePlanningReadinessC(row)) || row.status === "delivered").length,
+    atRisk: safeRows.filter(row => deriveFlowMatePlanningReadinessC(row) === "At Risk").length,
+    blocked: safeRows.filter(row => deriveFlowMatePlanningReadinessC(row) === "Blocked" || row.status === "blocked").length,
+    urgent: safeRows.filter(row => row.priority === "urgent").length
+  };
+}
+Object.assign(window, {
+  getFlowMatePlanningChannelsC,
+  getFlowMatePlanningCalendarDateC,
+  filterFlowMatePlanningRowsC,
+  groupFlowMatePlanningRowsByChannelC,
+  groupFlowMatePlanningRowsByCampaignC,
+  summarizeFlowMatePlanningCampaignC,
+  deriveFlowMatePlanningReadinessC
+});
 function WorkloadScreen({
   onOpen
 }) {
@@ -703,6 +939,632 @@ function WorkloadScreen({
     colSpan: "15",
     className: "muted"
   }, "No GD/VE workload rows loaded.")))))), React.createElement(Source, null, loadState.status === "live" ? "Supabase member_workload_v" : "No local fallback data", " - ", flowMateMonthLabelC(selectedWorkloadMonth), " - ", TODAY));
+}
+function PlanningChannelViewScreen({
+  onOpen
+}) {
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({
+    status: "loading",
+    message: "Loading planning rows..."
+  });
+  const [filters, setFilters] = useStateC({
+    month: "all",
+    campaign: "all",
+    channel: "all",
+    status: "all",
+    requesterTeam: "all",
+    priority: "all",
+    typeSkill: "all"
+  });
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      try {
+        const liveRows = await loadFlowMatePlanningRowsC();
+        if (!alive) return;
+        setRows(liveRows);
+        setLoadState({
+          status: "live",
+          message: "Live Supabase planning data"
+        });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Planning] Load failed:", error);
+        setRows([]);
+        setLoadState({
+          status: "error",
+          message: window.flowmateUserError(error, "Planning data load failed.")
+        });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
+  function setFilter(key, value) {
+    setFilters(current => ({
+      ...current,
+      [key]: value
+    }));
+  }
+  function clearFilters() {
+    setFilters({
+      month: "all",
+      campaign: "all",
+      channel: "all",
+      status: "all",
+      requesterTeam: "all",
+      priority: "all",
+      typeSkill: "all"
+    });
+  }
+  function openPlanningCard(row) {
+    if (!row || !row.id) return;
+    window.flowmateSelectedWorkItem = row;
+    onOpen(row.id);
+  }
+  const activeRows = (rows || []).filter(row => row && row.type === "creative" && !row.archivedAt);
+  const filteredRows = filterFlowMatePlanningRowsC(activeRows, filters);
+  const groupedRows = groupFlowMatePlanningRowsByChannelC(filteredRows);
+  const channelSections = filters.channel === "all" ? FLOWMATE_PLANNING_CHANNELS_C : [filters.channel];
+  const monthOptions = flowMateRowsMonthOptionsC(activeRows, ["planningDate", "publishDate", "launchDate"]);
+  const campaignOptions = flowMatePlanningOptionsC(activeRows, row => row.campaign || "No campaign");
+  const statusOptions = flowMatePlanningOptionsC(activeRows, row => row.status);
+  const requesterTeamOptions = flowMatePlanningOptionsC(activeRows, row => row.requesterTeam || "No team");
+  const priorityOptions = flowMatePlanningOptionsC(activeRows, row => row.priority);
+  const typeSkillOptions = flowMatePlanningOptionsC(activeRows, row => row.subtype || row.assetType);
+  const channelPlacementCount = flowMatePlanningChannelPlacementCountC(groupedRows);
+  const atRiskCount = filteredRows.filter(row => deriveFlowMatePlanningReadinessC(row) === "At Risk").length;
+  const blockedCount = filteredRows.filter(row => deriveFlowMatePlanningReadinessC(row) === "Blocked").length;
+  const readyCount = filteredRows.filter(row => ["Ready", "Published"].includes(deriveFlowMatePlanningReadinessC(row))).length;
+  function planningSelect(label, value, key, options, renderLabel) {
+    return React.createElement("label", {
+      className: "planning-filter"
+    }, React.createElement("span", null, label), React.createElement("select", {
+      className: "select",
+      value: value,
+      onChange: event => setFilter(key, event.target.value)
+    }, React.createElement("option", {
+      value: "all"
+    }, "All ", label.toLowerCase()), options.map(option => React.createElement("option", {
+      key: option.key || option,
+      value: option.key || option
+    }, renderLabel ? renderLabel(option) : option.label || option))));
+  }
+  function renderPlanningCard(row, channel) {
+    const assignee = row.assignee || "";
+    const owner = getFlowMatePlanningOwnerLabelC({
+      ...row,
+      assignee
+    });
+    const typeSkill = getFlowMatePlanningTypeSkillC(row) || "-";
+    const planningReadiness = deriveFlowMatePlanningReadinessC(row);
+    const planningDateLabel = row.planningFullLabel || row.planningLabel || row.planningDate || row.publishFullLabel || row.publishLabel || row.launchFullLabel || row.launchLabel || "-";
+    const draftLabel = row.dueFullLabel || row.dueLabel || row.dueDate || "-";
+    return React.createElement("button", {
+      key: `${channel}-${row.id}`,
+      type: "button",
+      className: "planning-card",
+      onClick: () => openPlanningCard(row)
+    }, React.createElement("div", {
+      className: "planning-card__top"
+    }, React.createElement("span", {
+      className: "mono planning-card__id"
+    }, row.id), React.createElement("span", {
+      className: `planning-readiness planning-readiness--${String(planningReadiness).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+    }, planningReadiness)), React.createElement("div", {
+      className: "planning-card__title"
+    }, row.title || "Untitled request"), React.createElement("div", {
+      className: "planning-card__meta"
+    }, React.createElement("span", null, "Campaign"), React.createElement("strong", null, row.campaign || "No campaign"), React.createElement("span", null, "Channel"), React.createElement("strong", null, channel), React.createElement("span", null, "Publish / launch"), React.createElement("strong", null, planningDateLabel), React.createElement("span", null, "1st Draft"), React.createElement("strong", null, draftLabel), React.createElement("span", null, "Status"), React.createElement("strong", null, STATUS_LABEL[row.status] || row.status || "-"), React.createElement("span", null, "Priority"), React.createElement("strong", null, row.priority || "-"), React.createElement("span", null, "Owner"), React.createElement("strong", null, owner), React.createElement("span", null, "Type / Skill"), React.createElement("strong", null, typeSkill)));
+  }
+  return React.createElement("div", {
+    className: "page planning-page"
+  }, React.createElement("div", {
+    className: "page__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Channel View"), React.createElement("div", {
+    className: "page__sub"
+  }, "Planning view grouped by normalized publishing channel - ", loadState.message)), React.createElement("div", {
+    className: "page__actions"
+  }, React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: clearFilters
+  }, "Clear filters"))), React.createElement("div", {
+    className: "stat-strip planning-metrics",
+    style: {
+      gridTemplateColumns: "repeat(4, 1fr)"
+    }
+  }, React.createElement("div", {
+    className: "stat"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, filteredRows.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Creative requests"), React.createElement("div", {
+    className: "stat__delta"
+  }, "counted once")), React.createElement("div", {
+    className: "stat stat--info"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, channelPlacementCount), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Channel placements"), React.createElement("div", {
+    className: "stat__delta"
+  }, "multi-channel duplicated")), React.createElement("div", {
+    className: "stat stat--warn"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, atRiskCount), React.createElement("div", {
+    className: "stat__lbl"
+  }, "At risk")), React.createElement("div", {
+    className: "stat stat--accent"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, blockedCount), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Blocked"), React.createElement("div", {
+    className: "stat__delta"
+  }, readyCount, " ready/published"))), React.createElement("div", {
+    className: "filterbar planning-filterbar"
+  }, planningSelect("Month", filters.month, "month", monthOptions), planningSelect("Campaign", filters.campaign, "campaign", campaignOptions), planningSelect("Channel", filters.channel, "channel", FLOWMATE_PLANNING_CHANNELS_C), planningSelect("Status", filters.status, "status", statusOptions, option => STATUS_LABEL[option] || option), planningSelect("Requester team", filters.requesterTeam, "requesterTeam", requesterTeamOptions), planningSelect("Priority", filters.priority, "priority", priorityOptions), planningSelect("Type / Skill", filters.typeSkill, "typeSkill", typeSkillOptions, option => getFlowMatePlanningTypeSkillC({
+    subtype: option,
+    assetType: option
+  }) || option)), loadState.status === "error" && React.createElement("div", {
+    className: "reason-box reason-box--need",
+    style: {
+      marginBottom: 12
+    }
+  }, loadState.message), React.createElement("div", {
+    className: "planning-channel-board"
+  }, channelSections.map(channel => {
+    const channelRows = groupedRows[channel] || [];
+    return React.createElement("section", {
+      key: channel,
+      className: "planning-channel"
+    }, React.createElement("div", {
+      className: "planning-channel__head"
+    }, React.createElement("div", null, React.createElement("h2", null, channel), React.createElement("div", {
+      className: "muted"
+    }, channelRows.length, " placement", channelRows.length === 1 ? "" : "s"))), React.createElement("div", {
+      className: "planning-channel__body"
+    }, channelRows.map(row => renderPlanningCard(row, channel)), channelRows.length === 0 && React.createElement("div", {
+      className: "planning-channel__empty"
+    }, "No active Creative Requests for this channel.")));
+  })), activeRows.length === 0 && loadState.status !== "loading" && loadState.status !== "error" && React.createElement("div", {
+    className: "team-settings-empty",
+    style: {
+      marginTop: 12
+    }
+  }, "No active Creative Requests loaded for Planning."), activeRows.length > 0 && filteredRows.length === 0 && React.createElement("div", {
+    className: "team-settings-empty",
+    style: {
+      marginTop: 12
+    }
+  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - publish date with launch date fallback"));
+}
+function PlanningCampaignViewScreen({
+  onOpen
+}) {
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({
+    status: "loading",
+    message: "Loading planning rows..."
+  });
+  const [filters, setFilters] = useStateC({
+    month: "all",
+    campaign: "all",
+    status: "all"
+  });
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      try {
+        const liveRows = await loadFlowMatePlanningRowsC();
+        if (!alive) return;
+        setRows(liveRows);
+        setLoadState({
+          status: "live",
+          message: "Live Supabase planning data"
+        });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Campaign Planning] Load failed:", error);
+        setRows([]);
+        setLoadState({
+          status: "error",
+          message: window.flowmateUserError(error, "Planning data load failed.")
+        });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
+  function setFilter(key, value) {
+    setFilters(current => ({
+      ...current,
+      [key]: value
+    }));
+  }
+  function clearFilters() {
+    setFilters({
+      month: "all",
+      campaign: "all",
+      status: "all"
+    });
+  }
+  function openPlanningAsset(row) {
+    if (!row || !row.id) return;
+    window.flowmateSelectedWorkItem = row;
+    onOpen(row.id);
+  }
+  const activeRows = (rows || []).filter(row => row && row.type === "creative" && !row.archivedAt);
+  const filteredRows = filterFlowMatePlanningRowsC(activeRows, {
+    month: filters.month,
+    campaign: filters.campaign,
+    channel: "all",
+    status: filters.status
+  });
+  const groupedRows = groupFlowMatePlanningRowsByCampaignC(filteredRows);
+  const campaignNames = Object.keys(groupedRows).sort((a, b) => a.localeCompare(b));
+  const monthOptions = flowMateRowsMonthOptionsC(activeRows, ["planningDate", "publishDate", "launchDate"]);
+  const campaignOptions = flowMatePlanningOptionsC(activeRows, row => getFlowMatePlanningCampaignNameC(row));
+  const statusOptions = flowMatePlanningOptionsC(activeRows, row => row.status);
+  const totalSummary = summarizeFlowMatePlanningCampaignC(filteredRows);
+  function planningSelect(label, value, key, options, renderLabel) {
+    return React.createElement("label", {
+      className: "planning-filter"
+    }, React.createElement("span", null, label), React.createElement("select", {
+      className: "select",
+      value: value,
+      onChange: event => setFilter(key, event.target.value)
+    }, React.createElement("option", {
+      value: "all"
+    }, "All ", label.toLowerCase()), options.map(option => React.createElement("option", {
+      key: option.key || option,
+      value: option.key || option
+    }, renderLabel ? renderLabel(option) : option.label || option))));
+  }
+  function renderCampaignAsset(row) {
+    const readiness = deriveFlowMatePlanningReadinessC(row);
+    const planningDateLabel = row.planningFullLabel || row.planningLabel || row.planningDate || row.publishFullLabel || row.publishLabel || row.launchFullLabel || row.launchLabel || "-";
+    return React.createElement("button", {
+      key: row.id,
+      type: "button",
+      className: "planning-asset-row",
+      onClick: () => openPlanningAsset(row)
+    }, React.createElement("span", {
+      className: "mono planning-card__id"
+    }, row.id), React.createElement("span", {
+      className: "planning-asset-row__title"
+    }, row.title || "Untitled request"), React.createElement("span", null, getFlowMatePlanningChannelsC(row).join(", ")), React.createElement("span", null, planningDateLabel), React.createElement("span", null, STATUS_LABEL[row.status] || row.status || "-"), React.createElement("span", null, getFlowMatePlanningOwnerLabelC(row)), React.createElement("span", null, row.priority || "-"), React.createElement("span", null, getFlowMatePlanningTypeSkillC(row) || "-"), React.createElement("span", {
+      className: `planning-readiness planning-readiness--${String(readiness).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+    }, readiness));
+  }
+  return React.createElement("div", {
+    className: "page planning-page"
+  }, React.createElement("div", {
+    className: "page__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Campaign View"), React.createElement("div", {
+    className: "page__sub"
+  }, "Planning view grouped by campaign - ", loadState.message)), React.createElement("div", {
+    className: "page__actions"
+  }, React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: clearFilters
+  }, "Clear filters"))), React.createElement("div", {
+    className: "stat-strip planning-metrics",
+    style: {
+      gridTemplateColumns: "repeat(6, 1fr)"
+    }
+  }, React.createElement("div", {
+    className: "stat"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, totalSummary.totalAssets), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Assets")), React.createElement("div", {
+    className: "stat stat--info"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, campaignNames.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Campaigns")), React.createElement("div", {
+    className: "stat"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, totalSummary.channelsCovered), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Channels")), React.createElement("div", {
+    className: "stat stat--accent"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, totalSummary.readyDelivered), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Ready / delivered")), React.createElement("div", {
+    className: "stat stat--warn"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, totalSummary.atRisk), React.createElement("div", {
+    className: "stat__lbl"
+  }, "At risk")), React.createElement("div", {
+    className: "stat stat--accent"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, totalSummary.blocked), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Blocked"), React.createElement("div", {
+    className: "stat__delta"
+  }, totalSummary.urgent, " urgent"))), React.createElement("div", {
+    className: "filterbar planning-filterbar"
+  }, planningSelect("Month", filters.month, "month", monthOptions), planningSelect("Campaign", filters.campaign, "campaign", campaignOptions), planningSelect("Status", filters.status, "status", statusOptions, option => STATUS_LABEL[option] || option)), loadState.status === "error" && React.createElement("div", {
+    className: "reason-box reason-box--need",
+    style: {
+      marginBottom: 12
+    }
+  }, loadState.message), React.createElement("div", {
+    className: "planning-campaign-list"
+  }, campaignNames.map(campaign => {
+    const campaignRows = groupedRows[campaign] || [];
+    const summary = summarizeFlowMatePlanningCampaignC(campaignRows);
+    return React.createElement("section", {
+      key: campaign,
+      className: "planning-campaign"
+    }, React.createElement("div", {
+      className: "planning-campaign__head"
+    }, React.createElement("div", null, React.createElement("h2", null, campaign), React.createElement("div", {
+      className: "muted"
+    }, summary.totalAssets, " asset", summary.totalAssets === 1 ? "" : "s", " - ", summary.channelsCovered, " channel", summary.channelsCovered === 1 ? "" : "s")), React.createElement("div", {
+      className: "planning-campaign__summary"
+    }, React.createElement("span", null, React.createElement("strong", null, summary.readyDelivered), " ready"), React.createElement("span", null, React.createElement("strong", null, summary.atRisk), " at risk"), React.createElement("span", null, React.createElement("strong", null, summary.blocked), " blocked"), React.createElement("span", null, React.createElement("strong", null, summary.urgent), " urgent"))), React.createElement("div", {
+      className: "planning-asset-header"
+    }, React.createElement("span", null, "ID"), React.createElement("span", null, "Asset"), React.createElement("span", null, "Channel"), React.createElement("span", null, "Date"), React.createElement("span", null, "Status"), React.createElement("span", null, "Owner"), React.createElement("span", null, "Priority"), React.createElement("span", null, "Type / Skill"), React.createElement("span", null, "Readiness")), React.createElement("div", {
+      className: "planning-asset-list"
+    }, campaignRows.map(renderCampaignAsset)));
+  })), activeRows.length === 0 && loadState.status !== "loading" && loadState.status !== "error" && React.createElement("div", {
+    className: "team-settings-empty",
+    style: {
+      marginTop: 12
+    }
+  }, "No active Creative Requests loaded for Planning."), activeRows.length > 0 && filteredRows.length === 0 && React.createElement("div", {
+    className: "team-settings-empty",
+    style: {
+      marginTop: 12
+    }
+  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - campaign asset counts exclude archived rows"));
+}
+function PlanningContentCalendarScreen({
+  onOpen
+}) {
+  const todayKey = calendarUtcKeyC(new Date());
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({
+    status: "loading",
+    message: "Loading planning rows..."
+  });
+  const [monthKey, setMonthKey] = useStateC(String(todayKey).slice(0, 7));
+  const [filters, setFilters] = useStateC({
+    month: String(todayKey).slice(0, 7),
+    campaign: "all",
+    channel: "all",
+    status: "all"
+  });
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      try {
+        const liveRows = await loadFlowMatePlanningRowsC();
+        if (!alive) return;
+        setRows(liveRows);
+        setLoadState({
+          status: "live",
+          message: "Live Supabase planning data"
+        });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Content Calendar] Load failed:", error);
+        setRows([]);
+        setLoadState({
+          status: "error",
+          message: window.flowmateUserError(error, "Planning data load failed.")
+        });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
+  function setFilter(key, value) {
+    setFilters(current => ({
+      ...current,
+      [key]: value
+    }));
+    if (key === "month" && value !== "all") setMonthKey(value);
+  }
+  function clearFilters() {
+    const currentMonth = String(todayKey).slice(0, 7);
+    setMonthKey(currentMonth);
+    setFilters({
+      month: currentMonth,
+      campaign: "all",
+      channel: "all",
+      status: "all"
+    });
+  }
+  function shiftPlanningMonth(delta) {
+    const next = calendarShiftMonthC(`${monthKey}-01`, delta).slice(0, 7);
+    setMonthKey(next);
+    setFilters(current => ({
+      ...current,
+      month: next
+    }));
+  }
+  function openPlanningCalendarItem(row) {
+    if (!row || !row.id) return;
+    window.flowmateSelectedWorkItem = row;
+    onOpen(row.id);
+  }
+  const activeRows = (rows || []).filter(row => row && row.type === "creative" && !row.archivedAt).map(row => ({
+    ...row,
+    planningDate: getFlowMatePlanningCalendarDateC(row),
+    planningLabel: flowMateDateLabelPlanningC(getFlowMatePlanningCalendarDateC(row)),
+    planningFullLabel: flowMateDateFullLabelPlanningC(getFlowMatePlanningCalendarDateC(row))
+  }));
+  const monthOptions = flowMateRowsMonthOptionsC(activeRows, ["publishDate", "launchDate", "planningDate"]);
+  const campaignOptions = flowMatePlanningOptionsC(activeRows, row => getFlowMatePlanningCampaignNameC(row));
+  const statusOptions = flowMatePlanningOptionsC(activeRows, row => row.status);
+  const filteredRows = filterFlowMatePlanningRowsC(activeRows, filters).filter(row => getFlowMatePlanningCalendarDateC(row));
+  const rowsByDate = filteredRows.reduce((map, row) => {
+    const dateKey = getFlowMatePlanningCalendarDateC(row).slice(0, 10);
+    if (!map[dateKey]) map[dateKey] = [];
+    map[dateKey].push(row);
+    return map;
+  }, {});
+  const visibleMonthKey = filters.month !== "all" ? filters.month : monthKey;
+  const cells = calendarMonthCellsC(`${visibleMonthKey}-01`);
+  function planningSelect(label, value, key, options, renderLabel) {
+    return React.createElement("label", {
+      className: "planning-filter"
+    }, React.createElement("span", null, label), React.createElement("select", {
+      className: "select",
+      value: value,
+      onChange: event => setFilter(key, event.target.value)
+    }, React.createElement("option", {
+      value: "all"
+    }, "All ", label.toLowerCase()), options.map(option => React.createElement("option", {
+      key: option.key || option,
+      value: option.key || option
+    }, renderLabel ? renderLabel(option) : option.label || option))));
+  }
+  function renderCalendarItem(row) {
+    const channels = getFlowMatePlanningChannelsC(row).join(", ");
+    const readiness = deriveFlowMatePlanningReadinessC(row);
+    return React.createElement("button", {
+      key: row.id,
+      type: "button",
+      className: "planning-calendar-item",
+      onClick: () => openPlanningCalendarItem(row)
+    }, React.createElement("span", {
+      className: "planning-calendar-item__top"
+    }, React.createElement("span", {
+      className: "mono"
+    }, row.id), React.createElement("span", null, STATUS_LABEL[row.status] || row.status || "-")), React.createElement("strong", null, getFlowMatePlanningCampaignNameC(row)), React.createElement("span", null, channels), React.createElement("span", null, row.title || "Untitled request"), React.createElement("span", {
+      className: `planning-readiness planning-readiness--${String(readiness).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+    }, readiness));
+  }
+  return React.createElement("div", {
+    className: "page planning-page"
+  }, React.createElement("div", {
+    className: "page__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Content Calendar"), React.createElement("div", {
+    className: "page__sub"
+  }, "Planning calendar by publish date, with launch date fallback - ", loadState.message)), React.createElement("div", {
+    className: "page__actions"
+  }, React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: () => shiftPlanningMonth(-1)
+  }, React.createElement(Icon, {
+    name: "chevron",
+    style: {
+      transform: "rotate(180deg)"
+    }
+  }), " Prev"), React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: clearFilters
+  }, "Today"), React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: () => shiftPlanningMonth(1)
+  }, "Next ", React.createElement(Icon, {
+    name: "chevron"
+  })))), React.createElement("div", {
+    className: "stat-strip planning-metrics",
+    style: {
+      gridTemplateColumns: "repeat(4, 1fr)"
+    }
+  }, React.createElement("div", {
+    className: "stat"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, filteredRows.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Calendar items"), React.createElement("div", {
+    className: "stat__delta"
+  }, flowMateMonthLabelC(visibleMonthKey))), React.createElement("div", {
+    className: "stat stat--info"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, campaignOptions.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Campaign filters")), React.createElement("div", {
+    className: "stat"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, FLOWMATE_PLANNING_CHANNELS_C.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Channel filters")), React.createElement("div", {
+    className: "stat stat--warn"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, filteredRows.filter(row => deriveFlowMatePlanningReadinessC(row) === "At Risk").length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "At risk"))), React.createElement("div", {
+    className: "filterbar planning-filterbar"
+  }, planningSelect("Month", filters.month, "month", monthOptions), planningSelect("Campaign", filters.campaign, "campaign", campaignOptions), planningSelect("Channel", filters.channel, "channel", FLOWMATE_PLANNING_CHANNELS_C), planningSelect("Status", filters.status, "status", statusOptions, option => STATUS_LABEL[option] || option)), loadState.status === "error" && React.createElement("div", {
+    className: "reason-box reason-box--need",
+    style: {
+      marginBottom: 12
+    }
+  }, loadState.message), React.createElement("div", {
+    className: "planning-calendar"
+  }, React.createElement("div", {
+    className: "planning-calendar__weekdays"
+  }, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => React.createElement("span", {
+    key: day
+  }, day))), React.createElement("div", {
+    className: "planning-calendar__grid"
+  }, cells.map(cell => {
+    const items = rowsByDate[cell.key] || [];
+    return React.createElement("section", {
+      key: cell.key,
+      className: `planning-calendar__cell ${cell.inMonth ? "" : "is-muted"}`
+    }, React.createElement("div", {
+      className: "planning-calendar__date"
+    }, React.createElement("span", {
+      className: cell.key === todayKey ? "mono strong" : "mono"
+    }, cell.day), items.length > 0 && React.createElement("span", {
+      className: "tag"
+    }, items.length)), React.createElement("div", {
+      className: "planning-calendar__items"
+    }, items.slice(0, 3).map(renderCalendarItem), items.length > 3 && React.createElement("div", {
+      className: "planning-calendar__more"
+    }, "+", items.length - 3, " more")));
+  }))), activeRows.length === 0 && loadState.status !== "loading" && loadState.status !== "error" && React.createElement("div", {
+    className: "team-settings-empty",
+    style: {
+      marginTop: 12
+    }
+  }, "No active Creative Requests loaded for Planning."), activeRows.length > 0 && filteredRows.length === 0 && React.createElement("div", {
+    className: "team-settings-empty",
+    style: {
+      marginTop: 12
+    }
+  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - publish date first, launch date fallback; Team Calendar still uses 1st Draft/due date"));
 }
 function flowMateKpiAiTagsC(row) {
   return Array.isArray(row && row.aiTags) ? row.aiTags : [];
@@ -2524,6 +3386,9 @@ function SettingsScreen() {
 }
 Object.assign(window, {
   WorkloadScreen,
+  PlanningChannelViewScreen,
+  PlanningCampaignViewScreen,
+  PlanningContentCalendarScreen,
   KpiScreen,
   CalendarScreen,
   TeamGanttScreen,

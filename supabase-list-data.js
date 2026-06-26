@@ -277,7 +277,7 @@ async function loadFlowMateListRows() {
   const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
+      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
       // O-5: exclude archived items at the DB instead of fetching then dropping
       // them client-side. (List/Board/Queue/My Work never show archived rows.)
       .is("archived_at", null)
@@ -444,6 +444,12 @@ async function loadFlowMateListRows() {
       launchDate: item.launch_date,
       launchLabel: flowmateDateLabel(item.launch_date),
       launchFullLabel: flowmateDateFullLabel(item.launch_date),
+      publishDate: item.publish_date,
+      publishLabel: flowmateDateLabel(item.publish_date),
+      publishFullLabel: flowmateDateFullLabel(item.publish_date),
+      planningDate: item.publish_date || item.launch_date,
+      planningLabel: flowmateDateLabel(item.publish_date || item.launch_date),
+      planningFullLabel: flowmateDateFullLabel(item.publish_date || item.launch_date),
       createdLabel: flowmateDateFullLabel(item.created_at),
       urgentReason: item.urgent_reason || "",
       assetType: flowmateToKebab(details.asset_type),
@@ -451,6 +457,7 @@ async function loadFlowMateListRows() {
       assetCount: details.asset_count || 1,
       platforms: details.platforms || [],
       platform: (details.platforms || []).join(", "),
+      channel: (details.platforms || []).join(", "),
       size: details.size_format || "",
       briefLink: details.brief_link || "",
       referenceLink: details.reference_link || "",

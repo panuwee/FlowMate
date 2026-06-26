@@ -40,6 +40,21 @@ const NAV = [{
     icon: "queue"
   }]
 }, {
+  group: "Planning",
+  items: [{
+    key: "planning-channel",
+    label: "Channel View",
+    icon: "chart"
+  }, {
+    key: "planning-campaign",
+    label: "Campaign View",
+    icon: "board"
+  }, {
+    key: "planning-calendar",
+    label: "Content Calendar",
+    icon: "calendar"
+  }]
+}, {
   group: "Supervisor",
   items: [{
     key: "workload",
@@ -63,7 +78,7 @@ const ADMIN_NAV_GROUP = {
     icon: "users"
   }]
 };
-const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team");
+const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team" || group.group === "Planning");
 const TITLE_MAP = {
   "my-work": "My work",
   "create": "Create",
@@ -73,6 +88,9 @@ const TITLE_MAP = {
   "calendar": "Team calendar",
   "gantt": "Team Gantt chart",
   "queue": "Central queue",
+  "planning-channel": "Channel View",
+  "planning-campaign": "Campaign View",
+  "planning-calendar": "Content Calendar",
   "workload": "Workload",
   "kpi": "KPI",
   "settings": "Team settings",
@@ -672,6 +690,12 @@ function App() {
   }), allowedRoute && route === "queue" && React.createElement(QueueScreen, {
     onOpen: open,
     searchQuery: searchQuery
+  }), allowedRoute && route === "planning-channel" && React.createElement(PlanningChannelViewScreen, {
+    onOpen: open
+  }), allowedRoute && route === "planning-campaign" && React.createElement(PlanningCampaignViewScreen, {
+    onOpen: open
+  }), allowedRoute && route === "planning-calendar" && React.createElement(PlanningContentCalendarScreen, {
+    onOpen: open
   }), allowedRoute && route === "workload" && React.createElement(WorkloadScreen, {
     onOpen: open
   }), allowedRoute && route === "kpi" && React.createElement(KpiScreen, null), allowedRoute && route === "settings" && React.createElement(SettingsScreen, null), allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {

@@ -137,6 +137,7 @@ create table if not exists public.work_items (
   urgent_reason text,
   due_date date not null,
   launch_date date,
+  publish_date date,
   effort_point integer check (effort_point is null or (effort_point >= 1 and effort_point <= 999)),
   needs_split boolean not null default false,
   assignment_reason text,
@@ -149,6 +150,9 @@ create table if not exists public.work_items (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   delivered_at timestamptz,
+  archived_at timestamptz,
+  archived_by_user_id uuid references public.users(id) on update cascade on delete set null,
+  archive_reason text,
   constraint work_items_display_id_shape check (display_id ~ '^(CR|QT)-[0-9]{4,}$'),
   constraint work_items_urgent_reason check (
     priority <> 'urgent' or length(trim(coalesce(urgent_reason, ''))) > 0
@@ -185,6 +189,18 @@ create table if not exists public.work_items (
 
 alter table public.work_items
 add column if not exists assignee_other_name text;
+
+alter table public.work_items
+  add column if not exists publish_date date,
+  add column if not exists archived_at timestamptz,
+  add column if not exists archived_by_user_id uuid references public.users(id) on update cascade on delete set null,
+  add column if not exists archive_reason text;
+
+update public.work_items wi
+set publish_date = wi.launch_date
+where wi.work_type = 'creative_request'
+  and wi.publish_date is null
+  and wi.launch_date is not null;
 
 create table if not exists public.creative_request_details (
   id uuid primary key default gen_random_uuid(),
@@ -324,11 +340,15 @@ create index if not exists idx_team_members_skills on public.team_members using 
 create index if not exists idx_work_items_status on public.work_items(status);
 create index if not exists idx_work_items_type on public.work_items(work_type);
 create index if not exists idx_work_items_due_date on public.work_items(due_date);
+create index if not exists idx_work_items_publish_date on public.work_items(publish_date);
+create index if not exists idx_work_items_planning_date on public.work_items((coalesce(publish_date, launch_date)));
+create index if not exists idx_work_items_archived_at on public.work_items(archived_at);
 create index if not exists idx_work_items_requester on public.work_items(requester_user_id);
 create index if not exists idx_work_items_owner on public.work_items(final_owner_member_id);
 create index if not exists idx_work_items_assignee_user on public.work_items(assignee_user_id);
 create index if not exists idx_work_items_search on public.work_items using gin(to_tsvector('simple', coalesce(display_id,'') || ' ' || coalesce(title,'') || ' ' || coalesce(campaign_name,'') || ' ' || coalesce(requester_team,'')));
 create index if not exists idx_creative_details_asset_type on public.creative_request_details(asset_type);
+create index if not exists idx_creative_details_platforms on public.creative_request_details using gin(platforms);
 create index if not exists idx_assignment_runs_work_item on public.assignment_runs(work_item_id, ran_at desc);
 create index if not exists idx_events_work_item on public.work_item_events(work_item_id, created_at desc);
 create index if not exists idx_comments_work_item on public.comments(work_item_id, created_at);
@@ -375,6 +395,7 @@ select
   count(wi.id) filter (where wi.work_type = 'quick_task' and wi.status not in ('delivered', 'cancelled')) as quick_task_count
 from public.team_members tm
 left join public.work_items wi on wi.final_owner_member_id = tm.id
+  and wi.archived_at is null
 group by tm.id;
 
 create or replace view public.work_item_flags_v
@@ -391,6 +412,90 @@ select
   (wi.status = 'queued') as is_queued,
   (wi.status = 'blocked') as is_blocked
 from public.work_items wi;
+
+create or replace function public.flowmate_normalize_planning_channel(
+  p_channel text
+) returns text
+language sql
+immutable
+as $$
+  select case
+    when length(trim(coalesce(p_channel, ''))) = 0 then 'Other'
+    when lower(trim(p_channel)) in ('facebook', 'fb', 'meta facebook') then 'Facebook'
+    when lower(trim(p_channel)) in ('instagram', 'ig', 'insta', 'reels', 'instagram reels') then 'Instagram'
+    when lower(replace(trim(p_channel), ' ', '')) in ('tiktok', 'tik-tok') then 'TikTok'
+    when lower(trim(p_channel)) in ('youtube', 'yt', 'youtube shorts', 'shorts') then 'YouTube'
+    when lower(trim(p_channel)) in ('website', 'web', 'landing page', 'microsite') then 'Website'
+    when lower(trim(p_channel)) in ('in-game', 'ingame', 'in game', 'game', 'in-app', 'in app') then 'In-game'
+    when lower(trim(p_channel)) in ('line', 'line oa', 'line official', 'line official account') then 'LINE'
+    else 'Other'
+  end;
+$$;
+
+create or replace function public.flowmate_normalized_planning_channels(
+  p_platforms text[]
+) returns text[]
+language sql
+immutable
+as $$
+  select coalesce(
+    (
+      select array_agg(channel order by array_position(
+        array['Facebook', 'Instagram', 'TikTok', 'YouTube', 'Website', 'In-game', 'LINE', 'Other'],
+        channel
+      ), channel)
+      from (
+        select distinct public.flowmate_normalize_planning_channel(platform) as channel
+        from unnest(coalesce(p_platforms, '{}'::text[])) as platform
+        where length(trim(coalesce(platform, ''))) > 0
+      ) normalized
+    ),
+    array['Other']::text[]
+  );
+$$;
+
+create or replace view public.planning_work_items_v
+with (security_invoker = true) as
+select
+  wi.id,
+  wi.display_id,
+  wi.title,
+  wi.campaign_name,
+  wi.requester_user_id,
+  wi.requester_team,
+  wi.assignee_user_id,
+  wi.assignee_other_name,
+  wi.final_owner_member_id,
+  tm.display_name as final_owner_name,
+  wi.status,
+  wi.priority,
+  wi.due_date as first_draft_date,
+  wi.launch_date,
+  wi.publish_date,
+  coalesce(wi.publish_date, wi.launch_date) as planning_date,
+  crd.asset_type,
+  crd.asset_subtype,
+  crd.asset_count,
+  crd.platforms as raw_platforms,
+  public.flowmate_normalized_planning_channels(crd.platforms) as normalized_channels,
+  case
+    when wi.status = 'blocked' then 'Blocked'
+    when wi.status = 'need_brief' then 'Need Brief'
+    when wi.status = 'cancelled' then 'Cancelled'
+    when wi.status = 'delivered' and coalesce(wi.publish_date, wi.launch_date) <= current_date then 'Published'
+    when wi.status = 'delivered' then 'Ready'
+    when coalesce(wi.publish_date, wi.launch_date) is not null
+      and coalesce(wi.publish_date, wi.launch_date) <= current_date + interval '7 days'
+      and wi.status not in ('delivered', 'cancelled') then 'At Risk'
+    when wi.status = 'review' then 'In Review'
+    when wi.status in ('assigned', 'in_progress') then 'In Production'
+    else 'Planned'
+  end as planning_readiness
+from public.work_items wi
+join public.creative_request_details crd on crd.work_item_id = wi.id
+left join public.team_members tm on tm.id = wi.final_owner_member_id
+where wi.work_type = 'creative_request'
+  and wi.archived_at is null;
 
 create or replace function public.current_app_user_id()
 returns uuid
@@ -596,5 +701,7 @@ grant update on public.notifications to anon, authenticated;
 
 revoke all privileges on public.member_workload_v from public, anon, authenticated;
 revoke all privileges on public.work_item_flags_v from public, anon, authenticated;
+revoke all privileges on public.planning_work_items_v from public, anon, authenticated;
 grant select on public.member_workload_v to authenticated;
 grant select on public.work_item_flags_v to authenticated;
+grant select on public.planning_work_items_v to authenticated;

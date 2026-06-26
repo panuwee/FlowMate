@@ -895,6 +895,7 @@ function normalizeFlowMateCreativeDraft(draft) {
   };
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
+  const publishDate = clampFlowMateDateToToday(nextDraft.publishDate || launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
@@ -904,12 +905,13 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetSubtype: creativeType.key,
     assetCount,
     launchDate,
+    publishDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate)
   };
 }
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
   quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority"],
-  creative: ["title", "requesterTeam", "campaignName", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate"]
+  creative: ["title", "requesterTeam", "campaignName", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishDate"]
 };
 function getDefaultQuickDraft() {
   const requesterTeam = getDefaultRequesterTeam();
@@ -944,7 +946,8 @@ function getDefaultCreativeDraft() {
     priority: "normal",
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
-    launchDate: todayDate
+    launchDate: todayDate,
+    publishDate: todayDate
   };
 }
 function getDefaultRequesterTeam() {
@@ -987,16 +990,18 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     requireNotPast("launchDate", "Launch date cannot be before today.");
     return errors;
   }
-  requireField("campaignName", "Project / campaign is required.");
+  requireField("campaignName", "Campaign is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
-  requireField("platforms", "Platform is required.");
+  requireField("platforms", "Channel is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
+  requireField("publishDate", "Publish Date is required.");
   requireNotPast("launchDate", "Launch date cannot be before today.");
+  requireNotPast("publishDate", "Publish Date cannot be before today.");
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
   }
@@ -1536,10 +1541,19 @@ function CreativeRequestForm({
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
+      const shouldSyncPublishDate = !value.publishDate || value.publishDate === value.launchDate;
       onChange({
         ...value,
         launchDate: nextLaunchDate,
+        publishDate: shouldSyncPublishDate ? nextLaunchDate : value.publishDate,
         dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate)
+      });
+      return;
+    }
+    if (field === "publishDate") {
+      onChange({
+        ...value,
+        publishDate: clampFlowMateDateToToday(next)
       });
       return;
     }
@@ -1560,19 +1574,19 @@ function CreativeRequestForm({
     className: "input",
     value: value.title,
     readOnly: true,
-    placeholder: "[3 Jul 2026][Function][Project Name]",
-    title: "Auto-filled from Launch Date, your account team, and Project / campaign."
+    placeholder: "[3 Jul 2026][Function][Campaign]",
+    title: "Auto-filled from Launch Date, your account team, and Campaign."
   }), React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12,
       marginTop: 6
     }
-  }, "Auto-filled from Launch Date, your account team, and Project / campaign.")), React.createElement("div", {
+  }, "Auto-filled from Launch Date, your account team, and Campaign.")), React.createElement("div", {
     className: `field ${errors.campaignName ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "Project / campaign ", React.createElement("span", {
+  }, "Campaign ", React.createElement("span", {
     className: "req"
   }, "*")), React.createElement("input", {
     className: "input",
@@ -1616,7 +1630,7 @@ function CreativeRequestForm({
     className: `field ${errors.platforms ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "Platform ", React.createElement("span", {
+  }, "Channel ", React.createElement("span", {
     className: "req"
   }, "*")), React.createElement("input", {
     className: "input",
@@ -1704,6 +1718,20 @@ function CreativeRequestForm({
   }), errors.urgentReason && React.createElement("div", {
     className: "field__error"
   }, errors.urgentReason)), React.createElement("div", {
+    className: `field ${errors.publishDate ? "field--error" : ""}`
+  }, React.createElement("label", {
+    className: "field__label"
+  }, "Publish Date ", React.createElement("span", {
+    className: "req"
+  }, "*")), React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: value.publishDate,
+    onChange: e => update("publishDate", e.target.value),
+    min: todayDate
+  }), errors.publishDate && React.createElement("div", {
+    className: "field__error"
+  }, errors.publishDate)), React.createElement("div", {
     className: `field ${errors.dueDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -1989,7 +2017,7 @@ function DetailScreen({
   const visibleBriefNote = w.briefNote || w.note || "";
   const visibleChecklistItems = w.checklistItems || [];
   const watcherOptions = (window.MEMBERS || []).filter(member => member.userId);
-  const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
+  const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.channel || w.size || w.campaign || w.publishLabel || w.launchLabel);
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
   const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || currentUserId === w.requesterUserId || currentUserId === w.assigneeUserId || owner?.userId === currentUserId));
@@ -2631,6 +2659,18 @@ function DetailScreen({
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"
+  }, "Campaign"), React.createElement("div", {
+    className: "meta-row__val"
+  }, w.campaign || "-")), React.createElement("div", {
+    className: "meta-row"
+  }, React.createElement("div", {
+    className: "meta-row__lbl"
+  }, "Channel"), React.createElement("div", {
+    className: "meta-row__val"
+  }, w.channel || w.platform || "-")), React.createElement("div", {
+    className: "meta-row"
+  }, React.createElement("div", {
+    className: "meta-row__lbl"
   }, "Type / Skill"), React.createElement("div", {
     className: "meta-row__val"
   }, w.subtype ? getFlowMateCreativeTypeLabel(w.subtype) : ASSET_LABEL[w.assetType] || w.assetType || "-")), React.createElement("div", {
@@ -2640,12 +2680,6 @@ function DetailScreen({
   }, "Asset Count"), React.createElement("div", {
     className: "meta-row__val"
   }, w.assetCount || 1)), React.createElement("div", {
-    className: "meta-row"
-  }, React.createElement("div", {
-    className: "meta-row__lbl"
-  }, "Platform"), React.createElement("div", {
-    className: "meta-row__val"
-  }, w.platform || "-")), React.createElement("div", {
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"
@@ -2962,6 +2996,12 @@ function DetailScreen({
   }, "Created"), React.createElement("div", {
     className: "meta-row__val"
   }, w.createdLabel || "-")), React.createElement("div", {
+    className: "meta-row"
+  }, React.createElement("div", {
+    className: "meta-row__lbl"
+  }, "Publish Date"), React.createElement("div", {
+    className: "meta-row__val"
+  }, w.publishFullLabel || w.publishLabel || "-")), React.createElement("div", {
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"

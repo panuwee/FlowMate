@@ -47,19 +47,25 @@ Object.assign(window, {
 });
 
 function exportRowsCsv(rows) {
-  const columns = ["ID", "Title", "Type", "Status", "Owner", "Requester", "Team", "Asset", "Effort", "Priority", "Due"];
+  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "1st Draft", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
   const csvRows = rows.map((w) => [
     w.id,
     w.title,
     w.type,
     STATUS_LABEL[w.status] || w.status,
+    w.campaign || "",
+    w.channel || w.platform || "",
+    w.publishFullLabel || w.publishLabel || w.publishDate || "",
+    w.launchFullLabel || w.launchLabel || w.launchDate || "",
+    w.dueFullLabel || w.dueLabel || w.dueDate || "",
+    w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : (ASSET_LABEL[w.assetType] || w.assetType || ""),
+    w.assetCount || "",
     w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned",
     w.requester || "",
     w.requesterTeam || "",
     ASSET_LABEL[w.assetType] || w.assetType || "",
     w.effort || "",
     w.priority || "",
-    w.dueLabel || "",
   ]);
   window.flowmateDownloadCsv(`flowmate-list-${new Date().toISOString().slice(0, 10)}.csv`, columns, csvRows);
 }
@@ -76,6 +82,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
   const [filterTeam, setFilterTeam] = useStateB(savedListState.filterTeam || "all");
   const [filterAsset, setFilterAsset] = useStateB(savedListState.filterAsset || "all");
   const [filterType, setFilterType] = useStateB(savedListState.filterType || "all");
+  const [filterCampaign, setFilterCampaign] = useStateB(savedListState.filterCampaign || "all");
+  const [filterChannel, setFilterChannel] = useStateB(savedListState.filterChannel || "all");
   const [sourceRows, setSourceRows] = useStateB(WORK);
   const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS);
   const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
@@ -138,11 +146,26 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     return memberTeamById[work.assignee] || "";
   }
 
+  function getListCampaignValue(work) {
+    return (work && work.campaign) || "No campaign";
+  }
+
+  function getListChannelValues(work) {
+    const rawValues = Array.isArray(work && work.platforms)
+      ? work.platforms
+      : String((work && (work.channel || work.platform)) || "")
+          .split(",");
+    const values = rawValues.map((value) => String(value || "").trim()).filter(Boolean);
+    return values.length ? values : ["No channel"];
+  }
+
   const rows = sourceRows.filter(w => {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     if (filterStatus !== "all" && w.status !== filterStatus) return false;
     if (filterOwner !== "all" && (w.assignee || "unassigned") !== filterOwner) return false;
     if (filterTeam !== "all" && getListWorkAssigneeTeam(w) !== filterTeam) return false;
+    if (filterCampaign !== "all" && getListCampaignValue(w) !== filterCampaign) return false;
+    if (filterChannel !== "all" && !getListChannelValues(w).includes(filterChannel)) return false;
     if (filterAsset !== "all" && (w.assetType || "none") !== filterAsset) return false;
     if (filterType !== "all" && w.type !== filterType) return false;
     if (filterFlag === "overdue" && !w.overdue) return false;
@@ -164,6 +187,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
   ];
   const ownerOptions = Array.from(new Map(scopedOwnerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
   const teamOptions = requesterTeamOptions;
+  const campaignOptions = Array.from(new Set(sourceRows.map(getListCampaignValue))).sort();
+  const channelOptions = Array.from(new Set(sourceRows.flatMap(getListChannelValues))).sort();
   const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
   const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
 
@@ -173,11 +198,11 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     }
   }, [filterTeam, filterOwner, sourceRows.length]);
 
-  const currentListViewState = { filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType };
+  const currentListViewState = { filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType, filterCampaign, filterChannel };
 
   useEffectB(() => {
     saveFlowMateListViewState(currentListViewState);
-  }, [filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType]);
+  }, [filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType, filterCampaign, filterChannel]);
 
   function openListWorkItem(work) {
     saveFlowMateListViewState(currentListViewState);
@@ -217,6 +242,14 @@ function ListScreen({ onOpen, searchQuery = "" }) {
           <option value="all">All Assignee</option>
           {ownerOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
+        <select className="select" value={filterCampaign} onChange={e => setFilterCampaign(e.target.value)}>
+          <option value="all">All campaigns</option>
+          {campaignOptions.map(campaign => <option key={campaign} value={campaign}>{campaign}</option>)}
+        </select>
+        <select className="select" value={filterChannel} onChange={e => setFilterChannel(e.target.value)}>
+          <option value="all">All channels</option>
+          {channelOptions.map(channel => <option key={channel} value={channel}>{channel}</option>)}
+        </select>
         <select className="select" value={filterAsset} onChange={e => setFilterAsset(e.target.value)}>
           <option value="all">All asset types</option>
           {assetOptions.map(a => <option key={a} value={a}>{ASSET_LABEL[a] || a}</option>)}
@@ -246,12 +279,15 @@ function ListScreen({ onOpen, searchQuery = "" }) {
               <th>Title</th>
               <th>Type</th>
               <th>Status</th>
+              <th>Campaign</th>
+              <th>Channel</th>
+              <th>Publish Date</th>
               <th>Owner</th>
               <th>Requester / Team</th>
               <th>Asset</th>
               <th>Effort</th>
               <th>Priority</th>
-              <th>Due</th>
+              <th>1st Draft</th>
               <th>Flags</th>
             </tr>
           </thead>
@@ -262,6 +298,9 @@ function ListScreen({ onOpen, searchQuery = "" }) {
                 <td className="col-title">{w.title}</td>
                 <td><TypePill type={w.type} /></td>
                 <td><StatusBadge status={w.status} /></td>
+                <td><span className="muted" style={{ fontSize: 12 }}>{w.campaign || "-"}</span></td>
+                <td><span className="muted" style={{ fontSize: 12 }}>{w.channel || w.platform || "-"}</span></td>
+                <td><span className="mono muted" style={{ fontSize: 12 }}>{w.publishLabel || "-"}</span></td>
                 <td>
                   {w.assignee ? (
                     <span className="row" style={{ gap: 6 }}><Avatar memberId={w.assignee} /> <span>{(MEMBERS_BY_ID[w.assignee] && MEMBERS_BY_ID[w.assignee].name) || w.assigneeOtherName || "Unassigned"}</span></span>

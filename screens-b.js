@@ -48,8 +48,8 @@ Object.assign(window, {
   readFlowMateDetailBackContext
 });
 function exportRowsCsv(rows) {
-  const columns = ["ID", "Title", "Type", "Status", "Owner", "Requester", "Team", "Asset", "Effort", "Priority", "Due"];
-  const csvRows = rows.map(w => [w.id, w.title, w.type, STATUS_LABEL[w.status] || w.status, w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned", w.requester || "", w.requesterTeam || "", ASSET_LABEL[w.assetType] || w.assetType || "", w.effort || "", w.priority || "", w.dueLabel || ""]);
+  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "1st Draft", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
+  const csvRows = rows.map(w => [w.id, w.title, w.type, STATUS_LABEL[w.status] || w.status, w.campaign || "", w.channel || w.platform || "", w.publishFullLabel || w.publishLabel || w.publishDate || "", w.launchFullLabel || w.launchLabel || w.launchDate || "", w.dueFullLabel || w.dueLabel || w.dueDate || "", w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : ASSET_LABEL[w.assetType] || w.assetType || "", w.assetCount || "", w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned", w.requester || "", w.requesterTeam || "", ASSET_LABEL[w.assetType] || w.assetType || "", w.effort || "", w.priority || ""]);
   window.flowmateDownloadCsv(`flowmate-list-${new Date().toISOString().slice(0, 10)}.csv`, columns, csvRows);
 }
 function ListScreen({
@@ -64,6 +64,8 @@ function ListScreen({
   const [filterTeam, setFilterTeam] = useStateB(savedListState.filterTeam || "all");
   const [filterAsset, setFilterAsset] = useStateB(savedListState.filterAsset || "all");
   const [filterType, setFilterType] = useStateB(savedListState.filterType || "all");
+  const [filterCampaign, setFilterCampaign] = useStateB(savedListState.filterCampaign || "all");
+  const [filterChannel, setFilterChannel] = useStateB(savedListState.filterChannel || "all");
   const [sourceRows, setSourceRows] = useStateB(WORK);
   const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS);
   const [loadState, setLoadState] = useStateB({
@@ -130,11 +132,21 @@ function ListScreen({
   function getListWorkAssigneeTeam(work) {
     return memberTeamById[work.assignee] || "";
   }
+  function getListCampaignValue(work) {
+    return work && work.campaign || "No campaign";
+  }
+  function getListChannelValues(work) {
+    const rawValues = Array.isArray(work && work.platforms) ? work.platforms : String(work && (work.channel || work.platform) || "").split(",");
+    const values = rawValues.map(value => String(value || "").trim()).filter(Boolean);
+    return values.length ? values : ["No channel"];
+  }
   const rows = sourceRows.filter(w => {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     if (filterStatus !== "all" && w.status !== filterStatus) return false;
     if (filterOwner !== "all" && (w.assignee || "unassigned") !== filterOwner) return false;
     if (filterTeam !== "all" && getListWorkAssigneeTeam(w) !== filterTeam) return false;
+    if (filterCampaign !== "all" && getListCampaignValue(w) !== filterCampaign) return false;
+    if (filterChannel !== "all" && !getListChannelValues(w).includes(filterChannel)) return false;
     if (filterAsset !== "all" && (w.assetType || "none") !== filterAsset) return false;
     if (filterType !== "all" && w.type !== filterType) return false;
     if (filterFlag === "overdue" && !w.overdue) return false;
@@ -149,6 +161,8 @@ function ListScreen({
   })];
   const ownerOptions = Array.from(new Map(scopedOwnerOptionRows).entries()).sort((a, b) => a[1].localeCompare(b[1]));
   const teamOptions = requesterTeamOptions;
+  const campaignOptions = Array.from(new Set(sourceRows.map(getListCampaignValue))).sort();
+  const channelOptions = Array.from(new Set(sourceRows.flatMap(getListChannelValues))).sort();
   const assetOptions = Array.from(new Set(sourceRows.map(w => w.assetType || "none"))).sort();
   const typeOptions = Array.from(new Set(sourceRows.map(w => w.type))).sort();
   useEffectB(() => {
@@ -162,11 +176,13 @@ function ListScreen({
     filterOwner,
     filterTeam,
     filterAsset,
-    filterType
+    filterType,
+    filterCampaign,
+    filterChannel
   };
   useEffectB(() => {
     saveFlowMateListViewState(currentListViewState);
-  }, [filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType]);
+  }, [filterStatus, filterFlag, filterOwner, filterTeam, filterAsset, filterType, filterCampaign, filterChannel]);
   function openListWorkItem(work) {
     saveFlowMateListViewState(currentListViewState);
     saveFlowMateDetailBackContext({
@@ -225,6 +241,24 @@ function ListScreen({
     value: id
   }, label))), React.createElement("select", {
     className: "select",
+    value: filterCampaign,
+    onChange: e => setFilterCampaign(e.target.value)
+  }, React.createElement("option", {
+    value: "all"
+  }, "All campaigns"), campaignOptions.map(campaign => React.createElement("option", {
+    key: campaign,
+    value: campaign
+  }, campaign))), React.createElement("select", {
+    className: "select",
+    value: filterChannel,
+    onChange: e => setFilterChannel(e.target.value)
+  }, React.createElement("option", {
+    value: "all"
+  }, "All channels"), channelOptions.map(channel => React.createElement("option", {
+    key: channel,
+    value: channel
+  }, channel))), React.createElement("select", {
+    className: "select",
     value: filterAsset,
     onChange: e => setFilterAsset(e.target.value)
   }, React.createElement("option", {
@@ -265,7 +299,7 @@ function ListScreen({
     className: "tbl"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
     className: "col-id"
-  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Requester / Team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Due"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, rows.map(w => React.createElement("tr", {
+  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Publish Date"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Requester / Team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Priority"), React.createElement("th", null, "1st Draft"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, rows.map(w => React.createElement("tr", {
     key: w.id,
     className: w.overdue ? "is-overdue" : "",
     onClick: () => openListWorkItem(w)
@@ -277,7 +311,22 @@ function ListScreen({
     type: w.type
   })), React.createElement("td", null, React.createElement(StatusBadge, {
     status: w.status
-  })), React.createElement("td", null, w.assignee ? React.createElement("span", {
+  })), React.createElement("td", null, React.createElement("span", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, w.campaign || "-")), React.createElement("td", null, React.createElement("span", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, w.channel || w.platform || "-")), React.createElement("td", null, React.createElement("span", {
+    className: "mono muted",
+    style: {
+      fontSize: 12
+    }
+  }, w.publishLabel || "-")), React.createElement("td", null, w.assignee ? React.createElement("span", {
     className: "row",
     style: {
       gap: 6

@@ -208,3 +208,6 @@ with check (public.is_admin_app_user());
 
 grant select on public.user_whitelist to anon, authenticated;
 revoke insert, update, delete on public.user_whitelist from anon, authenticated;
+
+revoke all privileges on public.planning_work_items_v from public, anon, authenticated;
+grant select on public.planning_work_items_v to authenticated;

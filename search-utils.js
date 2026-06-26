@@ -3,9 +3,13 @@ function flowmateSearchText(row) {
     ? window.MEMBERS_BY_ID[row.assignee].name
     : "";
 
-  const platformText = Array.isArray(row.platforms)
-    ? row.platforms.join(" ")
-    : (row.platform || "");
+  const channelText = Array.isArray(row.normalizedChannels)
+    ? row.normalizedChannels.join(" ")
+    : Array.isArray(row.channels)
+      ? row.channels.join(" ")
+      : Array.isArray(row.platforms)
+        ? row.platforms.join(" ")
+        : (row.channel || row.platform || "");
 
   return [
     row.id,
@@ -14,9 +18,14 @@ function flowmateSearchText(row) {
     row.status,
     row.priority,
     row.assetType,
-    platformText,
+    channelText,
     row.size,
+    row.publishLabel,
+    row.publishFullLabel,
+    row.publishDate,
+    row.planningLabel,
     row.dueLabel,
+    row.launchLabel,
     row.requester,
     row.requesterTeam,
     row.campaign,

@@ -597,6 +597,7 @@ function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
+  const publishDate = clampFlowMateDateToToday(nextDraft.publishDate || launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
@@ -606,6 +607,7 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetSubtype: creativeType.key,
     assetCount,
     launchDate,
+    publishDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
   };
 }
@@ -638,6 +640,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "urgentReason",
     "dueDate",
     "launchDate",
+    "publishDate",
   ],
 };
 
@@ -676,6 +679,7 @@ function getDefaultCreativeDraft() {
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
     launchDate: todayDate,
+    publishDate: todayDate,
   };
 }
 
@@ -724,16 +728,18 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     return errors;
   }
 
-  requireField("campaignName", "Project / campaign is required.");
+  requireField("campaignName", "Campaign is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
-  requireField("platforms", "Platform is required.");
+  requireField("platforms", "Channel is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
+  requireField("publishDate", "Publish Date is required.");
   requireNotPast("launchDate", "Launch date cannot be before today.");
+  requireNotPast("publishDate", "Publish Date cannot be before today.");
 
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
@@ -1190,11 +1196,17 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
+      const shouldSyncPublishDate = !value.publishDate || value.publishDate === value.launchDate;
       onChange({
         ...value,
         launchDate: nextLaunchDate,
+        publishDate: shouldSyncPublishDate ? nextLaunchDate : value.publishDate,
         dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate),
       });
+      return;
+    }
+    if (field === "publishDate") {
+      onChange({ ...value, publishDate: clampFlowMateDateToToday(next) });
       return;
     }
     onChange({ ...value, [field]: next });
@@ -1204,11 +1216,11 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
       <div className="form-grid">
         <div className="field field--full">
           <label className="field__label">Title <span className="req">*</span></label>
-          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Project Name]" title="Auto-filled from Launch Date, your account team, and Project / campaign." />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, and Project / campaign.</div>
+          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Campaign]" title="Auto-filled from Launch Date, your account team, and Campaign." />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, and Campaign.</div>
         </div>
         <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
-          <label className="field__label">Project / campaign <span className="req">*</span></label>
+          <label className="field__label">Campaign <span className="req">*</span></label>
           <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
           {errors.campaignName && <div className="field__error">{errors.campaignName}</div>}
         </div>
@@ -1225,7 +1237,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           {errors.assetCount && <div className="field__error">{errors.assetCount}</div>}
         </div>
         <div className={`field ${errors.platforms ? "field--error" : ""}`}>
-          <label className="field__label">Platform <span className="req">*</span></label>
+          <label className="field__label">Channel <span className="req">*</span></label>
           <input className="input" value={value.platforms} onChange={e => update("platforms", e.target.value)} placeholder="Instagram, TikTok, YouTube, Web..." />
           {errors.platforms && <div className="field__error">{errors.platforms}</div>}
         </div>
@@ -1259,6 +1271,11 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <label className="field__label">Urgent reason {value.priority === "urgent" && <span className="req">*</span>}</label>
           <input className="input" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} disabled={value.priority !== "urgent"} placeholder={value.priority === "urgent" ? "Why urgent? (visible to supervisor)" : "Only required when priority is Urgent"} />
           {errors.urgentReason && <div className="field__error">{errors.urgentReason}</div>}
+        </div>
+        <div className={`field ${errors.publishDate ? "field--error" : ""}`}>
+          <label className="field__label">Publish Date <span className="req">*</span></label>
+          <input className="input" type="date" value={value.publishDate} onChange={e => update("publishDate", e.target.value)} min={todayDate} />
+          {errors.publishDate && <div className="field__error">{errors.publishDate}</div>}
         </div>
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">1st Draft <span className="req">*</span></label>
@@ -1462,7 +1479,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const visibleBriefNote = w.briefNote || w.note || "";
   const visibleChecklistItems = w.checklistItems || [];
   const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
-  const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.size || w.launchLabel);
+  const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.channel || w.size || w.campaign || w.publishLabel || w.launchLabel);
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
   const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (
@@ -1915,9 +1932,10 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             <div className="card">
               <div className="card__head"><span className="card__title">Creative details</span></div>
               <div className="card__body">
+                <div className="meta-row"><div className="meta-row__lbl">Campaign</div><div className="meta-row__val">{w.campaign || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Channel</div><div className="meta-row__val">{w.channel || w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Type / Skill</div><div className="meta-row__val">{w.subtype ? getFlowMateCreativeTypeLabel(w.subtype) : (ASSET_LABEL[w.assetType] || w.assetType || "-")}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Asset Count</div><div className="meta-row__val">{w.assetCount || 1}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Platform</div><div className="meta-row__val">{w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.briefLink) ? <a href={window.flowmateSafeHttpUrl(w.briefLink)} target="_blank" rel="noopener noreferrer">Open brief</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.referenceLink) ? <a href={window.flowmateSafeHttpUrl(w.referenceLink)} target="_blank" rel="noopener noreferrer">Open reference</a> : "-"}</div></div>
@@ -2078,6 +2096,10 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               <div className="meta-row">
                 <div className="meta-row__lbl">Created</div>
                 <div className="meta-row__val">{w.createdLabel || "-"}</div>
+              </div>
+              <div className="meta-row">
+                <div className="meta-row__lbl">Publish Date</div>
+                <div className="meta-row__val">{w.publishFullLabel || w.publishLabel || "-"}</div>
               </div>
               <div className="meta-row">
                 <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "1st Draft"}</div>

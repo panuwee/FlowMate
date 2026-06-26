@@ -15,6 +15,11 @@ const NAV = [
     { key: "gantt",    label: "Gantt Chart",   icon: "chart" },
     { key: "queue",    label: "Central queue", icon: "queue" },
   ]},
+  { group: "Planning", items: [
+    { key: "planning-channel", label: "Channel View", icon: "chart" },
+    { key: "planning-campaign", label: "Campaign View", icon: "board" },
+    { key: "planning-calendar", label: "Content Calendar", icon: "calendar" },
+  ]},
   { group: "Supervisor", items: [
     { key: "workload", label: "Workload",      icon: "users" },
     { key: "kpi",      label: "KPI",           icon: "chart" },
@@ -26,11 +31,14 @@ const ADMIN_NAV_GROUP = { group: "Admin", items: [
   { key: "admin-whitelist", label: "Whitelist", icon: "users" },
 ]};
 
-const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team");
+const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team" || group.group === "Planning");
 
 const TITLE_MAP = {
   "my-work": "My work", "create": "Create", "detail": "Work item",
   "list": "All work", "board": "Board", "calendar": "Team calendar", "gantt": "Team Gantt chart", "queue": "Central queue",
+  "planning-channel": "Channel View",
+  "planning-campaign": "Campaign View",
+  "planning-calendar": "Content Calendar",
   "workload": "Workload", "kpi": "KPI", "settings": "Team settings",
   "admin-whitelist": "Whitelist",
 };
@@ -599,6 +607,9 @@ function App() {
         {allowedRoute && route === "calendar" && <CalendarScreen onOpen={open} />}
         {allowedRoute && route === "gantt"    && <TeamGanttScreen onOpen={open} />}
         {allowedRoute && route === "queue"    && <QueueScreen    onOpen={open} searchQuery={searchQuery} />}
+        {allowedRoute && route === "planning-channel" && <PlanningChannelViewScreen onOpen={open} />}
+        {allowedRoute && route === "planning-campaign" && <PlanningCampaignViewScreen onOpen={open} />}
+        {allowedRoute && route === "planning-calendar" && <PlanningContentCalendarScreen onOpen={open} />}
         {allowedRoute && route === "workload" && <WorkloadScreen onOpen={open} />}
         {allowedRoute && route === "kpi"      && <KpiScreen />}
         {allowedRoute && route === "settings" && <SettingsScreen />}
