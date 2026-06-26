@@ -17,6 +17,7 @@ This folder contains the SQL needed to prepare the Supabase backend for FlowMate
 | `ai_tags.sql` | MVP 1.2 task-level AI tags table and auth-scoped add/list/remove RPCs |
 | `view_security_hardening.sql` | Locks public views to authenticated users and forces `security_invoker` so underlying RLS is respected |
 | `team_settings_admin.sql` | MVP 1.2 Team settings admin-only GD/VE member capacity updates plus own leave request table/RPC |
+| `marketing_plan.sql` | Marketing Plan tables, RLS, channel normalization helper, timeline/summary views, and June 2026 sample seed helper |
 | `phase1_security_fixes.sql` | Post-review **Phase 1** patch for an already-deployed DB: revoke direct table DML (writes go only through RPCs) + enforce the whitelist on `auth.users` email change |
 | `phase2_stability_fixes.sql` | Post-review **Phase 2** patch: `work_items.final_owner_member_id` FK → `on delete set null`; rename the comments read policy. (Also re-run `rpc_quick_task.sql` for the null-safe owner guards.) |
 | `phase3_performance.sql` | Post-review **Phase 3** patch: `latest_assignment_run_v` view + composite/partial indexes for the hottest queries |
@@ -51,6 +52,7 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    9. `supabase/ai_tags.sql`
    10. `supabase/view_security_hardening.sql`
    11. `supabase/team_settings_admin.sql`
+   12. `supabase/marketing_plan.sql`
 
 For an existing MVP 1.2 database that already ran the earlier SQL, apply the leave update in this order:
 
@@ -77,6 +79,23 @@ For the Asset Count, multi-day assignment capacity, and leave watcher notificati
 
 1. `supabase/rpc_assignment.sql`
 2. `supabase/team_settings_admin.sql`
+
+For the MVP 1.3 Planning backend update, apply:
+
+1. `supabase/schema.sql`
+2. `supabase/rpc_assignment.sql`
+3. `supabase/security_hardening.sql`
+4. `supabase/view_security_hardening.sql`
+
+For the separate Marketing Plan backend update on an existing FlowMate database, apply:
+
+1. `supabase/marketing_plan.sql`
+
+If the database has not run the auth/role helpers yet, run these first:
+
+1. `supabase/whitelist_access.sql`
+2. `supabase/security_hardening.sql`
+3. `supabase/marketing_plan.sql`
 
 For production go-live reset after all validation is complete, run manually. This creates `flowmate_archive` audit tables, archives task/request rows, clears only active task/request data, keeps leave requests, and lets new display IDs start again at `CR-1001` / `QT-2001`:
 
@@ -112,11 +131,18 @@ After the full run order, these tables should exist:
 - `leave_requests`
 - `capacity_overrides`
 - `user_whitelist`
+- `marketing_plans`
+- `marketing_campaigns`
+- `marketing_content_items`
+- `marketing_channel_placements`
 
 ## Expected Views
 
 - `member_workload_v`
 - `work_item_flags_v`
+- `planning_work_items_v`
+- `marketing_plan_timeline_v`
+- `marketing_campaign_summary_v`
 
 ## MVP Security Note
 
@@ -146,6 +172,7 @@ select count(*) from public.team_members;
 select count(*) from public.work_items;
 select * from public.member_workload_v order by member_code;
 select display_id, is_overdue, is_due_soon, is_queued from public.work_item_flags_v order by display_id;
+select display_id, campaign_name, normalized_channels, planning_date, planning_readiness from public.planning_work_items_v order by planning_date nulls last, display_id;
 select count(*) from public.notifications;
 select proname from pg_proc where proname in ('mark_notification_read', 'mark_all_notifications_read', 'flowmate_generate_due_notifications') order by proname;
 select tgname from pg_trigger where tgname = 'flowmate_notifications_after_event';
@@ -156,6 +183,15 @@ select tgname from pg_trigger where tgname = 'flowmate_collaboration_notificatio
 select proname from pg_proc where proname = 'flowmate_admin_update_team_member';
 select proname from pg_proc where proname = 'create_leave_request';
 select count(*) from public.leave_requests;
+select count(*) from public.marketing_plans;
+select * from public.marketing_campaign_summary_v order by month_key, campaign_sort_order;
+select * from public.marketing_plan_timeline_v order by publish_date, publish_time nulls last;
+```
+
+To load the optional June 2026 Marketing Plan sample after `marketing_plan.sql`, run this manually from Supabase SQL Editor:
+
+```sql
+select public.marketing_plan_june_2026_sample();
 ```
 
 ## Notification Center Manual Checks
@@ -204,5 +240,6 @@ After schema and seed run successfully, connect the frontend to Supabase:
 
 1. Install `@supabase/supabase-js`.
 2. Read from `work_items`, `creative_request_details`, `member_workload_v`, and `work_item_flags_v`.
+   For MVP 1.3 planning screens, prefer `planning_work_items_v` for active Creative Request rows with normalized channels and publish/launch planning dates.
 3. Replace static `WORK` and `MEMBERS` mock data gradually.
 4. Add RPC/Edge Functions for assignment, status transitions, review flow, comments, and checklist writes.
