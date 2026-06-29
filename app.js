@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-6";
+const FLOWMATE_APP_VERSION = "v20260629-8";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -82,6 +82,7 @@ const TITLE_MAP = {
   "admin-whitelist": "Whitelist"
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
+const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet"]);
 function getVisibleNavGroups(role) {
   return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
 }
@@ -114,6 +115,9 @@ function App() {
   const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
+      const hashKey = window.location.hash.replace("#", "");
+      if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
+      if (TITLE_MAP[hashKey]) return "flowmate";
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
       if (savedProduct === "flowmate" || savedProduct === "marketing-plan") return savedProduct;
     } catch (e) {}
@@ -386,12 +390,18 @@ function App() {
     try {
       sessionStorage.setItem("flowmate:activeProduct", "flowmate");
     } catch (e) {}
+    if (MARKETING_PLAN_HASH_KEYS.has(window.location.hash.replace("#", ""))) {
+      window.location.hash = route && TITLE_MAP[route] ? route : "my-work";
+    }
   }
   function chooseMarketingPlanProduct() {
     setActiveProduct("marketing-plan");
     try {
       sessionStorage.setItem("flowmate:activeProduct", "marketing-plan");
     } catch (e) {}
+    if (!MARKETING_PLAN_HASH_KEYS.has(window.location.hash.replace("#", ""))) {
+      window.location.hash = "campaign-timeline";
+    }
   }
   useEffectApp(() => {
     function onRealtimeState(event) {
@@ -1045,6 +1055,19 @@ function formatMarketingPlanTime(value) {
   if (!value) return "";
   return String(value).slice(0, 5);
 }
+function normalizeMarketingPlanTimeInput(value) {
+  const text = String(value || "").trim();
+  const compactMatch = text.match(/^(\d{1,2})(\d{2})$/);
+  const colonMatch = text.match(/^(\d{1,2}):(\d{2})$/);
+  const match = colonMatch || compactMatch;
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return "";
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
 function formatMarketingPlanDate(value) {
   if (!value) return "-";
   const date = new Date(`${value}T00:00:00Z`);
@@ -1054,6 +1077,48 @@ function formatMarketingPlanDate(value) {
     year: "numeric",
     timeZone: "UTC"
   });
+}
+function formatMarketingPlanShortWeekday(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00Z`);
+  return date.toLocaleDateString("en-US", {
+    weekday: "short",
+    timeZone: "UTC"
+  }).toUpperCase();
+}
+function addMarketingPlanDays(dateKey, amount) {
+  const date = new Date(`${dateKey}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+function getMarketingPlanWeekStart(dateKey) {
+  const date = new Date(`${dateKey}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - date.getUTCDay());
+  return date.toISOString().slice(0, 10);
+}
+function getMarketingPlanReferenceDate(selectedMonth) {
+  const today = flowMateTodayDateKey();
+  return selectedMonth && today.slice(0, 7) === selectedMonth ? today : `${selectedMonth || today.slice(0, 7)}-01`;
+}
+function getMarketingPlanCalendarViewDays(selectedMonth, viewMode) {
+  const referenceDate = getMarketingPlanReferenceDate(selectedMonth);
+  if (viewMode === "day") return [referenceDate];
+  if (viewMode === "4_days") return Array.from({
+    length: 4
+  }, (_, index) => addMarketingPlanDays(referenceDate, index));
+  if (viewMode === "week") {
+    const start = getMarketingPlanWeekStart(referenceDate);
+    return Array.from({
+      length: 7
+    }, (_, index) => addMarketingPlanDays(start, index));
+  }
+  return getMarketingPlanDays(selectedMonth).map(day => day.key);
+}
+function getMarketingPlanCalendarRangeLabel(days, viewMode, selectedMonth) {
+  if (viewMode === "month") return `${getMarketingPlanMonthLabel(selectedMonth)} publishing calendar`;
+  if (!days || days.length === 0) return "Publishing calendar";
+  if (days.length === 1) return formatMarketingPlanDate(days[0]);
+  return `${formatMarketingPlanDate(days[0])} - ${formatMarketingPlanDate(days[days.length - 1])}`;
 }
 function groupMarketingPlanTimelineRows(rows, selectedMonth) {
   const campaigns = new Map();
@@ -1141,6 +1206,22 @@ const MARKETING_PLAN_WORKING_STATUS_OPTIONS = [{
 }, {
   value: "posted",
   label: "Posted"
+}];
+const MARKETING_PLAN_CALENDAR_VIEW_OPTIONS = [{
+  value: "day",
+  label: "Day"
+}, {
+  value: "week",
+  label: "Week"
+}, {
+  value: "month",
+  label: "Month"
+}, {
+  value: "4_days",
+  label: "4 Days"
+}, {
+  value: "schedule",
+  label: "Schedule"
 }];
 function getDefaultMarketingPlanWorkingSheetForm() {
   const today = flowMateTodayDateKey();
@@ -1521,6 +1602,77 @@ async function updateMarketingPlanWorkingSheetContentFields(contentItemId, chang
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
     detail: {
       reason: "marketing_plan_working_sheet_updated"
+    }
+  }));
+  return true;
+}
+async function updateMarketingPlanWorkingSheetRow(row, form) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!row || !row.contentItemId) throw new Error("Content item is missing.");
+  const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : [];
+  if (selectedChannels.length === 0) throw new Error("Select at least one Channel Tag.");
+  const normalizedTime = normalizeMarketingPlanTimeInput(form.publishTime);
+  if (!normalizedTime) throw new Error("Time must use HH:MM, for example 15:00.");
+  const contentPayload = {
+    title: String(form.contentTitle || "").trim(),
+    details: String(form.contentTitle || "").trim(),
+    format: form.assetType || null,
+    content_tier: form.contentTier || null,
+    brief_link: String(form.briefLink || "").trim() || null,
+    source_start_date: form.publishDate || null,
+    source_start_time: normalizedTime
+  };
+  if (!contentPayload.title) throw new Error("Content is required.");
+  const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
+  if (contentResult.error) throw contentResult.error;
+  const existingPlacements = Array.isArray(row.placements) ? row.placements : [];
+  const existingByChannel = new Map(existingPlacements.map(placement => [placement.channel, placement]));
+  const selectedSet = new Set(selectedChannels);
+  const deleteIds = existingPlacements.filter(placement => placement.placementId && !selectedSet.has(placement.channel)).map(placement => placement.placementId);
+  if (deleteIds.length > 0) {
+    const deleted = await window.flowmateSupabase.from("marketing_channel_placements").delete().in("id", deleteIds);
+    if (deleted.error) throw deleted.error;
+  }
+  const updateIds = selectedChannels.map(channel => existingByChannel.get(channel)).filter(placement => placement && placement.placementId).map(placement => placement.placementId);
+  if (updateIds.length > 0) {
+    const updated = await window.flowmateSupabase.from("marketing_channel_placements").update({
+      publish_date: form.publishDate || null,
+      publish_time: normalizedTime
+    }).in("id", updateIds);
+    if (updated.error) throw updated.error;
+  }
+  const insertRows = selectedChannels.filter(channel => !existingByChannel.has(channel)).map(channel => ({
+    content_item_id: row.contentItemId,
+    channel,
+    publish_date: form.publishDate || null,
+    publish_time: normalizedTime,
+    placement_status: normalizeMarketingPlanWorkingStatus(row.placementStatus)
+  }));
+  if (insertRows.length > 0) {
+    const inserted = await window.flowmateSupabase.from("marketing_channel_placements").insert(insertRows);
+    if (inserted.error) throw inserted.error;
+  }
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_working_sheet_row_edited"
+    }
+  }));
+  return true;
+}
+async function deleteMarketingPlanWorkingSheetRow(row) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!row || !row.contentItemId) throw new Error("Content item is missing.");
+  const placementResult = await window.flowmateSupabase.from("marketing_channel_placements").delete().eq("content_item_id", row.contentItemId);
+  if (placementResult.error) throw placementResult.error;
+  const result = await window.flowmateSupabase.from("marketing_content_items").delete().eq("id", row.contentItemId);
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_working_sheet_row_deleted"
     }
   }));
   return true;
@@ -2327,6 +2479,7 @@ function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
+  const [calendarViewMode, setCalendarViewMode] = useStateApp("month");
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan calendar..."
@@ -2367,6 +2520,10 @@ function MarketingPlanCalendarScreen() {
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
   const monthDays = getMarketingPlanDays(selectedMonth);
+  const viewDays = getMarketingPlanCalendarViewDays(selectedMonth, calendarViewMode);
+  const calendarHours = Array.from({
+    length: 24
+  }, (_, hour) => hour);
   const firstDay = monthDays[0] ? new Date(`${monthDays[0].key}T00:00:00Z`).getUTCDay() : 0;
   const calendarCells = [...Array.from({
     length: firstDay
@@ -2387,6 +2544,27 @@ function MarketingPlanCalendarScreen() {
     return React.createElement("span", {
       className: `badge ${statusClass}`
     }, getMarketingPlanStatusLabel(status));
+  }
+  function renderCalendarPlacement(row, options = {}) {
+    return React.createElement("div", {
+      key: row.placementId || `${row.contentItemId}-${row.channel}-${row.publishTime}`,
+      className: options.compact ? "marketing-calendar-event marketing-calendar-event--compact" : "marketing-calendar-event"
+    }, React.createElement("div", {
+      className: "strong"
+    }, row.campaignName), React.createElement("div", null, row.contentTitle), React.createElement("div", {
+      className: "row",
+      style: {
+        gap: 5,
+        flexWrap: "wrap",
+        marginTop: 4
+      }
+    }, React.createElement("span", {
+      className: "badge badge--neutral"
+    }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
+      className: "mono muted"
+    }, formatMarketingPlanTime(row.publishTime) || "-"), renderStatusBadge(row.placementStatus), row.picName && React.createElement("span", {
+      className: "muted"
+    }, row.picName)));
   }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
@@ -2424,7 +2602,19 @@ function MarketingPlanCalendarScreen() {
   }, "All channels"), channelOptions.map(channel => React.createElement("option", {
     key: channel,
     value: channel
-  }, getMarketingPlanChannelLabel(channel)))), React.createElement("button", {
+  }, getMarketingPlanChannelLabel(channel)))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 132
+    },
+    value: calendarViewMode,
+    onChange: event => setCalendarViewMode(event.target.value),
+    disabled: monthOptions.length === 0,
+    "aria-label": "Calendar view"
+  }, MARKETING_PLAN_CALENDAR_VIEW_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
@@ -2492,9 +2682,9 @@ function MarketingPlanCalendarScreen() {
     className: "card__head"
   }, React.createElement("div", null, React.createElement("span", {
     className: "card__title"
-  }, getMarketingPlanMonthLabel(selectedMonth), " publishing calendar"), React.createElement("div", {
+  }, getMarketingPlanCalendarRangeLabel(viewDays, calendarViewMode, selectedMonth)), React.createElement("div", {
     className: "card__sub"
-  }, "Day cards show campaign, asset/content, channel, time, status, and PIC.")), React.createElement("div", {
+  }, "Day, Week, Month, 4 Days, and Schedule read the same Marketing Plan placements.")), React.createElement("div", {
     className: "row",
     style: {
       gap: 6,
@@ -2510,14 +2700,34 @@ function MarketingPlanCalendarScreen() {
     className: "badge badge--overdue"
   }, "Delayed"))), React.createElement("div", {
     className: "card__body"
-  }, React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(7, minmax(132px, 1fr))",
-      gap: 8,
-      minWidth: 980,
-      overflowX: "auto"
-    }
+  }, calendarViewMode === "schedule" ? React.createElement("div", {
+    className: "marketing-calendar-schedule"
+  }, viewDays.map(dayKey => {
+    const dayRows = (rowsByDate.get(dayKey) || []).sort((a, b) => String(a.publishTime || "").localeCompare(String(b.publishTime || "")));
+    if (dayRows.length === 0) return null;
+    return React.createElement("div", {
+      key: dayKey,
+      className: "marketing-calendar-schedule__day"
+    }, React.createElement("div", {
+      className: "marketing-calendar-schedule__date"
+    }, React.createElement("span", {
+      className: "mono strong"
+    }, new Date(`${dayKey}T00:00:00Z`).getUTCDate()), React.createElement("span", {
+      className: "muted"
+    }, formatMarketingPlanShortWeekday(dayKey))), React.createElement("div", {
+      className: "marketing-calendar-schedule__items"
+    }, dayRows.map(row => React.createElement("div", {
+      key: row.placementId || `${row.contentItemId}-${row.channel}-${row.publishTime}`,
+      className: "marketing-calendar-schedule__item"
+    }, React.createElement("span", {
+      className: "mono"
+    }, formatMarketingPlanTime(row.publishTime) || "All day"), React.createElement("span", {
+      className: "badge badge--neutral"
+    }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
+      className: "strong"
+    }, row.campaignName), React.createElement("span", null, row.contentTitle), renderStatusBadge(row.placementStatus)))));
+  })) : calendarViewMode === "month" ? React.createElement("div", {
+    className: "marketing-calendar-month-grid"
   }, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(dayName => React.createElement("div", {
     key: dayName,
     className: "eyebrow",
@@ -2525,25 +2735,16 @@ function MarketingPlanCalendarScreen() {
       padding: "0 4px"
     }
   }, dayName)), calendarCells.map(cell => {
-    if (cell.isBlank) {
-      return React.createElement("div", {
-        key: cell.key,
-        style: {
-          minHeight: 116
-        }
-      });
-    }
+    if (cell.isBlank) return React.createElement("div", {
+      key: cell.key,
+      style: {
+        minHeight: 116
+      }
+    });
     const dayRows = rowsByDate.get(cell.key) || [];
     return React.createElement("div", {
       key: cell.key,
-      style: {
-        minHeight: 128,
-        border: "1px solid var(--garena-light-grey)",
-        borderRadius: 8,
-        padding: 8,
-        background: cell.isWeekend ? "var(--garena-badge-bg)" : "var(--garena-white)",
-        overflow: "hidden"
-      }
+      className: `marketing-calendar-month-cell ${cell.isWeekend ? "is-weekend" : ""}`
     }, React.createElement("div", {
       className: "row",
       style: {
@@ -2560,49 +2761,41 @@ function MarketingPlanCalendarScreen() {
         display: "grid",
         gap: 6
       }
-    }, dayRows.slice(0, 4).map(row => React.createElement("div", {
-      key: row.placementId || `${row.contentItemId}-${row.channel}-${row.publishTime}`,
-      style: {
-        borderLeft: "3px solid var(--garena-red)",
-        padding: "5px 6px",
-        background: "#FFF",
-        boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.05)"
-      }
-    }, React.createElement("div", {
-      className: "strong",
-      style: {
-        fontSize: 12,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }
-    }, row.campaignName), React.createElement("div", {
-      style: {
-        fontSize: 12,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
-      }
-    }, row.contentTitle), React.createElement("div", {
-      className: "row",
-      style: {
-        gap: 5,
-        flexWrap: "wrap",
-        marginTop: 4
-      }
-    }, React.createElement("span", {
-      className: "badge badge--neutral"
-    }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
-      className: "mono muted"
-    }, formatMarketingPlanTime(row.publishTime) || "-"), renderStatusBadge(row.placementStatus), row.picName && React.createElement("span", {
-      className: "muted"
-    }, row.picName)))), dayRows.length > 4 && React.createElement("div", {
+    }, dayRows.slice(0, 4).map(row => renderCalendarPlacement(row, {
+      compact: true
+    })), dayRows.length > 4 && React.createElement("div", {
       className: "muted",
       style: {
         fontSize: 12
       }
     }, "+", dayRows.length - 4, " more placements")));
-  })))));
+  })) : React.createElement("div", {
+    className: "marketing-calendar-time-grid",
+    style: {
+      gridTemplateColumns: `68px repeat(${viewDays.length}, minmax(180px, 1fr))`
+    }
+  }, React.createElement("div", {
+    className: "marketing-calendar-time-grid__corner"
+  }, "GMT+07"), viewDays.map(dayKey => React.createElement("div", {
+    key: dayKey,
+    className: "marketing-calendar-time-grid__dayhead"
+  }, React.createElement("span", {
+    className: "muted"
+  }, formatMarketingPlanShortWeekday(dayKey)), React.createElement("span", {
+    className: "mono strong"
+  }, new Date(`${dayKey}T00:00:00Z`).getUTCDate()))), calendarHours.map(hour => React.createElement(React.Fragment, {
+    key: `hour-${hour}`
+  }, React.createElement("div", {
+    className: "marketing-calendar-time-grid__hour"
+  }, String(hour).padStart(2, "0"), ":00"), viewDays.map(dayKey => {
+    const dayRows = (rowsByDate.get(dayKey) || []).filter(row => Number(String(row.publishTime || "00").slice(0, 2)) === hour);
+    return React.createElement("div", {
+      key: `${dayKey}-${hour}`,
+      className: "marketing-calendar-time-grid__slot"
+    }, dayRows.map(row => renderCalendarPlacement(row, {
+      compact: true
+    })));
+  })))))));
 }
 function MarketingPlanWorkingSheetScreen() {
   const [rows, setRows] = useStateApp([]);
@@ -2616,6 +2809,8 @@ function MarketingPlanWorkingSheetScreen() {
     message: ""
   });
   const [updatingRowId, setUpdatingRowId] = useStateApp("");
+  const [editingWorkingRow, setEditingWorkingRow] = useStateApp(null);
+  const [editForm, setEditForm] = useStateApp(null);
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan working sheet..."
@@ -2693,6 +2888,95 @@ function MarketingPlanWorkingSheetScreen() {
       };
     });
   }
+  function normalizeSheetTimeValue() {
+    const normalizedTime = normalizeMarketingPlanTimeInput(sheetForm.publishTime);
+    updateSheetForm("publishTime", normalizedTime || "12:00");
+  }
+  function startEditWorkingRow(row) {
+    const selectedChannels = Array.isArray(row.channels) && row.channels.length ? row.channels : row.channel ? [row.channel] : ["facebook"];
+    setEditingWorkingRow(row);
+    setEditForm({
+      contentTitle: row.contentTitle || "",
+      publishDate: row.publishDate || flowMateTodayDateKey(),
+      publishTime: formatMarketingPlanTime(row.publishTime) || "12:00",
+      assetType: row.format || "Banner",
+      contentTier: row.contentTier || "B",
+      briefLink: row.briefLink || "",
+      channels: selectedChannels
+    });
+    setExportMessage("");
+  }
+  function updateEditForm(key, value) {
+    setEditForm(current => ({
+      ...(current || {}),
+      [key]: value
+    }));
+  }
+  function toggleEditChannel(channelKey) {
+    setEditForm(current => {
+      const currentChannels = Array.isArray(current && current.channels) ? current.channels : [];
+      const nextChannels = currentChannels.includes(channelKey) ? currentChannels.filter(channel => channel !== channelKey) : [...currentChannels, channelKey];
+      return {
+        ...(current || {}),
+        channels: nextChannels.length ? nextChannels : [channelKey]
+      };
+    });
+  }
+  async function handleSaveEditWorkingRow(event) {
+    event.preventDefault();
+    if (!editingWorkingRow || !editForm) return;
+    const normalizedTime = normalizeMarketingPlanTimeInput(editForm.publishTime);
+    if (!normalizedTime) {
+      setExportMessage("Time must use HH:MM, for example 15:00.");
+      return;
+    }
+    if (!String(editForm.contentTitle || "").trim()) {
+      setExportMessage("Content is required.");
+      return;
+    }
+    if (!editForm.publishDate) {
+      setExportMessage("Publish Date is required.");
+      return;
+    }
+    if (!editForm.channels || editForm.channels.length === 0) {
+      setExportMessage("Select at least one Channel Tag.");
+      return;
+    }
+    setUpdatingRowId(editingWorkingRow.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetRow(editingWorkingRow, {
+        ...editForm,
+        publishTime: normalizedTime
+      });
+      setEditingWorkingRow(null);
+      setEditForm(null);
+      await loadWorkingSheetRows({
+        alive: true
+      });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet row edit failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Row edit failed.") : "Row edit failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
+  async function handleDeleteWorkingRow(row) {
+    if (!window.confirm(`Delete ${row.contentTitle || "this Working Sheet row"}?`)) return;
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await deleteMarketingPlanWorkingSheetRow(row);
+      await loadWorkingSheetRows({
+        alive: true
+      });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet row delete failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Row delete failed.") : "Row delete failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
   async function handleSaveWorkingSheetRow(event) {
     event.preventDefault();
     const required = [["campaignName", "Campaign is required."], ["launchDate", "Launch Date is required."], ["publishTime", "Time is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
@@ -2701,6 +2985,14 @@ function MarketingPlanWorkingSheetScreen() {
       setSaveState({
         status: "error",
         message: missing[1]
+      });
+      return;
+    }
+    const normalizedTime = normalizeMarketingPlanTimeInput(sheetForm.publishTime);
+    if (!normalizedTime) {
+      setSaveState({
+        status: "error",
+        message: "Time must use HH:MM, for example 15:00."
       });
       return;
     }
@@ -2716,7 +3008,10 @@ function MarketingPlanWorkingSheetScreen() {
       message: "Saving Working Sheet row..."
     });
     try {
-      const result = await createMarketingPlanWorkingSheetRow(sheetForm);
+      const result = await createMarketingPlanWorkingSheetRow({
+        ...sheetForm,
+        publishTime: normalizedTime
+      });
       setSaveState({
         status: "saved",
         message: `Saved 1 asset with ${result.placementCount} channel placement${result.placementCount === 1 ? "" : "s"}.`
@@ -2724,7 +3019,7 @@ function MarketingPlanWorkingSheetScreen() {
       setSheetForm(current => ({
         ...getDefaultMarketingPlanWorkingSheetForm(),
         launchDate: current.launchDate,
-        publishTime: current.publishTime,
+        publishTime: normalizedTime,
         campaignName: current.campaignName
       }));
       await loadWorkingSheetRows({
@@ -2765,11 +3060,16 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
   async function handleWorkingRowTimeChange(row, nextTime) {
+    const normalizedTime = normalizeMarketingPlanTimeInput(nextTime);
+    if (!normalizedTime) {
+      setExportMessage("Time must use HH:MM, for example 15:00.");
+      return;
+    }
     setUpdatingRowId(row.contentItemId);
     setExportMessage("");
     try {
       await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, {
-        publishTime: nextTime
+        publishTime: normalizedTime
       });
       await loadWorkingSheetRows({
         alive: true
@@ -2866,11 +3166,12 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field__label"
   }, "Time *"), React.createElement("input", {
     className: "input",
-    type: "time",
+    type: "text",
+    inputMode: "numeric",
     value: sheetForm.publishTime,
-    onClick: openNativeTimePicker,
-    onFocus: openNativeTimePicker,
-    onChange: event => updateSheetForm("publishTime", event.target.value)
+    placeholder: "HH:MM",
+    onChange: event => updateSheetForm("publishTime", event.target.value),
+    onBlur: normalizeSheetTimeValue
   })), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
@@ -3041,7 +3342,9 @@ function MarketingPlanWorkingSheetScreen() {
     className: "col-pic"
   }, "PIC"), React.createElement("th", {
     className: "col-status"
-  }, "Status"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => React.createElement("tr", {
+  }, "Status"), React.createElement("th", {
+    className: "col-actions"
+  }, "Actions"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => React.createElement("tr", {
     key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`
   }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, row.contentTier || "-"), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
     className: "marketing-channel-tags"
@@ -3051,12 +3354,15 @@ function MarketingPlanWorkingSheetScreen() {
     title: getMarketingPlanChannelLabel(channel)
   }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("input", {
     className: "input marketing-working-time",
-    type: "time",
-    value: formatMarketingPlanTime(row.publishTime),
+    type: "text",
+    inputMode: "numeric",
+    defaultValue: formatMarketingPlanTime(row.publishTime),
     disabled: updatingRowId === row.contentItemId,
-    onClick: openNativeTimePicker,
-    onFocus: openNativeTimePicker,
-    onChange: event => handleWorkingRowTimeChange(row, event.target.value)
+    placeholder: "HH:MM",
+    onBlur: event => handleWorkingRowTimeChange(row, event.target.value),
+    onKeyDown: event => {
+      if (event.key === "Enter") event.currentTarget.blur();
+    }
   })), React.createElement("td", null, React.createElement("div", {
     className: "marketing-working-link-edit"
   }, React.createElement("input", {
@@ -3081,10 +3387,136 @@ function MarketingPlanWorkingSheetScreen() {
   }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
     key: option.value,
     value: option.value
-  }, option.label, row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : "")))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "11",
+  }, option.label, row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : "")))), React.createElement("td", null, React.createElement("div", {
+    className: "marketing-working-actions"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary btn--xs",
+    disabled: updatingRowId === row.contentItemId,
+    onClick: () => startEditWorkingRow(row)
+  }, "Edit"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--danger btn--xs",
+    disabled: updatingRowId === row.contentItemId,
+    onClick: () => handleDeleteWorkingRow(row)
+  }, "Delete"))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "12",
     className: "muted"
-  }, "No rows match the selected filters."))))))));
+  }, "No rows match the selected filters."))))))), editingWorkingRow && editForm && React.createElement("div", {
+    className: "modal-backdrop",
+    role: "presentation",
+    onMouseDown: () => {
+      setEditingWorkingRow(null);
+      setEditForm(null);
+    }
+  }, React.createElement("form", {
+    className: "modal modal--settings marketing-working-edit-modal",
+    role: "dialog",
+    "aria-modal": "true",
+    onMouseDown: event => event.stopPropagation(),
+    onSubmit: handleSaveEditWorkingRow
+  }, React.createElement("div", {
+    className: "modal__head"
+  }, React.createElement("div", null, React.createElement("h2", null, "Edit Working Sheet row"), React.createElement("div", {
+    className: "muted"
+  }, "Changes update Timeline, Channel Plan, Calendar, and CSV export.")), React.createElement("button", {
+    type: "button",
+    className: "iconbtn",
+    onClick: () => {
+      setEditingWorkingRow(null);
+      setEditForm(null);
+    }
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("label", {
+    className: "field field--full"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Content *"), React.createElement("input", {
+    className: "input",
+    value: editForm.contentTitle,
+    onChange: event => updateEditForm("contentTitle", event.target.value)
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Publish Date *"), React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: editForm.publishDate,
+    onChange: event => updateEditForm("publishDate", event.target.value)
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Time *"), React.createElement("input", {
+    className: "input",
+    type: "text",
+    inputMode: "numeric",
+    value: editForm.publishTime,
+    placeholder: "HH:MM",
+    onChange: event => updateEditForm("publishTime", event.target.value),
+    onBlur: event => updateEditForm("publishTime", normalizeMarketingPlanTimeInput(event.target.value) || editForm.publishTime)
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Asset Type *"), React.createElement("select", {
+    className: "select",
+    value: editForm.assetType,
+    onChange: event => updateEditForm("assetType", event.target.value)
+  }, MARKETING_PLAN_ASSET_TYPES.map(type => React.createElement("option", {
+    key: type,
+    value: type
+  }, type)))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Tier *"), React.createElement("select", {
+    className: "select",
+    value: editForm.contentTier,
+    onChange: event => updateEditForm("contentTier", event.target.value)
+  }, MARKETING_PLAN_CONTENT_TIERS.map(tier => React.createElement("option", {
+    key: tier,
+    value: tier
+  }, tier)))), React.createElement("label", {
+    className: "field field--full"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Brief Link"), React.createElement("input", {
+    className: "input",
+    value: editForm.briefLink,
+    onChange: event => updateEditForm("briefLink", event.target.value),
+    placeholder: "https://..."
+  })), React.createElement("div", {
+    className: "field field--full"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Channel Tag *"), React.createElement("div", {
+    className: "check-row"
+  }, MARKETING_PLAN_CHANNELS.map(channel => React.createElement("label", {
+    key: channel.key,
+    className: "check-pill"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: (editForm.channels || []).includes(channel.key),
+    onChange: () => toggleEditChannel(channel.key)
+  }), React.createElement("span", null, channel.label)))))), React.createElement("div", {
+    className: "modal__actions"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => {
+      setEditingWorkingRow(null);
+      setEditForm(null);
+    }
+  }, "Cancel"), React.createElement("button", {
+    type: "submit",
+    className: "btn btn--primary",
+    disabled: updatingRowId === editingWorkingRow.contentItemId
+  }, updatingRowId === editingWorkingRow.contentItemId ? "Saving..." : "Save changes")))));
 }
 function MarketingPlanPlaceholderScreen({
   title,
@@ -3104,24 +3536,49 @@ function MarketingPlanShell({
   onSwitchMarketingPlan,
   onSignOut
 }) {
-  const [activeSection, setActiveSection] = useStateApp("Campaign Timeline");
   const sections = [{
+    key: "campaign-timeline",
     label: "Campaign Timeline",
     detail: "Campaign rows with asset sub-rows and publish dates.",
     icon: "chart"
   }, {
+    key: "channel-plan",
     label: "Channel Plan",
     detail: "View content by Facebook, TikTok, Instagram, LINE, YouTube, and in-game.",
     icon: "board"
   }, {
+    key: "marketing-calendar",
     label: "Calendar",
     detail: "Monthly publishing calendar for marketing managers.",
     icon: "calendar"
   }, {
+    key: "working-sheet",
     label: "Working Sheet",
     detail: "Enter recurring monthly plan rows in Marketing Plan.",
     icon: "list"
   }];
+  const sectionByKey = new Map(sections.map(section => [section.key, section]));
+  function getSectionFromHash() {
+    const hashKey = window.location.hash.replace("#", "");
+    return sectionByKey.get(hashKey) || sections[0];
+  }
+  const [activeSectionKey, setActiveSectionKey] = useStateApp(() => getSectionFromHash().key);
+  const activeSection = sectionByKey.get(activeSectionKey) || sections[0];
+  useEffectApp(() => {
+    function onMarketingHashChange() {
+      const nextSection = getSectionFromHash();
+      setActiveSectionKey(nextSection.key);
+    }
+    if (!sectionByKey.has(window.location.hash.replace("#", ""))) {
+      window.location.hash = sections[0].key;
+    }
+    window.addEventListener("hashchange", onMarketingHashChange);
+    return () => window.removeEventListener("hashchange", onMarketingHashChange);
+  }, []);
+  function openMarketingSection(section) {
+    setActiveSectionKey(section.key);
+    window.location.hash = section.key;
+  }
   return React.createElement("div", {
     className: "app"
   }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
@@ -3157,15 +3614,15 @@ function MarketingPlanShell({
   }, React.createElement("div", null, React.createElement("div", {
     className: "nav-section"
   }, "Marketing Plan"), sections.map(section => React.createElement("div", {
-    key: section.label,
-    className: `nav-item ${activeSection === section.label ? "is-active" : ""}`,
-    onClick: () => setActiveSection(section.label)
+    key: section.key,
+    className: `nav-item ${activeSection.key === section.key ? "is-active" : ""}`,
+    onClick: () => openMarketingSection(section)
   }, React.createElement(Icon, {
     name: section.icon,
     size: 15
   }), React.createElement("span", null, section.label))))), React.createElement("main", {
     className: "app__main app__main--marketing"
-  }, activeSection === "Campaign Timeline" && React.createElement(MarketingPlanTimelineScreen, null), activeSection === "Channel Plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection === "Calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection === "Working Sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null)));
+  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, null), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null)));
 }
 function GlobalSearchResultsPanel({
   query,
