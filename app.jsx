@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-14";
+const FLOWMATE_APP_VERSION = "v20260629-15";
 
 const NAV = [
   { group: "Personal", items: [
@@ -41,6 +41,10 @@ const TITLE_MAP = {
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet"]);
 
+function getFlowMateHashRouteKey(hashValue) {
+  return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+}
+
 function getVisibleNavGroups(role) {
   return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
 }
@@ -52,8 +56,8 @@ function isFlowMateRouteAllowedForRole(role, routeKey) {
 
 function App() {
   const [route, setRoute] = useStateApp(() => {
-    const h = window.location.hash.replace("#", "");
-    return h && TITLE_MAP[h.split("/")[0]] ? h.split("/")[0] : "my-work";
+    const h = getFlowMateHashRouteKey();
+    return h && TITLE_MAP[h] ? h : "my-work";
   });
   const [focusId, setFocusId] = useStateApp(null);
   // O-6: `searchInput` is bound to the box (instant typing); `searchQuery` is
@@ -75,7 +79,7 @@ function App() {
   const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
-      const hashKey = window.location.hash.replace("#", "");
+      const hashKey = getFlowMateHashRouteKey();
       if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
       if (TITLE_MAP[hashKey]) return "flowmate";
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
@@ -220,7 +224,15 @@ function App() {
   useEffectApp(() => {
     function onHash() {
       const h = window.location.hash.replace("#", "");
-      const [r, id] = h.split("/");
+      const r = getFlowMateHashRouteKey(h);
+      const id = h.split("/")[1];
+      if (MARKETING_PLAN_HASH_KEYS.has(r)) {
+        setActiveProduct("marketing-plan");
+        try { sessionStorage.setItem("flowmate:activeProduct", "marketing-plan"); } catch (e) {}
+      } else if (TITLE_MAP[r]) {
+        setActiveProduct("flowmate");
+        try { sessionStorage.setItem("flowmate:activeProduct", "flowmate"); } catch (e) {}
+      }
       if (r === "detail" && id) { setFocusId(id); setRoute("detail"); return; }
       if (TITLE_MAP[r]) setRoute(r);
     }
@@ -329,7 +341,7 @@ function App() {
   function chooseFlowMateProduct() {
     setActiveProduct("flowmate");
     try { sessionStorage.setItem("flowmate:activeProduct", "flowmate"); } catch (e) {}
-    if (MARKETING_PLAN_HASH_KEYS.has(window.location.hash.replace("#", ""))) {
+    if (MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey())) {
       window.location.hash = route && TITLE_MAP[route] ? route : "my-work";
     }
   }
@@ -337,7 +349,7 @@ function App() {
   function chooseMarketingPlanProduct() {
     setActiveProduct("marketing-plan");
     try { sessionStorage.setItem("flowmate:activeProduct", "marketing-plan"); } catch (e) {}
-    if (!MARKETING_PLAN_HASH_KEYS.has(window.location.hash.replace("#", ""))) {
+    if (!MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey())) {
       window.location.hash = "campaign-timeline";
     }
   }
@@ -1026,7 +1038,7 @@ function groupMarketingPlanTimelineRows(rows, selectedMonth) {
         channel: row.channel,
         publishDate: row.publishDate,
         publishTime: row.publishTime,
-        status: row.placementStatus,
+        status: getMarketingPlanViewStatus(row),
         note: row.placementNote,
       });
     });
@@ -1291,6 +1303,12 @@ function normalizeMarketingPlanWorkingStatus(status) {
   return status || "planned";
 }
 
+function getMarketingPlanViewStatus(row) {
+  const normalized = normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
+  if (normalized === "planned" && String((row && row.briefLink) || "").trim()) return "assigned";
+  return normalized;
+}
+
 function getMarketingPlanStatusClass(status) {
   const normalized = normalizeMarketingPlanWorkingStatus(status);
   if (normalized === "posted") return "badge--delivered";
@@ -1324,7 +1342,7 @@ function getMarketingPlanPlacementStatusOptions(rows, selectedMonth) {
   const statuses = new Set();
   (rows || []).forEach(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth === selectedMonth && row.placementStatus) statuses.add(row.placementStatus);
+    if (rowMonth === selectedMonth) statuses.add(getMarketingPlanViewStatus(row));
   });
   return Array.from(statuses).sort();
 }
@@ -1764,7 +1782,7 @@ function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, se
     .filter(row => {
       const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
       if (rowMonth !== selectedMonth) return false;
-      if (selectedStatus !== "all" && row.placementStatus !== selectedStatus) return false;
+      if (selectedStatus !== "all" && getMarketingPlanViewStatus(row) !== selectedStatus) return false;
       return selectedChannel === "all" || row.channel === selectedChannel;
     })
     .forEach(row => {
@@ -2442,7 +2460,7 @@ function MarketingPlanChannelPlanScreen() {
                               <a className="marketing-working-link" href={placement.briefLink} target="_blank" rel="noreferrer">Link</a>
                             ) : "-"}
                           </td>
-                          <td>{renderStatusBadge(placement.placementStatus)}</td>
+                          <td>{renderStatusBadge(getMarketingPlanViewStatus(placement))}</td>
                           <td>{placement.picName || "-"}</td>
                         </tr>
                       ))}
@@ -2537,7 +2555,7 @@ function MarketingPlanCalendarScreen() {
         <div className="row" style={{ gap: 5, flexWrap: "wrap", marginTop: 4 }}>
           <span className="badge badge--neutral">{getMarketingPlanChannelLabel(row.channel)}</span>
           <span className="mono muted">{formatMarketingPlanTime(row.publishTime) || "-"}</span>
-          {renderStatusBadge(row.placementStatus)}
+          {renderStatusBadge(getMarketingPlanViewStatus(row))}
           {row.picName && <span className="muted">{row.picName}</span>}
         </div>
       </div>
@@ -2661,7 +2679,7 @@ function MarketingPlanCalendarScreen() {
                             <span className="badge badge--neutral">{getMarketingPlanChannelLabel(row.channel)}</span>
                             <span className="strong">{row.campaignName}</span>
                             <span>{row.contentTitle}</span>
-                            {renderStatusBadge(row.placementStatus)}
+                            {renderStatusBadge(getMarketingPlanViewStatus(row))}
                           </div>
                         ))}
                       </div>

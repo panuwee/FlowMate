@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-14";
+const FLOWMATE_APP_VERSION = "v20260629-15";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -83,6 +83,9 @@ const TITLE_MAP = {
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet"]);
+function getFlowMateHashRouteKey(hashValue) {
+  return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+}
 function getVisibleNavGroups(role) {
   return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
 }
@@ -92,8 +95,8 @@ function isFlowMateRouteAllowedForRole(role, routeKey) {
 }
 function App() {
   const [route, setRoute] = useStateApp(() => {
-    const h = window.location.hash.replace("#", "");
-    return h && TITLE_MAP[h.split("/")[0]] ? h.split("/")[0] : "my-work";
+    const h = getFlowMateHashRouteKey();
+    return h && TITLE_MAP[h] ? h : "my-work";
   });
   const [focusId, setFocusId] = useStateApp(null);
   const [searchInput, setSearchInput] = useStateApp("");
@@ -115,7 +118,7 @@ function App() {
   const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
-      const hashKey = window.location.hash.replace("#", "");
+      const hashKey = getFlowMateHashRouteKey();
       if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
       if (TITLE_MAP[hashKey]) return "flowmate";
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
@@ -287,7 +290,19 @@ function App() {
   useEffectApp(() => {
     function onHash() {
       const h = window.location.hash.replace("#", "");
-      const [r, id] = h.split("/");
+      const r = getFlowMateHashRouteKey(h);
+      const id = h.split("/")[1];
+      if (MARKETING_PLAN_HASH_KEYS.has(r)) {
+        setActiveProduct("marketing-plan");
+        try {
+          sessionStorage.setItem("flowmate:activeProduct", "marketing-plan");
+        } catch (e) {}
+      } else if (TITLE_MAP[r]) {
+        setActiveProduct("flowmate");
+        try {
+          sessionStorage.setItem("flowmate:activeProduct", "flowmate");
+        } catch (e) {}
+      }
       if (r === "detail" && id) {
         setFocusId(id);
         setRoute("detail");
@@ -390,7 +405,7 @@ function App() {
     try {
       sessionStorage.setItem("flowmate:activeProduct", "flowmate");
     } catch (e) {}
-    if (MARKETING_PLAN_HASH_KEYS.has(window.location.hash.replace("#", ""))) {
+    if (MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey())) {
       window.location.hash = route && TITLE_MAP[route] ? route : "my-work";
     }
   }
@@ -399,7 +414,7 @@ function App() {
     try {
       sessionStorage.setItem("flowmate:activeProduct", "marketing-plan");
     } catch (e) {}
-    if (!MARKETING_PLAN_HASH_KEYS.has(window.location.hash.replace("#", ""))) {
+    if (!MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey())) {
       window.location.hash = "campaign-timeline";
     }
   }
@@ -1170,7 +1185,7 @@ function groupMarketingPlanTimelineRows(rows, selectedMonth) {
       channel: row.channel,
       publishDate: row.publishDate,
       publishTime: row.publishTime,
-      status: row.placementStatus,
+      status: getMarketingPlanViewStatus(row),
       note: row.placementNote
     });
   });
@@ -1407,6 +1422,11 @@ function normalizeMarketingPlanWorkingStatus(status) {
   if (status === "schedule") return "scheduled";
   return status || "planned";
 }
+function getMarketingPlanViewStatus(row) {
+  const normalized = normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
+  if (normalized === "planned" && String(row && row.briefLink || "").trim()) return "assigned";
+  return normalized;
+}
 function getMarketingPlanStatusClass(status) {
   const normalized = normalizeMarketingPlanWorkingStatus(status);
   if (normalized === "posted") return "badge--delivered";
@@ -1435,7 +1455,7 @@ function getMarketingPlanPlacementStatusOptions(rows, selectedMonth) {
   const statuses = new Set();
   (rows || []).forEach(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth === selectedMonth && row.placementStatus) statuses.add(row.placementStatus);
+    if (rowMonth === selectedMonth) statuses.add(getMarketingPlanViewStatus(row));
   });
   return Array.from(statuses).sort();
 }
@@ -1791,7 +1811,7 @@ function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, se
   (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
     if (rowMonth !== selectedMonth) return false;
-    if (selectedStatus !== "all" && row.placementStatus !== selectedStatus) return false;
+    if (selectedStatus !== "all" && getMarketingPlanViewStatus(row) !== selectedStatus) return false;
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).forEach(row => {
     const channelKey = groupMap.has(row.channel) ? row.channel : "other";
@@ -2554,7 +2574,7 @@ function MarketingPlanChannelPlanScreen() {
     href: placement.briefLink,
     target: "_blank",
     rel: "noreferrer"
-  }, "Link") : "-"), React.createElement("td", null, renderStatusBadge(placement.placementStatus)), React.createElement("td", null, placement.picName || "-")))))))))));
+  }, "Link") : "-"), React.createElement("td", null, renderStatusBadge(getMarketingPlanViewStatus(placement))), React.createElement("td", null, placement.picName || "-")))))))))));
 }
 function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
@@ -2641,7 +2661,7 @@ function MarketingPlanCalendarScreen() {
       className: "badge badge--neutral"
     }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
       className: "mono muted"
-    }, formatMarketingPlanTime(row.publishTime) || "-"), renderStatusBadge(row.placementStatus), row.picName && React.createElement("span", {
+    }, formatMarketingPlanTime(row.publishTime) || "-"), renderStatusBadge(getMarketingPlanViewStatus(row)), row.picName && React.createElement("span", {
       className: "muted"
     }, row.picName)));
   }
@@ -2775,7 +2795,7 @@ function MarketingPlanCalendarScreen() {
       className: "badge badge--neutral"
     }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
       className: "strong"
-    }, row.campaignName), React.createElement("span", null, row.contentTitle), renderStatusBadge(row.placementStatus)))));
+    }, row.campaignName), React.createElement("span", null, row.contentTitle), renderStatusBadge(getMarketingPlanViewStatus(row))))));
   })) : calendarViewMode === "month" ? React.createElement("div", {
     className: "marketing-calendar-month-grid"
   }, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(dayName => React.createElement("div", {
