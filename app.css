@@ -534,6 +534,104 @@ button:disabled {
 .badge--overdue  { background: var(--garena-red-light-2); color: var(--garena-red); border-color: var(--garena-red); }
 .badge--soon     { background: #FDEFE0; color: #8A4A12; }
 
+.marketing-timeline-badge {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  min-width: 30px;
+  max-width: 34px;
+  min-height: 34px;
+  padding: 3px 4px;
+  line-height: 1.05;
+  white-space: normal;
+}
+.marketing-timeline-badge__channel {
+  display: block;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  line-height: 1.05;
+}
+.marketing-timeline-badge__time {
+  display: block;
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.marketing-working-table {
+  width: 100%;
+  min-width: 1160px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.marketing-working-table th,
+.marketing-working-table td {
+  padding: 8px 10px;
+  border-bottom: var(--border-hairline);
+  text-align: left;
+  vertical-align: middle;
+}
+.marketing-working-table th {
+  color: var(--garena-grey);
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.marketing-working-table td {
+  font-size: 13px;
+}
+.marketing-working-table .col-month { width: 92px; }
+.marketing-working-table .col-campaign { width: 160px; }
+.marketing-working-table .col-asset { width: 220px; }
+.marketing-working-table .col-tier { width: 62px; }
+.marketing-working-table .col-type { width: 120px; }
+.marketing-working-table .col-channel { width: 156px; }
+.marketing-working-table .col-date { width: 112px; }
+.marketing-working-table .col-time { width: 96px; }
+.marketing-working-table .col-link { width: 88px; }
+.marketing-working-table .col-status { width: 150px; }
+.marketing-channel-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.marketing-channel-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 7px;
+  border: var(--border-hairline);
+  border-radius: var(--radius-xs);
+  background: var(--garena-badge-bg);
+  color: var(--garena-iron);
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+.marketing-working-time {
+  width: 78px;
+  height: 30px;
+  padding: 0 6px;
+}
+.marketing-working-status {
+  width: 132px;
+  height: 30px;
+}
+.marketing-working-link {
+  color: var(--garena-red);
+  font-weight: var(--weight-bold);
+  text-decoration: none;
+}
+.marketing-working-link:hover {
+  text-decoration: underline;
+}
+
 .prio { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--garena-iron); }
 .prio__mark {
   width: 8px; height: 8px; border-radius: var(--radius-xs);

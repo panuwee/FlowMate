@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-1";
+const FLOWMATE_APP_VERSION = "v20260629-3";
 
 const NAV = [
   { group: "Personal", items: [
@@ -833,6 +833,7 @@ function normalizeMarketingPlanTimelineRow(row) {
     format: row.format || "",
     contentTier: row.content_tier || "",
     picName: row.pic_name || "",
+    briefLink: row.brief_link || "",
     contentStatus: row.content_status || "",
     contentSortOrder: Number(row.content_sort_order || 0),
     placementId: row.placement_id,
@@ -957,6 +958,15 @@ const MARKETING_PLAN_ASSET_TYPES = [
 
 const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
 
+const MARKETING_PLAN_WORKING_STATUS_OPTIONS = [
+  { value: "planned", label: "Planned" },
+  { value: "assigned", label: "Assigned" },
+  { value: "review", label: "Review" },
+  { value: "ready_to_post", label: "Ready to Post" },
+  { value: "scheduled", label: "Schedule" },
+  { value: "posted", label: "Posted" },
+];
+
 function getDefaultMarketingPlanWorkingSheetForm() {
   const today = flowMateTodayDateKey();
   return {
@@ -1011,15 +1021,125 @@ function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all") {
     ));
 }
 
+function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel = "all") {
+  const groups = new Map();
+  filterMarketingPlanRows(rows, selectedMonth, selectedChannel).forEach(row => {
+    const key = row.contentItemId || `${row.campaignName}-${row.contentTitle}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        ...row,
+        channels: [],
+        placements: [],
+      });
+    }
+    const group = groups.get(key);
+    group.placements.push(row);
+    if (row.channel && !group.channels.includes(row.channel)) group.channels.push(row.channel);
+  });
+
+  return Array.from(groups.values())
+    .map(group => {
+      const sortedPlacements = group.placements.sort((a, b) => (
+        String(a.publishDate || "").localeCompare(String(b.publishDate || "")) ||
+        String(a.publishTime || "").localeCompare(String(b.publishTime || "")) ||
+        String(a.channel || "").localeCompare(String(b.channel || ""))
+      ));
+      const primaryPlacement = sortedPlacements[0] || group;
+      const normalizedStatuses = new Set(sortedPlacements.map(row => normalizeMarketingPlanWorkingStatus(row.placementStatus)));
+      const orderedChannels = MARKETING_PLAN_CHANNELS
+        .map(channel => channel.key)
+        .filter(channel => group.channels.includes(channel));
+      return {
+        ...group,
+        placementId: primaryPlacement.placementId,
+        monthKey: primaryPlacement.monthKey,
+        publishDate: primaryPlacement.publishDate,
+        publishTime: primaryPlacement.publishTime,
+        placementStatus: normalizedStatuses.size === 1 ? Array.from(normalizedStatuses)[0] : normalizeMarketingPlanWorkingStatus(primaryPlacement.placementStatus),
+        hasMixedStatus: normalizedStatuses.size > 1,
+        channels: orderedChannels.length ? orderedChannels : group.channels,
+        placements: sortedPlacements,
+      };
+    })
+    .sort((a, b) => (
+      String(a.publishDate || "").localeCompare(String(b.publishDate || "")) ||
+      String(a.publishTime || "").localeCompare(String(b.publishTime || "")) ||
+      String(a.campaignName || "").localeCompare(String(b.campaignName || "")) ||
+      String(a.contentTitle || "").localeCompare(String(b.contentTitle || ""))
+    ));
+}
+
 function getMarketingPlanChannelLabel(channel) {
   const normalized = channel || "other";
   const match = MARKETING_PLAN_CHANNELS.find(item => item.key === normalized);
   return match ? match.label : "Other";
 }
 
+function getMarketingPlanChannelAbbrev(channel) {
+  const normalized = channel || "other";
+  const labels = {
+    facebook: "FB",
+    tiktok: "TT",
+    instagram: "IG",
+    in_game: "Game",
+    youtube: "YT",
+    other: "Other",
+  };
+  return labels[normalized] || getMarketingPlanChannelLabel(normalized).slice(0, 6);
+}
+
+function formatMarketingPlanBadgeTime(value) {
+  if (!value) return "";
+  const [hourText, minuteText] = String(value).slice(0, 5).split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText || 0);
+  if (Number.isNaN(hour)) return String(value).slice(0, 5);
+  const suffix = hour >= 12 ? "pm" : "am";
+  const hour12 = hour % 12 || 12;
+  return minute ? `${hour12}:${String(minute).padStart(2, "0")}${suffix}` : `${hour12}${suffix}`;
+}
+
 function getMarketingPlanStatusLabel(status) {
+  if (status === "ready") return "Ready to Post";
+  if (status === "ready_to_post") return "Ready to Post";
+  if (status === "scheduled") return "Schedule";
   if (!status) return "Planned";
   return String(status).replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function normalizeMarketingPlanWorkingStatus(status) {
+  if (status === "ready") return "ready_to_post";
+  if (status === "schedule") return "scheduled";
+  return status || "planned";
+}
+
+function getMarketingPlanStatusClass(status) {
+  const normalized = normalizeMarketingPlanWorkingStatus(status);
+  if (normalized === "posted") return "badge--delivered";
+  if (normalized === "review") return "badge--review";
+  if (normalized === "assigned" || normalized === "ready_to_post" || normalized === "scheduled") return "badge--assigned";
+  if (normalized === "delayed") return "badge--overdue";
+  if (normalized === "cancelled") return "badge--cancelled";
+  return "badge--neutral";
+}
+
+function getMarketingPlanCurrentUserDefaults() {
+  const user = window.FLOWMATE_CURRENT_USER || {};
+  const member = user.team_member_id && window.MEMBERS_BY_ID ? window.MEMBERS_BY_ID[user.team_member_id] : null;
+  return {
+    team: user.requester_team || (member && member.discipline) || "",
+    picName: user.name || user.email || "Unknown",
+  };
+}
+
+function openNativeTimePicker(event) {
+  const input = event.currentTarget;
+  if (!input || typeof input.showPicker !== "function") return;
+  try {
+    input.showPicker();
+  } catch (error) {
+    // Browsers only allow showPicker from direct user gestures.
+  }
 }
 
 function getMarketingPlanPlacementStatusOptions(rows, selectedMonth) {
@@ -1174,8 +1294,11 @@ async function createMarketingPlanWorkingSheetRow(form) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
   const monthKey = marketingPlanMonthKeyFromDate(form.launchDate);
+  const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
+  const ownerTeam = currentUserDefaults.team || null;
+  const ownerName = currentUserDefaults.picName || null;
   const planId = await findOrCreateMarketingPlan(monthKey);
-  const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, form.team);
+  const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, ownerTeam);
   const title = marketingPlanTitleFromDetails(form.details, form.assetType);
 
   const content = await window.flowmateSupabase
@@ -1184,10 +1307,10 @@ async function createMarketingPlanWorkingSheetRow(form) {
       campaign_id: campaignId,
       title,
       details: form.details || null,
-      team: form.team || null,
+      team: ownerTeam,
       format: form.assetType || null,
       content_tier: form.contentTier || null,
-      pic_name: form.picName || null,
+      pic_name: ownerName,
       note: form.note || null,
       brief_link: form.briefLink || null,
       source_start_date: form.launchDate || null,
@@ -1216,6 +1339,28 @@ async function createMarketingPlanWorkingSheetRow(form) {
     .insert(placementRows);
   if (placements.error) throw placements.error;
   return { planId, campaignId, contentItemId: content.data.id, placementCount: placementRows.length };
+}
+
+async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, changes) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(changes, "status")) {
+    payload.placement_status = normalizeMarketingPlanWorkingStatus(changes.status);
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, "publishTime")) {
+    payload.publish_time = changes.publishTime || null;
+  }
+  if (Object.keys(payload).length === 0) return false;
+  const result = await window.flowmateSupabase
+    .from("marketing_channel_placements")
+    .update(payload)
+    .eq("content_item_id", contentItemId);
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "marketing_plan_working_sheet_updated" } }));
+  return true;
 }
 
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
@@ -1399,29 +1544,22 @@ function MarketingPlanTimelineScreen() {
   }
 
   function renderPlacementBadge(placement) {
-    const statusClass = placement.status === "delayed"
-      ? "badge--overdue"
-      : placement.status === "posted"
-        ? "badge--delivered"
-        : placement.status === "ready"
-          ? "badge--assigned"
-          : "badge--neutral";
+    const statusClass = getMarketingPlanStatusClass(placement.status);
     const timeLabel = formatMarketingPlanTime(placement.publishTime);
+    const badgeTimeLabel = formatMarketingPlanBadgeTime(placement.publishTime);
+    const channelAbbrev = getMarketingPlanChannelAbbrev(placement.channel);
     return (
       <div
         key={placement.id || `${placement.channel}-${placement.publishDate}-${placement.publishTime}`}
-        className={`badge ${statusClass}`}
-        title={`${placement.channel} - ${placement.publishDate}${timeLabel ? ` ${timeLabel}` : ""} - ${placement.status}`}
+        className={`badge ${statusClass} marketing-timeline-badge`}
+        title={`${getMarketingPlanChannelLabel(placement.channel)} - ${placement.publishDate}${timeLabel ? ` ${timeLabel}` : ""} - ${placement.status}`}
         style={{
           width: "100%",
-          maxWidth: 98,
           justifyContent: "center",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
         }}
       >
-        {placement.channel}{timeLabel ? ` ${timeLabel}` : ""}
+        <span className="marketing-timeline-badge__channel">{channelAbbrev}</span>
+        <span className="marketing-timeline-badge__time">{badgeTimeLabel || "-"}</span>
       </div>
     );
   }
@@ -1518,7 +1656,15 @@ function MarketingPlanTimelineScreen() {
                   background: "var(--garena-white)",
                   borderBottom: "1px solid var(--garena-light-grey)",
                 }}>
-                  <div className="eyebrow" style={{ padding: "12px 14px", borderRight: "1px solid var(--garena-light-grey)", gridRow: "span 2" }}>
+                  <div className="eyebrow" style={{
+                    padding: "12px 14px",
+                    borderRight: "1px solid var(--garena-light-grey)",
+                    gridRow: "span 2",
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 5,
+                    background: "var(--garena-white)",
+                  }}>
                     Campaign / Asset
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: timelineWindow.monthGroups.map(group => `${group.days.length * columnWidth}px`).join(" ") }}>
@@ -1558,7 +1704,14 @@ function MarketingPlanTimelineScreen() {
                       borderBottom: "1px solid var(--garena-light-grey)",
                       background: "#F7F7F7",
                     }}>
-                      <div style={{ padding: "10px 14px", borderRight: "1px solid var(--garena-light-grey)" }}>
+                      <div style={{
+                        padding: "10px 14px",
+                        borderRight: "1px solid var(--garena-light-grey)",
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 3,
+                        background: "#F7F7F7",
+                      }}>
                         <div className="strong">{campaign.name}</div>
                         <div className="muted" style={{ fontSize: 12 }}>{campaign.team || "No team"} · {campaign.assets.length} assets</div>
                       </div>
@@ -1572,7 +1725,15 @@ function MarketingPlanTimelineScreen() {
                         borderBottom: "1px solid var(--garena-light-grey)",
                         background: "var(--garena-white)",
                       }}>
-                        <div style={{ padding: "9px 14px", borderRight: "1px solid var(--garena-light-grey)", minWidth: 0 }}>
+                        <div style={{
+                          padding: "9px 14px",
+                          borderRight: "1px solid var(--garena-light-grey)",
+                          minWidth: 0,
+                          position: "sticky",
+                          left: 0,
+                          zIndex: 2,
+                          background: "var(--garena-white)",
+                        }}>
                           <div className="strong" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.title}</div>
                           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
                             {[asset.format, asset.contentTier, asset.picName, asset.status].filter(Boolean).join(" · ") || "No details"}
@@ -1675,17 +1836,11 @@ function MarketingPlanChannelPlanScreen() {
   const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus);
   const placements = groupedChannels.flatMap(group => group.placements);
   const activeChannels = groupedChannels.length;
-  const readyPostedCount = placements.filter(row => row.placementStatus === "ready" || row.placementStatus === "posted").length;
+  const readyPostedCount = placements.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
   const delayedCount = placements.filter(row => row.placementStatus === "delayed").length;
 
   function renderStatusBadge(status) {
-    const statusClass = status === "delayed"
-      ? "badge--overdue"
-      : status === "posted"
-        ? "badge--delivered"
-        : status === "ready"
-          ? "badge--assigned"
-          : "badge--neutral";
+    const statusClass = getMarketingPlanStatusClass(status);
     return <span className={`badge ${statusClass}`}>{getMarketingPlanStatusLabel(status)}</span>;
   }
 
@@ -1901,17 +2056,11 @@ function MarketingPlanCalendarScreen() {
     map.get(row.publishDate).push(row);
     return map;
   }, new Map());
-  const readyPostedCount = visibleRows.filter(row => row.placementStatus === "ready" || row.placementStatus === "posted").length;
+  const readyPostedCount = visibleRows.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
   const delayedCount = visibleRows.filter(row => row.placementStatus === "delayed").length;
 
   function renderStatusBadge(status) {
-    const statusClass = status === "delayed"
-      ? "badge--overdue"
-      : status === "posted"
-        ? "badge--delivered"
-        : status === "ready"
-          ? "badge--assigned"
-          : "badge--neutral";
+    const statusClass = getMarketingPlanStatusClass(status);
     return <span className={`badge ${statusClass}`}>{getMarketingPlanStatusLabel(status)}</span>;
   }
 
@@ -2086,6 +2235,7 @@ function MarketingPlanWorkingSheetScreen() {
   const [exportMessage, setExportMessage] = useStateApp("");
   const [sheetForm, setSheetForm] = useStateApp(getDefaultMarketingPlanWorkingSheetForm);
   const [saveState, setSaveState] = useStateApp({ status: "idle", message: "" });
+  const [updatingRowId, setUpdatingRowId] = useStateApp("");
   const [loadState, setLoadState] = useStateApp({ status: "loading", message: "Loading Marketing Plan working sheet..." });
 
   async function loadWorkingSheetRows(aliveRef) {
@@ -2150,7 +2300,8 @@ function MarketingPlanWorkingSheetScreen() {
 
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+  const visiblePlacementRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+  const visibleRows = groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel);
 
   function updateSheetForm(key, value) {
     setSheetForm(current => ({ ...current, [key]: value }));
@@ -2170,13 +2321,11 @@ function MarketingPlanWorkingSheetScreen() {
     event.preventDefault();
     const required = [
       ["campaignName", "Campaign is required."],
-      ["team", "Team is required."],
       ["launchDate", "Launch Date is required."],
       ["publishTime", "Time is required."],
       ["assetType", "Asset Type is required."],
       ["details", "Details are required."],
       ["contentTier", "Content Tier is required."],
-      ["picName", "PIC is required."],
     ];
     const missing = required.find(([key]) => !String(sheetForm[key] || "").trim());
     if (missing) {
@@ -2196,7 +2345,6 @@ function MarketingPlanWorkingSheetScreen() {
         ...getDefaultMarketingPlanWorkingSheetForm(),
         launchDate: current.launchDate,
         publishTime: current.publishTime,
-        team: current.team,
         campaignName: current.campaignName,
       }));
       await loadWorkingSheetRows({ alive: true });
@@ -2215,6 +2363,34 @@ function MarketingPlanWorkingSheetScreen() {
   function handleExportCsv() {
     const exportedCount = exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel);
     setExportMessage(`Exported ${exportedCount} visible Marketing Plan rows.`);
+  }
+
+  async function handleWorkingRowStatusChange(row, nextStatus) {
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, { status: nextStatus });
+      await loadWorkingSheetRows({ alive: true });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet status update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Status update failed.") : "Status update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
+
+  async function handleWorkingRowTimeChange(row, nextTime) {
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, { publishTime: nextTime });
+      await loadWorkingSheetRows({ alive: true });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet time update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Time update failed.") : "Time update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
   }
 
   return (
@@ -2253,16 +2429,12 @@ function MarketingPlanWorkingSheetScreen() {
               </datalist>
             </label>
             <label className="field">
-              <span className="field__label">Team *</span>
-              <input className="input" value={sheetForm.team} onChange={event => updateSheetForm("team", event.target.value)} placeholder="e.g. Marketing, Esport, Operations" />
-            </label>
-            <label className="field">
               <span className="field__label">Launch Date *</span>
               <input className="input" type="date" value={sheetForm.launchDate} onChange={event => updateSheetForm("launchDate", event.target.value)} />
             </label>
             <label className="field">
               <span className="field__label">Time *</span>
-              <input className="input" type="time" value={sheetForm.publishTime} onChange={event => updateSheetForm("publishTime", event.target.value)} />
+              <input className="input" type="time" value={sheetForm.publishTime} onClick={openNativeTimePicker} onFocus={openNativeTimePicker} onChange={event => updateSheetForm("publishTime", event.target.value)} />
             </label>
             <label className="field">
               <span className="field__label">Asset Type *</span>
@@ -2275,10 +2447,6 @@ function MarketingPlanWorkingSheetScreen() {
               <select className="select" value={sheetForm.contentTier} onChange={event => updateSheetForm("contentTier", event.target.value)}>
                 {MARKETING_PLAN_CONTENT_TIERS.map(tier => <option key={tier} value={tier}>{tier}</option>)}
               </select>
-            </label>
-            <label className="field">
-              <span className="field__label">PIC *</span>
-              <input className="input" value={sheetForm.picName} onChange={event => updateSheetForm("picName", event.target.value)} placeholder="e.g. Panu, May, Ploy" />
             </label>
             <label className="field">
               <span className="field__label">Brief Link</span>
@@ -2362,7 +2530,7 @@ function MarketingPlanWorkingSheetScreen() {
               type="button"
               className="btn btn--secondary"
               onClick={handleExportCsv}
-              disabled={visibleRows.length === 0}
+              disabled={visiblePlacementRows.length === 0}
             >
               <Icon name="download" /> Export CSV
             </button>
@@ -2370,35 +2538,74 @@ function MarketingPlanWorkingSheetScreen() {
           </div>
           {exportMessage && <div className="reason-box" style={{ marginBottom: 14 }}>{exportMessage}</div>}
           <div style={{ overflowX: "auto" }}>
-            <table className="table table--dense" style={{ minWidth: 980 }}>
+            <table className="table table--dense marketing-working-table">
               <thead>
                 <tr>
-                  <th>Month</th>
-                  <th>Campaign</th>
-                  <th>Asset / Content</th>
-                  <th>Channel</th>
-                  <th>Publish Date</th>
-                  <th>Time</th>
-                  <th>Status</th>
-                  <th>PIC</th>
+                  <th className="col-month">Month</th>
+                  <th className="col-campaign">Campaign</th>
+                  <th className="col-asset">Asset / Content</th>
+                  <th className="col-tier">Tier</th>
+                  <th className="col-type">Asset Type</th>
+                  <th className="col-channel">Channel</th>
+                  <th className="col-date">Publish Date</th>
+                  <th className="col-time">Time</th>
+                  <th className="col-link">Brief Link</th>
+                  <th className="col-status">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRows.slice(0, 12).map(row => (
-                  <tr key={row.placementId || `${row.contentItemId}-${row.channel}-${row.publishDate}-${row.publishTime}`}>
+                  <tr key={row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`}>
                     <td>{getMarketingPlanMonthLabel(row.monthKey)}</td>
                     <td>{row.campaignName}</td>
                     <td>{row.contentTitle}</td>
-                    <td>{getMarketingPlanChannelLabel(row.channel)}</td>
+                    <td>{row.contentTier || "-"}</td>
+                    <td>{row.format || "-"}</td>
+                    <td>
+                      <div className="marketing-channel-tags">
+                        {(row.channels || []).map(channel => (
+                          <span key={channel} className="marketing-channel-tag" title={getMarketingPlanChannelLabel(channel)}>
+                            {getMarketingPlanChannelAbbrev(channel)}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
                     <td className="mono">{row.publishDate || "-"}</td>
-                    <td className="mono">{formatMarketingPlanTime(row.publishTime) || "-"}</td>
-                    <td>{getMarketingPlanStatusLabel(row.placementStatus)}</td>
-                    <td>{row.picName || "-"}</td>
+                    <td>
+                      <input
+                        className="input marketing-working-time"
+                        type="time"
+                        value={formatMarketingPlanTime(row.publishTime)}
+                        disabled={updatingRowId === row.contentItemId}
+                        onClick={openNativeTimePicker}
+                        onFocus={openNativeTimePicker}
+                        onChange={event => handleWorkingRowTimeChange(row, event.target.value)}
+                      />
+                    </td>
+                    <td>
+                      {row.briefLink ? (
+                        <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
+                      ) : "-"}
+                    </td>
+                    <td>
+                      <select
+                        className="select marketing-working-status"
+                        value={normalizeMarketingPlanWorkingStatus(row.placementStatus)}
+                        disabled={updatingRowId === row.contentItemId}
+                        onChange={event => handleWorkingRowStatusChange(row, event.target.value)}
+                      >
+                        {MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}{row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
                   </tr>
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan="8" className="muted">No rows match the selected filters.</td>
+                    <td colSpan="10" className="muted">No rows match the selected filters.</td>
                   </tr>
                 )}
               </tbody>

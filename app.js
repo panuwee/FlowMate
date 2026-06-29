@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-1";
+const FLOWMATE_APP_VERSION = "v20260629-3";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -984,6 +984,7 @@ function normalizeMarketingPlanTimelineRow(row) {
     format: row.format || "",
     contentTier: row.content_tier || "",
     picName: row.pic_name || "",
+    briefLink: row.brief_link || "",
     contentStatus: row.content_status || "",
     contentSortOrder: Number(row.content_sort_order || 0),
     placementId: row.placement_id,
@@ -1094,6 +1095,25 @@ const MARKETING_PLAN_CHANNELS = [{
 }];
 const MARKETING_PLAN_ASSET_TYPES = ["Banner", "Video", "Shorts/Reels", "Story", "Album", "Cover/Profile", "PR", "GIF", "Live"];
 const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
+const MARKETING_PLAN_WORKING_STATUS_OPTIONS = [{
+  value: "planned",
+  label: "Planned"
+}, {
+  value: "assigned",
+  label: "Assigned"
+}, {
+  value: "review",
+  label: "Review"
+}, {
+  value: "ready_to_post",
+  label: "Ready to Post"
+}, {
+  value: "scheduled",
+  label: "Schedule"
+}, {
+  value: "posted",
+  label: "Posted"
+}];
 function getDefaultMarketingPlanWorkingSheetForm() {
   const today = flowMateTodayDateKey();
   return {
@@ -1133,14 +1153,101 @@ function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all") {
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
 }
+function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel = "all") {
+  const groups = new Map();
+  filterMarketingPlanRows(rows, selectedMonth, selectedChannel).forEach(row => {
+    const key = row.contentItemId || `${row.campaignName}-${row.contentTitle}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        ...row,
+        channels: [],
+        placements: []
+      });
+    }
+    const group = groups.get(key);
+    group.placements.push(row);
+    if (row.channel && !group.channels.includes(row.channel)) group.channels.push(row.channel);
+  });
+  return Array.from(groups.values()).map(group => {
+    const sortedPlacements = group.placements.sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.channel || "").localeCompare(String(b.channel || "")));
+    const primaryPlacement = sortedPlacements[0] || group;
+    const normalizedStatuses = new Set(sortedPlacements.map(row => normalizeMarketingPlanWorkingStatus(row.placementStatus)));
+    const orderedChannels = MARKETING_PLAN_CHANNELS.map(channel => channel.key).filter(channel => group.channels.includes(channel));
+    return {
+      ...group,
+      placementId: primaryPlacement.placementId,
+      monthKey: primaryPlacement.monthKey,
+      publishDate: primaryPlacement.publishDate,
+      publishTime: primaryPlacement.publishTime,
+      placementStatus: normalizedStatuses.size === 1 ? Array.from(normalizedStatuses)[0] : normalizeMarketingPlanWorkingStatus(primaryPlacement.placementStatus),
+      hasMixedStatus: normalizedStatuses.size > 1,
+      channels: orderedChannels.length ? orderedChannels : group.channels,
+      placements: sortedPlacements
+    };
+  }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
+}
 function getMarketingPlanChannelLabel(channel) {
   const normalized = channel || "other";
   const match = MARKETING_PLAN_CHANNELS.find(item => item.key === normalized);
   return match ? match.label : "Other";
 }
+function getMarketingPlanChannelAbbrev(channel) {
+  const normalized = channel || "other";
+  const labels = {
+    facebook: "FB",
+    tiktok: "TT",
+    instagram: "IG",
+    in_game: "Game",
+    youtube: "YT",
+    other: "Other"
+  };
+  return labels[normalized] || getMarketingPlanChannelLabel(normalized).slice(0, 6);
+}
+function formatMarketingPlanBadgeTime(value) {
+  if (!value) return "";
+  const [hourText, minuteText] = String(value).slice(0, 5).split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText || 0);
+  if (Number.isNaN(hour)) return String(value).slice(0, 5);
+  const suffix = hour >= 12 ? "pm" : "am";
+  const hour12 = hour % 12 || 12;
+  return minute ? `${hour12}:${String(minute).padStart(2, "0")}${suffix}` : `${hour12}${suffix}`;
+}
 function getMarketingPlanStatusLabel(status) {
+  if (status === "ready") return "Ready to Post";
+  if (status === "ready_to_post") return "Ready to Post";
+  if (status === "scheduled") return "Schedule";
   if (!status) return "Planned";
   return String(status).replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase());
+}
+function normalizeMarketingPlanWorkingStatus(status) {
+  if (status === "ready") return "ready_to_post";
+  if (status === "schedule") return "scheduled";
+  return status || "planned";
+}
+function getMarketingPlanStatusClass(status) {
+  const normalized = normalizeMarketingPlanWorkingStatus(status);
+  if (normalized === "posted") return "badge--delivered";
+  if (normalized === "review") return "badge--review";
+  if (normalized === "assigned" || normalized === "ready_to_post" || normalized === "scheduled") return "badge--assigned";
+  if (normalized === "delayed") return "badge--overdue";
+  if (normalized === "cancelled") return "badge--cancelled";
+  return "badge--neutral";
+}
+function getMarketingPlanCurrentUserDefaults() {
+  const user = window.FLOWMATE_CURRENT_USER || {};
+  const member = user.team_member_id && window.MEMBERS_BY_ID ? window.MEMBERS_BY_ID[user.team_member_id] : null;
+  return {
+    team: user.requester_team || member && member.discipline || "",
+    picName: user.name || user.email || "Unknown"
+  };
+}
+function openNativeTimePicker(event) {
+  const input = event.currentTarget;
+  if (!input || typeof input.showPicker !== "function") return;
+  try {
+    input.showPicker();
+  } catch (error) {}
 }
 function getMarketingPlanPlacementStatusOptions(rows, selectedMonth) {
   const statuses = new Set();
@@ -1277,17 +1384,20 @@ async function createMarketingPlanWorkingSheetRow(form) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
   const monthKey = marketingPlanMonthKeyFromDate(form.launchDate);
+  const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
+  const ownerTeam = currentUserDefaults.team || null;
+  const ownerName = currentUserDefaults.picName || null;
   const planId = await findOrCreateMarketingPlan(monthKey);
-  const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, form.team);
+  const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, ownerTeam);
   const title = marketingPlanTitleFromDetails(form.details, form.assetType);
   const content = await window.flowmateSupabase.from("marketing_content_items").insert({
     campaign_id: campaignId,
     title,
     details: form.details || null,
-    team: form.team || null,
+    team: ownerTeam,
     format: form.assetType || null,
     content_tier: form.contentTier || null,
-    pic_name: form.picName || null,
+    pic_name: ownerName,
     note: form.note || null,
     brief_link: form.briefLink || null,
     source_start_date: form.launchDate || null,
@@ -1313,6 +1423,28 @@ async function createMarketingPlanWorkingSheetRow(form) {
     contentItemId: content.data.id,
     placementCount: placementRows.length
   };
+}
+async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, changes) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(changes, "status")) {
+    payload.placement_status = normalizeMarketingPlanWorkingStatus(changes.status);
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, "publishTime")) {
+    payload.publish_time = changes.publishTime || null;
+  }
+  if (Object.keys(payload).length === 0) return false;
+  const result = await window.flowmateSupabase.from("marketing_channel_placements").update(payload).eq("content_item_id", contentItemId);
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_working_sheet_updated"
+    }
+  }));
+  return true;
 }
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
   const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
@@ -1453,21 +1585,23 @@ function MarketingPlanTimelineScreen() {
     }
   }
   function renderPlacementBadge(placement) {
-    const statusClass = placement.status === "delayed" ? "badge--overdue" : placement.status === "posted" ? "badge--delivered" : placement.status === "ready" ? "badge--assigned" : "badge--neutral";
+    const statusClass = getMarketingPlanStatusClass(placement.status);
     const timeLabel = formatMarketingPlanTime(placement.publishTime);
+    const badgeTimeLabel = formatMarketingPlanBadgeTime(placement.publishTime);
+    const channelAbbrev = getMarketingPlanChannelAbbrev(placement.channel);
     return React.createElement("div", {
       key: placement.id || `${placement.channel}-${placement.publishDate}-${placement.publishTime}`,
-      className: `badge ${statusClass}`,
-      title: `${placement.channel} - ${placement.publishDate}${timeLabel ? ` ${timeLabel}` : ""} - ${placement.status}`,
+      className: `badge ${statusClass} marketing-timeline-badge`,
+      title: `${getMarketingPlanChannelLabel(placement.channel)} - ${placement.publishDate}${timeLabel ? ` ${timeLabel}` : ""} - ${placement.status}`,
       style: {
         width: "100%",
-        maxWidth: 98,
-        justifyContent: "center",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap"
+        justifyContent: "center"
       }
-    }, placement.channel, timeLabel ? ` ${timeLabel}` : "");
+    }, React.createElement("span", {
+      className: "marketing-timeline-badge__channel"
+    }, channelAbbrev), React.createElement("span", {
+      className: "marketing-timeline-badge__time"
+    }, badgeTimeLabel || "-"));
   }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
@@ -1581,7 +1715,11 @@ function MarketingPlanTimelineScreen() {
     style: {
       padding: "12px 14px",
       borderRight: "1px solid var(--garena-light-grey)",
-      gridRow: "span 2"
+      gridRow: "span 2",
+      position: "sticky",
+      left: 0,
+      zIndex: 5,
+      background: "var(--garena-white)"
     }
   }, "Campaign / Asset"), React.createElement("div", {
     style: {
@@ -1634,7 +1772,11 @@ function MarketingPlanTimelineScreen() {
   }, React.createElement("div", {
     style: {
       padding: "10px 14px",
-      borderRight: "1px solid var(--garena-light-grey)"
+      borderRight: "1px solid var(--garena-light-grey)",
+      position: "sticky",
+      left: 0,
+      zIndex: 3,
+      background: "#F7F7F7"
     }
   }, React.createElement("div", {
     className: "strong"
@@ -1656,7 +1798,11 @@ function MarketingPlanTimelineScreen() {
     style: {
       padding: "9px 14px",
       borderRight: "1px solid var(--garena-light-grey)",
-      minWidth: 0
+      minWidth: 0,
+      position: "sticky",
+      left: 0,
+      zIndex: 2,
+      background: "var(--garena-white)"
     }
   }, React.createElement("div", {
     className: "strong",
@@ -1759,10 +1905,10 @@ function MarketingPlanChannelPlanScreen() {
   const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus);
   const placements = groupedChannels.flatMap(group => group.placements);
   const activeChannels = groupedChannels.length;
-  const readyPostedCount = placements.filter(row => row.placementStatus === "ready" || row.placementStatus === "posted").length;
+  const readyPostedCount = placements.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
   const delayedCount = placements.filter(row => row.placementStatus === "delayed").length;
   function renderStatusBadge(status) {
-    const statusClass = status === "delayed" ? "badge--overdue" : status === "posted" ? "badge--delivered" : status === "ready" ? "badge--assigned" : "badge--neutral";
+    const statusClass = getMarketingPlanStatusClass(status);
     return React.createElement("span", {
       className: `badge ${statusClass}`
     }, getMarketingPlanStatusLabel(status));
@@ -2016,10 +2162,10 @@ function MarketingPlanCalendarScreen() {
     map.get(row.publishDate).push(row);
     return map;
   }, new Map());
-  const readyPostedCount = visibleRows.filter(row => row.placementStatus === "ready" || row.placementStatus === "posted").length;
+  const readyPostedCount = visibleRows.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
   const delayedCount = visibleRows.filter(row => row.placementStatus === "delayed").length;
   function renderStatusBadge(status) {
-    const statusClass = status === "delayed" ? "badge--overdue" : status === "posted" ? "badge--delivered" : status === "ready" ? "badge--assigned" : "badge--neutral";
+    const statusClass = getMarketingPlanStatusClass(status);
     return React.createElement("span", {
       className: `badge ${statusClass}`
     }, getMarketingPlanStatusLabel(status));
@@ -2251,6 +2397,7 @@ function MarketingPlanWorkingSheetScreen() {
     status: "idle",
     message: ""
   });
+  const [updatingRowId, setUpdatingRowId] = useStateApp("");
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan working sheet..."
@@ -2310,7 +2457,8 @@ function MarketingPlanWorkingSheetScreen() {
   }, []);
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+  const visiblePlacementRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+  const visibleRows = groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel);
   function updateSheetForm(key, value) {
     setSheetForm(current => ({
       ...current,
@@ -2329,7 +2477,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   async function handleSaveWorkingSheetRow(event) {
     event.preventDefault();
-    const required = [["campaignName", "Campaign is required."], ["team", "Team is required."], ["launchDate", "Launch Date is required."], ["publishTime", "Time is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."], ["picName", "PIC is required."]];
+    const required = [["campaignName", "Campaign is required."], ["launchDate", "Launch Date is required."], ["publishTime", "Time is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
     const missing = required.find(([key]) => !String(sheetForm[key] || "").trim());
     if (missing) {
       setSaveState({
@@ -2359,7 +2507,6 @@ function MarketingPlanWorkingSheetScreen() {
         ...getDefaultMarketingPlanWorkingSheetForm(),
         launchDate: current.launchDate,
         publishTime: current.publishTime,
-        team: current.team,
         campaignName: current.campaignName
       }));
       await loadWorkingSheetRows({
@@ -2381,6 +2528,40 @@ function MarketingPlanWorkingSheetScreen() {
   function handleExportCsv() {
     const exportedCount = exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel);
     setExportMessage(`Exported ${exportedCount} visible Marketing Plan rows.`);
+  }
+  async function handleWorkingRowStatusChange(row, nextStatus) {
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, {
+        status: nextStatus
+      });
+      await loadWorkingSheetRows({
+        alive: true
+      });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet status update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Status update failed.") : "Status update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
+  async function handleWorkingRowTimeChange(row, nextTime) {
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, {
+        publishTime: nextTime
+      });
+      await loadWorkingSheetRows({
+        alive: true
+      });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet time update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Time update failed.") : "Time update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
   }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
@@ -2433,15 +2614,6 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Team *"), React.createElement("input", {
-    className: "input",
-    value: sheetForm.team,
-    onChange: event => updateSheetForm("team", event.target.value),
-    placeholder: "e.g. Marketing, Esport, Operations"
-  })), React.createElement("label", {
-    className: "field"
-  }, React.createElement("span", {
-    className: "field__label"
   }, "Launch Date *"), React.createElement("input", {
     className: "input",
     type: "date",
@@ -2455,6 +2627,8 @@ function MarketingPlanWorkingSheetScreen() {
     className: "input",
     type: "time",
     value: sheetForm.publishTime,
+    onClick: openNativeTimePicker,
+    onFocus: openNativeTimePicker,
     onChange: event => updateSheetForm("publishTime", event.target.value)
   })), React.createElement("label", {
     className: "field"
@@ -2479,15 +2653,6 @@ function MarketingPlanWorkingSheetScreen() {
     key: tier,
     value: tier
   }, tier)))), React.createElement("label", {
-    className: "field"
-  }, React.createElement("span", {
-    className: "field__label"
-  }, "PIC *"), React.createElement("input", {
-    className: "input",
-    value: sheetForm.picName,
-    onChange: event => updateSheetForm("picName", event.target.value),
-    placeholder: "e.g. Panu, May, Ploy"
-  })), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
@@ -2597,7 +2762,7 @@ function MarketingPlanWorkingSheetScreen() {
     type: "button",
     className: "btn btn--secondary",
     onClick: handleExportCsv,
-    disabled: visibleRows.length === 0
+    disabled: visiblePlacementRows.length === 0
   }, React.createElement(Icon, {
     name: "download"
   }), " Export CSV"), React.createElement("span", {
@@ -2612,18 +2777,60 @@ function MarketingPlanWorkingSheetScreen() {
       overflowX: "auto"
     }
   }, React.createElement("table", {
-    className: "table table--dense",
-    style: {
-      minWidth: 980
-    }
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Month"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Asset / Content"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Publish Date"), React.createElement("th", null, "Time"), React.createElement("th", null, "Status"), React.createElement("th", null, "PIC"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => React.createElement("tr", {
-    key: row.placementId || `${row.contentItemId}-${row.channel}-${row.publishDate}-${row.publishTime}`
-  }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, getMarketingPlanChannelLabel(row.channel)), React.createElement("td", {
+    className: "table table--dense marketing-working-table"
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
+    className: "col-month"
+  }, "Month"), React.createElement("th", {
+    className: "col-campaign"
+  }, "Campaign"), React.createElement("th", {
+    className: "col-asset"
+  }, "Asset / Content"), React.createElement("th", {
+    className: "col-tier"
+  }, "Tier"), React.createElement("th", {
+    className: "col-type"
+  }, "Asset Type"), React.createElement("th", {
+    className: "col-channel"
+  }, "Channel"), React.createElement("th", {
+    className: "col-date"
+  }, "Publish Date"), React.createElement("th", {
+    className: "col-time"
+  }, "Time"), React.createElement("th", {
+    className: "col-link"
+  }, "Brief Link"), React.createElement("th", {
+    className: "col-status"
+  }, "Status"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => React.createElement("tr", {
+    key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`
+  }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, row.contentTier || "-"), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
+    className: "marketing-channel-tags"
+  }, (row.channels || []).map(channel => React.createElement("span", {
+    key: channel,
+    className: "marketing-channel-tag",
+    title: getMarketingPlanChannelLabel(channel)
+  }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", {
     className: "mono"
-  }, row.publishDate || "-"), React.createElement("td", {
-    className: "mono"
-  }, formatMarketingPlanTime(row.publishTime) || "-"), React.createElement("td", null, getMarketingPlanStatusLabel(row.placementStatus)), React.createElement("td", null, row.picName || "-"))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "8",
+  }, row.publishDate || "-"), React.createElement("td", null, React.createElement("input", {
+    className: "input marketing-working-time",
+    type: "time",
+    value: formatMarketingPlanTime(row.publishTime),
+    disabled: updatingRowId === row.contentItemId,
+    onClick: openNativeTimePicker,
+    onFocus: openNativeTimePicker,
+    onChange: event => handleWorkingRowTimeChange(row, event.target.value)
+  })), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+    className: "marketing-working-link",
+    href: row.briefLink,
+    target: "_blank",
+    rel: "noreferrer"
+  }, "Open") : "-"), React.createElement("td", null, React.createElement("select", {
+    className: "select marketing-working-status",
+    value: normalizeMarketingPlanWorkingStatus(row.placementStatus),
+    disabled: updatingRowId === row.contentItemId,
+    onChange: event => handleWorkingRowStatusChange(row, event.target.value)
+  }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label, row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : "")))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "10",
     className: "muted"
   }, "No rows match the selected filters."))))))));
 }
