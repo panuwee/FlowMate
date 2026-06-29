@@ -563,13 +563,13 @@ button:disabled {
 
 .marketing-working-table {
   width: 100%;
-  min-width: 1420px;
+  min-width: 0;
   table-layout: fixed;
   border-collapse: collapse;
 }
 .marketing-working-table th,
 .marketing-working-table td {
-  padding: 8px 10px;
+  padding: 8px 8px;
   border-bottom: var(--border-hairline);
   text-align: left;
   vertical-align: middle;
@@ -584,18 +584,18 @@ button:disabled {
 .marketing-working-table td {
   font-size: 13px;
 }
-.marketing-working-table .col-month { width: 86px; }
-.marketing-working-table .col-campaign { width: 142px; }
-.marketing-working-table .col-asset { width: 210px; }
+.marketing-working-table .col-month { width: 76px; }
+.marketing-working-table .col-campaign { width: 128px; }
+.marketing-working-table .col-asset { width: 190px; }
 .marketing-working-table .col-tier { width: 54px; }
-.marketing-working-table .col-type { width: 110px; }
-.marketing-working-table .col-channel { width: 130px; }
-.marketing-working-table .col-date { width: 116px; }
-.marketing-working-table .col-time { width: 112px; }
-.marketing-working-table .col-link { width: 160px; }
-.marketing-working-table .col-pic { width: 74px; }
-.marketing-working-table .col-status { width: 126px; }
-.marketing-working-table .col-actions { width: 220px; }
+.marketing-working-table .col-type { width: 96px; }
+.marketing-working-table .col-channel { width: 104px; }
+.marketing-working-table .col-date { width: 92px; }
+.marketing-working-table .col-time { width: 72px; }
+.marketing-working-table .col-link { width: 76px; }
+.marketing-working-table .col-pic { width: 58px; }
+.marketing-working-table .col-status { width: 108px; }
+.marketing-working-table .col-actions { width: 124px; }
 .marketing-channel-tags {
   display: flex;
   flex-wrap: wrap;
@@ -637,7 +637,13 @@ button:disabled {
 .marketing-working-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  justify-content: flex-start;
+}
+.marketing-working-actions .btn {
+  padding-left: 8px;
+  padding-right: 8px;
+  white-space: nowrap;
 }
 .marketing-working-edit-modal {
   width: min(720px, 100%);
