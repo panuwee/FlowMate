@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-4";
+const FLOWMATE_APP_VERSION = "v20260629-5";
 
 const NAV = [
   { group: "Personal", items: [
@@ -873,7 +873,7 @@ function formatMarketingPlanTime(value) {
 function formatMarketingPlanDate(value) {
   if (!value) return "-";
   const date = new Date(`${value}T00:00:00Z`);
-  return date.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
 function groupMarketingPlanTimelineRows(rows, selectedMonth) {
@@ -2612,7 +2612,7 @@ function MarketingPlanWorkingSheetScreen() {
                         ))}
                       </div>
                     </td>
-                    <td className="mono">{row.publishDate || "-"}</td>
+                    <td>{formatMarketingPlanDate(row.publishDate)}</td>
                     <td>
                       <input
                         className="input marketing-working-time"
