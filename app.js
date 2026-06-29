@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-10";
+const FLOWMATE_APP_VERSION = "v20260629-11";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -403,6 +403,21 @@ function App() {
       window.location.hash = "campaign-timeline";
     }
   }
+  useEffectApp(() => {
+    function onSwitchFlowMateProduct(event) {
+      const routeKey = event && event.detail && event.detail.route ? event.detail.route : "my-work";
+      setActiveProduct("flowmate");
+      try {
+        sessionStorage.setItem("flowmate:activeProduct", "flowmate");
+      } catch (e) {}
+      if (TITLE_MAP[routeKey]) {
+        setRoute(routeKey);
+        window.location.hash = routeKey;
+      }
+    }
+    window.addEventListener("flowmate:switch-flowmate-product", onSwitchFlowMateProduct);
+    return () => window.removeEventListener("flowmate:switch-flowmate-product", onSwitchFlowMateProduct);
+  }, []);
   useEffectApp(() => {
     function onRealtimeState(event) {
       setRealtimeState(event.detail || window.FLOWMATE_REALTIME_STATE || {
@@ -1227,6 +1242,7 @@ function getDefaultMarketingPlanWorkingSheetForm() {
   const today = flowMateTodayDateKey();
   return {
     campaignName: "",
+    productEvent: "",
     team: "",
     launchDate: today,
     publishTime: "12:00",
@@ -1246,6 +1262,67 @@ function marketingPlanTitleFromDetails(details, assetType) {
   const text = String(details || "").trim().replace(/\s+/g, " ");
   if (text) return text.slice(0, 90);
   return `${assetType || "Asset"} content`;
+}
+function getFlowMateCreativeSubtypeFromMarketingAssetType(assetType) {
+  const normalized = String(assetType || "").trim().toLowerCase();
+  if (normalized.includes("short") || normalized.includes("reel")) return "video-under-1-min";
+  if (normalized.includes("video")) return "video-standard";
+  if (normalized.includes("motion") || normalized.includes("gif")) return "motion";
+  if (normalized.includes("album")) return "hero-album";
+  if (normalized.includes("banner")) return "banner";
+  return "banner";
+}
+function getFlowMateCreativeAssetTypeFromSubtype(subtype) {
+  if (subtype === "video-standard" || subtype === "video-under-1-min") return "general-video";
+  if (subtype === "motion") return "motion";
+  return "static-graphic";
+}
+function createFlowMateDraftFromMarketingPlanRow(row) {
+  const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
+  const launchDate = row.publishDate || flowMateTodayDateKey();
+  const channels = Array.isArray(row.channels) && row.channels.length ? row.channels.map(channel => getMarketingPlanChannelLabel(channel)).join(", ") : row.channel ? getMarketingPlanChannelLabel(row.channel) : "Instagram";
+  const productEvent = row.contentTitle || "";
+  const requesterTeam = currentUserDefaults.team || "Operations";
+  const campaignName = row.campaignName || "";
+  const assetSubtype = getFlowMateCreativeSubtypeFromMarketingAssetType(row.format);
+  return {
+    title: window.buildFlowMateTemplateTitle ? window.buildFlowMateTemplateTitle({
+      launchDate,
+      requesterTeam,
+      projectName: campaignName,
+      productEvent
+    }) : "",
+    requesterTeam,
+    campaignName,
+    productEvent,
+    assetType: getFlowMateCreativeAssetTypeFromSubtype(assetSubtype),
+    assetSubtype,
+    assetCount: "1",
+    platforms: channels,
+    sizeFormat: "1080x1080",
+    briefLink: row.briefLink || "",
+    briefNote: row.contentDetails || row.placementNote || "",
+    referenceLink: "",
+    priority: "normal",
+    urgentReason: "",
+    dueDate: launchDate,
+    launchDate,
+    publishDate: launchDate
+  };
+}
+function openFlowMateCreativeBriefFromMarketingRow(row) {
+  const draft = createFlowMateDraftFromMarketingPlanRow(row);
+  if (window.localStorage) {
+    window.localStorage.setItem("flowmate:create:creativeDraft:v1", JSON.stringify(draft));
+  }
+  if (window.sessionStorage) {
+    window.sessionStorage.setItem("flowmate:activeProduct", "flowmate");
+  }
+  window.dispatchEvent(new CustomEvent("flowmate:switch-flowmate-product", {
+    detail: {
+      route: "create"
+    }
+  }));
 }
 function getMarketingPlanChannelOptions(rows, selectedMonth) {
   const channels = new Set();
@@ -1529,7 +1606,7 @@ async function createMarketingPlanWorkingSheetRow(form) {
   const ownerName = currentUserDefaults.picName || null;
   const planId = await findOrCreateMarketingPlan(monthKey);
   const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, ownerTeam);
-  const title = marketingPlanTitleFromDetails(form.details, form.assetType);
+  const title = String(form.productEvent || "").trim() || marketingPlanTitleFromDetails(form.details, form.assetType);
   const content = await window.flowmateSupabase.from("marketing_content_items").insert({
     campaign_id: campaignId,
     title,
@@ -1597,7 +1674,7 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!normalizedTime) throw new Error("Time must use HH:MM, for example 15:00.");
   const contentPayload = {
     title: String(form.contentTitle || "").trim(),
-    details: String(form.contentTitle || "").trim(),
+    details: String(form.details || form.contentTitle || "").trim(),
     format: form.assetType || null,
     content_tier: form.contentTier || null,
     brief_link: String(form.briefLink || "").trim() || null,
@@ -1659,7 +1736,7 @@ async function deleteMarketingPlanWorkingSheetRow(row) {
 }
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
   const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
-  const headerLabels = ["Month", "Campaign", "Team", "Asset / Content", "Format", "Tier", "PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
+  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
   const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
   const channelSuffix = selectedChannel === "all" ? "all-channels" : selectedChannel;
   const filename = `marketing-plan-${selectedMonth || "no-month"}-${channelSuffix}.csv`;
@@ -1895,7 +1972,7 @@ function MarketingPlanTimelineScreen() {
   }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
-  }, React.createElement("div", null, React.createElement("h1", null, "Campaign Timeline"), React.createElement("p", null, "Campaign rows, asset sub-rows, and channel placements by publish date.")), React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("h1", null, "Campaign Timeline"), React.createElement("p", null, "Campaign rows, Product / Event sub-rows, and channel placements by publish date.")), React.createElement("div", {
     className: "row",
     style: {
       gap: 8
@@ -2046,7 +2123,7 @@ function MarketingPlanTimelineScreen() {
     className: "card__title"
   }, getMarketingPlanMonthLabel(selectedMonth), " + ", getMarketingPlanMonthLabel(getNextMarketingPlanMonthKey(selectedMonth)), " campaign timeline"), React.createElement("div", {
     className: "card__sub"
-  }, "Main row = Campaign, sub-row = Asset, columns = publish date")), React.createElement("div", {
+  }, "Main row = Campaign, sub-row = Product / Event, columns = publish date")), React.createElement("div", {
     className: "row",
     style: {
       gap: 6,
@@ -2087,7 +2164,7 @@ function MarketingPlanTimelineScreen() {
       zIndex: 5,
       background: "var(--garena-white)"
     }
-  }, "Campaign / Asset"), React.createElement("div", {
+  }, "Campaign / Product Event"), React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: timelineWindow.monthGroups.map(group => `${group.days.length * columnWidth}px`).join(" ")
@@ -2426,7 +2503,7 @@ function MarketingPlanChannelPlanScreen() {
     className: "col-campaign"
   }, "Campaign"), React.createElement("th", {
     className: "col-asset"
-  }, "Asset / content"), React.createElement("th", {
+  }, "Product / Event"), React.createElement("th", {
     className: "col-link"
   }, "Brief Link"), React.createElement("th", {
     className: "col-status"
@@ -2928,7 +3005,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   async function handleSaveWorkingSheetRow(event) {
     event.preventDefault();
-    const required = [["campaignName", "Campaign is required."], ["launchDate", "Launch Date is required."], ["publishTime", "Time is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
+    const required = [["campaignName", "Campaign is required."], ["productEvent", "Product / Event is required."], ["launchDate", "Launch Date is required."], ["publishTime", "Time is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
     const missing = required.find(([key]) => !String(sheetForm[key] || "").trim());
     if (missing) {
       setSaveState({
@@ -3056,6 +3133,15 @@ function MarketingPlanWorkingSheetScreen() {
     key: campaign.id || campaign.name,
     value: campaign.name
   })))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Product / Event *"), React.createElement("input", {
+    className: "input",
+    value: sheetForm.productEvent,
+    onChange: event => updateSheetForm("productEvent", event.target.value),
+    placeholder: "e.g. DAU, Hero Post Teaser"
+  })), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
@@ -3232,7 +3318,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "col-campaign"
   }, "Campaign"), React.createElement("th", {
     className: "col-asset"
-  }, "Asset / Content"), React.createElement("th", {
+  }, "Product / Event"), React.createElement("th", {
     className: "col-tier"
   }, "Tier"), React.createElement("th", {
     className: "col-type"
@@ -3287,7 +3373,12 @@ function MarketingPlanWorkingSheetScreen() {
     className: "btn btn--danger btn--xs",
     disabled: updatingRowId === row.contentItemId,
     onClick: () => handleDeleteWorkingRow(row)
-  }, "Delete"))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+  }, "Delete"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary btn--xs",
+    disabled: updatingRowId === row.contentItemId,
+    onClick: () => openFlowMateCreativeBriefFromMarketingRow(row)
+  }, "Create Brief"))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
     colSpan: "12",
     className: "muted"
   }, "No rows match the selected filters."))))))), editingWorkingRow && editForm && React.createElement("div", {
@@ -3322,7 +3413,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Content *"), React.createElement("input", {
+  }, "Product / Event *"), React.createElement("input", {
     className: "input",
     value: editForm.contentTitle,
     onChange: event => updateEditForm("contentTitle", event.target.value)
@@ -3429,7 +3520,7 @@ function MarketingPlanShell({
   const sections = [{
     key: "campaign-timeline",
     label: "Campaign Timeline",
-    detail: "Campaign rows with asset sub-rows and publish dates.",
+    detail: "Campaign rows with Product / Event sub-rows and publish dates.",
     icon: "chart"
   }, {
     key: "channel-plan",

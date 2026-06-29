@@ -68,8 +68,11 @@ function buildFlowMateTemplateTitle(input) {
   const datePart = flowmateDateToDMmmYyyy(input && input.launchDate);
   const functionPart = ((input && input.requesterTeam) || "").trim();
   const projectPart = ((input && input.projectName) || "").trim();
+  const productEventPart = ((input && input.productEvent) || "").trim();
   if (!datePart || !functionPart || !projectPart) return "";
-  return `[${datePart}][${functionPart}][${projectPart}]`;
+  return productEventPart
+    ? `[${datePart}][${functionPart}][${projectPart}][${productEventPart}]`
+    : `[${datePart}][${functionPart}][${projectPart}]`;
 }
 
 function filterFlowMateAssigneeOptions(options, query) {

@@ -768,12 +768,42 @@ const FLOWMATE_CREATIVE_TYPE_OPTIONS = [{
   label: "Motion",
   assetType: "motion"
 }];
+const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [{
+  key: "facebook",
+  label: "Facebook"
+}, {
+  key: "tiktok",
+  label: "TikTok"
+}, {
+  key: "instagram",
+  label: "Instagram"
+}, {
+  key: "in_game",
+  label: "In-game"
+}, {
+  key: "youtube",
+  label: "YouTube"
+}, {
+  key: "other",
+  label: "Other"
+}];
 function getFlowMateCreativeTypeOption(typeKey) {
   return FLOWMATE_CREATIVE_TYPE_OPTIONS.find(option => option.key === typeKey) || FLOWMATE_CREATIVE_TYPE_OPTIONS[0];
 }
 function getFlowMateCreativeTypeLabel(typeKey) {
   const option = FLOWMATE_CREATIVE_TYPE_OPTIONS.find(item => item.key === typeKey);
   return option ? option.label : typeKey;
+}
+function normalizeFlowMateCreativeChannels(value) {
+  const rawValues = Array.isArray(value) ? value : String(value || "").split(",").map(item => item.trim()).filter(Boolean);
+  const normalizedLabels = rawValues.map(item => {
+    const match = FLOWMATE_CREATIVE_CHANNEL_OPTIONS.find(option => option.key.toLowerCase() === String(item).toLowerCase() || option.label.toLowerCase() === String(item).toLowerCase());
+    return match ? match.label : String(item).trim();
+  }).filter(Boolean);
+  return Array.from(new Set(normalizedLabels));
+}
+function formatFlowMateCreativeChannels(value) {
+  return normalizeFlowMateCreativeChannels(value).join(", ");
 }
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
 const FLOWMATE_CREATIVE_UNIT_EFFORT = {
@@ -911,7 +941,7 @@ function normalizeFlowMateCreativeDraft(draft) {
 }
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
   quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority"],
-  creative: ["title", "requesterTeam", "campaignName", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishDate"]
+  creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishDate"]
 };
 function getDefaultQuickDraft() {
   const requesterTeam = getDefaultRequesterTeam();
@@ -935,6 +965,7 @@ function getDefaultCreativeDraft() {
     title: "",
     requesterTeam,
     campaignName: "",
+    productEvent: "",
     assetType: "static-graphic",
     assetSubtype: FLOWMATE_CREATIVE_TYPE_OPTIONS[0].key,
     assetCount: "1",
@@ -991,9 +1022,10 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     return errors;
   }
   requireField("campaignName", "Campaign is required.");
+  requireField("productEvent", "Product / Event is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
-  requireField("platforms", "Channel is required.");
+  requireField("platforms", "Channel Tag is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
   requireField("priority", "Priority is required.");
@@ -1071,7 +1103,8 @@ function CreateScreen({
       title: window.buildFlowMateTemplateTitle({
         launchDate: draft.launchDate,
         requesterTeam: draft.requesterTeam,
-        projectName: draft.campaignName
+        projectName: draft.campaignName,
+        productEvent: draft.productEvent
       })
     };
   });
@@ -1233,7 +1266,8 @@ function CreateScreen({
     const title = window.buildFlowMateTemplateTitle({
       launchDate: normalizedDraft.launchDate,
       requesterTeam: normalizedDraft.requesterTeam,
-      projectName: normalizedDraft.campaignName
+      projectName: normalizedDraft.campaignName,
+      productEvent: normalizedDraft.productEvent
     });
     const nextCreativeDraft = {
       ...normalizedDraft,
@@ -1530,6 +1564,7 @@ function CreativeRequestForm({
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+  const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
   useEffect(() => {
     let alive = true;
     function syncCampaignOptions(event) {
@@ -1580,6 +1615,11 @@ function CreativeRequestForm({
       [field]: next
     });
   }
+  function toggleChannel(channelLabel) {
+    const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
+    const nextChannels = currentChannels.includes(channelLabel) ? currentChannels.filter(channel => channel !== channelLabel) : [...currentChannels, channelLabel];
+    update("platforms", nextChannels.length ? nextChannels.join(", ") : channelLabel);
+  }
   return React.createElement("div", null, React.createElement("div", {
     className: "form-grid"
   }, React.createElement("div", {
@@ -1592,15 +1632,15 @@ function CreativeRequestForm({
     className: "input",
     value: value.title,
     readOnly: true,
-    placeholder: "[3 Jul 2026][Function][Campaign]",
-    title: "Auto-filled from Launch Date, your account team, and Campaign."
+    placeholder: "[3 Jul 2026][Function][Campaign][Product / Event]",
+    title: "Auto-filled from Launch Date, your account team, Campaign, and Product / Event."
   }), React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12,
       marginTop: 6
     }
-  }, "Auto-filled from Launch Date, your account team, and Campaign.")), React.createElement("div", {
+  }, "Auto-filled from Launch Date, your account team, Campaign, and Product / Event.")), React.createElement("div", {
     className: `field ${errors.campaignName ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -1620,6 +1660,19 @@ function CreativeRequestForm({
   }))), errors.campaignName && React.createElement("div", {
     className: "field__error"
   }, errors.campaignName)), React.createElement("div", {
+    className: `field ${errors.productEvent ? "field--error" : ""}`
+  }, React.createElement("label", {
+    className: "field__label"
+  }, "Product / Event ", React.createElement("span", {
+    className: "req"
+  }, "*")), React.createElement("input", {
+    className: "input",
+    value: value.productEvent,
+    onChange: e => update("productEvent", e.target.value),
+    placeholder: "e.g. DAU, Hero Post Teaser"
+  }), errors.productEvent && React.createElement("div", {
+    className: "field__error"
+  }, errors.productEvent)), React.createElement("div", {
     className: `field ${errors.assetSubtype ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -1654,14 +1707,18 @@ function CreativeRequestForm({
     className: `field ${errors.platforms ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "Channel ", React.createElement("span", {
+  }, "Channel Tag ", React.createElement("span", {
     className: "req"
-  }, "*")), React.createElement("input", {
-    className: "input",
-    value: value.platforms,
-    onChange: e => update("platforms", e.target.value),
-    placeholder: "Instagram, TikTok, YouTube, Web..."
-  }), errors.platforms && React.createElement("div", {
+  }, "*")), React.createElement("div", {
+    className: "check-row"
+  }, FLOWMATE_CREATIVE_CHANNEL_OPTIONS.map(channel => React.createElement("label", {
+    key: channel.key,
+    className: "check-pill"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: selectedChannels.includes(channel.label),
+    onChange: () => toggleChannel(channel.label)
+  }), React.createElement("span", null, channel.label)))), errors.platforms && React.createElement("div", {
     className: "field__error"
   }, errors.platforms)), React.createElement("div", {
     className: `field ${errors.sizeFormat ? "field--error" : ""}`

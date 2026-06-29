@@ -563,7 +563,7 @@ button:disabled {
 
 .marketing-working-table {
   width: 100%;
-  min-width: 1320px;
+  min-width: 1420px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -595,7 +595,7 @@ button:disabled {
 .marketing-working-table .col-link { width: 160px; }
 .marketing-working-table .col-pic { width: 74px; }
 .marketing-working-table .col-status { width: 126px; }
-.marketing-working-table .col-actions { width: 134px; }
+.marketing-working-table .col-actions { width: 220px; }
 .marketing-channel-tags {
   display: flex;
   flex-wrap: wrap;
@@ -616,27 +616,15 @@ button:disabled {
   font-weight: var(--weight-bold);
   line-height: 1;
 }
-.marketing-working-time {
-  width: 82px;
-  height: 30px;
-  padding: 0 6px;
+.marketing-working-time-text {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
   font-variant-numeric: tabular-nums;
 }
 .marketing-working-status {
   width: 112px;
   height: 30px;
-}
-.marketing-working-link-edit {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.marketing-working-brief {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
 }
 .marketing-working-link {
   color: var(--garena-red);

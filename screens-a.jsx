@@ -459,6 +459,15 @@ const FLOWMATE_CREATIVE_TYPE_OPTIONS = [
   { key: "motion", label: "Motion", assetType: "motion" },
 ];
 
+const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
+  { key: "facebook", label: "Facebook" },
+  { key: "tiktok", label: "TikTok" },
+  { key: "instagram", label: "Instagram" },
+  { key: "in_game", label: "In-game" },
+  { key: "youtube", label: "YouTube" },
+  { key: "other", label: "Other" },
+];
+
 function getFlowMateCreativeTypeOption(typeKey) {
   return FLOWMATE_CREATIVE_TYPE_OPTIONS.find((option) => option.key === typeKey) || FLOWMATE_CREATIVE_TYPE_OPTIONS[0];
 }
@@ -466,6 +475,26 @@ function getFlowMateCreativeTypeOption(typeKey) {
 function getFlowMateCreativeTypeLabel(typeKey) {
   const option = FLOWMATE_CREATIVE_TYPE_OPTIONS.find((item) => item.key === typeKey);
   return option ? option.label : typeKey;
+}
+
+function normalizeFlowMateCreativeChannels(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+  const normalizedLabels = rawValues
+    .map((item) => {
+      const match = FLOWMATE_CREATIVE_CHANNEL_OPTIONS.find((option) => (
+        option.key.toLowerCase() === String(item).toLowerCase()
+        || option.label.toLowerCase() === String(item).toLowerCase()
+      ));
+      return match ? match.label : String(item).trim();
+    })
+    .filter(Boolean);
+  return Array.from(new Set(normalizedLabels));
+}
+
+function formatFlowMateCreativeChannels(value) {
+  return normalizeFlowMateCreativeChannels(value).join(", ");
 }
 
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
@@ -628,6 +657,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "title",
     "requesterTeam",
     "campaignName",
+    "productEvent",
     "assetType",
     "assetSubtype",
     "assetCount",
@@ -667,6 +697,7 @@ function getDefaultCreativeDraft() {
     title: "",
     requesterTeam,
     campaignName: "",
+    productEvent: "",
     assetType: "static-graphic",
     assetSubtype: FLOWMATE_CREATIVE_TYPE_OPTIONS[0].key,
     assetCount: "1",
@@ -729,9 +760,10 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   }
 
   requireField("campaignName", "Campaign is required.");
+  requireField("productEvent", "Product / Event is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
-  requireField("platforms", "Channel is required.");
+  requireField("platforms", "Channel Tag is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
   requireField("priority", "Priority is required.");
@@ -818,6 +850,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
         launchDate: draft.launchDate,
         requesterTeam: draft.requesterTeam,
         projectName: draft.campaignName,
+        productEvent: draft.productEvent,
       }),
     };
   });
@@ -980,6 +1013,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
       launchDate: normalizedDraft.launchDate,
       requesterTeam: normalizedDraft.requesterTeam,
       projectName: normalizedDraft.campaignName,
+      productEvent: normalizedDraft.productEvent,
     });
     const nextCreativeDraft = { ...normalizedDraft, title };
     setCreativeDraft(nextCreativeDraft);
@@ -1189,6 +1223,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+  const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
 
   useEffect(() => {
     let alive = true;
@@ -1233,13 +1268,22 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     }
     onChange({ ...value, [field]: next });
   }
+
+  function toggleChannel(channelLabel) {
+    const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
+    const nextChannels = currentChannels.includes(channelLabel)
+      ? currentChannels.filter(channel => channel !== channelLabel)
+      : [...currentChannels, channelLabel];
+    update("platforms", nextChannels.length ? nextChannels.join(", ") : channelLabel);
+  }
+
   return (
     <div>
       <div className="form-grid">
         <div className="field field--full">
           <label className="field__label">Title <span className="req">*</span></label>
-          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Campaign]" title="Auto-filled from Launch Date, your account team, and Campaign." />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, and Campaign.</div>
+          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Campaign][Product / Event]" title="Auto-filled from Launch Date, your account team, Campaign, and Product / Event." />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, Campaign, and Product / Event.</div>
         </div>
         <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
           <label className="field__label">Campaign <span className="req">*</span></label>
@@ -1248,6 +1292,11 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
             {campaignOptions.map(campaign => <option key={campaign.id || campaign.name} value={campaign.name} />)}
           </datalist>
           {errors.campaignName && <div className="field__error">{errors.campaignName}</div>}
+        </div>
+        <div className={`field ${errors.productEvent ? "field--error" : ""}`}>
+          <label className="field__label">Product / Event <span className="req">*</span></label>
+          <input className="input" value={value.productEvent} onChange={e => update("productEvent", e.target.value)} placeholder="e.g. DAU, Hero Post Teaser" />
+          {errors.productEvent && <div className="field__error">{errors.productEvent}</div>}
         </div>
         <div className={`field ${errors.assetSubtype ? "field--error" : ""}`}>
           <label className="field__label">Type / Skill <span className="req">*</span></label>
@@ -1262,8 +1311,19 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           {errors.assetCount && <div className="field__error">{errors.assetCount}</div>}
         </div>
         <div className={`field ${errors.platforms ? "field--error" : ""}`}>
-          <label className="field__label">Channel <span className="req">*</span></label>
-          <input className="input" value={value.platforms} onChange={e => update("platforms", e.target.value)} placeholder="Instagram, TikTok, YouTube, Web..." />
+          <label className="field__label">Channel Tag <span className="req">*</span></label>
+          <div className="check-row">
+            {FLOWMATE_CREATIVE_CHANNEL_OPTIONS.map(channel => (
+              <label key={channel.key} className="check-pill">
+                <input
+                  type="checkbox"
+                  checked={selectedChannels.includes(channel.label)}
+                  onChange={() => toggleChannel(channel.label)}
+                />
+                <span>{channel.label}</span>
+              </label>
+            ))}
+          </div>
           {errors.platforms && <div className="field__error">{errors.platforms}</div>}
         </div>
         <div className={`field ${errors.sizeFormat ? "field--error" : ""}`}>
