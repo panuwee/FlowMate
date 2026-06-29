@@ -645,6 +645,53 @@ button:disabled {
   text-decoration: underline;
 }
 
+.marketing-campaign-manager {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.marketing-campaign-manager__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--garena-white);
+}
+.marketing-channel-table {
+  width: 100%;
+  min-width: 1040px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.marketing-channel-table th,
+.marketing-channel-table td {
+  padding: 9px 12px;
+  border-bottom: var(--border-hairline);
+  text-align: left;
+  vertical-align: top;
+}
+.marketing-channel-table th {
+  color: var(--garena-iron);
+  font-size: 12px;
+  font-weight: var(--weight-bold);
+}
+.marketing-channel-table .col-date { width: 128px; }
+.marketing-channel-table .col-time { width: 84px; }
+.marketing-channel-table .col-campaign { width: 180px; }
+.marketing-channel-table .col-asset { width: 310px; }
+.marketing-channel-table .col-link { width: 86px; }
+.marketing-channel-table .col-status { width: 132px; }
+.marketing-channel-table .col-pic { width: 110px; }
+.marketing-channel-table td > .strong,
+.marketing-channel-table td > div {
+  overflow-wrap: anywhere;
+}
+
 .prio { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--garena-iron); }
 .prio__mark {
   width: 8px; height: 8px; border-radius: var(--radius-xs);

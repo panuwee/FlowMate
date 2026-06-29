@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-5";
+const FLOWMATE_APP_VERSION = "v20260629-6";
 
 const NAV = [
   { group: "Personal", items: [
@@ -865,6 +865,40 @@ function normalizeMarketingPlanCampaignOption(row, plan) {
   };
 }
 
+const MARKETING_PLAN_HIDDEN_CAMPAIGNS_KEY = "flowmate:marketing-plan:hidden-campaign-tags";
+
+function getMarketingPlanCampaignKey(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+function getHiddenMarketingPlanCampaignKeys() {
+  try {
+    const raw = window.localStorage ? window.localStorage.getItem(MARKETING_PLAN_HIDDEN_CAMPAIGNS_KEY) : "";
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function setHiddenMarketingPlanCampaignKeys(keys) {
+  const uniqueKeys = Array.from(new Set((keys || []).filter(Boolean)));
+  if (window.localStorage) {
+    window.localStorage["setItem"](MARKETING_PLAN_HIDDEN_CAMPAIGNS_KEY, JSON.stringify(uniqueKeys));
+  }
+  return uniqueKeys;
+}
+
+function isMarketingPlanCampaignHidden(name) {
+  return getHiddenMarketingPlanCampaignKeys().includes(getMarketingPlanCampaignKey(name));
+}
+
+function applyMarketingPlanCampaignVisibility(campaigns, includeHidden = false) {
+  if (includeHidden) return campaigns || [];
+  const hiddenKeys = new Set(getHiddenMarketingPlanCampaignKeys());
+  return (campaigns || []).filter(campaign => !hiddenKeys.has(getMarketingPlanCampaignKey(campaign.name)));
+}
+
 function formatMarketingPlanTime(value) {
   if (!value) return "";
   return String(value).slice(0, 5);
@@ -1089,14 +1123,7 @@ function getMarketingPlanChannelAbbrev(channel) {
 }
 
 function formatMarketingPlanBadgeTime(value) {
-  if (!value) return "";
-  const [hourText, minuteText] = String(value).slice(0, 5).split(":");
-  const hour = Number(hourText);
-  const minute = Number(minuteText || 0);
-  if (Number.isNaN(hour)) return String(value).slice(0, 5);
-  const suffix = hour >= 12 ? "pm" : "am";
-  const hour12 = hour % 12 || 12;
-  return minute ? `${hour12}:${String(minute).padStart(2, "0")}${suffix}` : `${hour12}${suffix}`;
+  return formatMarketingPlanTime(value);
 }
 
 function getMarketingPlanStatusLabel(status) {
@@ -1261,9 +1288,10 @@ async function loadMarketingPlanCampaignOptions(options = {}) {
     });
   });
 
-  const campaigns = Array.from(byName.values()).sort((a, b) => (
+  const allCampaigns = Array.from(byName.values()).sort((a, b) => (
     String(a.name || "").localeCompare(String(b.name || ""))
   ));
+  const campaigns = applyMarketingPlanCampaignVisibility(allCampaigns, options.includeHidden === true);
   window.FLOWMATE_MARKETING_CAMPAIGNS = campaigns;
   if (options.announce !== false) {
     window.dispatchEvent(new CustomEvent("flowmate:marketing-campaigns-updated", { detail: { campaigns } }));
@@ -1282,12 +1310,57 @@ async function addMarketingPlanCampaignTag(name, monthKey) {
     : flowMateTodayDateKey().slice(0, 7);
   const planId = await findOrCreateMarketingPlan(targetMonthKey);
   const campaignId = await findOrCreateMarketingCampaign(planId, campaignName, null);
+  const hiddenKeys = getHiddenMarketingPlanCampaignKeys().filter(key => key !== getMarketingPlanCampaignKey(campaignName));
+  setHiddenMarketingPlanCampaignKeys(hiddenKeys);
   const campaigns = await loadMarketingPlanCampaignOptions();
   return { campaignId, campaignName, monthKey: targetMonthKey, campaigns };
 }
 
+async function hideMarketingPlanCampaignTag(name) {
+  const key = getMarketingPlanCampaignKey(name);
+  if (!key) throw new Error("Campaign name is required.");
+  const hiddenKeys = getHiddenMarketingPlanCampaignKeys();
+  setHiddenMarketingPlanCampaignKeys([...hiddenKeys, key]);
+  const campaigns = await loadMarketingPlanCampaignOptions();
+  return campaigns;
+}
+
+async function showMarketingPlanCampaignTag(name) {
+  const key = getMarketingPlanCampaignKey(name);
+  const hiddenKeys = getHiddenMarketingPlanCampaignKeys().filter(item => item !== key);
+  setHiddenMarketingPlanCampaignKeys(hiddenKeys);
+  const campaigns = await loadMarketingPlanCampaignOptions();
+  return campaigns;
+}
+
+async function deleteMarketingPlanCampaignTag(campaign) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!campaign || !campaign.id) throw new Error("Campaign is missing.");
+  const linkedContent = await window.flowmateSupabase
+    .from("marketing_content_items")
+    .select("id")
+    .eq("campaign_id", campaign.id)
+    .limit(1);
+  if (linkedContent.error) throw linkedContent.error;
+  if (linkedContent.data && linkedContent.data.length > 0) {
+    throw new Error("This campaign has content rows. Hide it instead of deleting it.");
+  }
+  const deleted = await window.flowmateSupabase
+    .from("marketing_campaigns")
+    .delete()
+    .eq("id", campaign.id);
+  if (deleted.error) throw deleted.error;
+  await showMarketingPlanCampaignTag(campaign.name);
+  return loadMarketingPlanCampaignOptions({ includeHidden: true });
+}
+
 window.loadFlowMateMarketingCampaignOptions = loadMarketingPlanCampaignOptions;
 window.addFlowMateMarketingCampaignTag = addMarketingPlanCampaignTag;
+window.hideFlowMateMarketingCampaignTag = hideMarketingPlanCampaignTag;
+window.showFlowMateMarketingCampaignTag = showMarketingPlanCampaignTag;
+window.deleteFlowMateMarketingCampaignTag = deleteMarketingPlanCampaignTag;
 
 async function createMarketingPlanWorkingSheetRow(form) {
   if (!window.flowmateSupabase) {
@@ -1436,7 +1509,7 @@ function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all"
   return visibleRows.length;
 }
 
-function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus) {
+function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel = "all") {
   const groups = MARKETING_PLAN_CHANNELS.map(channel => ({
     ...channel,
     placements: [],
@@ -1447,7 +1520,8 @@ function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus) {
     .filter(row => {
       const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
       if (rowMonth !== selectedMonth) return false;
-      return selectedStatus === "all" || row.placementStatus === selectedStatus;
+      if (selectedStatus !== "all" && row.placementStatus !== selectedStatus) return false;
+      return selectedChannel === "all" || row.channel === selectedChannel;
     })
     .forEach(row => {
       const channelKey = groupMap.has(row.channel) ? row.channel : "other";
@@ -1470,6 +1544,10 @@ function MarketingPlanTimelineScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [campaignMessage, setCampaignMessage] = useStateApp("");
+  const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useStateApp(false);
+  const [campaignManagerRows, setCampaignManagerRows] = useStateApp([]);
+  const [campaignManagerName, setCampaignManagerName] = useStateApp("");
+  const [campaignManagerState, setCampaignManagerState] = useStateApp({ status: "idle", message: "" });
   const [loadState, setLoadState] = useStateApp({ status: "loading", message: "Loading Marketing Plan timeline..." });
 
   async function loadTimelineRows(isAlive = () => true) {
@@ -1538,28 +1616,65 @@ function MarketingPlanTimelineScreen() {
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
 
-  async function handleAddCampaign() {
+  async function loadCampaignManagerRows() {
+    if (!window.loadFlowMateMarketingCampaignOptions) return;
+    const campaigns = await window.loadFlowMateMarketingCampaignOptions({ includeHidden: true, announce: false });
+    setCampaignManagerRows(campaigns || []);
+  }
+
+  async function openCampaignManager() {
+    setCampaignManagerState({ status: "idle", message: "" });
+    await loadCampaignManagerRows();
+    setIsCampaignManagerOpen(true);
+  }
+
+  async function handleManagerAddCampaign(event) {
+    event.preventDefault();
     if (!window.addFlowMateMarketingCampaignTag) {
-      setCampaignMessage("Campaign creator is not ready. Please refresh the page.");
+      setCampaignManagerState({ status: "error", message: "Campaign manager is not ready. Please refresh the page." });
       return;
     }
-    const campaignName = window.flowmatePrompt
-      ? await window.flowmatePrompt({
-          title: "Add Campaign",
-          label: "Campaign name",
-          placeholder: "e.g. New Patch update : 26.05",
-          required: true,
-          confirmText: "Add Campaign",
-        })
-      : "";
-    if (campaignName === null) return;
+    const campaignName = campaignManagerName.trim();
+    if (!campaignName) {
+      setCampaignManagerState({ status: "error", message: "Campaign name is required." });
+      return;
+    }
     try {
       const result = await window.addFlowMateMarketingCampaignTag(campaignName, selectedMonth || flowMateTodayDateKey().slice(0, 7));
-      setCampaignMessage(`Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}. It is now available as a Campaign tag.`);
+      setCampaignManagerName("");
+      setCampaignManagerState({ status: "saved", message: `Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}.` });
+      await loadCampaignManagerRows();
       await loadTimelineRows(() => true);
     } catch (error) {
       console.error("[Marketing Plan] Add campaign failed:", error);
-      setCampaignMessage(window.flowmateUserError ? window.flowmateUserError(error, "Add Campaign failed.") : "Add Campaign failed.");
+      setCampaignManagerState({ status: "error", message: window.flowmateUserError ? window.flowmateUserError(error, "Add Campaign failed.") : "Add Campaign failed." });
+    }
+  }
+
+  async function handleCampaignVisibility(campaign, mode) {
+    setCampaignManagerState({ status: "saving", message: "Updating campaign tag..." });
+    try {
+      if (mode === "hide") {
+        await window.hideFlowMateMarketingCampaignTag(campaign.name);
+      } else {
+        await window.showFlowMateMarketingCampaignTag(campaign.name);
+      }
+      await loadCampaignManagerRows();
+      setCampaignManagerState({ status: "saved", message: mode === "hide" ? "Campaign tag hidden from selectors." : "Campaign tag shown in selectors." });
+    } catch (error) {
+      setCampaignManagerState({ status: "error", message: window.flowmateUserError ? window.flowmateUserError(error, "Campaign visibility update failed.") : "Campaign visibility update failed." });
+    }
+  }
+
+  async function handleDeleteCampaignTag(campaign) {
+    setCampaignManagerState({ status: "saving", message: "Deleting campaign tag..." });
+    try {
+      await window.deleteFlowMateMarketingCampaignTag(campaign);
+      await loadCampaignManagerRows();
+      setCampaignManagerState({ status: "saved", message: `Deleted "${campaign.name}".` });
+      await loadTimelineRows(() => true);
+    } catch (error) {
+      setCampaignManagerState({ status: "error", message: window.flowmateUserError ? window.flowmateUserError(error, "Delete Campaign failed.") : (error && error.message) || "Delete Campaign failed." });
     }
   }
 
@@ -1607,9 +1722,9 @@ function MarketingPlanTimelineScreen() {
           <button
             type="button"
             className="btn btn--primary"
-            onClick={handleAddCampaign}
+            onClick={openCampaignManager}
           >
-            <Icon name="plus" /> Campaign
+            <Icon name="settings" /> Manage Campaign
           </button>
           <button
             type="button"
@@ -1622,6 +1737,74 @@ function MarketingPlanTimelineScreen() {
       </div>
 
       {campaignMessage && <div className="reason-box" style={{ marginBottom: 16 }}>{campaignMessage}</div>}
+
+      {isCampaignManagerOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setIsCampaignManagerOpen(false)}>
+          <div className="modal modal--settings" role="dialog" aria-modal="true" onMouseDown={event => event.stopPropagation()}>
+            <div className="modal__head">
+              <div>
+                <h2>Manage Campaign</h2>
+                <p>Choose which Campaign tags are shown in Marketing Plan selectors. Delete is allowed only for unused tags.</p>
+              </div>
+              <button type="button" className="iconbtn" onClick={() => setIsCampaignManagerOpen(false)}><Icon name="x" /></button>
+            </div>
+            <form className="row" style={{ gap: 8, padding: "12px 16px 0", alignItems: "center" }} onSubmit={handleManagerAddCampaign}>
+              <input
+                className="input"
+                value={campaignManagerName}
+                onChange={event => setCampaignManagerName(event.target.value)}
+                placeholder="New campaign tag"
+              />
+              <button type="submit" className="btn btn--primary" disabled={campaignManagerState.status === "saving"}>
+                <Icon name="plus" /> Add
+              </button>
+            </form>
+            {campaignManagerState.message && (
+              <div className={`reason-box ${campaignManagerState.status === "error" ? "reason-box--need" : ""}`} style={{ margin: "12px 16px 0" }}>
+                {campaignManagerState.message}
+              </div>
+            )}
+            <div className="marketing-campaign-manager">
+              {campaignManagerRows.map(campaign => {
+                const hidden = isMarketingPlanCampaignHidden(campaign.name);
+                return (
+                  <div key={campaign.id || campaign.name} className="marketing-campaign-manager__row">
+                    <div>
+                      <div className="strong">{campaign.name}</div>
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        {[campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 6 }}>
+                      <span className={`badge ${hidden ? "badge--neutral" : "badge--delivered"}`}>{hidden ? "Hidden" : "Shown"}</span>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={() => handleCampaignVisibility(campaign, hidden ? "show" : "hide")}
+                        disabled={campaignManagerState.status === "saving"}
+                      >
+                        {hidden ? "Show" : "Hide"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={() => handleDeleteCampaignTag(campaign)}
+                        disabled={campaignManagerState.status === "saving"}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {campaignManagerRows.length === 0 && <div className="muted">No campaign tags yet.</div>}
+            </div>
+            <div className="modal__actions">
+              <button type="button" className="btn btn--primary" onClick={() => setIsCampaignManagerOpen(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loadState.status === "loading" && <div className="reason-box">Loading Marketing Plan timeline...</div>}
 
@@ -1798,6 +1981,7 @@ function MarketingPlanChannelPlanScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedStatus, setSelectedStatus] = useStateApp("all");
+  const [selectedChannel, setSelectedChannel] = useStateApp("all");
   const [loadState, setLoadState] = useStateApp({ status: "loading", message: "Loading Marketing Plan channel placements..." });
 
   useEffectApp(() => {
@@ -1823,6 +2007,7 @@ function MarketingPlanChannelPlanScreen() {
         setRows(normalizedRows);
         setSelectedMonth(current => current && monthOptions.includes(current) ? current : (monthOptions[0] || ""));
         setSelectedStatus(current => current || "all");
+        setSelectedChannel(current => current || "all");
         setLoadState({
           status: normalizedRows.length ? "live" : "empty",
           message: normalizedRows.length
@@ -1835,6 +2020,7 @@ function MarketingPlanChannelPlanScreen() {
         setRows([]);
         setSelectedMonth("");
         setSelectedStatus("all");
+        setSelectedChannel("all");
         setLoadState({
           status: "error",
           message: window.flowmateUserError
@@ -1854,11 +2040,8 @@ function MarketingPlanChannelPlanScreen() {
 
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const statusOptions = getMarketingPlanPlacementStatusOptions(rows, selectedMonth);
-  const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus);
-  const placements = groupedChannels.flatMap(group => group.placements);
-  const activeChannels = groupedChannels.length;
-  const readyPostedCount = placements.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
-  const delayedCount = placements.filter(row => row.placementStatus === "delayed").length;
+  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
+  const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel);
 
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
@@ -1880,12 +2063,26 @@ function MarketingPlanChannelPlanScreen() {
             onChange={(event) => {
               setSelectedMonth(event.target.value);
               setSelectedStatus("all");
+              setSelectedChannel("all");
             }}
             disabled={monthOptions.length === 0}
           >
             {monthOptions.length === 0 && <option value="">No data</option>}
             {monthOptions.map(monthKey => (
               <option key={monthKey} value={monthKey}>{getMarketingPlanMonthLabel(monthKey)}</option>
+            ))}
+          </select>
+          <select
+            className="input"
+            style={{ width: 160 }}
+            value={selectedChannel}
+            onChange={(event) => setSelectedChannel(event.target.value)}
+            disabled={monthOptions.length === 0}
+            aria-label="Filter By Channel"
+          >
+            <option value="all">Filter By Channel</option>
+            {channelOptions.map(channel => (
+              <option key={channel} value={channel}>{getMarketingPlanChannelLabel(channel)}</option>
             ))}
           </select>
           <select
@@ -1908,13 +2105,6 @@ function MarketingPlanChannelPlanScreen() {
             <Icon name="refresh" /> Refresh
           </button>
         </div>
-      </div>
-
-      <div className="stat-strip" style={{ marginBottom: 16 }}>
-        <div className="stat"><div className="stat__num mono">{placements.length}</div><div className="stat__lbl">Total placements</div></div>
-        <div className="stat stat--info"><div className="stat__num mono">{activeChannels}</div><div className="stat__lbl">Active channels</div></div>
-        <div className="stat stat--accent"><div className="stat__num mono">{readyPostedCount}</div><div className="stat__lbl">Ready / posted</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{delayedCount}</div><div className="stat__lbl">Delayed</div></div>
       </div>
 
       {loadState.status === "loading" && <div className="reason-box">Loading Marketing Plan channel placements...</div>}
@@ -1940,7 +2130,7 @@ function MarketingPlanChannelPlanScreen() {
 
       {loadState.status === "live" && groupedChannels.length === 0 && (
         <div className="reason-box">
-          No placements match {getMarketingPlanMonthLabel(selectedMonth)} and {selectedStatus === "all" ? "all statuses" : getMarketingPlanStatusLabel(selectedStatus)}.
+          No placements match {getMarketingPlanMonthLabel(selectedMonth)}, {selectedChannel === "all" ? "all channels" : getMarketingPlanChannelLabel(selectedChannel)}, and {selectedStatus === "all" ? "all statuses" : getMarketingPlanStatusLabel(selectedStatus)}.
         </div>
       )}
 
@@ -1957,7 +2147,7 @@ function MarketingPlanChannelPlanScreen() {
               ))}
             </div>
           </div>
-          <div className="card__body" style={{ display: "grid", gap: 14 }}>
+          <div className="card__body marketing-channel-plan" style={{ display: "grid", gap: 14 }}>
             {groupedChannels.map(group => (
               <div key={group.key} style={{ border: "1px solid var(--garena-light-grey)", borderRadius: 8, overflow: "hidden" }}>
                 <div style={{
@@ -1976,21 +2166,22 @@ function MarketingPlanChannelPlanScreen() {
                   <span className="badge badge--assigned">Active</span>
                 </div>
                 <div style={{ overflowX: "auto" }}>
-                  <table className="table table--dense" style={{ minWidth: 920 }}>
+                  <table className="table table--dense marketing-channel-table">
                     <thead>
                       <tr>
-                        <th style={{ width: 120 }}>Publish date</th>
-                        <th style={{ width: 90 }}>Time</th>
-                        <th>Campaign</th>
-                        <th>Asset / content</th>
-                        <th style={{ width: 120 }}>Status</th>
-                        <th style={{ width: 140 }}>PIC</th>
+                        <th className="col-date">Publish date</th>
+                        <th className="col-time">Time</th>
+                        <th className="col-campaign">Campaign</th>
+                        <th className="col-asset">Asset / content</th>
+                        <th className="col-link">Brief Link</th>
+                        <th className="col-status">Status</th>
+                        <th className="col-pic">PIC</th>
                       </tr>
                     </thead>
                     <tbody>
                       {group.placements.map(placement => (
                         <tr key={placement.placementId || `${placement.channel}-${placement.contentItemId}-${placement.publishDate}-${placement.publishTime}`}>
-                          <td className="mono">{formatMarketingPlanDate(placement.publishDate)}</td>
+                          <td>{formatMarketingPlanDate(placement.publishDate)}</td>
                           <td className="mono">{formatMarketingPlanTime(placement.publishTime) || "-"}</td>
                           <td>
                             <div className="strong">{placement.campaignName}</div>
@@ -2001,6 +2192,11 @@ function MarketingPlanChannelPlanScreen() {
                             <div className="muted" style={{ fontSize: 12 }}>
                               {[placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" · ") || "No details"}
                             </div>
+                          </td>
+                          <td>
+                            {placement.briefLink ? (
+                              <a className="marketing-working-link" href={placement.briefLink} target="_blank" rel="noreferrer">Link</a>
+                            ) : "-"}
                           </td>
                           <td>{renderStatusBadge(placement.placementStatus)}</td>
                           <td>{placement.picName || "-"}</td>

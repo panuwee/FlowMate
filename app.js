@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-5";
+const FLOWMATE_APP_VERSION = "v20260629-6";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1013,6 +1013,34 @@ function normalizeMarketingPlanCampaignOption(row, plan) {
     sortOrder: Number(row.sort_order || 0)
   };
 }
+const MARKETING_PLAN_HIDDEN_CAMPAIGNS_KEY = "flowmate:marketing-plan:hidden-campaign-tags";
+function getMarketingPlanCampaignKey(name) {
+  return String(name || "").trim().toLowerCase();
+}
+function getHiddenMarketingPlanCampaignKeys() {
+  try {
+    const raw = window.localStorage ? window.localStorage.getItem(MARKETING_PLAN_HIDDEN_CAMPAIGNS_KEY) : "";
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+function setHiddenMarketingPlanCampaignKeys(keys) {
+  const uniqueKeys = Array.from(new Set((keys || []).filter(Boolean)));
+  if (window.localStorage) {
+    window.localStorage["setItem"](MARKETING_PLAN_HIDDEN_CAMPAIGNS_KEY, JSON.stringify(uniqueKeys));
+  }
+  return uniqueKeys;
+}
+function isMarketingPlanCampaignHidden(name) {
+  return getHiddenMarketingPlanCampaignKeys().includes(getMarketingPlanCampaignKey(name));
+}
+function applyMarketingPlanCampaignVisibility(campaigns, includeHidden = false) {
+  if (includeHidden) return campaigns || [];
+  const hiddenKeys = new Set(getHiddenMarketingPlanCampaignKeys());
+  return (campaigns || []).filter(campaign => !hiddenKeys.has(getMarketingPlanCampaignKey(campaign.name)));
+}
 function formatMarketingPlanTime(value) {
   if (!value) return "";
   return String(value).slice(0, 5);
@@ -1204,14 +1232,7 @@ function getMarketingPlanChannelAbbrev(channel) {
   return labels[normalized] || getMarketingPlanChannelLabel(normalized).slice(0, 6);
 }
 function formatMarketingPlanBadgeTime(value) {
-  if (!value) return "";
-  const [hourText, minuteText] = String(value).slice(0, 5).split(":");
-  const hour = Number(hourText);
-  const minute = Number(minuteText || 0);
-  if (Number.isNaN(hour)) return String(value).slice(0, 5);
-  const suffix = hour >= 12 ? "pm" : "am";
-  const hour12 = hour % 12 || 12;
-  return minute ? `${hour12}:${String(minute).padStart(2, "0")}${suffix}` : `${hour12}${suffix}`;
+  return formatMarketingPlanTime(value);
 }
 function getMarketingPlanStatusLabel(status) {
   if (status === "ready") return "Ready to Post";
@@ -1349,7 +1370,8 @@ async function loadMarketingPlanCampaignOptions(options = {}) {
       if (!byName.has(key)) byName.set(key, option);
     });
   });
-  const campaigns = Array.from(byName.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  const allCampaigns = Array.from(byName.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  const campaigns = applyMarketingPlanCampaignVisibility(allCampaigns, options.includeHidden === true);
   window.FLOWMATE_MARKETING_CAMPAIGNS = campaigns;
   if (options.announce !== false) {
     window.dispatchEvent(new CustomEvent("flowmate:marketing-campaigns-updated", {
@@ -1369,6 +1391,8 @@ async function addMarketingPlanCampaignTag(name, monthKey) {
   const targetMonthKey = monthKey && /^\d{4}-\d{2}$/.test(monthKey) ? monthKey : flowMateTodayDateKey().slice(0, 7);
   const planId = await findOrCreateMarketingPlan(targetMonthKey);
   const campaignId = await findOrCreateMarketingCampaign(planId, campaignName, null);
+  const hiddenKeys = getHiddenMarketingPlanCampaignKeys().filter(key => key !== getMarketingPlanCampaignKey(campaignName));
+  setHiddenMarketingPlanCampaignKeys(hiddenKeys);
   const campaigns = await loadMarketingPlanCampaignOptions();
   return {
     campaignId,
@@ -1377,8 +1401,43 @@ async function addMarketingPlanCampaignTag(name, monthKey) {
     campaigns
   };
 }
+async function hideMarketingPlanCampaignTag(name) {
+  const key = getMarketingPlanCampaignKey(name);
+  if (!key) throw new Error("Campaign name is required.");
+  const hiddenKeys = getHiddenMarketingPlanCampaignKeys();
+  setHiddenMarketingPlanCampaignKeys([...hiddenKeys, key]);
+  const campaigns = await loadMarketingPlanCampaignOptions();
+  return campaigns;
+}
+async function showMarketingPlanCampaignTag(name) {
+  const key = getMarketingPlanCampaignKey(name);
+  const hiddenKeys = getHiddenMarketingPlanCampaignKeys().filter(item => item !== key);
+  setHiddenMarketingPlanCampaignKeys(hiddenKeys);
+  const campaigns = await loadMarketingPlanCampaignOptions();
+  return campaigns;
+}
+async function deleteMarketingPlanCampaignTag(campaign) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!campaign || !campaign.id) throw new Error("Campaign is missing.");
+  const linkedContent = await window.flowmateSupabase.from("marketing_content_items").select("id").eq("campaign_id", campaign.id).limit(1);
+  if (linkedContent.error) throw linkedContent.error;
+  if (linkedContent.data && linkedContent.data.length > 0) {
+    throw new Error("This campaign has content rows. Hide it instead of deleting it.");
+  }
+  const deleted = await window.flowmateSupabase.from("marketing_campaigns").delete().eq("id", campaign.id);
+  if (deleted.error) throw deleted.error;
+  await showMarketingPlanCampaignTag(campaign.name);
+  return loadMarketingPlanCampaignOptions({
+    includeHidden: true
+  });
+}
 window.loadFlowMateMarketingCampaignOptions = loadMarketingPlanCampaignOptions;
 window.addFlowMateMarketingCampaignTag = addMarketingPlanCampaignTag;
+window.hideFlowMateMarketingCampaignTag = hideMarketingPlanCampaignTag;
+window.showFlowMateMarketingCampaignTag = showMarketingPlanCampaignTag;
+window.deleteFlowMateMarketingCampaignTag = deleteMarketingPlanCampaignTag;
 async function createMarketingPlanWorkingSheetRow(form) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
@@ -1490,7 +1549,7 @@ function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all"
   URL.revokeObjectURL(url);
   return visibleRows.length;
 }
-function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus) {
+function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel = "all") {
   const groups = MARKETING_PLAN_CHANNELS.map(channel => ({
     ...channel,
     placements: []
@@ -1499,7 +1558,8 @@ function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus) {
   (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
     if (rowMonth !== selectedMonth) return false;
-    return selectedStatus === "all" || row.placementStatus === selectedStatus;
+    if (selectedStatus !== "all" && row.placementStatus !== selectedStatus) return false;
+    return selectedChannel === "all" || row.channel === selectedChannel;
   }).forEach(row => {
     const channelKey = groupMap.has(row.channel) ? row.channel : "other";
     groupMap.get(channelKey).placements.push(row);
@@ -1513,6 +1573,13 @@ function MarketingPlanTimelineScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [campaignMessage, setCampaignMessage] = useStateApp("");
+  const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useStateApp(false);
+  const [campaignManagerRows, setCampaignManagerRows] = useStateApp([]);
+  const [campaignManagerName, setCampaignManagerName] = useStateApp("");
+  const [campaignManagerState, setCampaignManagerState] = useStateApp({
+    status: "idle",
+    message: ""
+  });
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan timeline..."
@@ -1582,26 +1649,97 @@ function MarketingPlanTimelineScreen() {
   const columnWidth = 38;
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
-  async function handleAddCampaign() {
+  async function loadCampaignManagerRows() {
+    if (!window.loadFlowMateMarketingCampaignOptions) return;
+    const campaigns = await window.loadFlowMateMarketingCampaignOptions({
+      includeHidden: true,
+      announce: false
+    });
+    setCampaignManagerRows(campaigns || []);
+  }
+  async function openCampaignManager() {
+    setCampaignManagerState({
+      status: "idle",
+      message: ""
+    });
+    await loadCampaignManagerRows();
+    setIsCampaignManagerOpen(true);
+  }
+  async function handleManagerAddCampaign(event) {
+    event.preventDefault();
     if (!window.addFlowMateMarketingCampaignTag) {
-      setCampaignMessage("Campaign creator is not ready. Please refresh the page.");
+      setCampaignManagerState({
+        status: "error",
+        message: "Campaign manager is not ready. Please refresh the page."
+      });
       return;
     }
-    const campaignName = window.flowmatePrompt ? await window.flowmatePrompt({
-      title: "Add Campaign",
-      label: "Campaign name",
-      placeholder: "e.g. New Patch update : 26.05",
-      required: true,
-      confirmText: "Add Campaign"
-    }) : "";
-    if (campaignName === null) return;
+    const campaignName = campaignManagerName.trim();
+    if (!campaignName) {
+      setCampaignManagerState({
+        status: "error",
+        message: "Campaign name is required."
+      });
+      return;
+    }
     try {
       const result = await window.addFlowMateMarketingCampaignTag(campaignName, selectedMonth || flowMateTodayDateKey().slice(0, 7));
-      setCampaignMessage(`Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}. It is now available as a Campaign tag.`);
+      setCampaignManagerName("");
+      setCampaignManagerState({
+        status: "saved",
+        message: `Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}.`
+      });
+      await loadCampaignManagerRows();
       await loadTimelineRows(() => true);
     } catch (error) {
       console.error("[Marketing Plan] Add campaign failed:", error);
-      setCampaignMessage(window.flowmateUserError ? window.flowmateUserError(error, "Add Campaign failed.") : "Add Campaign failed.");
+      setCampaignManagerState({
+        status: "error",
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Add Campaign failed.") : "Add Campaign failed."
+      });
+    }
+  }
+  async function handleCampaignVisibility(campaign, mode) {
+    setCampaignManagerState({
+      status: "saving",
+      message: "Updating campaign tag..."
+    });
+    try {
+      if (mode === "hide") {
+        await window.hideFlowMateMarketingCampaignTag(campaign.name);
+      } else {
+        await window.showFlowMateMarketingCampaignTag(campaign.name);
+      }
+      await loadCampaignManagerRows();
+      setCampaignManagerState({
+        status: "saved",
+        message: mode === "hide" ? "Campaign tag hidden from selectors." : "Campaign tag shown in selectors."
+      });
+    } catch (error) {
+      setCampaignManagerState({
+        status: "error",
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Campaign visibility update failed.") : "Campaign visibility update failed."
+      });
+    }
+  }
+  async function handleDeleteCampaignTag(campaign) {
+    setCampaignManagerState({
+      status: "saving",
+      message: "Deleting campaign tag..."
+    });
+    try {
+      await window.deleteFlowMateMarketingCampaignTag(campaign);
+      await loadCampaignManagerRows();
+      setCampaignManagerState({
+        status: "saved",
+        message: `Deleted "${campaign.name}".`
+      });
+      await loadTimelineRows(() => true);
+    } catch (error) {
+      setCampaignManagerState({
+        status: "error",
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Delete Campaign failed.") : error && error.message || "Delete Campaign failed."
+      });
     }
   }
   function renderPlacementBadge(placement) {
@@ -1646,10 +1784,10 @@ function MarketingPlanTimelineScreen() {
   }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
-    onClick: handleAddCampaign
+    onClick: openCampaignManager
   }, React.createElement(Icon, {
-    name: "plus"
-  }), " Campaign"), React.createElement("button", {
+    name: "settings"
+  }), " Manage Campaign"), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
@@ -1660,7 +1798,88 @@ function MarketingPlanTimelineScreen() {
     style: {
       marginBottom: 16
     }
-  }, campaignMessage), loadState.status === "loading" && React.createElement("div", {
+  }, campaignMessage), isCampaignManagerOpen && React.createElement("div", {
+    className: "modal-backdrop",
+    role: "presentation",
+    onMouseDown: () => setIsCampaignManagerOpen(false)
+  }, React.createElement("div", {
+    className: "modal modal--settings",
+    role: "dialog",
+    "aria-modal": "true",
+    onMouseDown: event => event.stopPropagation()
+  }, React.createElement("div", {
+    className: "modal__head"
+  }, React.createElement("div", null, React.createElement("h2", null, "Manage Campaign"), React.createElement("p", null, "Choose which Campaign tags are shown in Marketing Plan selectors. Delete is allowed only for unused tags.")), React.createElement("button", {
+    type: "button",
+    className: "iconbtn",
+    onClick: () => setIsCampaignManagerOpen(false)
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), React.createElement("form", {
+    className: "row",
+    style: {
+      gap: 8,
+      padding: "12px 16px 0",
+      alignItems: "center"
+    },
+    onSubmit: handleManagerAddCampaign
+  }, React.createElement("input", {
+    className: "input",
+    value: campaignManagerName,
+    onChange: event => setCampaignManagerName(event.target.value),
+    placeholder: "New campaign tag"
+  }), React.createElement("button", {
+    type: "submit",
+    className: "btn btn--primary",
+    disabled: campaignManagerState.status === "saving"
+  }, React.createElement(Icon, {
+    name: "plus"
+  }), " Add")), campaignManagerState.message && React.createElement("div", {
+    className: `reason-box ${campaignManagerState.status === "error" ? "reason-box--need" : ""}`,
+    style: {
+      margin: "12px 16px 0"
+    }
+  }, campaignManagerState.message), React.createElement("div", {
+    className: "marketing-campaign-manager"
+  }, campaignManagerRows.map(campaign => {
+    const hidden = isMarketingPlanCampaignHidden(campaign.name);
+    return React.createElement("div", {
+      key: campaign.id || campaign.name,
+      className: "marketing-campaign-manager__row"
+    }, React.createElement("div", null, React.createElement("div", {
+      className: "strong"
+    }, campaign.name), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 12
+      }
+    }, [campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" · "))), React.createElement("div", {
+      className: "row",
+      style: {
+        gap: 6
+      }
+    }, React.createElement("span", {
+      className: `badge ${hidden ? "badge--neutral" : "badge--delivered"}`
+    }, hidden ? "Hidden" : "Shown"), React.createElement("button", {
+      type: "button",
+      className: "btn btn--secondary",
+      onClick: () => handleCampaignVisibility(campaign, hidden ? "show" : "hide"),
+      disabled: campaignManagerState.status === "saving"
+    }, hidden ? "Show" : "Hide"), React.createElement("button", {
+      type: "button",
+      className: "btn btn--secondary",
+      onClick: () => handleDeleteCampaignTag(campaign),
+      disabled: campaignManagerState.status === "saving"
+    }, "Delete")));
+  }), campaignManagerRows.length === 0 && React.createElement("div", {
+    className: "muted"
+  }, "No campaign tags yet.")), React.createElement("div", {
+    className: "modal__actions"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    onClick: () => setIsCampaignManagerOpen(false)
+  }, "Done")))), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan timeline..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -1861,6 +2080,7 @@ function MarketingPlanChannelPlanScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedStatus, setSelectedStatus] = useStateApp("all");
+  const [selectedChannel, setSelectedChannel] = useStateApp("all");
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan channel placements..."
@@ -1892,6 +2112,7 @@ function MarketingPlanChannelPlanScreen() {
         setRows(normalizedRows);
         setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
         setSelectedStatus(current => current || "all");
+        setSelectedChannel(current => current || "all");
         setLoadState({
           status: normalizedRows.length ? "live" : "empty",
           message: normalizedRows.length ? "Live Marketing Plan channel data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
@@ -1902,6 +2123,7 @@ function MarketingPlanChannelPlanScreen() {
         setRows([]);
         setSelectedMonth("");
         setSelectedStatus("all");
+        setSelectedChannel("all");
         setLoadState({
           status: "error",
           message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
@@ -1917,11 +2139,8 @@ function MarketingPlanChannelPlanScreen() {
   }, []);
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const statusOptions = getMarketingPlanPlacementStatusOptions(rows, selectedMonth);
-  const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus);
-  const placements = groupedChannels.flatMap(group => group.placements);
-  const activeChannels = groupedChannels.length;
-  const readyPostedCount = placements.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
-  const delayedCount = placements.filter(row => row.placementStatus === "delayed").length;
+  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
+  const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel);
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
     return React.createElement("span", {
@@ -1944,6 +2163,7 @@ function MarketingPlanChannelPlanScreen() {
     onChange: event => {
       setSelectedMonth(event.target.value);
       setSelectedStatus("all");
+      setSelectedChannel("all");
     },
     disabled: monthOptions.length === 0
   }, monthOptions.length === 0 && React.createElement("option", {
@@ -1952,6 +2172,20 @@ function MarketingPlanChannelPlanScreen() {
     key: monthKey,
     value: monthKey
   }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 160
+    },
+    value: selectedChannel,
+    onChange: event => setSelectedChannel(event.target.value),
+    disabled: monthOptions.length === 0,
+    "aria-label": "Filter By Channel"
+  }, React.createElement("option", {
+    value: "all"
+  }, "Filter By Channel"), channelOptions.map(channel => React.createElement("option", {
+    key: channel,
+    value: channel
+  }, getMarketingPlanChannelLabel(channel)))), React.createElement("select", {
     className: "input",
     style: {
       width: 140
@@ -1970,36 +2204,7 @@ function MarketingPlanChannelPlanScreen() {
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), React.createElement("div", {
-    className: "stat-strip",
-    style: {
-      marginBottom: 16
-    }
-  }, React.createElement("div", {
-    className: "stat"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, placements.length), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Total placements")), React.createElement("div", {
-    className: "stat stat--info"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, activeChannels), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Active channels")), React.createElement("div", {
-    className: "stat stat--accent"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, readyPostedCount), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Ready / posted")), React.createElement("div", {
-    className: "stat stat--warn"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, delayedCount), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Delayed"))), loadState.status === "loading" && React.createElement("div", {
+  }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan channel placements..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -2026,7 +2231,7 @@ function MarketingPlanChannelPlanScreen() {
     }
   }, "Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();")), loadState.status === "live" && groupedChannels.length === 0 && React.createElement("div", {
     className: "reason-box"
-  }, "No placements match ", getMarketingPlanMonthLabel(selectedMonth), " and ", selectedStatus === "all" ? "all statuses" : getMarketingPlanStatusLabel(selectedStatus), "."), loadState.status === "live" && groupedChannels.length > 0 && React.createElement("div", {
+  }, "No placements match ", getMarketingPlanMonthLabel(selectedMonth), ", ", selectedChannel === "all" ? "all channels" : getMarketingPlanChannelLabel(selectedChannel), ", and ", selectedStatus === "all" ? "all statuses" : getMarketingPlanStatusLabel(selectedStatus), "."), loadState.status === "live" && groupedChannels.length > 0 && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
@@ -2044,7 +2249,7 @@ function MarketingPlanChannelPlanScreen() {
     key: channel.key,
     className: "badge badge--neutral"
   }, channel.label)))), React.createElement("div", {
-    className: "card__body",
+    className: "card__body marketing-channel-plan",
     style: {
       display: "grid",
       gap: 14
@@ -2080,31 +2285,24 @@ function MarketingPlanChannelPlanScreen() {
       overflowX: "auto"
     }
   }, React.createElement("table", {
-    className: "table table--dense",
-    style: {
-      minWidth: 920
-    }
+    className: "table table--dense marketing-channel-table"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
-    style: {
-      width: 120
-    }
+    className: "col-date"
   }, "Publish date"), React.createElement("th", {
-    style: {
-      width: 90
-    }
-  }, "Time"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Asset / content"), React.createElement("th", {
-    style: {
-      width: 120
-    }
+    className: "col-time"
+  }, "Time"), React.createElement("th", {
+    className: "col-campaign"
+  }, "Campaign"), React.createElement("th", {
+    className: "col-asset"
+  }, "Asset / content"), React.createElement("th", {
+    className: "col-link"
+  }, "Brief Link"), React.createElement("th", {
+    className: "col-status"
   }, "Status"), React.createElement("th", {
-    style: {
-      width: 140
-    }
+    className: "col-pic"
   }, "PIC"))), React.createElement("tbody", null, group.placements.map(placement => React.createElement("tr", {
     key: placement.placementId || `${placement.channel}-${placement.contentItemId}-${placement.publishDate}-${placement.publishTime}`
-  }, React.createElement("td", {
-    className: "mono"
-  }, formatMarketingPlanDate(placement.publishDate)), React.createElement("td", {
+  }, React.createElement("td", null, formatMarketingPlanDate(placement.publishDate)), React.createElement("td", {
     className: "mono"
   }, formatMarketingPlanTime(placement.publishTime) || "-"), React.createElement("td", null, React.createElement("div", {
     className: "strong"
@@ -2118,7 +2316,12 @@ function MarketingPlanChannelPlanScreen() {
     style: {
       fontSize: 12
     }
-  }, [placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" · ") || "No details")), React.createElement("td", null, renderStatusBadge(placement.placementStatus)), React.createElement("td", null, placement.picName || "-")))))))))));
+  }, [placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" · ") || "No details")), React.createElement("td", null, placement.briefLink ? React.createElement("a", {
+    className: "marketing-working-link",
+    href: placement.briefLink,
+    target: "_blank",
+    rel: "noreferrer"
+  }, "Link") : "-"), React.createElement("td", null, renderStatusBadge(placement.placementStatus)), React.createElement("td", null, placement.picName || "-")))))))))));
 }
 function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
