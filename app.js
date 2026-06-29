@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-3";
+const FLOWMATE_APP_VERSION = "v20260629-4";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1446,6 +1446,26 @@ async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, cha
   }));
   return true;
 }
+async function updateMarketingPlanWorkingSheetContentFields(contentItemId, changes) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(changes, "briefLink")) {
+    const briefLink = String(changes.briefLink || "").trim();
+    payload.brief_link = briefLink || null;
+  }
+  if (Object.keys(payload).length === 0) return false;
+  const result = await window.flowmateSupabase.from("marketing_content_items").update(payload).eq("id", contentItemId);
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_working_sheet_updated"
+    }
+  }));
+  return true;
+}
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
   const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
   const headerLabels = ["Month", "Campaign", "Team", "Asset / Content", "Format", "Tier", "PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
@@ -1681,15 +1701,10 @@ function MarketingPlanTimelineScreen() {
       gap: 6,
       flexWrap: "wrap"
     }
-  }, React.createElement("span", {
-    className: "badge badge--neutral"
-  }, "Planned"), React.createElement("span", {
-    className: "badge badge--assigned"
-  }, "Ready"), React.createElement("span", {
-    className: "badge badge--delivered"
-  }, "Posted"), React.createElement("span", {
-    className: "badge badge--overdue"
-  }, "Delayed"))), React.createElement("div", {
+  }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("span", {
+    key: option.value,
+    className: `badge ${getMarketingPlanStatusClass(option.value)}`
+  }, option.label)))), React.createElement("div", {
     className: "card__body card__body--flush"
   }, React.createElement("div", {
     style: {
@@ -2563,6 +2578,29 @@ function MarketingPlanWorkingSheetScreen() {
       setUpdatingRowId("");
     }
   }
+  async function handleWorkingRowBriefLinkChange(row, nextBriefLink) {
+    const normalizedLink = String(nextBriefLink || "").trim();
+    if ((row.briefLink || "") === normalizedLink) return;
+    if (normalizedLink && !/^https?:\/\/[^\s]{4,}$/i.test(normalizedLink)) {
+      setExportMessage("Brief Link must start with http:// or https://.");
+      return;
+    }
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetContentFields(row.contentItemId, {
+        briefLink: normalizedLink
+      });
+      await loadWorkingSheetRows({
+        alive: true
+      });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet brief link update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Brief Link update failed.") : "Brief Link update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("h1", null, "Working Sheet"), React.createElement("p", null, "Recurring monthly plan entry. Views read from these Campaign, Content Item, and Channel Placement records."))), loadState.status === "error" && React.createElement("div", {
@@ -2797,6 +2835,8 @@ function MarketingPlanWorkingSheetScreen() {
   }, "Time"), React.createElement("th", {
     className: "col-link"
   }, "Brief Link"), React.createElement("th", {
+    className: "col-pic"
+  }, "PIC"), React.createElement("th", {
     className: "col-status"
   }, "Status"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => React.createElement("tr", {
     key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`
@@ -2816,12 +2856,23 @@ function MarketingPlanWorkingSheetScreen() {
     onClick: openNativeTimePicker,
     onFocus: openNativeTimePicker,
     onChange: event => handleWorkingRowTimeChange(row, event.target.value)
-  })), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+  })), React.createElement("td", null, React.createElement("div", {
+    className: "marketing-working-link-edit"
+  }, React.createElement("input", {
+    className: "input marketing-working-brief",
+    defaultValue: row.briefLink || "",
+    disabled: updatingRowId === row.contentItemId,
+    placeholder: "https://...",
+    onBlur: event => handleWorkingRowBriefLinkChange(row, event.target.value),
+    onKeyDown: event => {
+      if (event.key === "Enter") event.currentTarget.blur();
+    }
+  }), row.briefLink && React.createElement("a", {
     className: "marketing-working-link",
     href: row.briefLink,
     target: "_blank",
     rel: "noreferrer"
-  }, "Open") : "-"), React.createElement("td", null, React.createElement("select", {
+  }, "Open"))), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
     className: "select marketing-working-status",
     value: normalizeMarketingPlanWorkingStatus(row.placementStatus),
     disabled: updatingRowId === row.contentItemId,
@@ -2830,7 +2881,7 @@ function MarketingPlanWorkingSheetScreen() {
     key: option.value,
     value: option.value
   }, option.label, row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : "")))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "10",
+    colSpan: "11",
     className: "muted"
   }, "No rows match the selected filters."))))))));
 }

@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-3";
+const FLOWMATE_APP_VERSION = "v20260629-4";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1363,6 +1363,26 @@ async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, cha
   return true;
 }
 
+async function updateMarketingPlanWorkingSheetContentFields(contentItemId, changes) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(changes, "briefLink")) {
+    const briefLink = String(changes.briefLink || "").trim();
+    payload.brief_link = briefLink || null;
+  }
+  if (Object.keys(payload).length === 0) return false;
+  const result = await window.flowmateSupabase
+    .from("marketing_content_items")
+    .update(payload)
+    .eq("id", contentItemId);
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "marketing_plan_working_sheet_updated" } }));
+  return true;
+}
+
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
   const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
   const headerLabels = [
@@ -1638,10 +1658,11 @@ function MarketingPlanTimelineScreen() {
               <div className="card__sub">Main row = Campaign, sub-row = Asset, columns = publish date</div>
             </div>
             <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-              <span className="badge badge--neutral">Planned</span>
-              <span className="badge badge--assigned">Ready</span>
-              <span className="badge badge--delivered">Posted</span>
-              <span className="badge badge--overdue">Delayed</span>
+              {MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => (
+                <span key={option.value} className={`badge ${getMarketingPlanStatusClass(option.value)}`}>
+                  {option.label}
+                </span>
+              ))}
             </div>
           </div>
           <div className="card__body card__body--flush">
@@ -2393,6 +2414,26 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
 
+  async function handleWorkingRowBriefLinkChange(row, nextBriefLink) {
+    const normalizedLink = String(nextBriefLink || "").trim();
+    if ((row.briefLink || "") === normalizedLink) return;
+    if (normalizedLink && !/^https?:\/\/[^\s]{4,}$/i.test(normalizedLink)) {
+      setExportMessage("Brief Link must start with http:// or https://.");
+      return;
+    }
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetContentFields(row.contentItemId, { briefLink: normalizedLink });
+      await loadWorkingSheetRows({ alive: true });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet brief link update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Brief Link update failed.") : "Brief Link update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
+
   return (
     <div>
       <div className="page-head">
@@ -2550,6 +2591,7 @@ function MarketingPlanWorkingSheetScreen() {
                   <th className="col-date">Publish Date</th>
                   <th className="col-time">Time</th>
                   <th className="col-link">Brief Link</th>
+                  <th className="col-pic">PIC</th>
                   <th className="col-status">Status</th>
                 </tr>
               </thead>
@@ -2583,10 +2625,23 @@ function MarketingPlanWorkingSheetScreen() {
                       />
                     </td>
                     <td>
-                      {row.briefLink ? (
-                        <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
-                      ) : "-"}
+                      <div className="marketing-working-link-edit">
+                        <input
+                          className="input marketing-working-brief"
+                          defaultValue={row.briefLink || ""}
+                          disabled={updatingRowId === row.contentItemId}
+                          placeholder="https://..."
+                          onBlur={event => handleWorkingRowBriefLinkChange(row, event.target.value)}
+                          onKeyDown={event => {
+                            if (event.key === "Enter") event.currentTarget.blur();
+                          }}
+                        />
+                        {row.briefLink && (
+                          <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
+                        )}
+                      </div>
                     </td>
+                    <td>{row.picName || "-"}</td>
                     <td>
                       <select
                         className="select marketing-working-status"
@@ -2605,7 +2660,7 @@ function MarketingPlanWorkingSheetScreen() {
                 ))}
                 {visibleRows.length === 0 && (
                   <tr>
-                    <td colSpan="10" className="muted">No rows match the selected filters.</td>
+                    <td colSpan="11" className="muted">No rows match the selected filters.</td>
                   </tr>
                 )}
               </tbody>
