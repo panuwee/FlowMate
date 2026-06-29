@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-13";
+const FLOWMATE_APP_VERSION = "v20260629-14";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1306,7 +1306,11 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     priority: "normal",
     urgentReason: "",
     dueDate: launchDate,
-    launchDate
+    launchDate,
+    marketingPlanContentItemId: row.contentItemId || "",
+    marketingPlanOriginalBriefLink: row.briefLink || "",
+    marketingPlanProductEvent: productEvent,
+    marketingPlanCampaignName: campaignName
   };
 }
 function openFlowMateCreativeBriefFromMarketingRow(row) {
@@ -1640,6 +1644,27 @@ async function createMarketingPlanWorkingSheetRow(form) {
     placementCount: placementRows.length
   };
 }
+async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(contentItemId, briefLink) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  if (!briefLink) throw new Error("Creative Request link is missing.");
+  const result = await window.flowmateSupabase.from("marketing_content_items").update({
+    brief_link: briefLink
+  }).eq("id", contentItemId);
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_creative_request_link"
+    }
+  }));
+  return {
+    contentItemId,
+    briefLink
+  };
+}
+window.updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest = updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest;
 async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, changes) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");

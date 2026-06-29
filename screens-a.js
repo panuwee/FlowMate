@@ -939,7 +939,7 @@ function normalizeFlowMateCreativeDraft(draft) {
 }
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
   quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority"],
-  creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate"]
+  creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "marketingPlanContentItemId", "marketingPlanOriginalBriefLink", "marketingPlanProductEvent", "marketingPlanCampaignName"]
 };
 function getDefaultQuickDraft() {
   const requesterTeam = getDefaultRequesterTeam();
@@ -975,7 +975,11 @@ function getDefaultCreativeDraft() {
     priority: "normal",
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
-    launchDate: todayDate
+    launchDate: todayDate,
+    marketingPlanContentItemId: "",
+    marketingPlanOriginalBriefLink: "",
+    marketingPlanProductEvent: "",
+    marketingPlanCampaignName: ""
   };
 }
 function getDefaultRequesterTeam() {
@@ -1066,6 +1070,19 @@ function clearFlowMateCreateDraft(kind) {
 function getDefaultQuickAssignee(options = FLOWMATE_ASSIGNEE_FALLBACK) {
   const currentUserId = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id;
   return options.find(option => option.userId === currentUserId) || options.find(option => option.name === "Pond") || options[0];
+}
+function getFlowMateCreativeRequestDetailUrl(displayId) {
+  if (!displayId) return "";
+  return `${window.location.origin}${window.location.pathname}#detail/${displayId}`;
+}
+async function syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, created) {
+  if (!submissionDraft || !submissionDraft.marketingPlanContentItemId) return null;
+  if (String(submissionDraft.marketingPlanOriginalBriefLink || "").trim()) return null;
+  if (!window.updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest) return null;
+  const displayId = window.getFlowMateCreatedDisplayId(created);
+  const detailUrl = getFlowMateCreativeRequestDetailUrl(displayId);
+  if (!detailUrl) return null;
+  return window.updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(submissionDraft.marketingPlanContentItemId, detailUrl);
 }
 function CreateScreen({
   onNav,
@@ -1210,6 +1227,11 @@ function CreateScreen({
         };
       } else {
         created = await window.createFlowMateCreativeRequest(submissionDraft);
+        try {
+          await syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, created);
+        } catch (syncError) {
+          console.warn("[FlowMate Create] Marketing Plan link backfill failed:", syncError);
+        }
         const assignment = created.assignment || {};
         const result = assignment.result || "queued";
         nextResult = {
