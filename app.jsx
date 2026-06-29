@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-8";
+const FLOWMATE_APP_VERSION = "v20260629-10";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1509,26 +1509,6 @@ async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, cha
   return true;
 }
 
-async function updateMarketingPlanWorkingSheetContentFields(contentItemId, changes) {
-  if (!window.flowmateSupabase) {
-    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
-  }
-  if (!contentItemId) throw new Error("Content item is missing.");
-  const payload = {};
-  if (Object.prototype.hasOwnProperty.call(changes, "briefLink")) {
-    const briefLink = String(changes.briefLink || "").trim();
-    payload.brief_link = briefLink || null;
-  }
-  if (Object.keys(payload).length === 0) return false;
-  const result = await window.flowmateSupabase
-    .from("marketing_content_items")
-    .update(payload)
-    .eq("id", contentItemId);
-  if (result.error) throw result.error;
-  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "marketing_plan_working_sheet_updated" } }));
-  return true;
-}
-
 async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
@@ -2445,8 +2425,6 @@ function MarketingPlanCalendarScreen() {
     map.get(row.publishDate).push(row);
     return map;
   }, new Map());
-  const readyPostedCount = visibleRows.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
-  const delayedCount = visibleRows.filter(row => row.placementStatus === "delayed").length;
 
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
@@ -2526,13 +2504,6 @@ function MarketingPlanCalendarScreen() {
             <Icon name="refresh" /> Refresh
           </button>
         </div>
-      </div>
-
-      <div className="stat-strip" style={{ marginBottom: 16 }}>
-        <div className="stat"><div className="stat__num mono">{visibleRows.length}</div><div className="stat__lbl">Placements</div></div>
-        <div className="stat stat--info"><div className="stat__num mono">{channelOptions.length}</div><div className="stat__lbl">Channels</div></div>
-        <div className="stat stat--accent"><div className="stat__num mono">{readyPostedCount}</div><div className="stat__lbl">Ready / posted</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{delayedCount}</div><div className="stat__lbl">Delayed</div></div>
       </div>
 
       {loadState.status === "loading" && <div className="reason-box">Loading Marketing Plan calendar...</div>}
@@ -2902,45 +2873,6 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
 
-  async function handleWorkingRowTimeChange(row, nextTime) {
-    const normalizedTime = normalizeMarketingPlanTimeInput(nextTime);
-    if (!normalizedTime) {
-      setExportMessage("Time must use HH:MM, for example 15:00.");
-      return;
-    }
-    setUpdatingRowId(row.contentItemId);
-    setExportMessage("");
-    try {
-      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, { publishTime: normalizedTime });
-      await loadWorkingSheetRows({ alive: true });
-    } catch (error) {
-      console.error("[Marketing Plan] Working Sheet time update failed:", error);
-      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Time update failed.") : "Time update failed.");
-    } finally {
-      setUpdatingRowId("");
-    }
-  }
-
-  async function handleWorkingRowBriefLinkChange(row, nextBriefLink) {
-    const normalizedLink = String(nextBriefLink || "").trim();
-    if ((row.briefLink || "") === normalizedLink) return;
-    if (normalizedLink && !/^https?:\/\/[^\s]{4,}$/i.test(normalizedLink)) {
-      setExportMessage("Brief Link must start with http:// or https://.");
-      return;
-    }
-    setUpdatingRowId(row.contentItemId);
-    setExportMessage("");
-    try {
-      await updateMarketingPlanWorkingSheetContentFields(row.contentItemId, { briefLink: normalizedLink });
-      await loadWorkingSheetRows({ alive: true });
-    } catch (error) {
-      console.error("[Marketing Plan] Working Sheet brief link update failed:", error);
-      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Brief Link update failed.") : "Brief Link update failed.");
-    } finally {
-      setUpdatingRowId("");
-    }
-  }
-
   return (
     <div>
       <div className="page-head">
@@ -2978,7 +2910,14 @@ function MarketingPlanWorkingSheetScreen() {
             </label>
             <label className="field">
               <span className="field__label">Launch Date *</span>
-              <input className="input" type="date" value={sheetForm.launchDate} onChange={event => updateSheetForm("launchDate", event.target.value)} />
+              <input
+                className="input"
+                type="date"
+                value={sheetForm.launchDate}
+                onClick={openNativeTimePicker}
+                onFocus={openNativeTimePicker}
+                onChange={event => updateSheetForm("launchDate", event.target.value)}
+              />
             </label>
             <label className="field">
               <span className="field__label">Time *</span>
@@ -3130,35 +3069,14 @@ function MarketingPlanWorkingSheetScreen() {
                     </td>
                     <td>{formatMarketingPlanDate(row.publishDate)}</td>
                     <td>
-                      <input
-                        className="input marketing-working-time"
-                        type="text"
-                        inputMode="numeric"
-                        defaultValue={formatMarketingPlanTime(row.publishTime)}
-                        disabled={updatingRowId === row.contentItemId}
-                        placeholder="HH:MM"
-                        onBlur={event => handleWorkingRowTimeChange(row, event.target.value)}
-                        onKeyDown={event => {
-                          if (event.key === "Enter") event.currentTarget.blur();
-                        }}
-                      />
+                      <span className="mono marketing-working-time-text">{formatMarketingPlanTime(row.publishTime) || "-"}</span>
                     </td>
                     <td>
-                      <div className="marketing-working-link-edit">
-                        <input
-                          className="input marketing-working-brief"
-                          defaultValue={row.briefLink || ""}
-                          disabled={updatingRowId === row.contentItemId}
-                          placeholder="https://..."
-                          onBlur={event => handleWorkingRowBriefLinkChange(row, event.target.value)}
-                          onKeyDown={event => {
-                            if (event.key === "Enter") event.currentTarget.blur();
-                          }}
-                        />
-                        {row.briefLink && (
-                          <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
-                        )}
-                      </div>
+                      {row.briefLink ? (
+                        <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
+                      ) : (
+                        <span className="muted">-</span>
+                      )}
                     </td>
                     <td>{row.picName || "-"}</td>
                     <td>
@@ -3227,7 +3145,14 @@ function MarketingPlanWorkingSheetScreen() {
               </label>
               <label className="field">
                 <span className="field__label">Publish Date *</span>
-                <input className="input" type="date" value={editForm.publishDate} onChange={event => updateEditForm("publishDate", event.target.value)} />
+                <input
+                  className="input"
+                  type="date"
+                  value={editForm.publishDate}
+                  onClick={openNativeTimePicker}
+                  onFocus={openNativeTimePicker}
+                  onChange={event => updateEditForm("publishDate", event.target.value)}
+                />
               </label>
               <label className="field">
                 <span className="field__label">Time *</span>

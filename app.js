@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-8";
+const FLOWMATE_APP_VERSION = "v20260629-10";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1586,26 +1586,6 @@ async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, cha
   }));
   return true;
 }
-async function updateMarketingPlanWorkingSheetContentFields(contentItemId, changes) {
-  if (!window.flowmateSupabase) {
-    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
-  }
-  if (!contentItemId) throw new Error("Content item is missing.");
-  const payload = {};
-  if (Object.prototype.hasOwnProperty.call(changes, "briefLink")) {
-    const briefLink = String(changes.briefLink || "").trim();
-    payload.brief_link = briefLink || null;
-  }
-  if (Object.keys(payload).length === 0) return false;
-  const result = await window.flowmateSupabase.from("marketing_content_items").update(payload).eq("id", contentItemId);
-  if (result.error) throw result.error;
-  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
-    detail: {
-      reason: "marketing_plan_working_sheet_updated"
-    }
-  }));
-  return true;
-}
 async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
@@ -2537,8 +2517,6 @@ function MarketingPlanCalendarScreen() {
     map.get(row.publishDate).push(row);
     return map;
   }, new Map());
-  const readyPostedCount = visibleRows.filter(row => ["ready", "ready_to_post", "scheduled", "posted"].includes(row.placementStatus)).length;
-  const delayedCount = visibleRows.filter(row => row.placementStatus === "delayed").length;
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
     return React.createElement("span", {
@@ -2620,36 +2598,7 @@ function MarketingPlanCalendarScreen() {
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), React.createElement("div", {
-    className: "stat-strip",
-    style: {
-      marginBottom: 16
-    }
-  }, React.createElement("div", {
-    className: "stat"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, visibleRows.length), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Placements")), React.createElement("div", {
-    className: "stat stat--info"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, channelOptions.length), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Channels")), React.createElement("div", {
-    className: "stat stat--accent"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, readyPostedCount), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Ready / posted")), React.createElement("div", {
-    className: "stat stat--warn"
-  }, React.createElement("div", {
-    className: "stat__num mono"
-  }, delayedCount), React.createElement("div", {
-    className: "stat__lbl"
-  }, "Delayed"))), loadState.status === "loading" && React.createElement("div", {
+  }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan calendar..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -3059,51 +3008,6 @@ function MarketingPlanWorkingSheetScreen() {
       setUpdatingRowId("");
     }
   }
-  async function handleWorkingRowTimeChange(row, nextTime) {
-    const normalizedTime = normalizeMarketingPlanTimeInput(nextTime);
-    if (!normalizedTime) {
-      setExportMessage("Time must use HH:MM, for example 15:00.");
-      return;
-    }
-    setUpdatingRowId(row.contentItemId);
-    setExportMessage("");
-    try {
-      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, {
-        publishTime: normalizedTime
-      });
-      await loadWorkingSheetRows({
-        alive: true
-      });
-    } catch (error) {
-      console.error("[Marketing Plan] Working Sheet time update failed:", error);
-      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Time update failed.") : "Time update failed.");
-    } finally {
-      setUpdatingRowId("");
-    }
-  }
-  async function handleWorkingRowBriefLinkChange(row, nextBriefLink) {
-    const normalizedLink = String(nextBriefLink || "").trim();
-    if ((row.briefLink || "") === normalizedLink) return;
-    if (normalizedLink && !/^https?:\/\/[^\s]{4,}$/i.test(normalizedLink)) {
-      setExportMessage("Brief Link must start with http:// or https://.");
-      return;
-    }
-    setUpdatingRowId(row.contentItemId);
-    setExportMessage("");
-    try {
-      await updateMarketingPlanWorkingSheetContentFields(row.contentItemId, {
-        briefLink: normalizedLink
-      });
-      await loadWorkingSheetRows({
-        alive: true
-      });
-    } catch (error) {
-      console.error("[Marketing Plan] Working Sheet brief link update failed:", error);
-      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Brief Link update failed.") : "Brief Link update failed.");
-    } finally {
-      setUpdatingRowId("");
-    }
-  }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("h1", null, "Working Sheet"), React.createElement("p", null, "Recurring monthly plan entry. Views read from these Campaign, Content Item, and Channel Placement records."))), loadState.status === "error" && React.createElement("div", {
@@ -3159,6 +3063,8 @@ function MarketingPlanWorkingSheetScreen() {
     className: "input",
     type: "date",
     value: sheetForm.launchDate,
+    onClick: openNativeTimePicker,
+    onFocus: openNativeTimePicker,
     onChange: event => updateSheetForm("launchDate", event.target.value)
   })), React.createElement("label", {
     className: "field"
@@ -3352,34 +3258,16 @@ function MarketingPlanWorkingSheetScreen() {
     key: channel,
     className: "marketing-channel-tag",
     title: getMarketingPlanChannelLabel(channel)
-  }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("input", {
-    className: "input marketing-working-time",
-    type: "text",
-    inputMode: "numeric",
-    defaultValue: formatMarketingPlanTime(row.publishTime),
-    disabled: updatingRowId === row.contentItemId,
-    placeholder: "HH:MM",
-    onBlur: event => handleWorkingRowTimeChange(row, event.target.value),
-    onKeyDown: event => {
-      if (event.key === "Enter") event.currentTarget.blur();
-    }
-  })), React.createElement("td", null, React.createElement("div", {
-    className: "marketing-working-link-edit"
-  }, React.createElement("input", {
-    className: "input marketing-working-brief",
-    defaultValue: row.briefLink || "",
-    disabled: updatingRowId === row.contentItemId,
-    placeholder: "https://...",
-    onBlur: event => handleWorkingRowBriefLinkChange(row, event.target.value),
-    onKeyDown: event => {
-      if (event.key === "Enter") event.currentTarget.blur();
-    }
-  }), row.briefLink && React.createElement("a", {
+  }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("span", {
+    className: "mono marketing-working-time-text"
+  }, formatMarketingPlanTime(row.publishTime) || "-")), React.createElement("td", null, row.briefLink ? React.createElement("a", {
     className: "marketing-working-link",
     href: row.briefLink,
     target: "_blank",
     rel: "noreferrer"
-  }, "Open"))), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
+  }, "Open") : React.createElement("span", {
+    className: "muted"
+  }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
     className: "select marketing-working-status",
     value: normalizeMarketingPlanWorkingStatus(row.placementStatus),
     disabled: updatingRowId === row.contentItemId,
@@ -3446,6 +3334,8 @@ function MarketingPlanWorkingSheetScreen() {
     className: "input",
     type: "date",
     value: editForm.publishDate,
+    onClick: openNativeTimePicker,
+    onFocus: openNativeTimePicker,
     onChange: event => updateEditForm("publishDate", event.target.value)
   })), React.createElement("label", {
     className: "field"
