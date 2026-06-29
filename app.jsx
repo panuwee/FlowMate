@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260626-6";
+const FLOWMATE_APP_VERSION = "v20260626-7";
 
 const NAV = [
   { group: "Personal", items: [
@@ -908,6 +908,49 @@ const MARKETING_PLAN_CHANNELS = [
   { key: "other", label: "Other" },
 ];
 
+const MARKETING_PLAN_ASSET_TYPES = [
+  "Banner",
+  "Video",
+  "Shorts/Reels",
+  "Story",
+  "Album",
+  "Cover/Profile",
+  "PR",
+  "GIF",
+  "Live",
+];
+
+const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
+
+function getDefaultMarketingPlanWorkingSheetForm() {
+  const today = flowMateTodayDateKey();
+  return {
+    campaignName: "",
+    team: "",
+    launchDate: today,
+    publishTime: "12:00",
+    assetType: "Banner",
+    details: "",
+    contentTier: "B",
+    picName: "",
+    briefLink: "",
+    channels: ["facebook"],
+    note: "",
+  };
+}
+
+function marketingPlanMonthKeyFromDate(dateKey) {
+  return dateKey && /^\d{4}-\d{2}-\d{2}/.test(String(dateKey))
+    ? String(dateKey).slice(0, 7)
+    : flowMateTodayDateKey().slice(0, 7);
+}
+
+function marketingPlanTitleFromDetails(details, assetType) {
+  const text = String(details || "").trim().replace(/\s+/g, " ");
+  if (text) return text.slice(0, 90);
+  return `${assetType || "Asset"} content`;
+}
+
 function getMarketingPlanChannelOptions(rows, selectedMonth) {
   const channels = new Set();
   (rows || []).forEach(row => {
@@ -984,6 +1027,110 @@ async function loadMarketingPlanTimelineRows(orderBy = "publish_date") {
   const result = await query;
   if (result.error) throw result.error;
   return (result.data || []).map(normalizeMarketingPlanTimelineRow);
+}
+
+async function findOrCreateMarketingPlan(monthKey) {
+  const title = `Marketing Plan - ${getMarketingPlanMonthLabel(monthKey)}`;
+  const existing = await window.flowmateSupabase
+    .from("marketing_plans")
+    .select("id")
+    .eq("month_key", monthKey)
+    .neq("status", "archived")
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (existing.error) throw existing.error;
+  if (existing.data && existing.data[0]) return existing.data[0].id;
+
+  const inserted = await window.flowmateSupabase
+    .from("marketing_plans")
+    .insert({
+      month_key: monthKey,
+      title,
+      market: "TH",
+      audience_scope: "TH ONLY",
+      plan_date: `${monthKey}-01`,
+      status: "active",
+    })
+    .select("id")
+    .single();
+  if (inserted.error) throw inserted.error;
+  return inserted.data.id;
+}
+
+async function findOrCreateMarketingCampaign(planId, name, team) {
+  const campaignName = String(name || "").trim();
+  const existing = await window.flowmateSupabase
+    .from("marketing_campaigns")
+    .select("id")
+    .eq("plan_id", planId)
+    .eq("name", campaignName)
+    .limit(1);
+  if (existing.error) throw existing.error;
+  if (existing.data && existing.data[0]) return existing.data[0].id;
+
+  const inserted = await window.flowmateSupabase
+    .from("marketing_campaigns")
+    .insert({
+      plan_id: planId,
+      name: campaignName,
+      team: team || null,
+      start_date: null,
+      end_date: null,
+      sort_order: 100,
+    })
+    .select("id")
+    .single();
+  if (inserted.error) throw inserted.error;
+  return inserted.data.id;
+}
+
+async function createMarketingPlanWorkingSheetRow(form) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const monthKey = marketingPlanMonthKeyFromDate(form.launchDate);
+  const planId = await findOrCreateMarketingPlan(monthKey);
+  const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, form.team);
+  const title = marketingPlanTitleFromDetails(form.details, form.assetType);
+
+  const content = await window.flowmateSupabase
+    .from("marketing_content_items")
+    .insert({
+      campaign_id: campaignId,
+      title,
+      details: form.details || null,
+      team: form.team || null,
+      format: form.assetType || null,
+      content_tier: form.contentTier || null,
+      pic_name: form.picName || null,
+      note: form.note || null,
+      brief_link: form.briefLink || null,
+      source_start_date: form.launchDate || null,
+      source_start_time: form.publishTime || null,
+      status: "not_started",
+      sort_order: 100,
+    })
+    .select("id")
+    .single();
+  if (content.error) throw content.error;
+
+  const selectedChannels = Array.isArray(form.channels) && form.channels.length
+    ? form.channels
+    : ["other"];
+  const placementRows = selectedChannels.map(channel => ({
+    content_item_id: content.data.id,
+    channel,
+    publish_date: form.launchDate,
+    publish_time: form.publishTime || null,
+    placement_status: "planned",
+    note: form.note || null,
+  }));
+
+  const placements = await window.flowmateSupabase
+    .from("marketing_channel_placements")
+    .insert(placementRows);
+  if (placements.error) throw placements.error;
+  return { planId, campaignId, contentItemId: content.data.id, placementCount: placementRows.length };
 }
 
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
@@ -1809,48 +1956,51 @@ function MarketingPlanCalendarScreen() {
   );
 }
 
-function MarketingPlanImportExportScreen() {
+function MarketingPlanWorkingSheetScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
   const [exportMessage, setExportMessage] = useStateApp("");
-  const [loadState, setLoadState] = useStateApp({ status: "loading", message: "Loading Marketing Plan export rows..." });
+  const [sheetForm, setSheetForm] = useStateApp(getDefaultMarketingPlanWorkingSheetForm);
+  const [saveState, setSaveState] = useStateApp({ status: "idle", message: "" });
+  const [loadState, setLoadState] = useStateApp({ status: "loading", message: "Loading Marketing Plan working sheet..." });
+
+  async function loadWorkingSheetRows(aliveRef) {
+    try {
+      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
+      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      if (aliveRef && !aliveRef.alive) return;
+      setRows(normalizedRows);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : (monthOptions[0] || marketingPlanMonthKeyFromDate(sheetForm.launchDate)));
+      setSelectedChannel("all");
+      setLoadState({
+        status: normalizedRows.length ? "live" : "empty",
+        message: normalizedRows.length
+          ? "Live Marketing Plan working sheet data"
+          : "No Marketing Plan data yet. Add the first row below.",
+      });
+    } catch (error) {
+      if (aliveRef && !aliveRef.alive) return;
+      console.error("[Marketing Plan] Working Sheet load failed:", error);
+      setRows([]);
+      setSelectedMonth("");
+      setSelectedChannel("all");
+      setLoadState({
+        status: "error",
+        message: window.flowmateUserError
+          ? window.flowmateUserError(error, "Marketing Plan working sheet load failed. Run supabase/marketing_plan.sql first.")
+          : "Marketing Plan working sheet load failed. Run supabase/marketing_plan.sql first.",
+      });
+    }
+  }
 
   useEffectApp(() => {
-    let alive = true;
-    async function loadExportRows() {
-      try {
-        const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
-        const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
-        if (!alive) return;
-        setRows(normalizedRows);
-        setSelectedMonth(current => current && monthOptions.includes(current) ? current : (monthOptions[0] || ""));
-        setSelectedChannel("all");
-        setLoadState({
-          status: normalizedRows.length ? "live" : "empty",
-          message: normalizedRows.length
-            ? "Live Marketing Plan export data"
-            : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();",
-        });
-      } catch (error) {
-        if (!alive) return;
-        console.error("[Marketing Plan] Export load failed:", error);
-        setRows([]);
-        setSelectedMonth("");
-        setSelectedChannel("all");
-        setLoadState({
-          status: "error",
-          message: window.flowmateUserError
-            ? window.flowmateUserError(error, "Marketing Plan export load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();")
-            : "Marketing Plan export load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();",
-        });
-      }
-    }
-
-    loadExportRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadExportRows) : () => {};
+    const aliveRef = { alive: true };
+    const loadRows = () => loadWorkingSheetRows(aliveRef);
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
     return () => {
-      alive = false;
+      aliveRef.alive = false;
       cleanup();
     };
   }, []);
@@ -1858,6 +2008,66 @@ function MarketingPlanImportExportScreen() {
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
   const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+
+  function updateSheetForm(key, value) {
+    setSheetForm(current => ({ ...current, [key]: value }));
+  }
+
+  function toggleSheetChannel(channelKey) {
+    setSheetForm(current => {
+      const currentChannels = Array.isArray(current.channels) ? current.channels : [];
+      const nextChannels = currentChannels.includes(channelKey)
+        ? currentChannels.filter(channel => channel !== channelKey)
+        : [...currentChannels, channelKey];
+      return { ...current, channels: nextChannels.length ? nextChannels : [channelKey] };
+    });
+  }
+
+  async function handleSaveWorkingSheetRow(event) {
+    event.preventDefault();
+    const required = [
+      ["campaignName", "Campaign is required."],
+      ["team", "Team is required."],
+      ["launchDate", "Launch Date is required."],
+      ["publishTime", "Time is required."],
+      ["assetType", "Asset Type is required."],
+      ["details", "Details are required."],
+      ["contentTier", "Content Tier is required."],
+      ["picName", "PIC is required."],
+    ];
+    const missing = required.find(([key]) => !String(sheetForm[key] || "").trim());
+    if (missing) {
+      setSaveState({ status: "error", message: missing[1] });
+      return;
+    }
+    if (!sheetForm.channels || sheetForm.channels.length === 0) {
+      setSaveState({ status: "error", message: "Select at least one Channel Tag." });
+      return;
+    }
+
+    setSaveState({ status: "saving", message: "Saving Working Sheet row..." });
+    try {
+      const result = await createMarketingPlanWorkingSheetRow(sheetForm);
+      setSaveState({ status: "saved", message: `Saved 1 asset with ${result.placementCount} channel placement${result.placementCount === 1 ? "" : "s"}.` });
+      setSheetForm(current => ({
+        ...getDefaultMarketingPlanWorkingSheetForm(),
+        launchDate: current.launchDate,
+        publishTime: current.publishTime,
+        team: current.team,
+        campaignName: current.campaignName,
+      }));
+      await loadWorkingSheetRows({ alive: true });
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "marketing_plan_working_sheet_saved" } }));
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet save failed:", error);
+      setSaveState({
+        status: "error",
+        message: window.flowmateUserError
+          ? window.flowmateUserError(error, "Working Sheet save failed.")
+          : "Working Sheet save failed.",
+      });
+    }
+  }
 
   function handleExportCsv() {
     const exportedCount = exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel);
@@ -1868,8 +2078,8 @@ function MarketingPlanImportExportScreen() {
     <div>
       <div className="page-head">
         <div>
-          <h1>Import / Export</h1>
-          <p>Download visible Marketing Plan rows as CSV. Import mapping is prepared for the next pass.</p>
+          <h1>Working Sheet</h1>
+          <p>Recurring monthly plan entry. Views read from these Campaign, Content Item, and Channel Placement records.</p>
         </div>
       </div>
 
@@ -1878,25 +2088,99 @@ function MarketingPlanImportExportScreen() {
           <div className="strong">Marketing Plan data is not ready.</div>
           <div style={{ marginTop: 4 }}>{loadState.message}</div>
           <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-            SQL required: supabase/marketing_plan.sql. Optional sample data: select public.marketing_plan_june_2026_sample();
+            SQL required: supabase/marketing_plan.sql. Saving requires a user role allowed by Marketing Plan RLS.
           </div>
         </div>
       )}
 
-      {loadState.status === "empty" && (
-        <div className="reason-box">
-          <div className="strong">No Marketing Plan data yet.</div>
-          <div className="muted" style={{ marginTop: 4 }}>
-            Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card__head">
+          <div>
+            <span className="card__title">Add monthly working row</span>
+            <div className="card__sub">Use this instead of entering the recurring plan in Google Sheet.</div>
           </div>
         </div>
-      )}
+        <form className="card__body" onSubmit={handleSaveWorkingSheetRow}>
+          <div className="form-grid">
+            <label className="field">
+              <span className="field__label">Campaign *</span>
+              <input className="input" value={sheetForm.campaignName} onChange={event => updateSheetForm("campaignName", event.target.value)} placeholder="e.g. New Patch update : 26.05" />
+            </label>
+            <label className="field">
+              <span className="field__label">Team *</span>
+              <input className="input" value={sheetForm.team} onChange={event => updateSheetForm("team", event.target.value)} placeholder="e.g. Marketing, Esport, Operations" />
+            </label>
+            <label className="field">
+              <span className="field__label">Launch Date *</span>
+              <input className="input" type="date" value={sheetForm.launchDate} onChange={event => updateSheetForm("launchDate", event.target.value)} />
+            </label>
+            <label className="field">
+              <span className="field__label">Time *</span>
+              <input className="input" type="time" value={sheetForm.publishTime} onChange={event => updateSheetForm("publishTime", event.target.value)} />
+            </label>
+            <label className="field">
+              <span className="field__label">Asset Type *</span>
+              <select className="select" value={sheetForm.assetType} onChange={event => updateSheetForm("assetType", event.target.value)}>
+                {MARKETING_PLAN_ASSET_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span className="field__label">Content Tier *</span>
+              <select className="select" value={sheetForm.contentTier} onChange={event => updateSheetForm("contentTier", event.target.value)}>
+                {MARKETING_PLAN_CONTENT_TIERS.map(tier => <option key={tier} value={tier}>{tier}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span className="field__label">PIC *</span>
+              <input className="input" value={sheetForm.picName} onChange={event => updateSheetForm("picName", event.target.value)} placeholder="e.g. Panu, May, Ploy" />
+            </label>
+            <label className="field">
+              <span className="field__label">Brief Link</span>
+              <input className="input" value={sheetForm.briefLink} onChange={event => updateSheetForm("briefLink", event.target.value)} placeholder="https://..." />
+            </label>
+            <label className="field field--full">
+              <span className="field__label">Details *</span>
+              <textarea className="textarea" rows="3" value={sheetForm.details} onChange={event => updateSheetForm("details", event.target.value)} placeholder="Content details, message, format requirements, or sheet note." />
+            </label>
+            <div className="field field--full">
+              <span className="field__label">Channel Tag *</span>
+              <div className="check-row">
+                {MARKETING_PLAN_CHANNELS.filter(channel => channel.key !== "other").map(channel => (
+                  <label key={channel.key} className="check-pill">
+                    <input
+                      type="checkbox"
+                      checked={(sheetForm.channels || []).includes(channel.key)}
+                      onChange={() => toggleSheetChannel(channel.key)}
+                    />
+                    <span>{channel.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="field field--full">
+              <span className="field__label">Note</span>
+              <textarea className="textarea" rows="2" value={sheetForm.note} onChange={event => updateSheetForm("note", event.target.value)} placeholder="Internal note, dependency, posting instruction, or campaign context." />
+            </label>
+          </div>
+          {saveState.message && (
+            <div className={`reason-box ${saveState.status === "error" ? "reason-box--need" : ""}`} style={{ marginTop: 12 }}>
+              {saveState.message}
+            </div>
+          )}
+          <div className="modal__actions" style={{ marginTop: 12 }}>
+            <button type="button" className="btn btn--secondary" onClick={() => setSheetForm(getDefaultMarketingPlanWorkingSheetForm())}>Clear</button>
+            <button type="submit" className="btn btn--primary" disabled={saveState.status === "saving"}>
+              {saveState.status === "saving" ? "Saving..." : "Save to Marketing Plan"}
+            </button>
+          </div>
+        </form>
+      </div>
 
       <div className="card">
         <div className="card__head">
           <div>
-            <span className="card__title">Export planning rows</span>
-            <div className="card__sub">CSV includes month, campaign, team, content, channel, schedule, status, PIC, and note.</div>
+            <span className="card__title">Current working rows</span>
+            <div className="card__sub">These rows feed Campaign Timeline, Channel Plan, Calendar, and CSV export.</div>
           </div>
         </div>
         <div className="card__body">
@@ -1976,10 +2260,6 @@ function MarketingPlanImportExportScreen() {
           </div>
         </div>
       </div>
-
-      <div className="reason-box" style={{ marginTop: 16 }}>
-        Import is intentionally not a fake uploader in this MVP. The next pass should map Google Sheet columns into Campaign, Content Item, and Channel Placement records.
-      </div>
     </div>
   );
 }
@@ -2013,7 +2293,7 @@ function MarketingPlanShell({
     { label: "Campaign Timeline", detail: "Campaign rows with asset sub-rows and publish dates.", icon: "chart" },
     { label: "Channel Plan", detail: "View content by Facebook, TikTok, Instagram, LINE, YouTube, and in-game.", icon: "board" },
     { label: "Calendar", detail: "Monthly publishing calendar for marketing managers.", icon: "calendar" },
-    { label: "Import / Export", detail: "Bring in monthly sheet data and export planning views.", icon: "list" },
+    { label: "Working Sheet", detail: "Enter recurring monthly plan rows in Marketing Plan.", icon: "list" },
   ];
 
   return (
@@ -2055,7 +2335,7 @@ function MarketingPlanShell({
         {activeSection === "Campaign Timeline" && <MarketingPlanTimelineScreen />}
         {activeSection === "Channel Plan" && <MarketingPlanChannelPlanScreen />}
         {activeSection === "Calendar" && <MarketingPlanCalendarScreen />}
-        {activeSection === "Import / Export" && <MarketingPlanImportExportScreen />}
+        {activeSection === "Working Sheet" && <MarketingPlanWorkingSheetScreen />}
       </main>
     </div>
   );

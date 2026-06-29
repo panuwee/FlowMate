@@ -326,6 +326,28 @@ button:disabled {
 }
 .page__actions { display: flex; gap: 8px; align-items: center; }
 
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-5);
+}
+.page-head h1 {
+  font-size: 22px;
+  font-weight: var(--weight-bold);
+  color: var(--garena-black);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  margin: 0;
+}
+.page-head p {
+  font-size: 13px;
+  color: var(--garena-grey);
+  line-height: 1.4;
+  margin: 4px 0 0;
+}
+
 /* ---------- Buttons ---------- */
 .btn {
   height: 32px;
