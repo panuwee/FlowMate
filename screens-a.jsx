@@ -626,7 +626,6 @@ function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
-  const publishDate = clampFlowMateDateToToday(nextDraft.publishDate || launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
@@ -636,7 +635,6 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetSubtype: creativeType.key,
     assetCount,
     launchDate,
-    publishDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
   };
 }
@@ -670,7 +668,6 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "urgentReason",
     "dueDate",
     "launchDate",
-    "publishDate",
   ],
 };
 
@@ -710,7 +707,6 @@ function getDefaultCreativeDraft() {
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
     launchDate: todayDate,
-    publishDate: todayDate,
   };
 }
 
@@ -769,9 +765,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
-  requireField("publishDate", "Publish Date is required.");
   requireNotPast("launchDate", "Launch date cannot be before today.");
-  requireNotPast("publishDate", "Publish Date cannot be before today.");
 
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
@@ -1253,17 +1247,11 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
-      const shouldSyncPublishDate = !value.publishDate || value.publishDate === value.launchDate;
       onChange({
         ...value,
         launchDate: nextLaunchDate,
-        publishDate: shouldSyncPublishDate ? nextLaunchDate : value.publishDate,
         dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate),
       });
-      return;
-    }
-    if (field === "publishDate") {
-      onChange({ ...value, publishDate: clampFlowMateDateToToday(next) });
       return;
     }
     onChange({ ...value, [field]: next });
@@ -1336,13 +1324,13 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <input className="input" value={value.briefLink} onChange={e => update("briefLink", e.target.value)} placeholder="https://docs.google.com/..." />
           {errors.briefLink && <div className="field__error">{errors.briefLink}</div>}
         </div>
-        <div className="field field--full">
-          <label className="field__label">Brief Note</label>
-          <textarea className="textarea" value={value.briefNote} onChange={e => update("briefNote", e.target.value)} placeholder="Short brief context, key message, references, or special instructions."></textarea>
-        </div>
         <div className="field">
           <label className="field__label">Reference link</label>
           <input className="input" value={value.referenceLink} onChange={e => update("referenceLink", e.target.value)} placeholder="Optional - Figma / mood board / past asset" />
+        </div>
+        <div className="field field--full">
+          <label className="field__label">Brief Note</label>
+          <textarea className="textarea" value={value.briefNote} onChange={e => update("briefNote", e.target.value)} placeholder="Short brief context, key message, references, or special instructions."></textarea>
         </div>
         <div className={`field ${errors.priority ? "field--error" : ""}`}>
           <label className="field__label">Priority <span className="req">*</span></label>
@@ -1356,11 +1344,6 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <label className="field__label">Urgent reason {value.priority === "urgent" && <span className="req">*</span>}</label>
           <input className="input" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} disabled={value.priority !== "urgent"} placeholder={value.priority === "urgent" ? "Why urgent? (visible to supervisor)" : "Only required when priority is Urgent"} />
           {errors.urgentReason && <div className="field__error">{errors.urgentReason}</div>}
-        </div>
-        <div className={`field ${errors.publishDate ? "field--error" : ""}`}>
-          <label className="field__label">Publish Date <span className="req">*</span></label>
-          <input className="input" type="date" value={value.publishDate} onChange={e => update("publishDate", e.target.value)} min={todayDate} />
-          {errors.publishDate && <div className="field__error">{errors.publishDate}</div>}
         </div>
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">1st Draft <span className="req">*</span></label>

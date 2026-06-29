@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-11";
+const FLOWMATE_APP_VERSION = "v20260629-12";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1163,7 +1163,6 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     urgentReason: "",
     dueDate: launchDate,
     launchDate,
-    publishDate: launchDate,
   };
 }
 
@@ -2843,7 +2842,7 @@ function MarketingPlanWorkingSheetScreen() {
       return;
     }
     if (!editForm.publishDate) {
-      setExportMessage("Publish Date is required.");
+      setExportMessage("Launch Date is required.");
       return;
     }
     if (!editForm.channels || editForm.channels.length === 0) {
@@ -2872,6 +2871,10 @@ function MarketingPlanWorkingSheetScreen() {
     setExportMessage("");
     try {
       await deleteMarketingPlanWorkingSheetRow(row);
+      if (editingWorkingRow && editingWorkingRow.contentItemId === row.contentItemId) {
+        setEditingWorkingRow(null);
+        setEditForm(null);
+      }
       await loadWorkingSheetRows({ alive: true });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet row delete failed:", error);
@@ -3122,7 +3125,7 @@ function MarketingPlanWorkingSheetScreen() {
                   <th className="col-tier">Tier</th>
                   <th className="col-type">Asset Type</th>
                   <th className="col-channel">Channel</th>
-                  <th className="col-date">Publish Date</th>
+                  <th className="col-date">Launch Date</th>
                   <th className="col-time">Time</th>
                   <th className="col-link">Brief Link</th>
                   <th className="col-pic">PIC</th>
@@ -3185,14 +3188,6 @@ function MarketingPlanWorkingSheetScreen() {
                         </button>
                         <button
                           type="button"
-                          className="btn btn--danger btn--xs"
-                          disabled={updatingRowId === row.contentItemId}
-                          onClick={() => handleDeleteWorkingRow(row)}
-                        >
-                          Delete
-                        </button>
-                        <button
-                          type="button"
                           className="btn btn--primary btn--xs"
                           disabled={updatingRowId === row.contentItemId}
                           onClick={() => openFlowMateCreativeBriefFromMarketingRow(row)}
@@ -3232,7 +3227,7 @@ function MarketingPlanWorkingSheetScreen() {
                 <input className="input" value={editForm.contentTitle} onChange={event => updateEditForm("contentTitle", event.target.value)} />
               </label>
               <label className="field">
-                <span className="field__label">Publish Date *</span>
+                <span className="field__label">Launch Date *</span>
                 <input
                   className="input"
                   type="date"
@@ -3287,6 +3282,14 @@ function MarketingPlanWorkingSheetScreen() {
               </div>
             </div>
             <div className="modal__actions">
+              <button
+                type="button"
+                className="btn btn--danger"
+                disabled={updatingRowId === editingWorkingRow.contentItemId}
+                onClick={() => handleDeleteWorkingRow(editingWorkingRow)}
+              >
+                Delete
+              </button>
               <button type="button" className="btn btn--secondary" onClick={() => { setEditingWorkingRow(null); setEditForm(null); }}>Cancel</button>
               <button type="submit" className="btn btn--primary" disabled={updatingRowId === editingWorkingRow.contentItemId}>
                 {updatingRowId === editingWorkingRow.contentItemId ? "Saving..." : "Save changes"}

@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-11";
+const FLOWMATE_APP_VERSION = "v20260629-12";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1306,8 +1306,7 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     priority: "normal",
     urgentReason: "",
     dueDate: launchDate,
-    launchDate,
-    publishDate: launchDate
+    launchDate
   };
 }
 function openFlowMateCreativeBriefFromMarketingRow(row) {
@@ -2961,7 +2960,7 @@ function MarketingPlanWorkingSheetScreen() {
       return;
     }
     if (!editForm.publishDate) {
-      setExportMessage("Publish Date is required.");
+      setExportMessage("Launch Date is required.");
       return;
     }
     if (!editForm.channels || editForm.channels.length === 0) {
@@ -2993,6 +2992,10 @@ function MarketingPlanWorkingSheetScreen() {
     setExportMessage("");
     try {
       await deleteMarketingPlanWorkingSheetRow(row);
+      if (editingWorkingRow && editingWorkingRow.contentItemId === row.contentItemId) {
+        setEditingWorkingRow(null);
+        setEditForm(null);
+      }
       await loadWorkingSheetRows({
         alive: true
       });
@@ -3326,7 +3329,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "col-channel"
   }, "Channel"), React.createElement("th", {
     className: "col-date"
-  }, "Publish Date"), React.createElement("th", {
+  }, "Launch Date"), React.createElement("th", {
     className: "col-time"
   }, "Time"), React.createElement("th", {
     className: "col-link"
@@ -3369,11 +3372,6 @@ function MarketingPlanWorkingSheetScreen() {
     disabled: updatingRowId === row.contentItemId,
     onClick: () => startEditWorkingRow(row)
   }, "Edit"), React.createElement("button", {
-    type: "button",
-    className: "btn btn--danger btn--xs",
-    disabled: updatingRowId === row.contentItemId,
-    onClick: () => handleDeleteWorkingRow(row)
-  }, "Delete"), React.createElement("button", {
     type: "button",
     className: "btn btn--primary btn--xs",
     disabled: updatingRowId === row.contentItemId,
@@ -3421,7 +3419,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Publish Date *"), React.createElement("input", {
+  }, "Launch Date *"), React.createElement("input", {
     className: "input",
     type: "date",
     value: editForm.publishDate,
@@ -3487,6 +3485,11 @@ function MarketingPlanWorkingSheetScreen() {
   }), React.createElement("span", null, channel.label)))))), React.createElement("div", {
     className: "modal__actions"
   }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--danger",
+    disabled: updatingRowId === editingWorkingRow.contentItemId,
+    onClick: () => handleDeleteWorkingRow(editingWorkingRow)
+  }, "Delete"), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
     onClick: () => {

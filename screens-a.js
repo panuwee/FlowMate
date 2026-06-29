@@ -925,7 +925,6 @@ function normalizeFlowMateCreativeDraft(draft) {
   };
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
-  const publishDate = clampFlowMateDateToToday(nextDraft.publishDate || launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   return {
@@ -935,13 +934,12 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetSubtype: creativeType.key,
     assetCount,
     launchDate,
-    publishDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate)
   };
 }
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
   quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority"],
-  creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishDate"]
+  creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate"]
 };
 function getDefaultQuickDraft() {
   const requesterTeam = getDefaultRequesterTeam();
@@ -977,8 +975,7 @@ function getDefaultCreativeDraft() {
     priority: "normal",
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
-    launchDate: todayDate,
-    publishDate: todayDate
+    launchDate: todayDate
   };
 }
 function getDefaultRequesterTeam() {
@@ -1031,9 +1028,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
-  requireField("publishDate", "Publish Date is required.");
   requireNotPast("launchDate", "Launch date cannot be before today.");
-  requireNotPast("publishDate", "Publish Date cannot be before today.");
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
   }
@@ -1594,19 +1589,10 @@ function CreativeRequestForm({
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
-      const shouldSyncPublishDate = !value.publishDate || value.publishDate === value.launchDate;
       onChange({
         ...value,
         launchDate: nextLaunchDate,
-        publishDate: shouldSyncPublishDate ? nextLaunchDate : value.publishDate,
         dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate)
-      });
-      return;
-    }
-    if (field === "publishDate") {
-      onChange({
-        ...value,
-        publishDate: clampFlowMateDateToToday(next)
       });
       return;
     }
@@ -1747,15 +1733,6 @@ function CreativeRequestForm({
   }), errors.briefLink && React.createElement("div", {
     className: "field__error"
   }, errors.briefLink)), React.createElement("div", {
-    className: "field field--full"
-  }, React.createElement("label", {
-    className: "field__label"
-  }, "Brief Note"), React.createElement("textarea", {
-    className: "textarea",
-    value: value.briefNote,
-    onChange: e => update("briefNote", e.target.value),
-    placeholder: "Short brief context, key message, references, or special instructions."
-  })), React.createElement("div", {
     className: "field"
   }, React.createElement("label", {
     className: "field__label"
@@ -1764,6 +1741,15 @@ function CreativeRequestForm({
     value: value.referenceLink,
     onChange: e => update("referenceLink", e.target.value),
     placeholder: "Optional - Figma / mood board / past asset"
+  })), React.createElement("div", {
+    className: "field field--full"
+  }, React.createElement("label", {
+    className: "field__label"
+  }, "Brief Note"), React.createElement("textarea", {
+    className: "textarea",
+    value: value.briefNote,
+    onChange: e => update("briefNote", e.target.value),
+    placeholder: "Short brief context, key message, references, or special instructions."
   })), React.createElement("div", {
     className: `field ${errors.priority ? "field--error" : ""}`
   }, React.createElement("label", {
@@ -1799,20 +1785,6 @@ function CreativeRequestForm({
   }), errors.urgentReason && React.createElement("div", {
     className: "field__error"
   }, errors.urgentReason)), React.createElement("div", {
-    className: `field ${errors.publishDate ? "field--error" : ""}`
-  }, React.createElement("label", {
-    className: "field__label"
-  }, "Publish Date ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("input", {
-    className: "input",
-    type: "date",
-    value: value.publishDate,
-    onChange: e => update("publishDate", e.target.value),
-    min: todayDate
-  }), errors.publishDate && React.createElement("div", {
-    className: "field__error"
-  }, errors.publishDate)), React.createElement("div", {
     className: `field ${errors.dueDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
