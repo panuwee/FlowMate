@@ -77,6 +77,12 @@ button:disabled {
   overflow-y: auto;
   background: #FAFAFA;
 }
+.app__main--marketing {
+  padding: var(--s-5) var(--s-6) var(--s-7);
+}
+.app__main--marketing > div {
+  max-width: 1480px;
+}
 
 /* ---------- Topbar pieces ---------- */
 .searchbar {

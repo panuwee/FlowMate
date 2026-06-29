@@ -1188,6 +1188,28 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
 function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const todayDate = getFlowMateTodayDateKey();
+  const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+
+  useEffect(() => {
+    let alive = true;
+    function syncCampaignOptions(event) {
+      const campaigns = event && event.detail && event.detail.campaigns
+        ? event.detail.campaigns
+        : (window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+      if (alive) setCampaignOptions(campaigns);
+    }
+    window.addEventListener("flowmate:marketing-campaigns-updated", syncCampaignOptions);
+    if (window.loadFlowMateMarketingCampaignOptions) {
+      window.loadFlowMateMarketingCampaignOptions()
+        .then((campaigns) => { if (alive) setCampaignOptions(campaigns || []); })
+        .catch((error) => console.warn("[FlowMate Create] campaign options load failed:", error && error.message));
+    }
+    return () => {
+      alive = false;
+      window.removeEventListener("flowmate:marketing-campaigns-updated", syncCampaignOptions);
+    };
+  }, []);
+
   function update(field, next) {
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
@@ -1221,7 +1243,10 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
         </div>
         <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
           <label className="field__label">Campaign <span className="req">*</span></label>
-          <input className="input" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
+          <input className="input" list="flowmate-campaign-tags" value={value.campaignName} onChange={e => update("campaignName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
+          <datalist id="flowmate-campaign-tags">
+            {campaignOptions.map(campaign => <option key={campaign.id || campaign.name} value={campaign.name} />)}
+          </datalist>
           {errors.campaignName && <div className="field__error">{errors.campaignName}</div>}
         </div>
         <div className={`field ${errors.assetSubtype ? "field--error" : ""}`}>
