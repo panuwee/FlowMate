@@ -624,9 +624,9 @@ button:disabled {
 }
 .marketing-working-status {
   width: 112px;
-  height: 30px;
-  padding: 0 28px 0 10px;
-  line-height: 1.2;
+  min-height: 36px;
+  padding: 7px 28px 7px 10px;
+  line-height: 20px;
 }
 .marketing-working-link {
   color: var(--garena-red);

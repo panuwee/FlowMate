@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260630-6";
+const FLOWMATE_APP_VERSION = "v20260630-7";
 
 const NAV = [
   { group: "Personal", items: [
@@ -873,6 +873,7 @@ function normalizeMarketingPlanTimelineRow(row) {
     contentTier: row.content_tier || "",
     picName: row.pic_name || "",
     briefLink: row.brief_link || "",
+    flowmateStatus: row.flowmate_status || "",
     contentStatus: row.content_status || "",
     contentSortOrder: Number(row.content_sort_order || 0),
     placementId: row.placement_id,
@@ -1353,6 +1354,9 @@ function normalizeMarketingPlanWorkingStatus(status) {
 }
 
 function getMarketingPlanViewStatus(row) {
+  const flowmateStatus = normalizeMarketingPlanWorkingStatus(row && row.flowmateStatus);
+  if (flowmateStatus === "review") return "review";
+  if (flowmateStatus === "delivered") return "ready_to_post";
   const normalized = normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
   if (normalized === "planned" && String((row && row.briefLink) || "").trim()) return "assigned";
   return normalized;
@@ -1632,16 +1636,19 @@ async function createMarketingPlanWorkingSheetRow(form) {
   return { planId, campaignId, contentItemId: content.data.id, placementCount: placementRows.length };
 }
 
-async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(contentItemId, briefLink) {
+async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(contentItemId, briefLink, flowMateWorkItemId = "") {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
   if (!contentItemId) throw new Error("Content item is missing.");
   if (!briefLink) throw new Error("Creative Request link is missing.");
 
+  const updatePayload = { brief_link: briefLink };
+  if (flowMateWorkItemId) updatePayload.flowmate_work_item_id = flowMateWorkItemId;
+
   const result = await window.flowmateSupabase
     .from("marketing_content_items")
-    .update({ brief_link: briefLink })
+    .update(updatePayload)
     .eq("id", contentItemId);
   if (result.error) throw result.error;
   const placementResult = await window.flowmateSupabase

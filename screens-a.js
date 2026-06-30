@@ -1093,9 +1093,10 @@ async function syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, cr
   if (String(submissionDraft.marketingPlanOriginalBriefLink || "").trim()) return null;
   if (!window.updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest) return null;
   const displayId = window.getFlowMateCreatedDisplayId(created);
+  const flowMateWorkItemId = window.getFlowMateCreatedUuid ? window.getFlowMateCreatedUuid(created) : "";
   const detailUrl = getFlowMateCreativeRequestDetailUrl(displayId);
   if (!detailUrl) return null;
-  return window.updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(submissionDraft.marketingPlanContentItemId, detailUrl);
+  return window.updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(submissionDraft.marketingPlanContentItemId, detailUrl, flowMateWorkItemId);
 }
 function CreateScreen({
   onNav,

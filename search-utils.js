@@ -47,6 +47,14 @@ function getFlowMateCreatedDisplayId(created) {
   return created.display_id || created.displayId || created.id || "";
 }
 
+function getFlowMateCreatedUuid(created) {
+  if (!created) return "";
+  const id = created.id || created.work_item_id || created.workItemId || "";
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    ? id
+    : "";
+}
+
 function findFlowMateWorkItemById(rows, id) {
   if (!Array.isArray(rows) || !id) return null;
   return rows.find((row) => row && row.id === id) || null;
@@ -296,6 +304,7 @@ function getFlowMateWorkloadStatusCounts(items) {
 
 window.matchesFlowMateSearch = matchesFlowMateSearch;
 window.getFlowMateCreatedDisplayId = getFlowMateCreatedDisplayId;
+window.getFlowMateCreatedUuid = getFlowMateCreatedUuid;
 window.findFlowMateWorkItemById = findFlowMateWorkItemById;
 window.buildFlowMateTemplateTitle = buildFlowMateTemplateTitle;
 window.filterFlowMateAssigneeOptions = filterFlowMateAssigneeOptions;

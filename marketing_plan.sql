@@ -114,7 +114,7 @@ create table if not exists public.marketing_channel_placements (
     channel in ('facebook', 'tiktok', 'instagram', 'in_game', 'youtube', 'other')
   ),
   constraint marketing_channel_placements_status_check check (
-    placement_status in ('planned', 'ready', 'posted', 'delayed', 'cancelled')
+    placement_status in ('planned', 'assigned', 'review', 'ready', 'ready_to_post', 'scheduled', 'posted', 'delayed', 'cancelled')
   ),
   constraint marketing_channel_placements_posted_url_check check (
     posted_url is null
@@ -219,10 +219,11 @@ on public.marketing_plans for select
 using (public.is_active_app_user());
 
 drop policy if exists "admins can write marketing plans" on public.marketing_plans;
-create policy "admins can write marketing plans"
+drop policy if exists "active users can write marketing plans" on public.marketing_plans;
+create policy "active users can write marketing plans"
 on public.marketing_plans for all
-using (public.is_admin_app_user())
-with check (public.is_admin_app_user());
+using (public.is_active_app_user())
+with check (public.is_active_app_user());
 
 drop policy if exists "active users can read marketing campaigns" on public.marketing_campaigns;
 create policy "active users can read marketing campaigns"
@@ -230,10 +231,11 @@ on public.marketing_campaigns for select
 using (public.is_active_app_user());
 
 drop policy if exists "admins can write marketing campaigns" on public.marketing_campaigns;
-create policy "admins can write marketing campaigns"
+drop policy if exists "active users can write marketing campaigns" on public.marketing_campaigns;
+create policy "active users can write marketing campaigns"
 on public.marketing_campaigns for all
-using (public.is_admin_app_user())
-with check (public.is_admin_app_user());
+using (public.is_active_app_user())
+with check (public.is_active_app_user());
 
 drop policy if exists "active users can read marketing content items" on public.marketing_content_items;
 create policy "active users can read marketing content items"
@@ -241,10 +243,11 @@ on public.marketing_content_items for select
 using (public.is_active_app_user());
 
 drop policy if exists "admins can write marketing content items" on public.marketing_content_items;
-create policy "admins can write marketing content items"
+drop policy if exists "active users can write marketing content items" on public.marketing_content_items;
+create policy "active users can write marketing content items"
 on public.marketing_content_items for all
-using (public.is_admin_app_user())
-with check (public.is_admin_app_user());
+using (public.is_active_app_user())
+with check (public.is_active_app_user());
 
 drop policy if exists "active users can read marketing channel placements" on public.marketing_channel_placements;
 create policy "active users can read marketing channel placements"
@@ -252,10 +255,11 @@ on public.marketing_channel_placements for select
 using (public.is_active_app_user());
 
 drop policy if exists "admins can write marketing channel placements" on public.marketing_channel_placements;
-create policy "admins can write marketing channel placements"
+drop policy if exists "active users can write marketing channel placements" on public.marketing_channel_placements;
+create policy "active users can write marketing channel placements"
 on public.marketing_channel_placements for all
-using (public.is_admin_app_user())
-with check (public.is_admin_app_user());
+using (public.is_active_app_user())
+with check (public.is_active_app_user());
 
 revoke all privileges on public.marketing_plans from public, anon, authenticated;
 revoke all privileges on public.marketing_campaigns from public, anon, authenticated;
@@ -307,11 +311,18 @@ select
   mcp.publish_time,
   mcp.placement_status,
   mcp.posted_url,
-  mcp.note as placement_note
+  mcp.note as placement_note,
+  wi.status as flowmate_status
 from public.marketing_plans mp
 join public.marketing_campaigns mc on mc.plan_id = mp.id
 join public.marketing_content_items mci on mci.campaign_id = mc.id
 join public.marketing_channel_placements mcp on mcp.content_item_id = mci.id
+left join public.work_items wi
+  on wi.id = mci.flowmate_work_item_id
+  or (
+    mci.flowmate_work_item_id is null
+    and wi.display_id = substring(mci.brief_link from '#detail/([^/?#]+)')
+  )
 where mp.status <> 'archived'
   and mcp.placement_status <> 'cancelled';
 
@@ -335,7 +346,7 @@ select
     '{}'::text[]
   ) as channels_covered,
   count(mcp.id) filter (where mcp.placement_status = 'posted') as posted_count,
-  count(mcp.id) filter (where mcp.placement_status = 'ready') as ready_count,
+  count(mcp.id) filter (where mcp.placement_status in ('ready', 'ready_to_post')) as ready_count,
   count(mcp.id) filter (where mcp.placement_status = 'delayed') as delayed_count,
   count(distinct mci.id) filter (where mci.status = 'not_started') as not_started_count,
   min(mcp.publish_date) filter (
