@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260630-8";
+const FLOWMATE_APP_VERSION = "v20260630-9";
 
 const NAV = [
   { group: "Personal", items: [
@@ -2020,6 +2020,19 @@ function formatMarketingPlanSupervisorDateTime(value) {
   });
 }
 
+function formatMarketingPlanSupervisorExportDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  const bangkokDate = new Date(date.getTime() + (7 * 60 * 60 * 1000));
+  const year = bangkokDate.getUTCFullYear();
+  const month = String(bangkokDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(bangkokDate.getUTCDate()).padStart(2, "0");
+  const hour = String(bangkokDate.getUTCHours()).padStart(2, "0");
+  const minute = String(bangkokDate.getUTCMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}, ${hour}:${minute}`;
+}
+
 function getMarketingPlanSupervisorRiskClass(bucket) {
   if (bucket === "Healthy") return "badge--delivered";
   if (bucket === "Watch") return "badge--neutral";
@@ -2055,7 +2068,7 @@ function exportMarketingPlanSupervisorCsv(rows, filters) {
     row.picName,
     getMarketingPlanStatusLabel(row.effectiveStatus),
     getMarketingPlanStatusLabel(row.storedStatus),
-    row.firstAssignedAt,
+    formatMarketingPlanSupervisorExportDateTime(row.firstAssignedAt),
     row.workingDaysBeforeLaunch == null ? "" : row.workingDaysBeforeLaunch,
     row.riskBucket,
     row.briefLink,

@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260630-8";
+const FLOWMATE_APP_VERSION = "v20260630-9";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -2023,6 +2023,18 @@ function formatMarketingPlanSupervisorDateTime(value) {
     minute: "2-digit"
   });
 }
+function formatMarketingPlanSupervisorExportDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value || "");
+  const bangkokDate = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  const year = bangkokDate.getUTCFullYear();
+  const month = String(bangkokDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(bangkokDate.getUTCDate()).padStart(2, "0");
+  const hour = String(bangkokDate.getUTCHours()).padStart(2, "0");
+  const minute = String(bangkokDate.getUTCMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}, ${hour}:${minute}`;
+}
 function getMarketingPlanSupervisorRiskClass(bucket) {
   if (bucket === "Healthy") return "badge--delivered";
   if (bucket === "Watch") return "badge--neutral";
@@ -2033,7 +2045,7 @@ function getMarketingPlanSupervisorRiskClass(bucket) {
 function exportMarketingPlanSupervisorCsv(rows, filters) {
   const visibleRows = filterMarketingPlanSupervisorRows(rows, filters);
   const headerLabels = ["Month", "Campaign", "Product / Event", "Channel", "Launch Date", "Time", "PIC", "Effective Status", "Stored Status", "Assigned At", "Working Days Before Launch", "Risk Bucket", "Brief Link"];
-  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey), row.campaignName, row.productEvent, getMarketingPlanChannelLabel(row.channel), row.launchDate, formatMarketingPlanTime(row.publishTime), row.picName, getMarketingPlanStatusLabel(row.effectiveStatus), getMarketingPlanStatusLabel(row.storedStatus), row.firstAssignedAt, row.workingDaysBeforeLaunch == null ? "" : row.workingDaysBeforeLaunch, row.riskBucket, row.briefLink]);
+  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey), row.campaignName, row.productEvent, getMarketingPlanChannelLabel(row.channel), row.launchDate, formatMarketingPlanTime(row.publishTime), row.picName, getMarketingPlanStatusLabel(row.effectiveStatus), getMarketingPlanStatusLabel(row.storedStatus), formatMarketingPlanSupervisorExportDateTime(row.firstAssignedAt), row.workingDaysBeforeLaunch == null ? "" : row.workingDaysBeforeLaunch, row.riskBucket, row.briefLink]);
   const filenameMonth = filters && filters.month ? getMarketingPlanMonthLabel(filters.month).toLowerCase().replace(/\s+/g, "-") : "all-months";
   const filename = `marketing-plan-supervisor-${filenameMonth}.csv`;
   if (window.flowmateDownloadCsv) {
