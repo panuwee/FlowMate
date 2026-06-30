@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260630-2";
+const FLOWMATE_APP_VERSION = "v20260630-3";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1211,6 +1211,7 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     urgentReason: "",
     dueDate: launchDate,
     launchDate,
+    publishTime: row.publishTime || "12:00",
     marketingPlanContentItemId: row.contentItemId || "",
     marketingPlanOriginalBriefLink: row.briefLink || "",
     marketingPlanProductEvent: productEvent,

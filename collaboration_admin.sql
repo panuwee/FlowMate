@@ -347,7 +347,7 @@ begin
     v_work.id,
     v_actor_id,
     'add_link',
-    jsonb_build_object('link_id', v_link.id)
+    jsonb_build_object('url', v_link.url, 'description', v_link.description, 'link_id', v_link.id)
   );
 
   return jsonb_build_object(

@@ -162,7 +162,7 @@ begin
 
   perform pg_advisory_xact_lock(hashtext('flowmate_quick_task_display_id'));
 
-  select coalesce(max((substring(display_id from 4))::integer), 0) + 1
+  select coalesce(max((substring(display_id from 4))::integer), 2000) + 1
   into v_next_number
   from public.work_items
   where display_id ~ '^QT-[0-9]{4,}$';
@@ -598,6 +598,7 @@ begin
       'source', 'static_mvp',
       'action', 'add_comment',
       'comment_id', v_comment_id,
+      'body', trim(p_body),
       'mentioned_user_ids', coalesce(v_mentioned_user_ids, '{}'::uuid[])
     )
   );

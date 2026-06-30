@@ -138,6 +138,7 @@ create table if not exists public.work_items (
   due_date date not null,
   launch_date date,
   publish_date date,
+  publish_time time,
   effort_point integer check (effort_point is null or (effort_point >= 1 and effort_point <= 999)),
   needs_split boolean not null default false,
   assignment_reason text,
@@ -192,6 +193,7 @@ add column if not exists assignee_other_name text;
 
 alter table public.work_items
   add column if not exists publish_date date,
+  add column if not exists publish_time time,
   add column if not exists archived_at timestamptz,
   add column if not exists archived_by_user_id uuid references public.users(id) on update cascade on delete set null,
   add column if not exists archive_reason text;

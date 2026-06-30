@@ -1026,6 +1026,10 @@ drop function if exists public.create_creative_request(
   uuid, text, text, text, public.asset_type, text, text[], text,
   text, text, text, public.priority_level, text, date, date, integer, date
 );
+drop function if exists public.create_creative_request(
+  uuid, text, text, text, public.asset_type, text, text[], text,
+  text, text, text, public.priority_level, text, date, date, integer, date, time
+);
 
 create or replace function public.create_creative_request(
   p_actor_user_id uuid,
@@ -1044,7 +1048,8 @@ create or replace function public.create_creative_request(
   p_due_date date default null,
   p_launch_date date default null,
   p_asset_count integer default 1,
-  p_publish_date date default null
+  p_publish_date date default null,
+  p_publish_time time default null
 ) returns jsonb
 language plpgsql
 security definer
@@ -1131,7 +1136,7 @@ begin
     description,
     requester_user_id, requester_team,
     status, priority, urgent_reason,
-    due_date, launch_date, publish_date,
+    due_date, launch_date, publish_date, publish_time,
     -- effort_point intentionally null; engine writes it.
     effort_point, final_owner_member_id, needs_split, review_round, wip_counted
   ) values (
@@ -1139,7 +1144,7 @@ begin
     nullif(trim(coalesce(p_brief_note,'')), ''),
     v_actor_id, nullif(trim(coalesce(p_requester_team,'')), ''),
     'new', v_requested_priority, v_urgent_reason,
-    v_due_date, v_launch_date, p_publish_date,
+    v_due_date, v_launch_date, p_publish_date, p_publish_time,
     null, null, false, 0, false
   ) returning id into v_work_item_id;
 
@@ -1172,7 +1177,7 @@ $$;
 
 grant execute on function public.create_creative_request(
   uuid, text, text, text, public.asset_type, text, text[], text,
-  text, text, text, public.priority_level, text, date, date, integer, date
+  text, text, text, public.priority_level, text, date, date, integer, date, time
 ) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------

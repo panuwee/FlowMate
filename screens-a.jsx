@@ -634,9 +634,16 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetType: creativeType.assetType,
     assetSubtype: creativeType.key,
     assetCount,
+    publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || "12:00",
     launchDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
   };
+}
+
+function normalizeFlowMatePublishTimeInput(value) {
+  const text = String(value || "").trim();
+  if (/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(text)) return text;
+  return "";
 }
 
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
@@ -668,6 +675,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "urgentReason",
     "dueDate",
     "launchDate",
+    "publishTime",
     "marketingPlanContentItemId",
     "marketingPlanOriginalBriefLink",
     "marketingPlanProductEvent",
@@ -711,6 +719,7 @@ function getDefaultCreativeDraft() {
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
     launchDate: todayDate,
+    publishTime: "12:00",
     marketingPlanContentItemId: "",
     marketingPlanOriginalBriefLink: "",
     marketingPlanProductEvent: "",
@@ -752,6 +761,11 @@ function getFlowMateCreateValidationErrors(mode, draft) {
       errors[field] = message;
     }
   }
+  function requireTime(field, message) {
+    if (!normalizeFlowMatePublishTimeInput(row[field])) {
+      errors[field] = message;
+    }
+  }
 
   if (mode === "quick") {
     requireField("requesterTeam", "Requester team is required.");
@@ -773,6 +787,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
+  requireTime("publishTime", "Publish Time must use hh:mm format.");
   requireNotPast("launchDate", "Launch date cannot be before today.");
 
   if (row.priority === "urgent") {
@@ -1389,6 +1404,19 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} min={todayDate} />
           {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
         </div>
+        <div className={`field ${errors.publishTime ? "field--error" : ""}`}>
+          <label className="field__label">Publish Time <span className="req">*</span></label>
+          <input
+            className="input"
+            type="time"
+            pattern="[0-9]{2}:[0-9]{2}"
+            value={value.publishTime}
+            onChange={e => update("publishTime", e.target.value)}
+            onBlur={e => update("publishTime", normalizeFlowMatePublishTimeInput(e.target.value) || value.publishTime || "12:00")}
+            placeholder="14:00"
+          />
+          {errors.publishTime && <div className="field__error">{errors.publishTime}</div>}
+        </div>
         <div className="field field--full">
           <div className="reason-box">
             <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
@@ -1631,6 +1659,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
   const visibleAiTags = detailAiTags;
+  const visibleActivityEvents = w.activityEvents || [];
   const mentionQueryMatch = commentBody.match(/(^|\s)@([^\s@]*)$/);
   const mentionQuery = mentionQueryMatch ? mentionQueryMatch[2].toLowerCase() : null;
   const mentionSuggestions = mentionQuery == null ? [] : mentionUsers
@@ -1654,6 +1683,52 @@ function DetailScreen({ onNav, onOpen, focusId }) {
         hour12: true,
       })
       .replace(/\b(am|pm)\b/i, (match) => match.toUpperCase());
+  }
+
+  function getFlowMateActivityMetadata(event) {
+    const metadata = event && event.metadata;
+    if (!metadata) return {};
+    if (typeof metadata === "string") {
+      try {
+        return JSON.parse(metadata);
+      } catch (error) {
+        return {};
+      }
+    }
+    return metadata;
+  }
+
+  function formatFlowMateActivityAt(dateValue) {
+    if (!dateValue) return "";
+    const date = new Date(dateValue);
+    const dateLabel = date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const timeLabel = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+    return `${dateLabel} ${timeLabel}`;
+  }
+
+  function formatFlowMateActivityEvent(event) {
+    const metadata = getFlowMateActivityMetadata(event);
+    const actor = event.actorName || "System";
+    const when = formatFlowMateActivityAt(event.created_at);
+    const suffix = when ? ` at ${when}` : "";
+    const action = metadata.action || "";
+    if (action === "add_link") {
+      const addedFields = ["URL"];
+      if (String(metadata.description || "").trim()) addedFields.push("Description");
+      return `${actor} added ${addedFields.join(", ")} to this board${suffix}`;
+    }
+    if (action === "remove_link") return `${actor} removed a URL from this board${suffix}`;
+    if (action === "add_comment" || event.event_type === "commented") return `${actor} added a comment${suffix}`;
+    if (action === "add_watcher") return `${actor} added a watcher${suffix}`;
+    if (event.event_type === "created") return `${actor} created this task${suffix}`;
+    if (event.event_type === "assignment_ran") {
+      const result = metadata.result ? `: ${metadata.result}` : "";
+      return `Assignment engine ran${result}${suffix}`;
+    }
+    if (event.event_type === "status_changed" || event.from_status || event.to_status) {
+      return `${actor} moved status from ${event.from_status || "-"} to ${event.to_status || "-"}${suffix}`;
+    }
+    return `${actor} updated this task${suffix}`;
   }
 
   function extractFlowMateMentionedUserIds(body) {
@@ -2237,10 +2312,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row__val">{w.createdLabel || "-"}</div>
               </div>
               <div className="meta-row">
-                <div className="meta-row__lbl">Publish Date</div>
-                <div className="meta-row__val">{w.publishFullLabel || w.publishLabel || "-"}</div>
-              </div>
-              <div className="meta-row">
                 <div className="meta-row__lbl">{w.type === "quick" ? "1st Review / Draft" : "1st Draft"}</div>
                 <div className="meta-row__val">{w.dueFullLabel || w.dueLabel || "-"}</div>
               </div>
@@ -2274,14 +2345,22 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           </div>
 
-          {w.queueReason && (
-            <div className="card">
-              <div className="card__head"><span className="card__title">Assignment reason</span></div>
-              <div className="card__body">
+          <div className="card">
+            <div className="card__head"><span className="card__title">Activity log</span></div>
+            <div className="card__body" style={{ display: "grid", gap: 8 }}>
+              {visibleActivityEvents.length > 0 ? (
+                visibleActivityEvents.slice(0, 12).map((event) => (
+                  <div className="reason-box" key={event.id || `${event.event_type}-${event.created_at}`}>
+                    {formatFlowMateActivityEvent(event)}
+                  </div>
+                ))
+              ) : w.queueReason ? (
                 <div className="reason-box">{w.queueReason}</div>
-              </div>
+              ) : (
+                <div className="muted">No activity yet.</div>
+              )}
             </div>
-          )}
+          </div>
 
           {w.urgentReason && (
             <div className="card">

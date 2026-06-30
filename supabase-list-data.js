@@ -203,6 +203,12 @@ function flowmateDateFullLabel(dateValue) {
   return dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+function flowmateDateTimeWithOptionalTimeLabel(dateValue, timeValue) {
+  const dateLabel = flowmateDateFullLabel(dateValue);
+  const timeLabel = String(timeValue || "").slice(0, 5);
+  return dateLabel && timeLabel ? `${dateLabel} ${timeLabel}` : dateLabel;
+}
+
 function flowmateDateTimeLabel(dateValue) {
   if (!dateValue) return "";
   return new Date(dateValue).toLocaleString("en-US", {
@@ -274,10 +280,10 @@ async function loadFlowMateListRows() {
     throw new Error("Supabase client is not ready.");
   }
 
-  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, assignmentRunsResult] = await Promise.all([
+  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
+      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
       // O-5: exclude archived items at the DB instead of fetching then dropping
       // them client-side. (List/Board/Queue/My Work never show archived rows.)
       .is("archived_at", null)
@@ -314,6 +320,10 @@ async function loadFlowMateListRows() {
       .is("removed_at", null)
       .order("created_at", { ascending: true }),
     loadFlowMateAiTagRowsForList(),
+    window.flowmateSupabase
+      .from("work_item_events")
+      .select("id,work_item_id,actor_user_id,event_type,from_status,to_status,metadata,created_at")
+      .order("created_at", { ascending: false }),
     loadFlowMateLatestAssignmentRuns(),
   ]);
 
@@ -328,6 +338,7 @@ async function loadFlowMateListRows() {
     linksResult.error ||
     watchersResult.error ||
     aiTagsResult.error ||
+    eventsResult.error ||
     assignmentRunsResult.error;
 
   if (firstError) throw firstError;
@@ -391,6 +402,15 @@ async function loadFlowMateListRows() {
       createdAt: tag.created_at,
     });
   });
+  const eventsByWorkItemId = {};
+  (eventsResult.data || []).forEach((event) => {
+    if (!eventsByWorkItemId[event.work_item_id]) eventsByWorkItemId[event.work_item_id] = [];
+    eventsByWorkItemId[event.work_item_id].push({
+      ...event,
+      actorName: usersById[event.actor_user_id]?.display_name || "System",
+      createdLabel: flowmateDateTimeFullLabel(event.created_at),
+    });
+  });
   const assignmentRunByWorkItemId = {};
   (assignmentRunsResult.data || []).forEach((run) => {
     if (!assignmentRunByWorkItemId[run.work_item_id]) assignmentRunByWorkItemId[run.work_item_id] = run;
@@ -443,8 +463,9 @@ async function loadFlowMateListRows() {
       dueDelta: flowmateDueDelta(item.due_date),
       launchDate: item.launch_date,
       launchLabel: flowmateDateLabel(item.launch_date),
-      launchFullLabel: flowmateDateFullLabel(item.launch_date),
+      launchFullLabel: flowmateDateTimeWithOptionalTimeLabel(item.launch_date, item.publish_time),
       publishDate: item.publish_date,
+      publishTime: item.publish_time,
       publishLabel: flowmateDateLabel(item.publish_date),
       publishFullLabel: flowmateDateFullLabel(item.publish_date),
       planningDate: item.publish_date || item.launch_date,
@@ -483,6 +504,7 @@ async function loadFlowMateListRows() {
       links: linksByWorkItemId[item.id] || [],
       watchers: watchersByWorkItemId[item.id] || [],
       aiTags: aiTagsByWorkItemId[item.id] || [],
+      activityEvents: eventsByWorkItemId[item.id] || [],
       overdue: Boolean(flags.is_overdue),
       dueSoon: Boolean(flags.is_due_soon),
       isSupabaseRow: true,
