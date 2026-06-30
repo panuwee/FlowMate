@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260630-9";
+const FLOWMATE_APP_VERSION = "v20260630-10";
 
 const NAV = [
   { group: "Personal", items: [
@@ -3746,10 +3746,8 @@ function MarketingPlanSupervisorScreen({ user }) {
     let alive = true;
     const isAlive = () => alive;
     loadSupervisorRows(isAlive);
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadSupervisorRows(isAlive)) : () => {};
     return () => {
       alive = false;
-      cleanup();
     };
   }, [user && user.role]);
 
