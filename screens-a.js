@@ -1981,7 +1981,13 @@ function DetailScreen({
     onNav(detailBackRoute);
   }
   const selected = window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === id ? window.flowmateSelectedWorkItem : null;
-  const w = selected || WORK_BY_ID[id] || null;
+  const [directDetailItem, setDirectDetailItem] = useState(null);
+  const [directDetailLoadState, setDirectDetailLoadState] = useState({
+    status: "idle",
+    message: ""
+  });
+  const directDetailMatch = directDetailItem && directDetailItem.id === id ? directDetailItem : null;
+  const w = selected || directDetailMatch || WORK_BY_ID[id] || null;
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
   const [detailRefreshTick, setDetailRefreshTick] = useState(0);
@@ -2039,7 +2045,51 @@ function DetailScreen({
       alive = false;
     };
   }, [w && w.id]);
+  useEffect(() => {
+    let alive = true;
+    if (!id || w || !window.loadFlowMateListRows || !window.findFlowMateWorkItemById) {
+      if (w) setDirectDetailLoadState({
+        status: "idle",
+        message: ""
+      });
+      return () => {
+        alive = false;
+      };
+    }
+    setDirectDetailLoadState({
+      status: "loading",
+      message: "Loading work item..."
+    });
+    window.loadFlowMateListRows().then(rows => {
+      if (!alive) return;
+      const row = window.findFlowMateWorkItemById(rows, id);
+      if (row) {
+        window.flowmateSelectedWorkItem = row;
+        setDirectDetailItem(row);
+        setDirectDetailLoadState({
+          status: "loaded",
+          message: ""
+        });
+        return;
+      }
+      setDirectDetailLoadState({
+        status: "error",
+        message: "Work item not found."
+      });
+    }).catch(error => {
+      if (!alive) return;
+      console.warn("[FlowMate Detail] Direct detail load failed:", error && error.message);
+      setDirectDetailLoadState({
+        status: "error",
+        message: "Work item load failed."
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [id, w && w.id]);
   if (!w) {
+    const isLoadingDirectDetail = directDetailLoadState.status === "loading";
     return React.createElement("div", {
       className: "page",
       style: {
@@ -2070,9 +2120,13 @@ function DetailScreen({
       className: "card__head"
     }, React.createElement("span", {
       className: "card__title"
-    }, "Work item not loaded")), React.createElement("div", {
+    }, isLoadingDirectDetail ? "Loading work item" : "Work item not loaded")), React.createElement("div", {
       className: "card__body"
-    }, React.createElement("div", {
+    }, isLoadingDirectDetail ? React.createElement("div", {
+      className: "reason-box"
+    }, "Loading ", React.createElement("span", {
+      className: "mono"
+    }, id), " from Supabase...") : React.createElement(React.Fragment, null, React.createElement("div", {
       className: "reason-box reason-box--need"
     }, "We could not find ", React.createElement("span", {
       className: "mono"
@@ -2085,7 +2139,7 @@ function DetailScreen({
       onClick: () => onNav("list")
     }, React.createElement(Icon, {
       name: "list"
-    }), " Open list view")))));
+    }), " Open list view"))))));
   }
   const owner = MEMBERS_BY_ID[w.assignee];
   const isLiveDetail = Boolean(w.isSupabaseRow);

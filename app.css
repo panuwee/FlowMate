@@ -625,6 +625,8 @@ button:disabled {
 .marketing-working-status {
   width: 112px;
   height: 30px;
+  padding: 0 28px 0 10px;
+  line-height: 1.2;
 }
 .marketing-working-link {
   color: var(--garena-red);

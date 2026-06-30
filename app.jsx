@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260629-15";
+const FLOWMATE_APP_VERSION = "v20260630-1";
 
 const NAV = [
   { group: "Personal", items: [
@@ -59,7 +59,10 @@ function App() {
     const h = getFlowMateHashRouteKey();
     return h && TITLE_MAP[h] ? h : "my-work";
   });
-  const [focusId, setFocusId] = useStateApp(null);
+  const [focusId, setFocusId] = useStateApp(() => {
+    const hash = String(window.location.hash || "").replace("#", "");
+    return getFlowMateHashRouteKey(hash) === "detail" ? hash.split("/")[1] || null : null;
+  });
   // O-6: `searchInput` is bound to the box (instant typing); `searchQuery` is
   // the debounced value passed to the screens. This stops every keystroke from
   // re-rendering the whole signed-in tree and re-running the O(n) grouping.
@@ -1595,6 +1598,12 @@ async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(conte
     .update({ brief_link: briefLink })
     .eq("id", contentItemId);
   if (result.error) throw result.error;
+  const placementResult = await window.flowmateSupabase
+    .from("marketing_channel_placements")
+    .update({ placement_status: "assigned" })
+    .eq("content_item_id", contentItemId)
+    .eq("placement_status", "planned");
+  if (placementResult.error) throw placementResult.error;
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "marketing_plan_creative_request_link" } }));
   return { contentItemId, briefLink };
 }
@@ -3173,70 +3182,75 @@ function MarketingPlanWorkingSheetScreen() {
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.slice(0, 12).map(row => (
-                  <tr key={row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`}>
-                    <td>{getMarketingPlanMonthLabel(row.monthKey)}</td>
-                    <td>{row.campaignName}</td>
-                    <td>{row.contentTitle}</td>
-                    <td>{row.contentTier || "-"}</td>
-                    <td>{row.format || "-"}</td>
-                    <td>
-                      <div className="marketing-channel-tags">
-                        {(row.channels || []).map(channel => (
-                          <span key={channel} className="marketing-channel-tag" title={getMarketingPlanChannelLabel(channel)}>
-                            {getMarketingPlanChannelAbbrev(channel)}
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td>{formatMarketingPlanDate(row.publishDate)}</td>
-                    <td>
-                      <span className="mono marketing-working-time-text">{formatMarketingPlanTime(row.publishTime) || "-"}</span>
-                    </td>
-                    <td>
-                      {row.briefLink ? (
-                        <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
-                      ) : (
-                        <span className="muted">-</span>
-                      )}
-                    </td>
-                    <td>{row.picName || "-"}</td>
-                    <td>
-                      <select
-                        className="select marketing-working-status"
-                        value={normalizeMarketingPlanWorkingStatus(row.placementStatus)}
-                        disabled={updatingRowId === row.contentItemId}
-                        onChange={event => handleWorkingRowStatusChange(row, event.target.value)}
-                      >
-                        {MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}{row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <div className="marketing-working-actions">
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--xs"
+                {visibleRows.slice(0, 12).map(row => {
+                  const rowStatusValue = getMarketingPlanViewStatus(row);
+                  return (
+                    <tr key={row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`}>
+                      <td>{getMarketingPlanMonthLabel(row.monthKey)}</td>
+                      <td>{row.campaignName}</td>
+                      <td>{row.contentTitle}</td>
+                      <td>{row.contentTier || "-"}</td>
+                      <td>{row.format || "-"}</td>
+                      <td>
+                        <div className="marketing-channel-tags">
+                          {(row.channels || []).map(channel => (
+                            <span key={channel} className="marketing-channel-tag" title={getMarketingPlanChannelLabel(channel)}>
+                              {getMarketingPlanChannelAbbrev(channel)}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>{formatMarketingPlanDate(row.publishDate)}</td>
+                      <td>
+                        <span className="mono marketing-working-time-text">{formatMarketingPlanTime(row.publishTime) || "-"}</span>
+                      </td>
+                      <td>
+                        {row.briefLink ? (
+                          <a className="marketing-working-link" href={row.briefLink} target="_blank" rel="noreferrer">Open</a>
+                        ) : (
+                          <span className="muted">-</span>
+                        )}
+                      </td>
+                      <td>{row.picName || "-"}</td>
+                      <td>
+                        <select
+                          className="select marketing-working-status"
+                          value={rowStatusValue}
                           disabled={updatingRowId === row.contentItemId}
-                          onClick={() => startEditWorkingRow(row)}
+                          onChange={event => handleWorkingRowStatusChange(row, event.target.value)}
                         >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--primary btn--xs"
-                          disabled={updatingRowId === row.contentItemId}
-                          onClick={() => openFlowMateCreativeBriefFromMarketingRow(row)}
-                        >
-                          Create Brief
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}{row.hasMixedStatus && option.value === rowStatusValue ? " (mixed)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <div className="marketing-working-actions">
+                          <button
+                            type="button"
+                            className="btn btn--secondary btn--xs"
+                            disabled={updatingRowId === row.contentItemId}
+                            onClick={() => startEditWorkingRow(row)}
+                          >
+                            Edit
+                          </button>
+                          {row.briefLink ? null : (
+                            <button
+                              type="button"
+                              className="btn btn--primary btn--xs"
+                              disabled={updatingRowId === row.contentItemId}
+                              onClick={() => openFlowMateCreativeBriefFromMarketingRow(row)}
+                            >
+                              Create Brief
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {visibleRows.length === 0 && (
                   <tr>
                     <td colSpan="12" className="muted">No rows match the selected filters.</td>

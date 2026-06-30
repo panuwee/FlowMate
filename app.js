@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260629-15";
+const FLOWMATE_APP_VERSION = "v20260630-1";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -98,7 +98,10 @@ function App() {
     const h = getFlowMateHashRouteKey();
     return h && TITLE_MAP[h] ? h : "my-work";
   });
-  const [focusId, setFocusId] = useStateApp(null);
+  const [focusId, setFocusId] = useStateApp(() => {
+    const hash = String(window.location.hash || "").replace("#", "");
+    return getFlowMateHashRouteKey(hash) === "detail" ? hash.split("/")[1] || null : null;
+  });
   const [searchInput, setSearchInput] = useStateApp("");
   const [searchQuery, setSearchQuery] = useStateApp("");
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useStateApp(false);
@@ -1674,6 +1677,10 @@ async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(conte
     brief_link: briefLink
   }).eq("id", contentItemId);
   if (result.error) throw result.error;
+  const placementResult = await window.flowmateSupabase.from("marketing_channel_placements").update({
+    placement_status: "assigned"
+  }).eq("content_item_id", contentItemId).eq("placement_status", "planned");
+  if (placementResult.error) throw placementResult.error;
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
     detail: {
       reason: "marketing_plan_creative_request_link"
@@ -3384,44 +3391,47 @@ function MarketingPlanWorkingSheetScreen() {
     className: "col-status"
   }, "Status"), React.createElement("th", {
     className: "col-actions"
-  }, "Actions"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => React.createElement("tr", {
-    key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`
-  }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, row.contentTier || "-"), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
-    className: "marketing-channel-tags"
-  }, (row.channels || []).map(channel => React.createElement("span", {
-    key: channel,
-    className: "marketing-channel-tag",
-    title: getMarketingPlanChannelLabel(channel)
-  }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("span", {
-    className: "mono marketing-working-time-text"
-  }, formatMarketingPlanTime(row.publishTime) || "-")), React.createElement("td", null, row.briefLink ? React.createElement("a", {
-    className: "marketing-working-link",
-    href: row.briefLink,
-    target: "_blank",
-    rel: "noreferrer"
-  }, "Open") : React.createElement("span", {
-    className: "muted"
-  }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
-    className: "select marketing-working-status",
-    value: normalizeMarketingPlanWorkingStatus(row.placementStatus),
-    disabled: updatingRowId === row.contentItemId,
-    onChange: event => handleWorkingRowStatusChange(row, event.target.value)
-  }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
-    key: option.value,
-    value: option.value
-  }, option.label, row.hasMixedStatus && option.value === normalizeMarketingPlanWorkingStatus(row.placementStatus) ? " (mixed)" : "")))), React.createElement("td", null, React.createElement("div", {
-    className: "marketing-working-actions"
-  }, React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary btn--xs",
-    disabled: updatingRowId === row.contentItemId,
-    onClick: () => startEditWorkingRow(row)
-  }, "Edit"), React.createElement("button", {
-    type: "button",
-    className: "btn btn--primary btn--xs",
-    disabled: updatingRowId === row.contentItemId,
-    onClick: () => openFlowMateCreativeBriefFromMarketingRow(row)
-  }, "Create Brief"))))), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+  }, "Actions"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => {
+    const rowStatusValue = getMarketingPlanViewStatus(row);
+    return React.createElement("tr", {
+      key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`
+    }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, row.contentTier || "-"), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
+      className: "marketing-channel-tags"
+    }, (row.channels || []).map(channel => React.createElement("span", {
+      key: channel,
+      className: "marketing-channel-tag",
+      title: getMarketingPlanChannelLabel(channel)
+    }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("span", {
+      className: "mono marketing-working-time-text"
+    }, formatMarketingPlanTime(row.publishTime) || "-")), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+      className: "marketing-working-link",
+      href: row.briefLink,
+      target: "_blank",
+      rel: "noreferrer"
+    }, "Open") : React.createElement("span", {
+      className: "muted"
+    }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
+      className: "select marketing-working-status",
+      value: rowStatusValue,
+      disabled: updatingRowId === row.contentItemId,
+      onChange: event => handleWorkingRowStatusChange(row, event.target.value)
+    }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
+      key: option.value,
+      value: option.value
+    }, option.label, row.hasMixedStatus && option.value === rowStatusValue ? " (mixed)" : "")))), React.createElement("td", null, React.createElement("div", {
+      className: "marketing-working-actions"
+    }, React.createElement("button", {
+      type: "button",
+      className: "btn btn--secondary btn--xs",
+      disabled: updatingRowId === row.contentItemId,
+      onClick: () => startEditWorkingRow(row)
+    }, "Edit"), row.briefLink ? null : React.createElement("button", {
+      type: "button",
+      className: "btn btn--primary btn--xs",
+      disabled: updatingRowId === row.contentItemId,
+      onClick: () => openFlowMateCreativeBriefFromMarketingRow(row)
+    }, "Create Brief"))));
+  }), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
     colSpan: "12",
     className: "muted"
   }, "No rows match the selected filters."))))))), editingWorkingRow && editForm && React.createElement("div", {

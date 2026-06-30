@@ -1487,9 +1487,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const selected = window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === id
     ? window.flowmateSelectedWorkItem
     : null;
+  const [directDetailItem, setDirectDetailItem] = useState(null);
+  const [directDetailLoadState, setDirectDetailLoadState] = useState({ status: "idle", message: "" });
+  const directDetailMatch = directDetailItem && directDetailItem.id === id ? directDetailItem : null;
   // Do not fall back to a static item when the id cannot be resolved.
   // If we genuinely have nothing, render an empty state below.
-  const w = selected || WORK_BY_ID[id] || null;
+  const w = selected || directDetailMatch || WORK_BY_ID[id] || null;
 
   // CR-2: ALL hooks must run unconditionally and BEFORE any early return
   // (Rules of Hooks). When a live refresh clears the selected item, `w` can
@@ -1552,7 +1555,36 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     return () => { alive = false; };
   }, [w && w.id]);
 
+  useEffect(() => {
+    let alive = true;
+    if (!id || w || !window.loadFlowMateListRows || !window.findFlowMateWorkItemById) {
+      if (w) setDirectDetailLoadState({ status: "idle", message: "" });
+      return () => { alive = false; };
+    }
+
+    setDirectDetailLoadState({ status: "loading", message: "Loading work item..." });
+    window.loadFlowMateListRows()
+      .then((rows) => {
+        if (!alive) return;
+        const row = window.findFlowMateWorkItemById(rows, id);
+        if (row) {
+          window.flowmateSelectedWorkItem = row;
+          setDirectDetailItem(row);
+          setDirectDetailLoadState({ status: "loaded", message: "" });
+          return;
+        }
+        setDirectDetailLoadState({ status: "error", message: "Work item not found." });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        console.warn("[FlowMate Detail] Direct detail load failed:", error && error.message);
+        setDirectDetailLoadState({ status: "error", message: "Work item load failed." });
+      });
+    return () => { alive = false; };
+  }, [id, w && w.id]);
+
   if (!w) {
+    const isLoadingDirectDetail = directDetailLoadState.status === "loading";
     return (
       <div className="page" style={{ maxWidth: 640 }}>
         <div className="row" style={{ marginBottom: 12, fontSize: 12 }}>
@@ -1561,14 +1593,20 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <span className="mono muted">{id}</span>
         </div>
         <div className="card">
-          <div className="card__head"><span className="card__title">Work item not loaded</span></div>
+          <div className="card__head"><span className="card__title">{isLoadingDirectDetail ? "Loading work item" : "Work item not loaded"}</span></div>
           <div className="card__body">
-            <div className="reason-box reason-box--need">
-              We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Central queue</strong> so the full row is fetched from Supabase.
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <button className="btn btn--secondary" onClick={() => onNav("list")}><Icon name="list" /> Open list view</button>
-            </div>
+            {isLoadingDirectDetail ? (
+              <div className="reason-box">Loading <span className="mono">{id}</span> from Supabase...</div>
+            ) : (
+              <>
+                <div className="reason-box reason-box--need">
+                  We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Central queue</strong> so the full row is fetched from Supabase.
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn btn--secondary" onClick={() => onNav("list")}><Icon name="list" /> Open list view</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
