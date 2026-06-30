@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260630-7";
+const FLOWMATE_APP_VERSION = "v20260630-8";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -82,7 +82,7 @@ const TITLE_MAP = {
   "admin-whitelist": "Whitelist"
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
-const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet"]);
+const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 function getFlowMateHashRouteKey(hashValue) {
   return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
 }
@@ -1839,6 +1839,203 @@ function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all"
   const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
   const channelSuffix = selectedChannel === "all" ? "all-channels" : selectedChannel;
   const filename = `marketing-plan-${selectedMonth || "no-month"}-${channelSuffix}.csv`;
+  if (window.flowmateDownloadCsv) {
+    window.flowmateDownloadCsv(filename, headerLabels, dataRows);
+    return visibleRows.length;
+  }
+  const csv = [headerLabels, ...dataRows].map(row => row.map(value => `"${String(value == null ? "" : value).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return visibleRows.length;
+}
+function normalizeMarketingPlanSupervisorRow(row) {
+  return {
+    planId: row.plan_id || "",
+    monthKey: row.month_key || (row.launch_date ? String(row.launch_date).slice(0, 7) : ""),
+    campaignId: row.campaign_id || "",
+    campaignName: row.campaign_name || "No campaign",
+    campaignTeam: row.campaign_team || "",
+    contentItemId: row.content_item_id || "",
+    productEvent: row.product_event || "Untitled asset",
+    contentTeam: row.content_team || "",
+    picUserId: row.pic_user_id || "",
+    picName: row.pic_name || "Unassigned",
+    placementId: row.placement_id || "",
+    channel: row.channel || "other",
+    launchDate: row.launch_date || "",
+    publishDate: row.publish_date || "",
+    publishTime: row.publish_time || "",
+    storedStatus: normalizeMarketingPlanWorkingStatus(row.stored_status || "planned"),
+    effectiveStatus: normalizeMarketingPlanWorkingStatus(row.effective_status || row.stored_status || "planned"),
+    briefLink: row.brief_link || "",
+    firstAssignedAt: row.first_assigned_at || "",
+    assignedByUserId: row.assigned_by_user_id || "",
+    workingDaysBeforeLaunch: row.working_days_before_launch == null ? null : Number(row.working_days_before_launch),
+    calendarDaysBeforeLaunch: row.calendar_days_before_launch == null ? null : Number(row.calendar_days_before_launch),
+    riskBucket: row.risk_bucket || "Watch",
+    missingBriefLink: Boolean(row.missing_brief_link),
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || ""
+  };
+}
+function normalizeMarketingPlanSupervisorSummaryRow(row, type) {
+  return {
+    type,
+    monthKey: row.month_key || "",
+    picUserId: row.pic_user_id || "",
+    picName: row.pic_name || "Unassigned",
+    campaignId: row.campaign_id || "",
+    campaignName: row.campaign_name || "No campaign",
+    campaignTeam: row.campaign_team || "",
+    channel: row.channel || "other",
+    totalRows: Number(row.total_rows || 0),
+    assignedRows: Number(row.assigned_rows || 0),
+    unassignedRows: Number(row.unassigned_rows || 0),
+    avgWorkingDaysBeforeLaunch: row.avg_working_days_before_launch == null ? null : Number(row.avg_working_days_before_launch),
+    medianWorkingDaysBeforeLaunch: row.median_working_days_before_launch == null ? null : Number(row.median_working_days_before_launch),
+    healthyCount: Number(row.healthy_count || 0),
+    watchCount: Number(row.watch_count || 0),
+    riskCount: Number(row.risk_count || 0),
+    criticalCount: Number(row.critical_count || 0),
+    missingBriefLinkCount: Number(row.missing_brief_link_count || 0)
+  };
+}
+async function loadMarketingPlanSupervisorRows(user) {
+  if (!user || user.role !== "admin") return {
+    monthlyRows: [],
+    picRows: [],
+    campaignRows: [],
+    channelRows: []
+  };
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const [monthlyResult, picResult, campaignResult, channelResult] = await Promise.all([window.flowmateSupabase.from("marketing_plan_supervisor_monthly_v").select("*").order("month_key", {
+    ascending: true
+  }).order("launch_date", {
+    ascending: true
+  }).order("campaign_name", {
+    ascending: true
+  }), window.flowmateSupabase.from("marketing_plan_supervisor_pic_v").select("*").order("month_key", {
+    ascending: true
+  }).order("pic_name", {
+    ascending: true
+  }), window.flowmateSupabase.from("marketing_plan_supervisor_campaign_v").select("*").order("month_key", {
+    ascending: true
+  }).order("campaign_name", {
+    ascending: true
+  }), window.flowmateSupabase.from("marketing_plan_supervisor_channel_v").select("*").order("month_key", {
+    ascending: true
+  }).order("channel", {
+    ascending: true
+  })]);
+  for (const result of [monthlyResult, picResult, campaignResult, channelResult]) {
+    if (result.error) throw result.error;
+  }
+  return {
+    monthlyRows: (monthlyResult.data || []).map(normalizeMarketingPlanSupervisorRow),
+    picRows: (picResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "pic")),
+    campaignRows: (campaignResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "campaign")),
+    channelRows: (channelResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "channel"))
+  };
+}
+function getMarketingPlanSupervisorMonthOptions(monthlyRows) {
+  const months = new Set();
+  (monthlyRows || []).forEach(row => {
+    if (row.monthKey) months.add(row.monthKey);
+  });
+  return Array.from(months).sort();
+}
+function getDefaultMarketingPlanSupervisorMonth(monthOptions) {
+  const currentMonth = flowMateTodayDateKey().slice(0, 7);
+  if ((monthOptions || []).includes(currentMonth)) return currentMonth;
+  return (monthOptions || [])[monthOptions.length - 1] || "";
+}
+function getMarketingPlanSupervisorFilterOptions(rows, key, labelKey) {
+  const options = new Map();
+  (rows || []).forEach(row => {
+    const value = row[key] || row[labelKey] || "";
+    const label = row[labelKey] || value;
+    if (value && !options.has(value)) options.set(value, label);
+  });
+  return Array.from(options.entries()).map(([value, label]) => ({
+    value,
+    label
+  })).sort((a, b) => a.label.localeCompare(b.label));
+}
+function filterMarketingPlanSupervisorRows(rows, filters) {
+  const activeFilters = filters || {};
+  return (rows || []).filter(row => {
+    if (activeFilters.month && row.monthKey !== activeFilters.month) return false;
+    if (activeFilters.campaign && row.campaignId !== activeFilters.campaign && row.campaignName !== activeFilters.campaign) return false;
+    if (activeFilters.channel && row.channel !== activeFilters.channel) return false;
+    if (activeFilters.pic && row.picUserId !== activeFilters.pic && row.picName !== activeFilters.pic) return false;
+    return true;
+  }).sort((a, b) => String(a.launchDate || "").localeCompare(String(b.launchDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.productEvent || "").localeCompare(String(b.productEvent || "")));
+}
+function filterMarketingPlanSupervisorSummaryRows(rows, filters) {
+  const activeFilters = filters || {};
+  return (rows || []).filter(row => {
+    if (activeFilters.month && row.monthKey !== activeFilters.month) return false;
+    if (row.type === "pic" && activeFilters.pic && row.picUserId !== activeFilters.pic && row.picName !== activeFilters.pic) return false;
+    if (row.type === "campaign" && activeFilters.campaign && row.campaignId !== activeFilters.campaign && row.campaignName !== activeFilters.campaign) return false;
+    if (row.type === "channel" && activeFilters.channel && row.channel !== activeFilters.channel) return false;
+    return true;
+  });
+}
+function getMarketingPlanSupervisorSummary(rows) {
+  const assigned = (rows || []).filter(row => row.firstAssignedAt || row.effectiveStatus !== "planned").length;
+  const workingValues = (rows || []).map(row => row.workingDaysBeforeLaunch).filter(value => Number.isFinite(value));
+  const avgWorking = workingValues.length ? workingValues.reduce((sum, value) => sum + value, 0) / workingValues.length : null;
+  return {
+    totalRows: (rows || []).length,
+    assignedRows: assigned,
+    unassignedRows: Math.max((rows || []).length - assigned, 0),
+    avgWorkingDaysBeforeLaunch: avgWorking,
+    riskRows: (rows || []).filter(row => row.riskBucket === "Risk").length,
+    criticalRows: (rows || []).filter(row => row.riskBucket === "Critical").length
+  };
+}
+function formatMarketingPlanSupervisorNumber(value, digits = 1) {
+  if (!Number.isFinite(value)) return "-";
+  return Number(value).toLocaleString("en-US", {
+    maximumFractionDigits: digits
+  });
+}
+function formatMarketingPlanSupervisorDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 16);
+  return date.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+function getMarketingPlanSupervisorRiskClass(bucket) {
+  if (bucket === "Healthy") return "badge--delivered";
+  if (bucket === "Watch") return "badge--neutral";
+  if (bucket === "Risk") return "badge--review";
+  if (bucket === "Critical") return "badge--overdue";
+  return "badge--neutral";
+}
+function exportMarketingPlanSupervisorCsv(rows, filters) {
+  const visibleRows = filterMarketingPlanSupervisorRows(rows, filters);
+  const headerLabels = ["Month", "Campaign", "Product / Event", "Channel", "Launch Date", "Time", "PIC", "Effective Status", "Stored Status", "Assigned At", "Working Days Before Launch", "Risk Bucket", "Brief Link"];
+  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey), row.campaignName, row.productEvent, getMarketingPlanChannelLabel(row.channel), row.launchDate, formatMarketingPlanTime(row.publishTime), row.picName, getMarketingPlanStatusLabel(row.effectiveStatus), getMarketingPlanStatusLabel(row.storedStatus), row.firstAssignedAt, row.workingDaysBeforeLaunch == null ? "" : row.workingDaysBeforeLaunch, row.riskBucket, row.briefLink]);
+  const filenameMonth = filters && filters.month ? getMarketingPlanMonthLabel(filters.month).toLowerCase().replace(/\s+/g, "-") : "all-months";
+  const filename = `marketing-plan-supervisor-${filenameMonth}.csv`;
   if (window.flowmateDownloadCsv) {
     window.flowmateDownloadCsv(filename, headerLabels, dataRows);
     return visibleRows.length;
@@ -3617,6 +3814,303 @@ function MarketingPlanWorkingSheetScreen() {
     disabled: updatingRowId === editingWorkingRow.contentItemId
   }, updatingRowId === editingWorkingRow.contentItemId ? "Saving..." : "Save changes")))));
 }
+function MarketingPlanSupervisorScreen({
+  user
+}) {
+  const [monthlyRows, setMonthlyRows] = useStateApp([]);
+  const [picRows, setPicRows] = useStateApp([]);
+  const [campaignRows, setCampaignRows] = useStateApp([]);
+  const [channelRows, setChannelRows] = useStateApp([]);
+  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedCampaign, setSelectedCampaign] = useStateApp("");
+  const [selectedChannel, setSelectedChannel] = useStateApp("");
+  const [selectedPic, setSelectedPic] = useStateApp("");
+  const [activeTab, setActiveTab] = useStateApp("monthly");
+  const [loadState, setLoadState] = useStateApp({
+    status: "loading",
+    message: "Loading supervisor report..."
+  });
+  const [exportMessage, setExportMessage] = useStateApp("");
+  async function loadSupervisorRows(isAlive = () => true) {
+    if (!user || user.role !== "admin") return;
+    setLoadState({
+      status: "loading",
+      message: "Loading supervisor report..."
+    });
+    try {
+      const report = await loadMarketingPlanSupervisorRows(user);
+      if (!isAlive()) return;
+      const nextMonthlyRows = report.monthlyRows || [];
+      const monthOptions = getMarketingPlanSupervisorMonthOptions(nextMonthlyRows);
+      setMonthlyRows(nextMonthlyRows);
+      setPicRows(report.picRows || []);
+      setCampaignRows(report.campaignRows || []);
+      setChannelRows(report.channelRows || []);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanSupervisorMonth(monthOptions));
+      setLoadState({
+        status: nextMonthlyRows.length ? "live" : "empty",
+        message: nextMonthlyRows.length ? "Live supervisor report" : "No supervisor data for this filter."
+      });
+    } catch (error) {
+      if (!isAlive()) return;
+      console.error("[Marketing Plan] Supervisor load failed:", error);
+      setLoadState({
+        status: "error",
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Supervisor report load failed.") : "Supervisor report load failed."
+      });
+    }
+  }
+  useEffectApp(() => {
+    let alive = true;
+    const isAlive = () => alive;
+    loadSupervisorRows(isAlive);
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadSupervisorRows(isAlive)) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, [user && user.role]);
+  const monthOptions = getMarketingPlanSupervisorMonthOptions(monthlyRows);
+  const filters = {
+    month: selectedMonth,
+    campaign: selectedCampaign,
+    channel: selectedChannel,
+    pic: selectedPic
+  };
+  const filteredMonthlyRows = filterMarketingPlanSupervisorRows(monthlyRows, filters);
+  const filteredPicRows = filterMarketingPlanSupervisorSummaryRows(picRows, filters);
+  const filteredCampaignRows = filterMarketingPlanSupervisorSummaryRows(campaignRows, filters);
+  const filteredChannelRows = filterMarketingPlanSupervisorSummaryRows(channelRows, filters);
+  const summary = getMarketingPlanSupervisorSummary(filteredMonthlyRows);
+  const campaignOptions = getMarketingPlanSupervisorFilterOptions(filterMarketingPlanSupervisorRows(monthlyRows, {
+    month: selectedMonth,
+    channel: selectedChannel,
+    pic: selectedPic
+  }), "campaignId", "campaignName");
+  const channelOptions = getMarketingPlanSupervisorFilterOptions(filterMarketingPlanSupervisorRows(monthlyRows, {
+    month: selectedMonth,
+    campaign: selectedCampaign,
+    pic: selectedPic
+  }), "channel", "channel");
+  const picOptions = getMarketingPlanSupervisorFilterOptions(filterMarketingPlanSupervisorRows(monthlyRows, {
+    month: selectedMonth,
+    campaign: selectedCampaign,
+    channel: selectedChannel
+  }), "picUserId", "picName");
+  function resetDependentFilter(type, value) {
+    if (type === "month") {
+      setSelectedMonth(value);
+      setSelectedCampaign("");
+      setSelectedChannel("");
+      setSelectedPic("");
+    }
+    if (type === "campaign") setSelectedCampaign(value);
+    if (type === "channel") setSelectedChannel(value);
+    if (type === "pic") setSelectedPic(value);
+  }
+  function handleExportSupervisorCsv() {
+    const exportedCount = exportMarketingPlanSupervisorCsv(monthlyRows, filters);
+    setExportMessage(`Exported ${exportedCount} supervisor rows.`);
+  }
+  function renderRiskBadge(bucket) {
+    return React.createElement("span", {
+      className: `badge ${getMarketingPlanSupervisorRiskClass(bucket)}`
+    }, bucket || "Watch");
+  }
+  function renderSummaryMetric(label, value) {
+    return React.createElement("div", {
+      className: "card",
+      key: label,
+      style: {
+        minHeight: 94
+      }
+    }, React.createElement("div", {
+      className: "card__head"
+    }, React.createElement("span", {
+      className: "card__title"
+    }, label)), React.createElement("div", {
+      className: "card__body"
+    }, React.createElement("div", {
+      className: "strong",
+      style: {
+        fontSize: 24
+      }
+    }, value)));
+  }
+  function renderSummaryTable(rows, type) {
+    return React.createElement("div", {
+      className: "card"
+    }, React.createElement("div", {
+      className: "card__body",
+      style: {
+        overflowX: "auto"
+      }
+    }, React.createElement("table", {
+      className: "marketing-working-table"
+    }, React.createElement("thead", null, React.createElement("tr", null, type === "pic" && React.createElement("th", null, "PIC"), type === "campaign" && React.createElement("th", null, "Campaign"), type === "campaign" && React.createElement("th", null, "Team"), type === "channel" && React.createElement("th", null, "Channel"), React.createElement("th", null, "Total Rows"), React.createElement("th", null, "Assigned"), React.createElement("th", null, "Unassigned"), React.createElement("th", null, "Avg Working Days Before Launch"), type === "pic" && React.createElement("th", null, "Median Working Days Before Launch"), React.createElement("th", null, "Healthy"), React.createElement("th", null, "Watch"), React.createElement("th", null, "Risk"), React.createElement("th", null, "Critical"), React.createElement("th", null, "Missing Brief Link"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
+      key: `${type}-${row.monthKey}-${row.picUserId || row.campaignId || row.channel}`
+    }, type === "pic" && React.createElement("td", null, row.picName), type === "campaign" && React.createElement("td", null, row.campaignName), type === "campaign" && React.createElement("td", null, row.campaignTeam || "-"), type === "channel" && React.createElement("td", null, getMarketingPlanChannelLabel(row.channel)), React.createElement("td", null, row.totalRows), React.createElement("td", null, row.assignedRows), React.createElement("td", null, row.unassignedRows), React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.avgWorkingDaysBeforeLaunch)), type === "pic" && React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.medianWorkingDaysBeforeLaunch)), React.createElement("td", null, row.healthyCount), React.createElement("td", null, row.watchCount), React.createElement("td", null, row.riskCount), React.createElement("td", null, row.criticalCount), React.createElement("td", null, row.missingBriefLinkCount))), rows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+      colSpan: type === "campaign" ? 13 : 12
+    }, "No supervisor data for this filter."))))));
+  }
+  const tabOptions = [{
+    key: "monthly",
+    label: "Monthly Overview"
+  }, {
+    key: "pic",
+    label: "PIC Performance"
+  }, {
+    key: "campaign",
+    label: "Campaign Risk"
+  }, {
+    key: "channel",
+    label: "Channel Risk"
+  }];
+  return React.createElement("div", null, React.createElement("div", {
+    className: "page-head"
+  }, React.createElement("div", null, React.createElement("h1", null, "Supervisor"), React.createElement("p", null, "Monthly assignment health for Marketing Plan rows."))), React.createElement("div", {
+    className: "card",
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("div", {
+    className: "card__body"
+  }, React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      flexWrap: "wrap"
+    }
+  }, React.createElement("select", {
+    className: "input",
+    style: {
+      width: 150
+    },
+    value: selectedMonth,
+    onChange: event => resetDependentFilter("month", event.target.value)
+  }, monthOptions.length === 0 && React.createElement("option", {
+    value: ""
+  }, "No data"), monthOptions.map(monthKey => React.createElement("option", {
+    key: monthKey,
+    value: monthKey
+  }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 190
+    },
+    value: selectedCampaign,
+    onChange: event => resetDependentFilter("campaign", event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All campaigns"), campaignOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 160
+    },
+    value: selectedChannel,
+    onChange: event => resetDependentFilter("channel", event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All channels"), channelOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, getMarketingPlanChannelLabel(option.value)))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 160
+    },
+    value: selectedPic,
+    onChange: event => resetDependentFilter("pic", event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All PICs"), picOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => loadSupervisorRows(() => true)
+  }, React.createElement(Icon, {
+    name: "refresh"
+  }), " Refresh"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    onClick: handleExportSupervisorCsv,
+    disabled: filteredMonthlyRows.length === 0
+  }, React.createElement(Icon, {
+    name: "download"
+  }), " Export CSV")), exportMessage && React.createElement("div", {
+    className: "muted",
+    style: {
+      marginTop: 8
+    }
+  }, exportMessage))), loadState.status === "loading" && React.createElement("div", {
+    className: "reason-box"
+  }, "Loading supervisor report..."), loadState.status === "error" && React.createElement("div", {
+    className: "reason-box reason-box--need"
+  }, React.createElement("div", {
+    className: "strong"
+  }, "Supervisor report could not load."), React.createElement("div", {
+    style: {
+      marginTop: 4
+    }
+  }, loadState.message)), loadState.status === "empty" && React.createElement("div", {
+    className: "reason-box"
+  }, "No supervisor data for this filter."), loadState.status === "live" && React.createElement(React.Fragment, null, React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+      gap: 12,
+      marginBottom: 16
+    }
+  }, renderSummaryMetric("Total Rows", summary.totalRows), renderSummaryMetric("Assigned", summary.assignedRows), renderSummaryMetric("Unassigned", summary.unassignedRows), renderSummaryMetric("Avg Working Days Before Launch", formatMarketingPlanSupervisorNumber(summary.avgWorkingDaysBeforeLaunch)), renderSummaryMetric("Risk", summary.riskRows), renderSummaryMetric("Critical", summary.criticalRows)), React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 14
+    }
+  }, tabOptions.map(tab => React.createElement("button", {
+    key: tab.key,
+    type: "button",
+    className: `btn btn--xs ${activeTab === tab.key ? "btn--primary" : "btn--secondary"}`,
+    onClick: () => setActiveTab(tab.key)
+  }, tab.label)), React.createElement("span", {
+    className: "topbar__spacer"
+  }), React.createElement("span", {
+    className: "badge badge--delivered"
+  }, "Healthy"), React.createElement("span", {
+    className: "badge badge--neutral"
+  }, "Watch"), React.createElement("span", {
+    className: "badge badge--review"
+  }, "Risk"), React.createElement("span", {
+    className: "badge badge--overdue"
+  }, "Critical")), activeTab === "monthly" && React.createElement("div", {
+    className: "card"
+  }, React.createElement("div", {
+    className: "card__body",
+    style: {
+      overflowX: "auto"
+    }
+  }, React.createElement("table", {
+    className: "marketing-working-table"
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Campaign"), React.createElement("th", null, "Product / Event"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Launch Date"), React.createElement("th", null, "Time"), React.createElement("th", null, "PIC"), React.createElement("th", null, "Effective Status"), React.createElement("th", null, "Assigned At"), React.createElement("th", null, "Working Days Before Launch"), React.createElement("th", null, "Risk Bucket"), React.createElement("th", null, "Brief Link"))), React.createElement("tbody", null, filteredMonthlyRows.map(row => React.createElement("tr", {
+    key: `${row.contentItemId}-${row.placementId || row.channel}`
+  }, React.createElement("td", null, row.campaignName), React.createElement("td", null, row.productEvent), React.createElement("td", null, getMarketingPlanChannelLabel(row.channel)), React.createElement("td", null, formatMarketingPlanDate(row.launchDate)), React.createElement("td", null, formatMarketingPlanTime(row.publishTime) || "-"), React.createElement("td", null, row.picName), React.createElement("td", null, React.createElement("span", {
+    className: `badge ${getMarketingPlanStatusClass(row.effectiveStatus)}`
+  }, getMarketingPlanStatusLabel(row.effectiveStatus))), React.createElement("td", null, formatMarketingPlanSupervisorDateTime(row.firstAssignedAt)), React.createElement("td", null, row.workingDaysBeforeLaunch == null ? "-" : row.workingDaysBeforeLaunch), React.createElement("td", null, renderRiskBadge(row.riskBucket)), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+    href: row.briefLink,
+    target: "_blank",
+    rel: "noreferrer"
+  }, "Link") : React.createElement("span", {
+    className: "muted"
+  }, "Missing")))), filteredMonthlyRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "11"
+  }, "No supervisor data for this filter.")))))), activeTab === "pic" && renderSummaryTable(filteredPicRows, "pic"), activeTab === "campaign" && renderSummaryTable(filteredCampaignRows, "campaign"), activeTab === "channel" && renderSummaryTable(filteredChannelRows, "channel")));
+}
 function MarketingPlanPlaceholderScreen({
   title,
   detail
@@ -3628,6 +4122,7 @@ function MarketingPlanPlaceholderScreen({
   }, "This section is reserved for the next Marketing Plan chat. Campaign Timeline is the first implemented screen."));
 }
 function MarketingPlanShell({
+  user,
   currentUserName,
   currentUserEmail,
   avatarMemberId,
@@ -3635,7 +4130,14 @@ function MarketingPlanShell({
   onSwitchMarketingPlan,
   onSignOut
 }) {
-  const sections = [{
+  const isAdminUser = user.role === "admin";
+  const supervisorSection = {
+    key: "supervisor",
+    label: "Supervisor",
+    detail: "Monthly assignment health for Marketing Plan rows.",
+    icon: "chart"
+  };
+  const baseSections = [{
     key: "campaign-timeline",
     label: "Campaign Timeline",
     detail: "Campaign rows with Product / Event sub-rows and publish dates.",
@@ -3656,20 +4158,21 @@ function MarketingPlanShell({
     detail: "Enter recurring monthly plan rows in Marketing Plan.",
     icon: "list"
   }];
-  const sectionByKey = new Map(sections.map(section => [section.key, section]));
+  const sections = [...baseSections, ...(isAdminUser ? [supervisorSection] : [])];
+  const sectionByKey = new Map([...baseSections, supervisorSection].map(section => [section.key, section]));
   function getSectionFromHash() {
     const hashKey = window.location.hash.replace("#", "");
-    return sectionByKey.get(hashKey) || sections[0];
+    return sectionByKey.get(hashKey) || baseSections[0];
   }
   const [activeSectionKey, setActiveSectionKey] = useStateApp(() => getSectionFromHash().key);
-  const activeSection = sectionByKey.get(activeSectionKey) || sections[0];
+  const activeSection = sectionByKey.get(activeSectionKey) || baseSections[0];
   useEffectApp(() => {
     function onMarketingHashChange() {
       const nextSection = getSectionFromHash();
       setActiveSectionKey(nextSection.key);
     }
     if (!sectionByKey.has(window.location.hash.replace("#", ""))) {
-      window.location.hash = sections[0].key;
+      window.location.hash = baseSections[0].key;
     }
     window.addEventListener("hashchange", onMarketingHashChange);
     return () => window.removeEventListener("hashchange", onMarketingHashChange);
@@ -3721,7 +4224,22 @@ function MarketingPlanShell({
     size: 15
   }), React.createElement("span", null, section.label))))), React.createElement("main", {
     className: "app__main app__main--marketing"
-  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, null), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null)));
+  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, null), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null), activeSection.key === "supervisor" && !isAdminUser && React.createElement("div", {
+    className: "card",
+    style: {
+      maxWidth: 720
+    }
+  }, React.createElement("div", {
+    className: "card__head"
+  }, React.createElement("span", {
+    className: "card__title"
+  }, "Admin access required.")), React.createElement("div", {
+    className: "card__body"
+  }, React.createElement("div", {
+    className: "reason-box reason-box--need"
+  }, "Admin access required."))), activeSection.key === "supervisor" && isAdminUser && React.createElement(MarketingPlanSupervisorScreen, {
+    user: user
+  })));
 }
 function GlobalSearchResultsPanel({
   query,
