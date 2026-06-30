@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260630-1";
+const FLOWMATE_APP_VERSION = "v20260630-2";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1004,6 +1004,24 @@ function getMarketingPlanCalendarRangeLabel(days, viewMode, selectedMonth) {
   return `${formatMarketingPlanDate(days[0])} - ${formatMarketingPlanDate(days[days.length - 1])}`;
 }
 
+function getMarketingPlanTierRank(tier) {
+  const normalized = String(tier || "").trim().toUpperCase();
+  const order = { S: 0, A: 1, B: 2, C: 3 };
+  return Object.prototype.hasOwnProperty.call(order, normalized) ? order[normalized] : 99;
+}
+
+function getMarketingPlanAssetFirstPublishDate(asset) {
+  const dates = ((asset && asset.placements) || [])
+    .map(placement => String(placement.publishDate || ""))
+    .filter(Boolean)
+    .sort();
+  return dates[0] || "9999-12-31";
+}
+
+function getMarketingPlanTimelineAssetMeta(asset) {
+  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" · ") || "No details";
+}
+
 function groupMarketingPlanTimelineRows(rows, selectedMonth) {
   const campaigns = new Map();
   const windowMonths = new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys);
@@ -1047,20 +1065,35 @@ function groupMarketingPlanTimelineRows(rows, selectedMonth) {
     });
 
   return Array.from(campaigns.values())
-    .sort((a, b) => (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name))
-    .map(campaign => ({
-      ...campaign,
-      assets: Array.from(campaign.assets.values())
-        .sort((a, b) => (a.sortOrder - b.sortOrder) || a.title.localeCompare(b.title))
+    .map(campaign => {
+      const assets = Array.from(campaign.assets.values())
         .map(asset => ({
           ...asset,
+          firstPublishDate: getMarketingPlanAssetFirstPublishDate(asset),
           placements: asset.placements.sort((a, b) => (
             String(a.publishDate || "").localeCompare(String(b.publishDate || "")) ||
             String(a.publishTime || "").localeCompare(String(b.publishTime || "")) ||
             String(a.channel || "").localeCompare(String(b.channel || ""))
           )),
-        })),
-    }));
+        }))
+        .sort((a, b) => (
+          String(a.firstPublishDate || "").localeCompare(String(b.firstPublishDate || "")) ||
+          getMarketingPlanTierRank(a.contentTier) - getMarketingPlanTierRank(b.contentTier) ||
+          (a.sortOrder - b.sortOrder) ||
+          a.title.localeCompare(b.title)
+        ));
+      const firstPublishDate = assets[0] ? assets[0].firstPublishDate : "9999-12-31";
+      const bestTier = assets.reduce((best, asset) => (
+        getMarketingPlanTierRank(asset.contentTier) < getMarketingPlanTierRank(best) ? asset.contentTier : best
+      ), "");
+      return { ...campaign, firstPublishDate, bestTier, assets };
+    })
+    .sort((a, b) => (
+      String(a.firstPublishDate || "").localeCompare(String(b.firstPublishDate || "")) ||
+      getMarketingPlanTierRank(a.bestTier) - getMarketingPlanTierRank(b.bestTier) ||
+      (a.sortOrder - b.sortOrder) ||
+      a.name.localeCompare(b.name)
+    ));
 }
 
 const MARKETING_PLAN_CHANNELS = [
@@ -2211,7 +2244,7 @@ function MarketingPlanTimelineScreen() {
                         }}>
                           <div className="strong" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.title}</div>
                           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                            {[asset.format, asset.contentTier, asset.picName, asset.status].filter(Boolean).join(" · ") || "No details"}
+                            {getMarketingPlanTimelineAssetMeta(asset)}
                           </div>
                         </div>
                         <div style={{
@@ -2489,7 +2522,8 @@ function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
-  const [calendarViewMode, setCalendarViewMode] = useStateApp("month");
+  const [calendarViewMode, setCalendarViewMode] = useStateApp("schedule");
+  const [selectedScheduleDate, setSelectedScheduleDate] = useStateApp("");
   const [loadState, setLoadState] = useStateApp({ status: "loading", message: "Loading Marketing Plan calendar..." });
 
   useEffectApp(() => {
@@ -2502,6 +2536,7 @@ function MarketingPlanCalendarScreen() {
         setRows(normalizedRows);
         setSelectedMonth(current => current && monthOptions.includes(current) ? current : (monthOptions[0] || ""));
         setSelectedChannel("all");
+        setSelectedScheduleDate("");
         setLoadState({
           status: normalizedRows.length ? "live" : "empty",
           message: normalizedRows.length
@@ -2535,6 +2570,9 @@ function MarketingPlanCalendarScreen() {
   const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
   const monthDays = getMarketingPlanDays(selectedMonth);
   const viewDays = getMarketingPlanCalendarViewDays(selectedMonth, calendarViewMode);
+  const scheduleDayKeys = calendarViewMode === "schedule" && selectedScheduleDate
+    ? [selectedScheduleDate]
+    : viewDays;
   const calendarHours = Array.from({ length: 24 }, (_, hour) => hour);
   const firstDay = monthDays[0] ? new Date(`${monthDays[0].key}T00:00:00Z`).getUTCDay() : 0;
   const calendarCells = [
@@ -2551,6 +2589,11 @@ function MarketingPlanCalendarScreen() {
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
     return <span className={`badge ${statusClass}`}>{getMarketingPlanStatusLabel(status)}</span>;
+  }
+
+  function openScheduleForDate(dateKey) {
+    setSelectedScheduleDate(dateKey);
+    setCalendarViewMode("schedule");
   }
 
   function renderCalendarPlacement(row, options = {}) {
@@ -2586,6 +2629,7 @@ function MarketingPlanCalendarScreen() {
             onChange={(event) => {
               setSelectedMonth(event.target.value);
               setSelectedChannel("all");
+              setSelectedScheduleDate("");
             }}
             disabled={monthOptions.length === 0}
           >
@@ -2598,7 +2642,10 @@ function MarketingPlanCalendarScreen() {
             className="input"
             style={{ width: 150 }}
             value={selectedChannel}
-            onChange={(event) => setSelectedChannel(event.target.value)}
+            onChange={(event) => {
+              setSelectedChannel(event.target.value);
+              setSelectedScheduleDate("");
+            }}
             disabled={monthOptions.length === 0}
           >
             <option value="all">All channels</option>
@@ -2610,7 +2657,11 @@ function MarketingPlanCalendarScreen() {
             className="input"
             style={{ width: 132 }}
             value={calendarViewMode}
-            onChange={(event) => setCalendarViewMode(event.target.value)}
+            onChange={(event) => {
+              const nextMode = event.target.value;
+              setCalendarViewMode(nextMode);
+              if (nextMode !== "schedule") setSelectedScheduleDate("");
+            }}
             disabled={monthOptions.length === 0}
             aria-label="Calendar view"
           >
@@ -2663,16 +2714,17 @@ function MarketingPlanCalendarScreen() {
               <div className="card__sub">Day, Week, Month, 4 Days, and Schedule read the same Marketing Plan placements.</div>
             </div>
             <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-              <span className="badge badge--neutral">Planned</span>
-              <span className="badge badge--assigned">Ready</span>
-              <span className="badge badge--delivered">Posted</span>
-              <span className="badge badge--overdue">Delayed</span>
+              {MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => (
+                <span key={option.value} className={`badge ${getMarketingPlanStatusClass(option.value)}`}>
+                  {option.label}
+                </span>
+              ))}
             </div>
           </div>
           <div className="card__body">
             {calendarViewMode === "schedule" ? (
               <div className="marketing-calendar-schedule">
-                {viewDays.map(dayKey => {
+                {scheduleDayKeys.map(dayKey => {
                   const dayRows = (rowsByDate.get(dayKey) || []).sort((a, b) => String(a.publishTime || "").localeCompare(String(b.publishTime || "")));
                   if (dayRows.length === 0) return null;
                   return (
@@ -2708,11 +2760,15 @@ function MarketingPlanCalendarScreen() {
                     <div key={cell.key} className={`marketing-calendar-month-cell ${cell.isWeekend ? "is-weekend" : ""}`}>
                       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                         <span className="mono strong">{cell.day}</span>
-                        {dayRows.length > 0 && <span className="badge badge--quick">{dayRows.length}</span>}
+                        {dayRows.length > 0 && <button type="button" className="marketing-calendar-month-count" onClick={() => openScheduleForDate(cell.key)}>{dayRows.length}</button>}
                       </div>
                       <div style={{ display: "grid", gap: 6 }}>
-                        {dayRows.slice(0, 4).map(row => renderCalendarPlacement(row, { compact: true }))}
-                        {dayRows.length > 4 && <div className="muted" style={{ fontSize: 12 }}>+{dayRows.length - 4} more placements</div>}
+                        {dayRows.slice(0, 2).map(row => renderCalendarPlacement(row, { compact: true }))}
+                        {dayRows.length > 2 && (
+                          <button type="button" className="marketing-calendar-more" onClick={() => openScheduleForDate(cell.key)}>
+                            +{dayRows.length - 2} more placements
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
