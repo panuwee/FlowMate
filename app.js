@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260630-4";
+const FLOWMATE_APP_VERSION = "v20260630-5";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1320,6 +1320,16 @@ function getFlowMateCreativeAssetTypeFromSubtype(subtype) {
   if (subtype === "motion") return "motion";
   return "static-graphic";
 }
+function getMarketingPlanWorkingRowPublishTime(row) {
+  const directTime = normalizeMarketingPlanTimeInput(row && row.publishTime);
+  if (directTime) return directTime;
+  const placements = Array.isArray(row && row.placements) ? row.placements : [];
+  for (const placement of placements) {
+    const placementTime = normalizeMarketingPlanTimeInput(placement && placement.publishTime);
+    if (placementTime) return placementTime;
+  }
+  return "12:00";
+}
 function createFlowMateDraftFromMarketingPlanRow(row) {
   const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
   const launchDate = row.publishDate || flowMateTodayDateKey();
@@ -1350,7 +1360,7 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     urgentReason: "",
     dueDate: launchDate,
     launchDate,
-    publishTime: row.publishTime || "12:00",
+    publishTime: getMarketingPlanWorkingRowPublishTime(row),
     marketingPlanContentItemId: row.contentItemId || "",
     marketingPlanOriginalBriefLink: row.briefLink || "",
     marketingPlanProductEvent: productEvent,
@@ -1362,6 +1372,12 @@ function openFlowMateCreativeBriefFromMarketingRow(row) {
   if (window.localStorage) {
     window.localStorage.setItem("flowmate:create:creativeDraft:v1", JSON.stringify(draft));
   }
+  window.dispatchEvent(new CustomEvent("flowmate:create-draft-updated", {
+    detail: {
+      mode: "creative",
+      draft
+    }
+  }));
   if (window.sessionStorage) {
     window.sessionStorage.setItem("flowmate:activeProduct", "flowmate");
   }

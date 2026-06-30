@@ -1110,6 +1110,18 @@ function CreateScreen({
   const [createAlert, setCreateAlert] = useState("");
   const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
   const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
+  function withCreativeDraftTitle(draftInput) {
+    const draft = normalizeFlowMateCreativeDraft(draftInput);
+    return {
+      ...draft,
+      title: window.buildFlowMateTemplateTitle({
+        launchDate: draft.launchDate,
+        requesterTeam: draft.requesterTeam,
+        projectName: draft.campaignName,
+        productEvent: draft.productEvent
+      })
+    };
+  }
   const [quickDraft, setQuickDraft] = useState(() => {
     const draft = normalizeFlowMateQuickDraft(readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
     return {
@@ -1122,17 +1134,24 @@ function CreateScreen({
     };
   });
   const [creativeDraft, setCreativeDraft] = useState(() => {
-    const draft = normalizeFlowMateCreativeDraft(readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
-    return {
-      ...draft,
-      title: window.buildFlowMateTemplateTitle({
-        launchDate: draft.launchDate,
-        requesterTeam: draft.requesterTeam,
-        projectName: draft.campaignName,
-        productEvent: draft.productEvent
-      })
-    };
+    return withCreativeDraftTitle(readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
   });
+  useEffect(() => {
+    function onExternalCreateDraftUpdated(event) {
+      const detail = event && event.detail ? event.detail : {};
+      if (detail.mode !== "creative") return;
+      const withTitle = withCreativeDraftTitle(detail.draft || getDefaultCreativeDraft());
+      setCreativeDraft(withTitle);
+      saveFlowMateCreateDraft("creative", withTitle);
+      setMode("creative");
+      setSubmitted(false);
+      setResult(null);
+      setValidationErrors({});
+      setCreateAlert("");
+    }
+    window.addEventListener("flowmate:create-draft-updated", onExternalCreateDraftUpdated);
+    return () => window.removeEventListener("flowmate:create-draft-updated", onExternalCreateDraftUpdated);
+  }, []);
   useEffect(() => {
     let alive = true;
     if (!window.loadFlowMateAssignees) return () => {};
