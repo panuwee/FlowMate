@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260630-5";
+const FLOWMATE_APP_VERSION = "v20260630-6";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -2229,7 +2229,8 @@ function MarketingPlanTimelineScreen() {
     className: "card__body card__body--flush"
   }, React.createElement("div", {
     style: {
-      overflowX: "auto",
+      maxHeight: "calc(100vh - 220px)",
+      overflow: "auto",
       borderTop: "1px solid var(--garena-light-grey)"
     }
   }, React.createElement("div", {
@@ -2242,7 +2243,7 @@ function MarketingPlanTimelineScreen() {
       gridTemplateColumns: `${leftWidth}px ${timelineWidth}px`,
       position: "sticky",
       top: 0,
-      zIndex: 2,
+      zIndex: 20,
       background: "var(--garena-white)",
       borderBottom: "1px solid var(--garena-light-grey)"
     }

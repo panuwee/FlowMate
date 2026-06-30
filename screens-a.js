@@ -170,7 +170,7 @@ function MyWorkScreen({
     if (nextStatus === "review") {
       const deliveryLink = await window.flowmatePrompt({
         title: "Submit for review",
-        label: "Delivery link",
+        label: "Review Link",
         placeholder: "https://drive.google.com/…",
         required: true,
         validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."
@@ -2262,6 +2262,8 @@ function DetailScreen({
       return `${actor} added ${addedFields.join(", ")} to this board${suffix}`;
     }
     if (action === "remove_link") return `${actor} removed a URL from this board${suffix}`;
+    if (action === "add_ai_tag") return `${actor} added AI Tag${suffix}`;
+    if (action === "remove_ai_tag") return `${actor} removed AI Tag${suffix}`;
     if (action === "add_comment" || event.event_type === "commented") return `${actor} added a comment${suffix}`;
     if (action === "add_watcher") return `${actor} added a watcher${suffix}`;
     if (event.event_type === "created") return `${actor} created this task${suffix}`;
@@ -2317,7 +2319,7 @@ function DetailScreen({
     if (nextStatus === "review") {
       const link = await window.flowmatePrompt({
         title: "Submit for review",
-        label: "Delivery link",
+        label: "Review Link",
         placeholder: "https://drive.google.com/…",
         required: true,
         validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."

@@ -1277,6 +1277,7 @@ button:disabled {
   border: var(--border-hairline);
   border-radius: var(--radius-lg);
   background: var(--garena-white);
+  max-height: calc(100vh - 220px);
   overflow: auto;
 }
 .gantt__header,
@@ -1287,7 +1288,7 @@ button:disabled {
 .gantt__header {
   position: sticky;
   top: 0;
-  z-index: 8;
+  z-index: 20;
   background: #FAFAFA;
   border-bottom: var(--border-hairline);
 }
