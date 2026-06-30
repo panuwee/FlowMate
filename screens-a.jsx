@@ -1408,10 +1408,12 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <label className="field__label">Publish Time <span className="req">*</span></label>
           <input
             className="input"
-            type="time"
+            type="text"
+            inputMode="numeric"
             pattern="[0-9]{2}:[0-9]{2}"
+            maxLength={5}
             value={value.publishTime}
-            onChange={e => update("publishTime", e.target.value)}
+            onChange={e => update("publishTime", e.target.value.replace(/[^\d:]/g, "").slice(0, 5))}
             onBlur={e => update("publishTime", normalizeFlowMatePublishTimeInput(e.target.value) || value.publishTime || "12:00")}
             placeholder="14:00"
           />
