@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260701-1";
+const FLOWMATE_APP_VERSION = "v20260701-2";
 
 const NAV = [
   { group: "Personal", items: [
@@ -947,7 +947,7 @@ function formatMarketingPlanTime(value) {
 function normalizeMarketingPlanTimeInput(value) {
   const text = String(value || "").trim();
   const compactMatch = text.match(/^(\d{1,2})(\d{2})$/);
-  const colonMatch = text.match(/^(\d{1,2}):(\d{2})$/);
+  const colonMatch = text.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
   const match = colonMatch || compactMatch;
   if (!match) return "";
   const hour = Number(match[1]);

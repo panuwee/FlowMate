@@ -642,7 +642,8 @@ function normalizeFlowMateCreativeDraft(draft) {
 
 function normalizeFlowMatePublishTimeInput(value) {
   const text = String(value || "").trim();
-  if (/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(text)) return text;
+  const match = text.match(/^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::\d{2}(?:\.\d+)?)?$/);
+  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
   return "";
 }
 
