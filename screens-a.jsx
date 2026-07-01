@@ -468,6 +468,27 @@ const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
   { key: "other", label: "Other" },
 ];
 
+const FLOWMATE_SIZE_TEMPLATE_OPTIONS = [
+  { channel: "Facebook", typeSkill: "banner", placement: "Feed", width: 1080, height: 1080, label: "FB 1080x1080 Feed", formatType: "Static" },
+  { channel: "Facebook", typeSkill: "banner", placement: "Landscape", width: 1200, height: 630, label: "FB 1200x630 Landscape", formatType: "Static" },
+  { channel: "Facebook", typeSkill: "video-standard", placement: "Vertical", width: 1080, height: 1920, label: "FB 1080x1920 Vertical", formatType: "Video" },
+  { channel: "Instagram", typeSkill: "banner", placement: "Feed", width: 1080, height: 1080, label: "IG 1080x1080 Feed", formatType: "Static" },
+  { channel: "Instagram", typeSkill: "banner", placement: "Story/Reels", width: 1080, height: 1920, label: "IG 1080x1920 Story/Reels", formatType: "Static" },
+  { channel: "Instagram", typeSkill: "video-standard", placement: "Story/Reels", width: 1080, height: 1920, label: "IG 1080x1920 Vertical", formatType: "Video" },
+  { channel: "TikTok", typeSkill: "video-under-1-min", placement: "Vertical", width: 1080, height: 1920, label: "TikTok 1080x1920 Vertical", formatType: "Video" },
+  { channel: "YouTube", typeSkill: "video-standard", placement: "Landscape", width: 1920, height: 1080, label: "YouTube 1920x1080 Landscape", formatType: "Video" },
+  { channel: "YouTube", typeSkill: "banner", placement: "Thumbnail", width: 1280, height: 720, label: "YouTube 1280x720 Thumbnail", formatType: "Thumbnail" },
+  { channel: "In-game", typeSkill: "banner", placement: "Full Size Splash", width: 730, height: 504, label: "Full Size Splash", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "1/3 Splash", width: 730, height: 166, label: "1/3 Splash", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "PNG Free Roam + In-web", width: 240, height: 76, label: "PNG Free Roam + In-web", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "Scroll Banner", width: 240, height: 160, label: "Scroll Banner", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "News Icon", width: 362, height: 202, label: "News Icon", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "Mission Hub Web Event", width: 668, height: 157, label: "Mission Hub Web Event", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "In-game Free Roam", width: 240, height: 93, label: "In-game Free Roam", formatType: "Static" },
+  { channel: "In-game", typeSkill: "banner", placement: "In-game Tab Shop", width: 1359, height: 144, label: "In-game Tab Shop", formatType: "Static" },
+  { channel: "Other", typeSkill: "custom", placement: "Custom size", width: 0, height: 0, label: "Custom size", formatType: "Other" },
+];
+
 function getFlowMateCreativeTypeOption(typeKey) {
   return FLOWMATE_CREATIVE_TYPE_OPTIONS.find((option) => option.key === typeKey) || FLOWMATE_CREATIVE_TYPE_OPTIONS[0];
 }
@@ -495,6 +516,70 @@ function normalizeFlowMateCreativeChannels(value) {
 
 function formatFlowMateCreativeChannels(value) {
   return normalizeFlowMateCreativeChannels(value).join(", ");
+}
+
+function getFlowMateSizeSuggestions(typeSkill, channels) {
+  const selectedChannels = normalizeFlowMateCreativeChannels(channels);
+  const type = String(typeSkill || "").toLowerCase();
+  const isVideo = ["video-standard", "video-under-1-min", "motion"].includes(type);
+  const matches = FLOWMATE_SIZE_TEMPLATE_OPTIONS.filter((option) => {
+    const optionType = String(option.typeSkill || "").toLowerCase();
+    const channelMatch = selectedChannels.includes(option.channel) || option.channel === "Other";
+    const typeMatch = optionType === type
+      || optionType === "custom"
+      || (isVideo && option.formatType === "Video")
+      || (!isVideo && option.formatType !== "Video" && optionType === "banner");
+    return channelMatch && typeMatch;
+  });
+  const unique = [];
+  const seen = new Set();
+  matches.forEach((option) => {
+    const key = `${option.channel}|${option.label}|${option.width}x${option.height}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(option);
+  });
+  return unique.length ? unique : FLOWMATE_SIZE_TEMPLATE_OPTIONS.filter((option) => option.channel === "Other");
+}
+
+function normalizeFlowMateSelectedSizes(value) {
+  const sizes = Array.isArray(value) ? value : [];
+  return sizes
+    .filter((size) => size && typeof size === "object")
+    .map((size) => ({
+      channel: String(size.channel || "").trim(),
+      typeSkill: String(size.typeSkill || "").trim(),
+      placement: String(size.placement || "").trim(),
+      width: Number(size.width) || 0,
+      height: Number(size.height) || 0,
+      label: String(size.label || "").trim(),
+      formatType: String(size.formatType || "").trim(),
+    }))
+    .filter((size) => size.label);
+}
+
+function getFlowMateSizeLabel(size) {
+  if (!size) return "";
+  const dimensions = size.width && size.height ? `${size.width}x${size.height}` : "";
+  return [size.label, dimensions].filter(Boolean).join(" ");
+}
+
+function isFlowMateSizeSelected(selectedSizes, option) {
+  const label = getFlowMateSizeLabel(option);
+  return normalizeFlowMateSelectedSizes(selectedSizes).some((size) => getFlowMateSizeLabel(size) === label);
+}
+
+function getFlowMateStructuredBriefSummary(draft) {
+  const common = draft?.commonBrief || {};
+  const staticBrief = draft?.staticBrief || {};
+  const videoBrief = draft?.videoBrief || {};
+  return [
+    common.objective,
+    common.target_audience,
+    common.key_message,
+    staticBrief.visual_direction,
+    videoBrief.hook,
+  ].map((item) => String(item || "").trim()).filter(Boolean).join(" | ");
 }
 
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
@@ -628,12 +713,20 @@ function normalizeFlowMateCreativeDraft(draft) {
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
+  const normalizedBrief = {
+    commonBrief: nextDraft.commonBrief && typeof nextDraft.commonBrief === "object" ? nextDraft.commonBrief : {},
+    staticBrief: nextDraft.staticBrief && typeof nextDraft.staticBrief === "object" ? nextDraft.staticBrief : {},
+    videoBrief: nextDraft.videoBrief && typeof nextDraft.videoBrief === "object" ? nextDraft.videoBrief : {},
+  };
   return {
     ...nextDraft,
+    ...normalizedBrief,
     requesterTeam: getDefaultRequesterTeam(),
     assetType: creativeType.assetType,
     assetSubtype: creativeType.key,
     assetCount,
+    selectedSizes: normalizeFlowMateSelectedSizes(nextDraft.selectedSizes),
+    structuredBrief: getFlowMateStructuredBriefSummary({ ...nextDraft, ...normalizedBrief }),
     publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || "12:00",
     launchDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
@@ -669,6 +762,11 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "assetCount",
     "platforms",
     "sizeFormat",
+    "selectedSizes",
+    "structuredBrief",
+    "commonBrief",
+    "staticBrief",
+    "videoBrief",
     "briefLink",
     "briefNote",
     "referenceLink",
@@ -713,6 +811,23 @@ function getDefaultCreativeDraft() {
     assetCount: "1",
     platforms: "Instagram",
     sizeFormat: "1080x1080",
+    selectedSizes: [],
+    structuredBrief: "",
+    commonBrief: {
+      objective: "",
+      target_audience: "",
+      key_message: "",
+    },
+    staticBrief: {
+      visual_direction: "",
+      text_hierarchy: "",
+    },
+    videoBrief: {
+      duration: "",
+      aspect_ratio: "",
+      hook: "",
+      script_storyboard: "",
+    },
     briefLink: "",
     briefNote: "",
     referenceLink: "",
@@ -736,7 +851,13 @@ function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {
   const fields = FLOWMATE_CREATE_DRAFT_FIELDS[kind] || [];
   return fields.reduce((payload, field) => {
     const value = Object.prototype.hasOwnProperty.call(draft || {}, field) ? draft[field] : fallback[field];
-    payload[field] = typeof value === "string" ? value : "";
+    if (field === "selectedSizes") {
+      payload[field] = normalizeFlowMateSelectedSizes(value);
+    } else if (["commonBrief", "staticBrief", "videoBrief"].includes(field)) {
+      payload[field] = value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+    } else {
+      payload[field] = typeof value === "string" ? value : value == null ? "" : String(value);
+    }
     return payload;
   }, {});
 }
@@ -783,8 +904,6 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
   requireField("platforms", "Channel Tag is required.");
-  requireField("sizeFormat", "Size / format is required.");
-  requireField("briefLink", "Brief link is required.");
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
@@ -1289,6 +1408,12 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
+  const sizeSuggestions = getFlowMateSizeSuggestions(selectedCreativeType.key, selectedChannels);
+  const selectedSizes = normalizeFlowMateSelectedSizes(value.selectedSizes);
+  const commonBrief = value.commonBrief || {};
+  const staticBrief = value.staticBrief || {};
+  const videoBrief = value.videoBrief || {};
+  const isVideoRequest = ["video-standard", "video-under-1-min", "motion"].includes(selectedCreativeType.key);
 
   useEffect(() => {
     let alive = true;
@@ -1310,22 +1435,27 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     };
   }, []);
 
+  function updateDraft(nextFields) {
+    const nextDraft = { ...value, ...nextFields };
+    nextDraft.structuredBrief = getFlowMateStructuredBriefSummary(nextDraft);
+    onChange(nextDraft);
+  }
+
   function update(field, next) {
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
-      onChange({ ...value, assetType: nextType.assetType, assetSubtype: nextType.key });
+      updateDraft({ assetType: nextType.assetType, assetSubtype: nextType.key, selectedSizes: [] });
       return;
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
-      onChange({
-        ...value,
+      updateDraft({
         launchDate: nextLaunchDate,
         dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate),
       });
       return;
     }
-    onChange({ ...value, [field]: next });
+    updateDraft({ [field]: next });
   }
 
   function toggleChannel(channelLabel) {
@@ -1334,6 +1464,22 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
       ? currentChannels.filter(channel => channel !== channelLabel)
       : [...currentChannels, channelLabel];
     update("platforms", nextChannels.length ? nextChannels.join(", ") : channelLabel);
+  }
+
+  function updateBrief(section, field, next) {
+    const current = section === "commonBrief" ? commonBrief : section === "staticBrief" ? staticBrief : videoBrief;
+    updateDraft({ [section]: { ...current, [field]: next } });
+  }
+
+  function toggleSize(option) {
+    const nextSizes = isFlowMateSizeSelected(selectedSizes, option)
+      ? selectedSizes.filter((size) => getFlowMateSizeLabel(size) !== getFlowMateSizeLabel(option))
+      : [...selectedSizes, option];
+    const nextSizeFormat = nextSizes
+      .map(getFlowMateSizeLabel)
+      .filter(Boolean)
+      .join(", ");
+    updateDraft({ selectedSizes: nextSizes, sizeFormat: nextSizeFormat || value.sizeFormat });
   }
 
   return (
@@ -1386,14 +1532,75 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           {errors.platforms && <div className="field__error">{errors.platforms}</div>}
         </div>
         <div className={`field ${errors.sizeFormat ? "field--error" : ""}`}>
-          <label className="field__label">Size / format <span className="req">*</span></label>
-          <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="e.g. 1080x1350, 1080x1920" />
+          <label className="field__label">Size / format</label>
+          <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="Custom size or selected presets, e.g. 1080x1350" />
+          <div className="check-row" style={{ marginTop: 8 }}>
+            {sizeSuggestions.map((option) => (
+              <label key={`${option.channel}-${option.label}-${option.width}x${option.height}`} className="check-pill">
+                <input
+                  type="checkbox"
+                  checked={isFlowMateSizeSelected(selectedSizes, option)}
+                  onChange={() => toggleSize(option)}
+                />
+                <span>{getFlowMateSizeLabel(option)}</span>
+              </label>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Pick approved placements such as Full Size Splash or Mission Hub Web Event, or type a Custom size.</div>
           {errors.sizeFormat && <div className="field__error">{errors.sizeFormat}</div>}
         </div>
         <div className={`field ${errors.briefLink ? "field--error" : ""}`}>
-          <label className="field__label">Brief link <span className="req">*</span></label>
+          <label className="field__label">Brief link</label>
           <input className="input" value={value.briefLink} onChange={e => update("briefLink", e.target.value)} placeholder="https://docs.google.com/..." />
           {errors.briefLink && <div className="field__error">{errors.briefLink}</div>}
+        </div>
+        <div className="field field--full">
+          <label className="field__label">Structured brief</label>
+          <div className="form-grid" style={{ marginTop: 0 }}>
+            <div className="field">
+              <label className="field__label">Objective</label>
+              <input className="input" value={commonBrief.objective || ""} onChange={e => updateBrief("commonBrief", "objective", e.target.value)} placeholder="What should this asset achieve?" />
+            </div>
+            <div className="field">
+              <label className="field__label">Target audience</label>
+              <input className="input" value={commonBrief.target_audience || ""} onChange={e => updateBrief("commonBrief", "target_audience", e.target.value)} placeholder="Who should see this?" />
+            </div>
+            <div className="field field--full">
+              <label className="field__label">Key message</label>
+              <input className="input" value={commonBrief.key_message || ""} onChange={e => updateBrief("commonBrief", "key_message", e.target.value)} placeholder="Single main message." />
+            </div>
+            {isVideoRequest ? (
+              <>
+                <div className="field">
+                  <label className="field__label">Duration</label>
+                  <input className="input" value={videoBrief.duration || ""} onChange={e => updateBrief("videoBrief", "duration", e.target.value)} placeholder="e.g. 15 sec" />
+                </div>
+                <div className="field">
+                  <label className="field__label">Aspect ratio</label>
+                  <input className="input" value={videoBrief.aspect_ratio || ""} onChange={e => updateBrief("videoBrief", "aspect_ratio", e.target.value)} placeholder="e.g. 9:16" />
+                </div>
+                <div className="field">
+                  <label className="field__label">Hook</label>
+                  <input className="input" value={videoBrief.hook || ""} onChange={e => updateBrief("videoBrief", "hook", e.target.value)} placeholder="Opening idea." />
+                </div>
+                <div className="field">
+                  <label className="field__label">Script / storyboard</label>
+                  <input className="input" value={videoBrief.script_storyboard || ""} onChange={e => updateBrief("videoBrief", "script_storyboard", e.target.value)} placeholder="Script, shot list, or storyboard link." />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="field">
+                  <label className="field__label">Visual direction</label>
+                  <input className="input" value={staticBrief.visual_direction || ""} onChange={e => updateBrief("staticBrief", "visual_direction", e.target.value)} placeholder="Mood, style, visual references." />
+                </div>
+                <div className="field">
+                  <label className="field__label">Text hierarchy</label>
+                  <input className="input" value={staticBrief.text_hierarchy || ""} onChange={e => updateBrief("staticBrief", "text_hierarchy", e.target.value)} placeholder="Headline, sub text, CTA order." />
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="field">
           <label className="field__label">Reference link</label>
@@ -2180,6 +2387,13 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.briefLink) ? <a href={window.flowmateSafeHttpUrl(w.briefLink)} target="_blank" rel="noopener noreferrer">Open brief</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.referenceLink) ? <a href={window.flowmateSafeHttpUrl(w.referenceLink)} target="_blank" rel="noopener noreferrer">Open reference</a> : "-"}</div></div>
+                {w.status === "need_brief" && (
+                  <div className="meta-row"><div className="meta-row__lbl">Missing brief reason</div><div className="meta-row__val">{w.missingBriefReason || w.queueReason || "Required brief fields are missing."}</div></div>
+                )}
+                <div className="meta-row"><div className="meta-row__lbl">Structured brief</div><div className="meta-row__val">{w.commonBrief?.key_message || w.staticBrief?.visual_direction || w.videoBrief?.hook || "-"}</div></div>
+                {Array.isArray(w.selectedSizes) && w.selectedSizes.length > 0 && (
+                  <div className="meta-row"><div className="meta-row__lbl">Selected sizes</div><div className="meta-row__val">{w.selectedSizes.map(size => size.label || size.value || `${size.width || ""}x${size.height || ""}`).filter(Boolean).join(", ")}</div></div>
+                )}
               </div>
             </div>
           )}

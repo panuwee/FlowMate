@@ -109,11 +109,17 @@ function getFlowMateCurrentUserIds(currentUser, members) {
 
 function getFlowMateMyWorkRows(rows, currentUser, members, query) {
   const meIds = getFlowMateCurrentUserIds(currentUser, members);
-  return (rows || []).filter((row) =>
-    meIds.includes(row && row.assignee)
-    && isFlowMateActiveStatus(row && row.status)
-    && matchesFlowMateSearch(row || {}, query)
-  );
+  return (rows || []).filter((row) => {
+    const isNeedBriefFollowUp = row && row.status === "need_brief"
+      && (
+        row.requesterUserId === (currentUser && currentUser.id)
+        || row.picUserId === (currentUser && currentUser.id)
+        || String(row.picName || "").toLowerCase() === String((currentUser && currentUser.name) || "").toLowerCase()
+      );
+    return (meIds.includes(row && row.assignee) || isNeedBriefFollowUp)
+      && isFlowMateActiveStatus(row && row.status)
+      && matchesFlowMateSearch(row || {}, query);
+  });
 }
 
 function getFlowMateMyWorkSortRank(row) {

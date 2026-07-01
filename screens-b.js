@@ -56,7 +56,7 @@ function ListScreen({
   onOpen,
   searchQuery = ""
 }) {
-  const LIST_STATUS_FILTER_KEYS = ["queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
+  const LIST_STATUS_FILTER_KEYS = ["need_brief", "queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
   const savedListState = readFlowMateListViewState();
   const [filterStatus, setFilterStatus] = useStateB(savedListState.filterStatus || "all");
   const [filterFlag, setFilterFlag] = useStateB(savedListState.filterFlag || "all");
@@ -382,6 +382,9 @@ function BoardScreen({
   onOpen
 }) {
   const columns = [{
+    key: "need_brief",
+    label: "Need Brief"
+  }, {
     key: "assigned",
     label: "Assigned"
   }, {
@@ -675,7 +678,12 @@ function BoardScreen({
       }, React.createElement(Icon, {
         name: "alert",
         size: 11
-      }), " ", w.blockReason));
+      }), " ", w.blockReason), w.status === "need_brief" && React.createElement("div", {
+        className: "kcard__row kcard__row--meta"
+      }, React.createElement(Icon, {
+        name: "alert",
+        size: 11
+      }), " ", w.missingBriefReason || w.queueReason || "Need Brief follow-up"));
     }), byCol[c.key].length === 0 && React.createElement("div", {
       className: "muted",
       style: {
@@ -735,7 +743,12 @@ function QueueScreen({
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     return w.status === "queued" && !w.needsSplit;
   });
+  const needBriefRows = sourceRows.filter(w => {
+    if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
+    return w.status === "need_brief" && !w.needsSplit;
+  });
   const byReason = {
+    brief: needBriefRows,
     capacity: queued
   };
   return React.createElement("div", {
@@ -787,6 +800,12 @@ function QueueScreen({
   }, byReason.capacity.length), React.createElement("div", {
     className: "stat__lbl"
   }, "Capacity"))), React.createElement(QueueGroup, {
+    title: "Need Brief follow-up",
+    tone: "warn",
+    items: byReason.brief,
+    onOpen: onOpen,
+    hint: "PIC/requester must complete required brief fields before assignment can run."
+  }), React.createElement(QueueGroup, {
     title: "Capacity-blocked",
     tone: "warn",
     items: byReason.capacity,
