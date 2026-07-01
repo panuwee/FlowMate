@@ -965,6 +965,18 @@ function formatMarketingPlanDate(value) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+function isMarketingPlanFlowMateDetailLink(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /#detail\/CR-\d{4,}(?:$|[/?#])/i.test(text);
+}
+
+function hasMarketingPlanLinkedCreativeRequest(row) {
+  if (!row) return false;
+  if (String(row.flowmateWorkItemId || "").trim()) return true;
+  return isMarketingPlanFlowMateDetailLink(row.briefLink);
+}
+
 function formatMarketingPlanShortWeekday(value) {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00Z`);
@@ -1366,7 +1378,7 @@ function getMarketingPlanViewStatus(row) {
   if (flowmateStatus === "review") return "review";
   if (flowmateStatus === "delivered") return "ready_to_post";
   const normalized = normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
-  if (normalized === "planned" && String((row && row.briefLink) || "").trim()) return "assigned";
+  if (normalized === "planned" && hasMarketingPlanLinkedCreativeRequest(row)) return "assigned";
   return normalized;
 }
 
@@ -3582,7 +3594,7 @@ function MarketingPlanWorkingSheetScreen() {
                           >
                             Edit
                           </button>
-                          {row.briefLink ? null : (
+                          {hasMarketingPlanLinkedCreativeRequest(row) ? null : (
                             <button
                               type="button"
                               className="btn btn--primary btn--xs"

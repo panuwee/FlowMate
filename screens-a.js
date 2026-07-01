@@ -1261,10 +1261,12 @@ function CreateScreen({
         };
       } else {
         created = await window.createFlowMateCreativeRequest(submissionDraft);
+        let marketingPlanSyncWarning = "";
         try {
           await syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, created);
         } catch (syncError) {
           console.warn("[FlowMate Create] Marketing Plan link backfill failed:", syncError);
+          marketingPlanSyncWarning = "Creative Request was created, but FlowMate could not link it back to Marketing Plan. Refresh Working Sheet before creating another brief for this row.";
         }
         const assignment = created.assignment || {};
         const result = assignment.result || "queued";
@@ -1273,10 +1275,20 @@ function CreateScreen({
           id: window.getFlowMateCreatedDisplayId(created),
           owner: assignment.owner_code ? `m-${assignment.owner_code}` : null,
           effort: assignment.effort || null,
-          reason: assignment.reason || ""
+          reason: assignment.reason || "",
+          warning: marketingPlanSyncWarning
         };
       }
       clearFlowMateCreateDraft(mode);
+      if (nextResult.warning) {
+        setResult({
+          kind: "sync_warning",
+          id: nextResult.id || "Saved",
+          message: nextResult.warning
+        });
+        shouldShowResult = true;
+        return;
+      }
       try {
         await openCreatedDetail(created, nextResult.id);
         shouldShowResult = false;
@@ -1285,7 +1297,7 @@ function CreateScreen({
         setResult({
           kind: "open_failed",
           id: nextResult.id || "Saved",
-          message: openError.message || "Saved, but could not open the detail view."
+          message: nextResult.warning || openError.message || "Saved, but could not open the detail view."
         });
       }
     } catch (error) {
@@ -1916,7 +1928,7 @@ function CreateResultScreen({
     className: "card__head"
   }, React.createElement("span", {
     className: "card__title"
-  }, result.kind === "assigned" && "Request submitted - assigned", result.kind === "queued" && "Request submitted - queued", result.kind === "need_brief" && "Request submitted - needs brief", result.kind === "quick_created" && "Quick task created", result.kind === "open_failed" && "Saved - detail did not open", result.kind === "error" && "Could not save"), React.createElement("span", {
+  }, result.kind === "assigned" && "Request submitted - assigned", result.kind === "queued" && "Request submitted - queued", result.kind === "need_brief" && "Request submitted - needs brief", result.kind === "quick_created" && "Quick task created", result.kind === "open_failed" && "Saved - detail did not open", result.kind === "sync_warning" && "Saved - Marketing Plan not linked", result.kind === "error" && "Could not save"), React.createElement("span", {
     className: "card__sub mono"
   }, result.id)), React.createElement("div", {
     className: "card__body"
@@ -1992,6 +2004,10 @@ function CreateResultScreen({
   }, "Quick task saved to your team's list. It will appear under ", React.createElement("strong", null, "Quick tasks"), " in My Work."), result.kind === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
   }, result.message), result.kind === "open_failed" && React.createElement("div", {
+    className: "reason-box reason-box--need"
+  }, result.message, " Open the list view and search for ", React.createElement("span", {
+    className: "mono"
+  }, result.id), "."), result.kind === "sync_warning" && React.createElement("div", {
     className: "reason-box reason-box--need"
   }, result.message, " Open the list view and search for ", React.createElement("span", {
     className: "mono"

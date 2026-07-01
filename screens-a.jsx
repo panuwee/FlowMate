@@ -1029,10 +1029,12 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
         nextResult = { kind: "quick_created", id: window.getFlowMateCreatedDisplayId(created) };
       } else {
         created = await window.createFlowMateCreativeRequest(submissionDraft);
+        let marketingPlanSyncWarning = "";
         try {
           await syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, created);
         } catch (syncError) {
           console.warn("[FlowMate Create] Marketing Plan link backfill failed:", syncError);
+          marketingPlanSyncWarning = "Creative Request was created, but FlowMate could not link it back to Marketing Plan. Refresh Working Sheet before creating another brief for this row.";
         }
         const assignment = created.assignment || {};
         const result = assignment.result || "queued";
@@ -1042,9 +1044,20 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           owner: assignment.owner_code ? `m-${assignment.owner_code}` : null,
           effort: assignment.effort || null,
           reason: assignment.reason || "",
+          warning: marketingPlanSyncWarning,
         };
       }
       clearFlowMateCreateDraft(mode);
+
+      if (nextResult.warning) {
+        setResult({
+          kind: "sync_warning",
+          id: nextResult.id || "Saved",
+          message: nextResult.warning,
+        });
+        shouldShowResult = true;
+        return;
+      }
 
       try {
         await openCreatedDetail(created, nextResult.id);
@@ -1054,7 +1067,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
         setResult({
           kind: "open_failed",
           id: nextResult.id || "Saved",
-          message: openError.message || "Saved, but could not open the detail view.",
+          message: nextResult.warning || openError.message || "Saved, but could not open the detail view.",
         });
       }
     } catch (error) {
@@ -1464,6 +1477,7 @@ function CreateResultScreen({ result, onAgain, onNav }) {
             {result.kind === "need_brief" && "Request submitted - needs brief"}
             {result.kind === "quick_created" && "Quick task created"}
             {result.kind === "open_failed" && "Saved - detail did not open"}
+            {result.kind === "sync_warning" && "Saved - Marketing Plan not linked"}
             {result.kind === "error" && "Could not save"}
           </span>
           <span className="card__sub mono">{result.id}</span>
@@ -1509,6 +1523,9 @@ function CreateResultScreen({ result, onAgain, onNav }) {
             <div className="reason-box reason-box--need">{result.message}</div>
           )}
           {result.kind === "open_failed" && (
+            <div className="reason-box reason-box--need">{result.message} Open the list view and search for <span className="mono">{result.id}</span>.</div>
+          )}
+          {result.kind === "sync_warning" && (
             <div className="reason-box reason-box--need">{result.message} Open the list view and search for <span className="mono">{result.id}</span>.</div>
           )}
         </div>
