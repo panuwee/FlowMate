@@ -1705,7 +1705,13 @@ function KpiScreen() {
       cleanup();
     };
   }, []);
-  const kpiRows = flowMateFilterRowsByMonthC(rows, kpiExportMonth, ["calendarDate", "dueDate"]);
+  const kpiMonthOptions = flowMateRowsMonthOptionsC(rows, ["calendarDate", "dueDate"]);
+  const effectiveKpiMonthOptions = kpiMonthOptions.length ? kpiMonthOptions : [{
+    key: kpiExportMonth,
+    label: flowMateMonthLabelC(kpiExportMonth)
+  }];
+  const selectedKpiExportMonth = effectiveKpiMonthOptions.some(option => option.key === kpiExportMonth) ? kpiExportMonth : effectiveKpiMonthOptions[effectiveKpiMonthOptions.length - 1]?.key || kpiExportMonth;
+  const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
@@ -1800,11 +1806,11 @@ function KpiScreen() {
   })).sort((a, b) => b.count - a.count || a.team.localeCompare(b.team));
   const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
   function exportKpiRows() {
-    const filename = `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(kpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)), flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)), flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)), flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
+    const filename = `flowmate-kpi-${selectedKpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(selectedKpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)), flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)), flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)), flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
     const perMemberRows = [["Member", "Delivered effort", "Delivered items", "Avg days to delivered", "Blocked", "AI Tagged", "AI tagged task IDs"], ...ownerRows.map(row => [row.name, row.delivered, row.items, flowMateKpiFormatDaysC(row.avgCompletionDays), row.blocked, row.aiTagged, (row.aiTaggedItems || []).map(item => item.id).join(", ")])];
     const requesterTeamRows = [["Requester team", "Requests", "Share"], ...teamRows.map(row => [row.team, row.count, `${row.share}%`])];
-    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(kpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Need brief", needBriefRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
+    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Need brief", needBriefRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
     const completionRows = [["Task ID", "Task name", "Assignee", "Status", "Assigned At", "Delivered At", "Completion days", "Effort", "Campaign / project", "Type", "Priority"], ...completionDetailRows.map(row => [row.id || "", row.title || "", flowMateKpiOwnerNameC(row), row.status || "", flowMateKpiFormatDateTimeC(row.assignedAt), flowMateKpiFormatDateTimeC(row.deliveredAt), flowMateKpiFormatDaysC(row.completionDays), row.effort || "", row.campaign || "", row.type || "", row.priority || ""])];
     const sheets = [{
       name: "Summary",
@@ -1849,7 +1855,7 @@ function KpiScreen() {
     className: "page__actions"
   }, React.createElement("select", {
     className: "select",
-    value: kpiExportMonth,
+    value: selectedKpiExportMonth,
     onChange: event => setKpiExportMonth(event.target.value),
     "data-testid": "flowmate-kpi-export-month",
     "aria-label": "KPI export month",
@@ -1859,7 +1865,7 @@ function KpiScreen() {
       padding: "0 28px 0 10px",
       fontSize: 13
     }
-  }, flowMateMonthOptionsC().map(option => React.createElement("option", {
+  }, effectiveKpiMonthOptions.map(option => React.createElement("option", {
     key: option.key,
     value: option.key
   }, option.label))), React.createElement("button", {
@@ -1915,7 +1921,7 @@ function KpiScreen() {
     className: "kpi__num mono"
   }, kpiRows.length ? (kpiRows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / kpiRows.length).toFixed(1) : "0.0"), React.createElement("div", {
     className: "kpi__delta"
-  }, "Across ", flowMateMonthLabelC(kpiExportMonth), " rows"))), React.createElement("div", {
+  }, "Across ", flowMateMonthLabelC(selectedKpiExportMonth), " rows"))), React.createElement("div", {
     className: "kpi-grid",
     style: {
       gridTemplateColumns: "repeat(4, 1fr)"
@@ -2008,7 +2014,7 @@ function KpiScreen() {
     className: "card__title"
   }, "By requester team"), React.createElement("span", {
     className: "card__sub"
-  }, flowMateMonthLabelC(kpiExportMonth), " rows")), React.createElement("div", {
+  }, flowMateMonthLabelC(selectedKpiExportMonth), " rows")), React.createElement("div", {
     className: "card__body",
     style: {
       padding: 0
@@ -2045,7 +2051,7 @@ function KpiScreen() {
     className: "reason-box"
   }, "Productivity index is calculated as ", React.createElement("span", {
     className: "mono"
-  }, "delivered_effort x on_time_factor x rework_factor"), " and is intentionally ", React.createElement("strong", null, "not displayed as a personal ranking"), " in MVP - see PRD section 12."), React.createElement(Source, null, loadState.status === "live" ? "Supabase work_items table" : "No local fallback data", " - ", flowMateMonthLabelC(kpiExportMonth), " - ", TODAY));
+  }, "delivered_effort x on_time_factor x rework_factor"), " and is intentionally ", React.createElement("strong", null, "not displayed as a personal ranking"), " in MVP - see PRD section 12."), React.createElement(Source, null, loadState.status === "live" ? "Supabase work_items table" : "No local fallback data", " - ", flowMateMonthLabelC(selectedKpiExportMonth), " - ", TODAY));
 }
 function calendarUtcKeyC(date) {
   const y = date.getUTCFullYear();

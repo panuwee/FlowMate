@@ -1475,7 +1475,14 @@ function KpiScreen() {
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const kpiRows = flowMateFilterRowsByMonthC(rows, kpiExportMonth, ["calendarDate", "dueDate"]);
+  const kpiMonthOptions = flowMateRowsMonthOptionsC(rows, ["calendarDate", "dueDate"]);
+  const effectiveKpiMonthOptions = kpiMonthOptions.length
+    ? kpiMonthOptions
+    : [{ key: kpiExportMonth, label: flowMateMonthLabelC(kpiExportMonth) }];
+  const selectedKpiExportMonth = effectiveKpiMonthOptions.some(option => option.key === kpiExportMonth)
+    ? kpiExportMonth
+    : effectiveKpiMonthOptions[effectiveKpiMonthOptions.length - 1]?.key || kpiExportMonth;
+  const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
@@ -1575,11 +1582,11 @@ function KpiScreen() {
   const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
 
   function exportKpiRows() {
-    const filename = `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `flowmate-kpi-${selectedKpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     const allWorkRows = [
       ["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"],
       ...kpiRows.map(row => [
-        flowMateMonthLabelC(kpiExportMonth),
+        flowMateMonthLabelC(selectedKpiExportMonth),
         row.id || "",
         row.title || "",
         row.type || "",
@@ -1618,7 +1625,7 @@ function KpiScreen() {
     ];
     const summaryRows = [
       ["Metric", "Value"],
-      ["Export month", flowMateMonthLabelC(kpiExportMonth)],
+      ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)],
       ["Delivered effort", deliveredEffort],
       ["Delivered items", deliveredRows.length],
       ["Active work", activeRows.length],
@@ -1676,13 +1683,13 @@ function KpiScreen() {
         <div className="page__actions">
           <select
             className="select"
-            value={kpiExportMonth}
+            value={selectedKpiExportMonth}
             onChange={event => setKpiExportMonth(event.target.value)}
             data-testid="flowmate-kpi-export-month"
             aria-label="KPI export month"
             style={{ width: 132, height: 32, padding: "0 28px 0 10px", fontSize: 13 }}
           >
-            {flowMateMonthOptionsC().map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+            {effectiveKpiMonthOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
           </select>
           <button className="btn btn--secondary" onClick={exportKpiRows}><Icon name="download" /> Export</button>
         </div>
@@ -1707,7 +1714,7 @@ function KpiScreen() {
         <div className="kpi">
           <div className="kpi__lbl">Avg review rounds</div>
           <div className="kpi__num mono">{kpiRows.length ? (kpiRows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / kpiRows.length).toFixed(1) : "0.0"}</div>
-          <div className="kpi__delta">Across {flowMateMonthLabelC(kpiExportMonth)} rows</div>
+          <div className="kpi__delta">Across {flowMateMonthLabelC(selectedKpiExportMonth)} rows</div>
         </div>
       </div>
 
@@ -1762,7 +1769,7 @@ function KpiScreen() {
         </div>
 
         <div className="card">
-          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">{flowMateMonthLabelC(kpiExportMonth)} rows</span></div>
+          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">{flowMateMonthLabelC(selectedKpiExportMonth)} rows</span></div>
           <div className="card__body" style={{ padding: 0 }}>
             <table className="tbl">
               <thead>
@@ -1794,7 +1801,7 @@ function KpiScreen() {
         Productivity index is calculated as <span className="mono">delivered_effort x on_time_factor x rework_factor</span> and is intentionally <strong>not displayed as a personal ranking</strong> in MVP - see PRD section 12.
       </div>
 
-      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {flowMateMonthLabelC(kpiExportMonth)} - {TODAY}</Source>
+      <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {flowMateMonthLabelC(selectedKpiExportMonth)} - {TODAY}</Source>
     </div>
   );
 }
