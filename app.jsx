@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260701-2";
+const FLOWMATE_APP_VERSION = "v20260701-3";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1033,16 +1033,23 @@ function groupMarketingPlanTimelineRows(rows, selectedMonth) {
       return windowMonths.has(rowMonth);
     })
     .forEach(row => {
-      if (!campaigns.has(row.campaignId)) {
-        campaigns.set(row.campaignId, {
-          id: row.campaignId,
+      const campaignKey = getMarketingPlanCampaignKey(row.campaignName) || row.campaignId || "uncategorized";
+      if (!campaigns.has(campaignKey)) {
+        campaigns.set(campaignKey, {
+          id: campaignKey,
+          sourceCampaignIds: row.campaignId ? [row.campaignId] : [],
           name: row.campaignName,
           team: row.campaignTeam,
           sortOrder: row.campaignSortOrder,
           assets: new Map(),
         });
       }
-      const campaign = campaigns.get(row.campaignId);
+      const campaign = campaigns.get(campaignKey);
+      if (row.campaignId && !campaign.sourceCampaignIds.includes(row.campaignId)) {
+        campaign.sourceCampaignIds.push(row.campaignId);
+      }
+      if (!campaign.team && row.campaignTeam) campaign.team = row.campaignTeam;
+      campaign.sortOrder = Math.min(Number(campaign.sortOrder || 0), Number(row.campaignSortOrder || 0));
       if (!campaign.assets.has(row.contentItemId)) {
         campaign.assets.set(row.contentItemId, {
           id: row.contentItemId,
