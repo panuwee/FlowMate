@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260630-10";
+const FLOWMATE_APP_VERSION = "v20260630-11";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -3511,15 +3511,6 @@ function MarketingPlanWorkingSheetScreen() {
     key: tier,
     value: tier
   }, tier)))), React.createElement("label", {
-    className: "field"
-  }, React.createElement("span", {
-    className: "field__label"
-  }, "Brief Link"), React.createElement("input", {
-    className: "input",
-    value: sheetForm.briefLink,
-    onChange: event => updateSheetForm("briefLink", event.target.value),
-    placeholder: "https://..."
-  })), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"

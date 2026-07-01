@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260630-10";
+const FLOWMATE_APP_VERSION = "v20260630-11";
 
 const NAV = [
   { group: "Personal", items: [
@@ -3418,10 +3418,6 @@ function MarketingPlanWorkingSheetScreen() {
               <select className="select" value={sheetForm.contentTier} onChange={event => updateSheetForm("contentTier", event.target.value)}>
                 {MARKETING_PLAN_CONTENT_TIERS.map(tier => <option key={tier} value={tier}>{tier}</option>)}
               </select>
-            </label>
-            <label className="field">
-              <span className="field__label">Brief Link</span>
-              <input className="input" value={sheetForm.briefLink} onChange={event => updateSheetForm("briefLink", event.target.value)} placeholder="https://..." />
             </label>
             <label className="field field--full">
               <span className="field__label">Details *</span>

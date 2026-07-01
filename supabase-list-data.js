@@ -283,7 +283,7 @@ async function loadFlowMateListRows() {
   const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
-      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at")
+      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,archived_at,created_at,delivered_at")
       // O-5: exclude archived items at the DB instead of fetching then dropping
       // them client-side. (List/Board/Queue/My Work never show archived rows.)
       .is("archived_at", null)
@@ -471,7 +471,10 @@ async function loadFlowMateListRows() {
       planningDate: item.publish_date || item.launch_date,
       planningLabel: flowmateDateLabel(item.publish_date || item.launch_date),
       planningFullLabel: flowmateDateFullLabel(item.publish_date || item.launch_date),
+      createdAt: item.created_at,
       createdLabel: flowmateDateFullLabel(item.created_at),
+      deliveredAt: item.delivered_at,
+      deliveredLabel: flowmateDateTimeFullLabel(item.delivered_at),
       urgentReason: item.urgent_reason || "",
       assetType: flowmateToKebab(details.asset_type),
       subtype: details.asset_subtype || "",

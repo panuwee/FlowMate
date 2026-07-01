@@ -1576,6 +1576,47 @@ function flowMateKpiOwnerNameC(row) {
   if (row && row.assignee && MEMBERS_BY_ID[row.assignee]) return MEMBERS_BY_ID[row.assignee].name;
   return row && row.assigneeOtherName || "Unassigned";
 }
+function flowMateKpiDateFromValueC(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function flowMateKpiFormatDateTimeC(value) {
+  const date = flowMateKpiDateFromValueC(value);
+  if (!date) return "";
+  return date.toLocaleString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).replace(",", "");
+}
+function flowMateKpiAssignedAtC(row) {
+  const events = Array.isArray(row && row.activityEvents) ? row.activityEvents : [];
+  const candidates = events.filter(event => {
+    const toStatus = String(event.to_status || event.toStatus || "").toLowerCase();
+    return toStatus === "assigned" || toStatus === "in_progress";
+  }).map(event => flowMateKpiDateFromValueC(event.created_at || event.createdAt)).filter(Boolean).sort((a, b) => a.getTime() - b.getTime());
+  return candidates[0]?.toISOString() || row?.createdAt || "";
+}
+function flowMateKpiDeliveredAtC(row) {
+  if (row && row.deliveredAt) return row.deliveredAt;
+  const events = Array.isArray(row && row.activityEvents) ? row.activityEvents : [];
+  const deliveredEvent = events.filter(event => String(event.to_status || event.toStatus || "").toLowerCase() === "delivered").map(event => flowMateKpiDateFromValueC(event.created_at || event.createdAt)).filter(Boolean).sort((a, b) => a.getTime() - b.getTime())[0];
+  return deliveredEvent ? deliveredEvent.toISOString() : "";
+}
+function flowMateKpiCompletionDaysC(row) {
+  const assignedAt = flowMateKpiDateFromValueC(flowMateKpiAssignedAtC(row));
+  const deliveredAt = flowMateKpiDateFromValueC(flowMateKpiDeliveredAtC(row));
+  if (!assignedAt || !deliveredAt || deliveredAt < assignedAt) return null;
+  return (deliveredAt.getTime() - assignedAt.getTime()) / 86400000;
+}
+function flowMateKpiFormatDaysC(value) {
+  return value == null || Number.isNaN(Number(value)) ? "-" : Number(value).toFixed(1);
+}
 function flowMateKpiIsGdVeOwnerC(row) {
   const member = row && row.assignee ? MEMBERS_BY_ID[row.assignee] : null;
   return window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(member || {
@@ -1683,10 +1724,19 @@ function KpiScreen() {
       items: 0,
       blocked: 0,
       aiTagged: 0,
-      aiTaggedItems: []
+      aiTaggedItems: [],
+      completionDaysTotal: 0,
+      completionDaysCount: 0,
+      completionItems: []
     };
+    const completionDays = flowMateKpiCompletionDaysC(w);
     current.delivered += w.effort || 0;
     current.items += 1;
+    if (completionDays != null) {
+      current.completionDaysTotal += completionDays;
+      current.completionDaysCount += 1;
+      current.completionItems.push(w);
+    }
     ownerMap.set(id, current);
   });
   blockedRows.forEach(w => {
@@ -1699,7 +1749,10 @@ function KpiScreen() {
       items: 0,
       blocked: 0,
       aiTagged: 0,
-      aiTaggedItems: []
+      aiTaggedItems: [],
+      completionDaysTotal: 0,
+      completionDaysCount: 0,
+      completionItems: []
     };
     current.blocked += 1;
     ownerMap.set(id, current);
@@ -1715,14 +1768,26 @@ function KpiScreen() {
       items: 0,
       blocked: 0,
       aiTagged: 0,
-      aiTaggedItems: []
+      aiTaggedItems: [],
+      completionDaysTotal: 0,
+      completionDaysCount: 0,
+      completionItems: []
     };
     current.aiTagged += 1;
     current.aiTaggedItems.push(w);
     ownerMap.set(id, current);
   });
-  const ownerRows = Array.from(ownerMap.values()).sort((a, b) => b.delivered - a.delivered || a.name.localeCompare(b.name));
+  const ownerRows = Array.from(ownerMap.values()).map(row => ({
+    ...row,
+    avgCompletionDays: row.completionDaysCount ? row.completionDaysTotal / row.completionDaysCount : null
+  })).sort((a, b) => b.delivered - a.delivered || a.name.localeCompare(b.name));
   const maxOwnerDelivered = Math.max(1, ...ownerRows.map(row => row.delivered));
+  const completionDetailRows = deliveredRows.map(row => ({
+    ...row,
+    assignedAt: flowMateKpiAssignedAtC(row),
+    deliveredAt: flowMateKpiDeliveredAtC(row),
+    completionDays: flowMateKpiCompletionDaysC(row)
+  })).filter(row => row.completionDays != null);
   const teamMap = new Map();
   kpiRows.forEach(w => {
     const team = w.requesterTeam || "No team";
@@ -1736,10 +1801,11 @@ function KpiScreen() {
   const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
   function exportKpiRows() {
     const filename = `flowmate-kpi-${kpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(kpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
-    const perMemberRows = [["Member", "Delivered effort", "Delivered items", "Blocked", "AI Tagged", "AI tagged task IDs"], ...ownerRows.map(row => [row.name, row.delivered, row.items, row.blocked, row.aiTagged, (row.aiTaggedItems || []).map(item => item.id).join(", ")])];
+    const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(kpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)), flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)), flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)), flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
+    const perMemberRows = [["Member", "Delivered effort", "Delivered items", "Avg days to delivered", "Blocked", "AI Tagged", "AI tagged task IDs"], ...ownerRows.map(row => [row.name, row.delivered, row.items, flowMateKpiFormatDaysC(row.avgCompletionDays), row.blocked, row.aiTagged, (row.aiTaggedItems || []).map(item => item.id).join(", ")])];
     const requesterTeamRows = [["Requester team", "Requests", "Share"], ...teamRows.map(row => [row.team, row.count, `${row.share}%`])];
-    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(kpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Need brief", needBriefRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length]];
+    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(kpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Need brief", needBriefRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
+    const completionRows = [["Task ID", "Task name", "Assignee", "Status", "Assigned At", "Delivered At", "Completion days", "Effort", "Campaign / project", "Type", "Priority"], ...completionDetailRows.map(row => [row.id || "", row.title || "", flowMateKpiOwnerNameC(row), row.status || "", flowMateKpiFormatDateTimeC(row.assignedAt), flowMateKpiFormatDateTimeC(row.deliveredAt), flowMateKpiFormatDaysC(row.completionDays), row.effort || "", row.campaign || "", row.type || "", row.priority || ""])];
     const sheets = [{
       name: "Summary",
       rows: summaryRows
@@ -1749,6 +1815,9 @@ function KpiScreen() {
     }, {
       name: "Per member",
       rows: perMemberRows
+    }, {
+      name: "Completion detail",
+      rows: completionRows
     }, {
       name: "Requester team",
       rows: requesterTeamRows
@@ -1897,14 +1966,14 @@ function KpiScreen() {
     className: "card__title"
   }, "Per member"), React.createElement("span", {
     className: "card__sub"
-  }, "delivered effort - delivered items - active blocked")), React.createElement("div", {
+  }, "delivered effort - delivered items - average delivery days")), React.createElement("div", {
     className: "card__body",
     style: {
       padding: 0
     }
   }, React.createElement("table", {
     className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), React.createElement("th", null, "Delivered effort"), React.createElement("th", null, "Distribution"), React.createElement("th", null, "Delivered items"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "AI Tagged"))), React.createElement("tbody", null, ownerRows.map(r => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), React.createElement("th", null, "Delivered effort"), React.createElement("th", null, "Distribution"), React.createElement("th", null, "Delivered items"), React.createElement("th", null, "Avg days to delivered"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "AI Tagged"))), React.createElement("tbody", null, ownerRows.map(r => React.createElement("tr", {
     key: r.id
   }, React.createElement("td", {
     className: "col-name strong"
@@ -1924,10 +1993,12 @@ function KpiScreen() {
     className: "mono"
   }, r.items), React.createElement("td", {
     className: "mono"
+  }, flowMateKpiFormatDaysC(r.avgCompletionDays)), React.createElement("td", {
+    className: "mono"
   }, r.blocked), React.createElement("td", {
     className: "mono"
   }, r.aiTagged))), ownerRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "6",
+    colSpan: "7",
     className: "muted"
   }, "No delivered, blocked, or AI-tagged rows loaded.")))))), React.createElement("div", {
     className: "card"
