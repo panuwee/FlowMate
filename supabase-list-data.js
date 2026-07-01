@@ -299,7 +299,7 @@ async function loadFlowMateListRows() {
       .select("id,user_id,display_name,initials,color,discipline_short,active"),
     window.flowmateSupabase
       .from("creative_request_details")
-      .select("work_item_id,asset_type,asset_subtype,asset_count,platforms,size_format,brief_link,reference_link,brief_missing_reason,common_brief,static_brief,video_brief,selected_sizes"),
+      .select("work_item_id,asset_type,asset_subtype,asset_count,platforms,size_format,brief_link,reference_link,brief_missing_reason"),
     window.flowmateSupabase
       .from("checklist_items")
       .select("id,work_item_id,title,is_done,sort_order")
@@ -486,10 +486,6 @@ async function loadFlowMateListRows() {
       briefLink: details.brief_link || "",
       referenceLink: details.reference_link || "",
       missingBriefReason: details.brief_missing_reason || item.assignment_reason || "",
-      commonBrief: details.common_brief || {},
-      staticBrief: details.static_brief || {},
-      videoBrief: details.video_brief || {},
-      selectedSizes: details.selected_sizes || [],
       campaign: item.campaign_name || item.project_name || "",
       requesterTeam: requesterTeam || "No team",
       requesterUserId: item.requester_user_id,

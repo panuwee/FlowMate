@@ -74,7 +74,7 @@ function exportRowsCsv(rows) {
    LIST VIEW
    ============================================================ */
 function ListScreen({ onOpen, searchQuery = "" }) {
-  const LIST_STATUS_FILTER_KEYS = ["need_brief", "queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
+  const LIST_STATUS_FILTER_KEYS = ["queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
   const savedListState = readFlowMateListViewState();
   const [filterStatus, setFilterStatus] = useStateB(savedListState.filterStatus || "all");
   const [filterFlag, setFilterFlag] = useStateB(savedListState.filterFlag || "all");
@@ -334,7 +334,6 @@ function ListScreen({ onOpen, searchQuery = "" }) {
    ============================================================ */
 function BoardScreen({ onOpen }) {
   const columns = [
-    { key: "need_brief", label: "Need Brief" },
     { key: "assigned",    label: "Assigned" },
     { key: "in_progress", label: "In Progress" },
     { key: "review",      label: "Review" },
@@ -581,11 +580,6 @@ function BoardScreen({ onOpen }) {
                           <Icon name="alert" size={11} /> {w.blockReason}
                         </div>
                       )}
-                      {w.status === "need_brief" && (
-                        <div className="kcard__row kcard__row--meta">
-                          <Icon name="alert" size={11} /> {w.missingBriefReason || w.queueReason || "Need Brief follow-up"}
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -644,12 +638,7 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     return w.status === "queued" && !w.needsSplit;
   });
-  const needBriefRows = sourceRows.filter(w => {
-    if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
-    return w.status === "need_brief" && !w.needsSplit;
-  });
   const byReason = {
-    brief: needBriefRows,
     capacity: queued,
   };
 
@@ -684,8 +673,6 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
         <div className="stat stat--warn"><div className="stat__num">{byReason.capacity.length}</div><div className="stat__lbl">Capacity</div></div>
       </div>
 
-      <QueueGroup title="Need Brief follow-up" tone="warn" items={byReason.brief} onOpen={onOpen}
-                  hint="PIC/requester must complete required brief fields before assignment can run." />
       <QueueGroup title="Capacity-blocked" tone="warn" items={byReason.capacity} onOpen={onOpen}
                   hint="No eligible owner with remaining capacity before the due date." />
     </div>

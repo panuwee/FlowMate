@@ -1029,7 +1029,6 @@ function normalizeMarketingPlanTimelineRow(row) {
     picName: row.pic_name || "",
     briefLink: row.brief_link || "",
     flowmateWorkItemId: row.flowmate_work_item_id || "",
-    flowmateDisplayId: row.flowmate_display_id || "",
     flowmateStatus: row.flowmate_status || "",
     contentStatus: row.content_status || "",
     contentSortOrder: Number(row.content_sort_order || 0),
@@ -1677,43 +1676,37 @@ async function createMarketingPlanWorkingSheetRow(form) {
   const monthKey = marketingPlanMonthKeyFromDate(form.launchDate);
   const title = String(form.productEvent || "").trim() || marketingPlanTitleFromDetails(form.details, form.assetType);
   const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : ["other"];
-  const {
-    data,
-    error
-  } = await window.flowmateSupabase.rpc("marketing_plan_create_or_update_working_row", {
-    p_content_item_id: form.contentItemId || null,
-    p_month_key: monthKey,
-    p_campaign_name: form.campaignName,
-    p_product_event: title,
-    p_team: getMarketingPlanCurrentUserDefaults().team || null,
-    p_format: form.assetType || null,
-    p_content_tier: form.contentTier || null,
-    p_pic_name: getMarketingPlanCurrentUserDefaults().picName || null,
-    p_details: form.details || null,
-    p_brief_link: form.briefLink || null,
-    p_launch_date: form.launchDate || null,
-    p_publish_time: form.publishTime || null,
-    p_channels: selectedChannels,
-    p_note: form.note || null
-  });
-  if (error) throw error;
-  return data || {};
-}
-function openMarketingPlanLinkedFlowMateTask(row) {
-  const displayId = row && (row.flowmateDisplayId || "");
-  const fallbackLink = String(row && row.briefLink || "");
-  const linkMatch = fallbackLink.match(/#detail\/([^/?#]+)/);
-  const targetId = displayId || linkMatch && linkMatch[1] || "";
-  if (!targetId) return false;
-  if (window.sessionStorage) {
-    window.sessionStorage.setItem("flowmate:activeProduct", "flowmate");
-  }
-  window.dispatchEvent(new CustomEvent("flowmate:switch-flowmate-product", {
-    detail: {
-      route: `detail/${targetId}`
-    }
+  const planId = await findOrCreateMarketingPlan(monthKey);
+  const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, getMarketingPlanCurrentUserDefaults().team || null);
+  const contentPayload = {
+    campaign_id: campaignId,
+    title,
+    details: String(form.details || title || "").trim(),
+    team: getMarketingPlanCurrentUserDefaults().team || null,
+    format: form.assetType || null,
+    content_tier: form.contentTier || null,
+    pic_name: getMarketingPlanCurrentUserDefaults().picName || null,
+    brief_link: String(form.briefLink || "").trim() || null,
+    source_start_date: form.launchDate || null,
+    source_start_time: form.publishTime || null,
+    note: String(form.note || "").trim() || null
+  };
+  const contentResult = await window.flowmateSupabase.from("marketing_content_items").insert(contentPayload).select("id").single();
+  if (contentResult.error) throw contentResult.error;
+  const contentItemId = contentResult.data.id;
+  const insertRows = selectedChannels.map(channel => ({
+    content_item_id: contentItemId,
+    channel,
+    publish_date: form.launchDate || null,
+    publish_time: form.publishTime || null,
+    placement_status: "planned"
   }));
-  return true;
+  const placementResult = await window.flowmateSupabase.from("marketing_channel_placements").insert(insertRows);
+  if (placementResult.error) throw placementResult.error;
+  return {
+    contentItemId,
+    placementCount: insertRows.length
+  };
 }
 async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(contentItemId, briefLink, flowMateWorkItemId = "") {
   if (!window.flowmateSupabase) {
@@ -1795,19 +1788,27 @@ async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selected
   return true;
 }
 async function updateMarketingPlanWorkingSheetRow(row, form) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
   if (!row || !row.contentItemId) throw new Error("Content item is missing.");
   const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : [];
   if (selectedChannels.length === 0) throw new Error("Select at least one Channel Tag.");
   const normalizedTime = normalizeMarketingPlanTimeInput(form.publishTime);
   if (!normalizedTime) throw new Error("Time must use HH:MM, for example 15:00.");
-  await createMarketingPlanWorkingSheetRow({
-    ...form,
-    contentItemId: row.contentItemId,
-    productEvent: form.contentTitle || form.productEvent,
-    launchDate: form.publishDate,
-    publishTime: normalizedTime,
-    channels: selectedChannels
-  });
+  const contentPayload = {
+    title: String(form.contentTitle || "").trim(),
+    details: String(form.details || form.contentTitle || "").trim(),
+    format: form.assetType || null,
+    content_tier: form.contentTier || null,
+    brief_link: String(form.briefLink || "").trim() || null,
+    source_start_date: form.publishDate || null,
+    source_start_time: normalizedTime
+  };
+  if (!contentPayload.title) throw new Error("Content is required.");
+  const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
+  if (contentResult.error) throw contentResult.error;
+  await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
     detail: {
       reason: "marketing_plan_working_sheet_row_edited"
@@ -3362,7 +3363,7 @@ function MarketingPlanWorkingSheetScreen() {
       });
       setSaveState({
         status: "saved",
-        message: `Saved Marketing Plan row and linked FlowMate draft with ${result.placementCount} channel placement${result.placementCount === 1 ? "" : "s"}.`
+        message: `Saved Marketing Plan row with ${result.placementCount} channel placement${result.placementCount === 1 ? "" : "s"}.`
       });
       setSheetForm(current => ({
         ...getDefaultMarketingPlanWorkingSheetForm(),
@@ -3678,17 +3679,12 @@ function MarketingPlanWorkingSheetScreen() {
       value: option.value
     }, option.label, row.hasMixedStatus && option.value === rowStatusValue ? " (mixed)" : "")))), React.createElement("td", null, React.createElement("div", {
       className: "marketing-working-actions"
-    }, row.flowmateWorkItemId && React.createElement("button", {
-      type: "button",
-      className: "btn btn--primary btn--xs",
-      disabled: updatingRowId === row.contentItemId,
-      onClick: () => openMarketingPlanLinkedFlowMateTask(row)
-    }, "Open Task"), React.createElement("button", {
+    }, React.createElement("button", {
       type: "button",
       className: "btn btn--secondary btn--xs",
       disabled: updatingRowId === row.contentItemId,
       onClick: () => startEditWorkingRow(row)
-    }, "Edit"), row.flowmateWorkItemId ? null : row.briefLink ? null : React.createElement("button", {
+    }, "Edit"), row.briefLink ? null : React.createElement("button", {
       type: "button",
       className: "btn btn--primary btn--xs",
       disabled: updatingRowId === row.contentItemId,

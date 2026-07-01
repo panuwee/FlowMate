@@ -566,10 +566,6 @@ async function createFlowMateCreativeRequest(input) {
     p_launch_date:      input.launchDate || null,
     p_publish_date:    input.publishDate || null,
     p_publish_time:    input.publishTime || null,
-    p_common_brief:    input.commonBrief || {},
-    p_static_brief:    input.staticBrief || {},
-    p_video_brief:     input.videoBrief || {},
-    p_selected_sizes:  input.selectedSizes || [],
   });
   if (error) throw error;
   return data;

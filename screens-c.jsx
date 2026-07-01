@@ -1485,11 +1485,9 @@ function KpiScreen() {
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
-  const productionActiveRows = activeRows.filter(w => w.status !== "need_brief");
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
-  const blockedRows = productionActiveRows.filter(w => w.status === "blocked");
-  const queuedRows = productionActiveRows.filter(w => w.status === "queued");
-  const needBriefRows = activeRows.filter(w => w.status === "need_brief");
+  const blockedRows = activeRows.filter(w => w.status === "blocked");
+  const queuedRows = activeRows.filter(w => w.status === "queued");
   const quickClosedRows = deliveredRows.filter(w => w.type === "quick");
 
   const ownerMap = new Map();
@@ -1629,10 +1627,9 @@ function KpiScreen() {
       ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)],
       ["Delivered effort", deliveredEffort],
       ["Delivered items", deliveredRows.length],
-      ["Active production", productionActiveRows.length],
+      ["Active work", activeRows.length],
       ["Blocked", blockedRows.length],
       ["Queued", queuedRows.length],
-      ["Need brief", needBriefRows.length],
       ["Quick tasks closed", quickClosedRows.length],
       ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length],
       ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)],
@@ -1708,9 +1705,9 @@ function KpiScreen() {
           <div className="kpi__delta">Creative + quick tasks</div>
         </div>
         <div className="kpi">
-          <div className="kpi__lbl">Active production</div>
-          <div className="kpi__num mono">{productionActiveRows.length}</div>
-          <div className="kpi__delta">Excludes delivered, cancelled, and Need Brief</div>
+          <div className="kpi__lbl">Active work</div>
+          <div className="kpi__num mono">{activeRows.length}</div>
+          <div className="kpi__delta">Excludes delivered and cancelled</div>
         </div>
         <div className="kpi">
           <div className="kpi__lbl">Avg review rounds</div>
@@ -1719,10 +1716,9 @@ function KpiScreen() {
         </div>
       </div>
 
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <div className="kpi"><div className="kpi__lbl">Blocked</div><div className="kpi__num mono">{blockedRows.length}</div><div className="kpi__delta">Active blocked work</div></div>
         <div className="kpi"><div className="kpi__lbl">Queued</div><div className="kpi__num mono">{queuedRows.length}</div><div className="kpi__delta">{queuedRows.reduce((sum, w) => sum + (w.effort || 0), 0)} pt waiting</div></div>
-        <div className="kpi"><div className="kpi__lbl">Need brief</div><div className="kpi__num mono">{needBriefRows.length}</div><div className="kpi__delta">Missing required brief fields</div></div>
         <div className="kpi"><div className="kpi__lbl">Quick tasks closed</div><div className="kpi__num mono">{quickClosedRows.length}</div><div className="kpi__delta">Closed quick tasks</div></div>
       </div>
 
@@ -2000,14 +1996,10 @@ function TeamGanttScreen({ onOpen }) {
 
   const teamMap = new Map();
   ganttTasks.forEach(task => {
-    const assigneeId = task.item.status === "need_brief" ? "need_brief" : (task.item.assignee || "unassigned");
-    const member = assigneeId === "need_brief" ? null : MEMBERS_BY_ID[assigneeId];
-    const assigneeName = assigneeId === "need_brief"
-      ? "Need Brief / PIC follow-up"
-      : (member ? member.name : (task.item.assigneeOtherName || "Unassigned"));
-    const teamName = assigneeId === "need_brief"
-      ? "Planning risk"
-      : (member ? (member.discipline || "No team") : (task.item.requesterTeam || "No team"));
+    const assigneeId = task.item.assignee || "unassigned";
+    const member = MEMBERS_BY_ID[assigneeId];
+    const assigneeName = member ? member.name : (task.item.assigneeOtherName || "Unassigned");
+    const teamName = member ? (member.discipline || "No team") : (task.item.requesterTeam || "No team");
     if (!teamMap.has(teamName)) teamMap.set(teamName, new Map());
     const assigneeMap = teamMap.get(teamName);
     if (!assigneeMap.has(assigneeId)) {

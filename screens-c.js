@@ -1714,11 +1714,9 @@ function KpiScreen() {
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
-  const productionActiveRows = activeRows.filter(w => w.status !== "need_brief");
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
-  const blockedRows = productionActiveRows.filter(w => w.status === "blocked");
-  const queuedRows = productionActiveRows.filter(w => w.status === "queued");
-  const needBriefRows = activeRows.filter(w => w.status === "need_brief");
+  const blockedRows = activeRows.filter(w => w.status === "blocked");
+  const queuedRows = activeRows.filter(w => w.status === "queued");
   const quickClosedRows = deliveredRows.filter(w => w.type === "quick");
   const ownerMap = new Map();
   deliveredRows.forEach(w => {
@@ -1811,7 +1809,7 @@ function KpiScreen() {
     const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(selectedKpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)), flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)), flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)), flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
     const perMemberRows = [["Member", "Delivered effort", "Delivered items", "Avg days to delivered", "Blocked", "AI Tagged", "AI tagged task IDs"], ...ownerRows.map(row => [row.name, row.delivered, row.items, flowMateKpiFormatDaysC(row.avgCompletionDays), row.blocked, row.aiTagged, (row.aiTaggedItems || []).map(item => item.id).join(", ")])];
     const requesterTeamRows = [["Requester team", "Requests", "Share"], ...teamRows.map(row => [row.team, row.count, `${row.share}%`])];
-    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active production", productionActiveRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Need brief", needBriefRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
+    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
     const completionRows = [["Task ID", "Task name", "Assignee", "Status", "Assigned At", "Delivered At", "Completion days", "Effort", "Campaign / project", "Type", "Priority"], ...completionDetailRows.map(row => [row.id || "", row.title || "", flowMateKpiOwnerNameC(row), row.status || "", flowMateKpiFormatDateTimeC(row.assignedAt), flowMateKpiFormatDateTimeC(row.deliveredAt), flowMateKpiFormatDaysC(row.completionDays), row.effort || "", row.campaign || "", row.type || "", row.priority || ""])];
     const sheets = [{
       name: "Summary",
@@ -1910,11 +1908,11 @@ function KpiScreen() {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
-  }, "Active production"), React.createElement("div", {
+  }, "Active work"), React.createElement("div", {
     className: "kpi__num mono"
-  }, productionActiveRows.length), React.createElement("div", {
+  }, activeRows.length), React.createElement("div", {
     className: "kpi__delta"
-  }, "Excludes delivered, cancelled, and Need Brief")), React.createElement("div", {
+  }, "Excludes delivered and cancelled")), React.createElement("div", {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
@@ -1925,7 +1923,7 @@ function KpiScreen() {
   }, "Across ", flowMateMonthLabelC(selectedKpiExportMonth), " rows"))), React.createElement("div", {
     className: "kpi-grid",
     style: {
-      gridTemplateColumns: "repeat(4, 1fr)"
+      gridTemplateColumns: "repeat(3, 1fr)"
     }
   }, React.createElement("div", {
     className: "kpi"
@@ -1944,14 +1942,6 @@ function KpiScreen() {
   }, queuedRows.length), React.createElement("div", {
     className: "kpi__delta"
   }, queuedRows.reduce((sum, w) => sum + (w.effort || 0), 0), " pt waiting")), React.createElement("div", {
-    className: "kpi"
-  }, React.createElement("div", {
-    className: "kpi__lbl"
-  }, "Need brief"), React.createElement("div", {
-    className: "kpi__num mono"
-  }, needBriefRows.length), React.createElement("div", {
-    className: "kpi__delta"
-  }, "Missing required brief fields")), React.createElement("div", {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
@@ -2259,10 +2249,10 @@ function TeamGanttScreen({
   const ganttTasks = (sourceRows || []).filter(row => row && row.type !== "leave" && !["cancelled"].includes(row.status)).map(row => ganttTaskModelC(row, selectedGanttMonth, ganttWindow)).filter(Boolean).sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
   const teamMap = new Map();
   ganttTasks.forEach(task => {
-    const assigneeId = task.item.status === "need_brief" ? "need_brief" : task.item.assignee || "unassigned";
-    const member = assigneeId === "need_brief" ? null : MEMBERS_BY_ID[assigneeId];
-    const assigneeName = assigneeId === "need_brief" ? "Need Brief / PIC follow-up" : member ? member.name : task.item.assigneeOtherName || "Unassigned";
-    const teamName = assigneeId === "need_brief" ? "Planning risk" : member ? member.discipline || "No team" : task.item.requesterTeam || "No team";
+    const assigneeId = task.item.assignee || "unassigned";
+    const member = MEMBERS_BY_ID[assigneeId];
+    const assigneeName = member ? member.name : task.item.assigneeOtherName || "Unassigned";
+    const teamName = member ? member.discipline || "No team" : task.item.requesterTeam || "No team";
     if (!teamMap.has(teamName)) teamMap.set(teamName, new Map());
     const assigneeMap = teamMap.get(teamName);
     if (!assigneeMap.has(assigneeId)) {
