@@ -1380,6 +1380,35 @@ function flowMateKpiCompletionDaysC(row) {
   return (deliveredAt.getTime() - assignedAt.getTime()) / 86400000;
 }
 
+function flowMateKpiCancelledAtC(row) {
+  const events = Array.isArray(row && row.activityEvents) ? row.activityEvents : [];
+  const cancelledEvent = events
+    .filter(event => {
+      const eventType = String(event.event_type || event.eventType || "").toLowerCase();
+      const toStatus = String(event.to_status || event.toStatus || "").toLowerCase();
+      return eventType === "cancelled" || toStatus === "cancelled";
+    })
+    .map(event => flowMateKpiDateFromValueC(event.created_at || event.createdAt))
+    .filter(Boolean)
+    .sort((a, b) => b.getTime() - a.getTime())[0];
+  return cancelledEvent ? cancelledEvent.toISOString() : "";
+}
+
+function flowMateKpiCancelReasonC(row) {
+  if (row && row.cancelReason) return row.cancelReason;
+  const events = Array.isArray(row && row.activityEvents) ? row.activityEvents : [];
+  const cancelledEvent = events.find(event => {
+    const eventType = String(event.event_type || event.eventType || "").toLowerCase();
+    const toStatus = String(event.to_status || event.toStatus || "").toLowerCase();
+    return eventType === "cancelled" || toStatus === "cancelled";
+  });
+  const metadata = cancelledEvent && cancelledEvent.metadata;
+  if (metadata && typeof metadata === "object") {
+    return metadata.cancel_reason || metadata.reason || "";
+  }
+  return "";
+}
+
 function flowMateKpiFormatDaysC(value) {
   return value == null || Number.isNaN(Number(value)) ? "-" : Number(value).toFixed(1);
 }
@@ -1484,6 +1513,7 @@ function KpiScreen() {
     : effectiveKpiMonthOptions[effectiveKpiMonthOptions.length - 1]?.key || kpiExportMonth;
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
+  const cancelledRows = kpiRows.filter(w => w.status === "cancelled");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
   const blockedRows = activeRows.filter(w => w.status === "blocked");
@@ -1630,6 +1660,7 @@ function KpiScreen() {
       ["Active work", activeRows.length],
       ["Blocked", blockedRows.length],
       ["Queued", queuedRows.length],
+      ["Cancelled", cancelledRows.length],
       ["Quick tasks closed", quickClosedRows.length],
       ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length],
       ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)],
@@ -1650,11 +1681,30 @@ function KpiScreen() {
         row.priority || "",
       ]),
     ];
+    const cancelledDetailRows = [
+      ["Task ID", "Task name", "Type", "Assignee", "Requester", "Requester team", "Campaign / project", "Priority", "Effort", "1st Draft / Due", "Launch", "Cancelled At", "Cancel reason"],
+      ...cancelledRows.map(row => [
+        row.id || "",
+        row.title || "",
+        row.type || "",
+        flowMateKpiOwnerNameC(row),
+        row.requester || "",
+        row.requesterTeam || "",
+        row.campaign || "",
+        row.priority || "",
+        row.effort || "",
+        row.dueFullLabel || row.dueDate || "",
+        row.launchFullLabel || row.launchDate || "",
+        flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)),
+        flowMateKpiCancelReasonC(row),
+      ]),
+    ];
     const sheets = [
       { name: "Summary", rows: summaryRows },
       { name: "All work", rows: allWorkRows },
       { name: "Per member", rows: perMemberRows },
       { name: "Completion detail", rows: completionRows },
+      { name: "Cancelled detail", rows: cancelledDetailRows },
       { name: "Requester team", rows: requesterTeamRows },
       ...flowMateKpiGdVeAiSheets(kpiRows),
     ];
@@ -1719,7 +1769,7 @@ function KpiScreen() {
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <div className="kpi"><div className="kpi__lbl">Blocked</div><div className="kpi__num mono">{blockedRows.length}</div><div className="kpi__delta">Active blocked work</div></div>
         <div className="kpi"><div className="kpi__lbl">Queued</div><div className="kpi__num mono">{queuedRows.length}</div><div className="kpi__delta">{queuedRows.reduce((sum, w) => sum + (w.effort || 0), 0)} pt waiting</div></div>
-        <div className="kpi"><div className="kpi__lbl">Quick tasks closed</div><div className="kpi__num mono">{quickClosedRows.length}</div><div className="kpi__delta">Closed quick tasks</div></div>
+        <div className="kpi"><div className="kpi__lbl">Cancelled</div><div className="kpi__num mono">{cancelledRows.length}</div><div className="kpi__delta">Cancelled work in selected month</div></div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
@@ -1791,6 +1841,44 @@ function KpiScreen() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card__head">
+          <span className="card__title">Cancelled report</span>
+          <span className="card__sub">cancelled task audit for {flowMateMonthLabelC(selectedKpiExportMonth)}</span>
+        </div>
+        <div className="card__body" style={{ padding: 0, overflowX: "auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Task ID</th>
+                <th>Task name</th>
+                <th>Assignee</th>
+                <th>Requester</th>
+                <th>Campaign</th>
+                <th>Cancelled At</th>
+                <th>Cancel reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cancelledRows.map(row => (
+                <tr key={row.id}>
+                  <td className="mono strong">{row.id}</td>
+                  <td>{row.title}</td>
+                  <td>{flowMateKpiOwnerNameC(row)}</td>
+                  <td>{row.requester || "-"}</td>
+                  <td>{row.campaign || "-"}</td>
+                  <td className="mono">{flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)) || "-"}</td>
+                  <td>{flowMateKpiCancelReasonC(row) || "-"}</td>
+                </tr>
+              ))}
+              {cancelledRows.length === 0 && (
+                <tr><td colSpan="7" className="muted">No cancelled rows in this month.</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

@@ -1614,6 +1614,29 @@ function flowMateKpiCompletionDaysC(row) {
   if (!assignedAt || !deliveredAt || deliveredAt < assignedAt) return null;
   return (deliveredAt.getTime() - assignedAt.getTime()) / 86400000;
 }
+function flowMateKpiCancelledAtC(row) {
+  const events = Array.isArray(row && row.activityEvents) ? row.activityEvents : [];
+  const cancelledEvent = events.filter(event => {
+    const eventType = String(event.event_type || event.eventType || "").toLowerCase();
+    const toStatus = String(event.to_status || event.toStatus || "").toLowerCase();
+    return eventType === "cancelled" || toStatus === "cancelled";
+  }).map(event => flowMateKpiDateFromValueC(event.created_at || event.createdAt)).filter(Boolean).sort((a, b) => b.getTime() - a.getTime())[0];
+  return cancelledEvent ? cancelledEvent.toISOString() : "";
+}
+function flowMateKpiCancelReasonC(row) {
+  if (row && row.cancelReason) return row.cancelReason;
+  const events = Array.isArray(row && row.activityEvents) ? row.activityEvents : [];
+  const cancelledEvent = events.find(event => {
+    const eventType = String(event.event_type || event.eventType || "").toLowerCase();
+    const toStatus = String(event.to_status || event.toStatus || "").toLowerCase();
+    return eventType === "cancelled" || toStatus === "cancelled";
+  });
+  const metadata = cancelledEvent && cancelledEvent.metadata;
+  if (metadata && typeof metadata === "object") {
+    return metadata.cancel_reason || metadata.reason || "";
+  }
+  return "";
+}
 function flowMateKpiFormatDaysC(value) {
   return value == null || Number.isNaN(Number(value)) ? "-" : Number(value).toFixed(1);
 }
@@ -1713,6 +1736,7 @@ function KpiScreen() {
   const selectedKpiExportMonth = effectiveKpiMonthOptions.some(option => option.key === kpiExportMonth) ? kpiExportMonth : effectiveKpiMonthOptions[effectiveKpiMonthOptions.length - 1]?.key || kpiExportMonth;
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
+  const cancelledRows = kpiRows.filter(w => w.status === "cancelled");
   const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
   const blockedRows = activeRows.filter(w => w.status === "blocked");
@@ -1809,8 +1833,9 @@ function KpiScreen() {
     const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(selectedKpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)), flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)), flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)), flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
     const perMemberRows = [["Member", "Delivered effort", "Delivered items", "Avg days to delivered", "Blocked", "AI Tagged", "AI tagged task IDs"], ...ownerRows.map(row => [row.name, row.delivered, row.items, flowMateKpiFormatDaysC(row.avgCompletionDays), row.blocked, row.aiTagged, (row.aiTaggedItems || []).map(item => item.id).join(", ")])];
     const requesterTeamRows = [["Requester team", "Requests", "Share"], ...teamRows.map(row => [row.team, row.count, `${row.share}%`])];
-    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
+    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Queued", queuedRows.length], ["Cancelled", cancelledRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
     const completionRows = [["Task ID", "Task name", "Assignee", "Status", "Assigned At", "Delivered At", "Completion days", "Effort", "Campaign / project", "Type", "Priority"], ...completionDetailRows.map(row => [row.id || "", row.title || "", flowMateKpiOwnerNameC(row), row.status || "", flowMateKpiFormatDateTimeC(row.assignedAt), flowMateKpiFormatDateTimeC(row.deliveredAt), flowMateKpiFormatDaysC(row.completionDays), row.effort || "", row.campaign || "", row.type || "", row.priority || ""])];
+    const cancelledDetailRows = [["Task ID", "Task name", "Type", "Assignee", "Requester", "Requester team", "Campaign / project", "Priority", "Effort", "1st Draft / Due", "Launch", "Cancelled At", "Cancel reason"], ...cancelledRows.map(row => [row.id || "", row.title || "", row.type || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.campaign || "", row.priority || "", row.effort || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)), flowMateKpiCancelReasonC(row)])];
     const sheets = [{
       name: "Summary",
       rows: summaryRows
@@ -1823,6 +1848,9 @@ function KpiScreen() {
     }, {
       name: "Completion detail",
       rows: completionRows
+    }, {
+      name: "Cancelled detail",
+      rows: cancelledDetailRows
     }, {
       name: "Requester team",
       rows: requesterTeamRows
@@ -1945,11 +1973,11 @@ function KpiScreen() {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
-  }, "Quick tasks closed"), React.createElement("div", {
+  }, "Cancelled"), React.createElement("div", {
     className: "kpi__num mono"
-  }, quickClosedRows.length), React.createElement("div", {
+  }, cancelledRows.length), React.createElement("div", {
     className: "kpi__delta"
-  }, "Closed quick tasks"))), React.createElement("div", {
+  }, "Cancelled work in selected month"))), React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1.4fr 1fr",
@@ -2036,6 +2064,34 @@ function KpiScreen() {
     colSpan: "3",
     className: "muted"
   }, "No live rows loaded."))))))), React.createElement("div", {
+    className: "card",
+    style: {
+      marginTop: 16
+    }
+  }, React.createElement("div", {
+    className: "card__head"
+  }, React.createElement("span", {
+    className: "card__title"
+  }, "Cancelled report"), React.createElement("span", {
+    className: "card__sub"
+  }, "cancelled task audit for ", flowMateMonthLabelC(selectedKpiExportMonth))), React.createElement("div", {
+    className: "card__body",
+    style: {
+      padding: 0,
+      overflowX: "auto"
+    }
+  }, React.createElement("table", {
+    className: "tbl"
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Task ID"), React.createElement("th", null, "Task name"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "Requester"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Cancelled At"), React.createElement("th", null, "Cancel reason"))), React.createElement("tbody", null, cancelledRows.map(row => React.createElement("tr", {
+    key: row.id
+  }, React.createElement("td", {
+    className: "mono strong"
+  }, row.id), React.createElement("td", null, row.title), React.createElement("td", null, flowMateKpiOwnerNameC(row)), React.createElement("td", null, row.requester || "-"), React.createElement("td", null, row.campaign || "-"), React.createElement("td", {
+    className: "mono"
+  }, flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)) || "-"), React.createElement("td", null, flowMateKpiCancelReasonC(row) || "-"))), cancelledRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "7",
+    className: "muted"
+  }, "No cancelled rows in this month.")))))), React.createElement("div", {
     style: {
       marginTop: 16
     },
