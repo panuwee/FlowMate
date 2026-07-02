@@ -560,6 +560,14 @@ button:disabled {
   line-height: 1.05;
   letter-spacing: 0;
 }
+.marketing-timeline-channel-count {
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+  line-height: 1.25;
+  letter-spacing: 0;
+  color: var(--garena-grey);
+  white-space: nowrap;
+}
 
 .marketing-working-table {
   width: 100%;
@@ -1789,7 +1797,7 @@ button:disabled {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 80;
   display: flex;
   align-items: center;
   justify-content: center;
