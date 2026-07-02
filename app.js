@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260701-3";
+const FLOWMATE_APP_VERSION = "v20260702-4";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1189,6 +1189,29 @@ function getMarketingPlanAssetFirstPublishDate(asset) {
 function getMarketingPlanTimelineAssetMeta(asset) {
   return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" · ") || "No details";
 }
+const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [{
+  key: "facebook",
+  label: "FB"
+}, {
+  key: "tiktok",
+  label: "TK"
+}, {
+  key: "instagram",
+  label: "IG"
+}];
+function getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth) {
+  const windowMonths = new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys);
+  const countChannels = new Set(MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => channel.key));
+  const countsByDay = {};
+  (rows || []).forEach(row => {
+    const publishDate = String(row.publishDate || "");
+    const rowMonth = row.monthKey || (publishDate ? publishDate.slice(0, 7) : "");
+    if (!publishDate || !windowMonths.has(rowMonth) || !countChannels.has(row.channel)) return;
+    if (!countsByDay[publishDate]) countsByDay[publishDate] = {};
+    countsByDay[publishDate][row.channel] = (countsByDay[publishDate][row.channel] || 0) + 1;
+  });
+  return countsByDay;
+}
 function groupMarketingPlanTimelineRows(rows, selectedMonth) {
   const campaigns = new Map();
   const windowMonths = new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys);
@@ -2188,6 +2211,7 @@ function MarketingPlanTimelineScreen() {
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
   const groupedCampaigns = groupMarketingPlanTimelineRows(rows, selectedMonth);
+  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth);
   const columnWidth = 38;
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
@@ -2492,7 +2516,7 @@ function MarketingPlanTimelineScreen() {
     style: {
       padding: "12px 14px",
       borderRight: "1px solid var(--garena-light-grey)",
-      gridRow: "span 2",
+      gridRow: "span 3",
       position: "sticky",
       left: 0,
       zIndex: 5,
@@ -2537,7 +2561,30 @@ function MarketingPlanTimelineScreen() {
     style: {
       fontSize: 10
     }
-  }, day.weekday))))), groupedCampaigns.map(campaign => React.createElement("div", {
+  }, day.weekday)))), React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: `repeat(${monthDays.length}, ${columnWidth}px)`
+    }
+  }, monthDays.map(day => {
+    const dayCounts = channelCountsByDay[day.key] || {};
+    return React.createElement("div", {
+      key: `${day.key}-channel-counts`,
+      style: {
+        minHeight: 42,
+        padding: "4px 2px",
+        borderRight: "1px solid var(--garena-light-grey)",
+        background: day.isWeekend ? "var(--garena-badge-bg)" : "var(--garena-white)",
+        textAlign: "center"
+      }
+    }, MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => {
+      const count = dayCounts[channel.key] || 0;
+      return count > 0 ? React.createElement("div", {
+        key: channel.key,
+        className: "marketing-timeline-channel-count"
+      }, channel.label, " ", count) : null;
+    }));
+  }))), groupedCampaigns.map(campaign => React.createElement("div", {
     key: campaign.id
   }, React.createElement("div", {
     style: {
