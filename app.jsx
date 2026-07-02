@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260702-4";
+const FLOWMATE_APP_VERSION = "v20260702-5";
 
 const NAV = [
   { group: "Personal", items: [
@@ -3972,7 +3972,7 @@ function MarketingPlanSupervisorScreen({ user }) {
                 {type === "campaign" && <th>Campaign</th>}
                 {type === "campaign" && <th>Team</th>}
                 {type === "channel" && <th>Channel</th>}
-                <th>Total Rows</th>
+                <th>Total Event</th>
                 <th>Assigned</th>
                 <th>Unassigned</th>
                 <th>Avg Working Days Before Launch</th>
@@ -4081,7 +4081,7 @@ function MarketingPlanSupervisorScreen({ user }) {
       {loadState.status === "live" && (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 16 }}>
-            {renderSummaryMetric("Total Rows", summary.totalRows)}
+            {renderSummaryMetric("Total Event", summary.totalRows)}
             {renderSummaryMetric("Assigned", summary.assignedRows)}
             {renderSummaryMetric("Unassigned", summary.unassignedRows)}
             {renderSummaryMetric("Avg Working Days Before Launch", formatMarketingPlanSupervisorNumber(summary.avgWorkingDaysBeforeLaunch))}

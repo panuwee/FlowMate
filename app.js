@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260702-4";
+const FLOWMATE_APP_VERSION = "v20260702-5";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -4090,7 +4090,7 @@ function MarketingPlanSupervisorScreen({
       }
     }, React.createElement("table", {
       className: "marketing-working-table"
-    }, React.createElement("thead", null, React.createElement("tr", null, type === "pic" && React.createElement("th", null, "PIC"), type === "campaign" && React.createElement("th", null, "Campaign"), type === "campaign" && React.createElement("th", null, "Team"), type === "channel" && React.createElement("th", null, "Channel"), React.createElement("th", null, "Total Rows"), React.createElement("th", null, "Assigned"), React.createElement("th", null, "Unassigned"), React.createElement("th", null, "Avg Working Days Before Launch"), type === "pic" && React.createElement("th", null, "Median Working Days Before Launch"), React.createElement("th", null, "Healthy"), React.createElement("th", null, "Watch"), React.createElement("th", null, "Risk"), React.createElement("th", null, "Critical"), React.createElement("th", null, "Missing Brief Link"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
+    }, React.createElement("thead", null, React.createElement("tr", null, type === "pic" && React.createElement("th", null, "PIC"), type === "campaign" && React.createElement("th", null, "Campaign"), type === "campaign" && React.createElement("th", null, "Team"), type === "channel" && React.createElement("th", null, "Channel"), React.createElement("th", null, "Total Event"), React.createElement("th", null, "Assigned"), React.createElement("th", null, "Unassigned"), React.createElement("th", null, "Avg Working Days Before Launch"), type === "pic" && React.createElement("th", null, "Median Working Days Before Launch"), React.createElement("th", null, "Healthy"), React.createElement("th", null, "Watch"), React.createElement("th", null, "Risk"), React.createElement("th", null, "Critical"), React.createElement("th", null, "Missing Brief Link"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
       key: `${type}-${row.monthKey}-${row.picUserId || row.campaignId || row.channel}`
     }, type === "pic" && React.createElement("td", null, row.picName), type === "campaign" && React.createElement("td", null, row.campaignName), type === "campaign" && React.createElement("td", null, row.campaignTeam || "-"), type === "channel" && React.createElement("td", null, getMarketingPlanChannelLabel(row.channel)), React.createElement("td", null, row.totalRows), React.createElement("td", null, row.assignedRows), React.createElement("td", null, row.unassignedRows), React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.avgWorkingDaysBeforeLaunch)), type === "pic" && React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.medianWorkingDaysBeforeLaunch)), React.createElement("td", null, row.healthyCount), React.createElement("td", null, row.watchCount), React.createElement("td", null, row.riskCount), React.createElement("td", null, row.criticalCount), React.createElement("td", null, row.missingBriefLinkCount))), rows.length === 0 && React.createElement("tr", null, React.createElement("td", {
       colSpan: type === "campaign" ? 13 : 12
@@ -4209,7 +4209,7 @@ function MarketingPlanSupervisorScreen({
       gap: 12,
       marginBottom: 16
     }
-  }, renderSummaryMetric("Total Rows", summary.totalRows), renderSummaryMetric("Assigned", summary.assignedRows), renderSummaryMetric("Unassigned", summary.unassignedRows), renderSummaryMetric("Avg Working Days Before Launch", formatMarketingPlanSupervisorNumber(summary.avgWorkingDaysBeforeLaunch)), renderSummaryMetric("Risk", summary.riskRows), renderSummaryMetric("Critical", summary.criticalRows)), React.createElement("div", {
+  }, renderSummaryMetric("Total Event", summary.totalRows), renderSummaryMetric("Assigned", summary.assignedRows), renderSummaryMetric("Unassigned", summary.unassignedRows), renderSummaryMetric("Avg Working Days Before Launch", formatMarketingPlanSupervisorNumber(summary.avgWorkingDaysBeforeLaunch)), renderSummaryMetric("Risk", summary.riskRows), renderSummaryMetric("Critical", summary.criticalRows)), React.createElement("div", {
     className: "row",
     style: {
       gap: 8,

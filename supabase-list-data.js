@@ -209,6 +209,25 @@ function flowmateDateTimeWithOptionalTimeLabel(dateValue, timeValue) {
   return dateLabel && timeLabel ? `${dateLabel} ${timeLabel}` : dateLabel;
 }
 
+function flowmateDateTimeBangkokLabel(dateValue) {
+  if (!dateValue) return "";
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return flowmateDateFullLabel(dateValue);
+  const dateLabel = date.toLocaleDateString("en-US", {
+    timeZone: "Asia/Bangkok",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const timeLabel = date.toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  return `${dateLabel} ${timeLabel}`;
+}
+
 function flowmateDateTimeLabel(dateValue) {
   if (!dateValue) return "";
   return new Date(dateValue).toLocaleString("en-US", {
@@ -472,7 +491,7 @@ async function loadFlowMateListRows() {
       planningLabel: flowmateDateLabel(item.publish_date || item.launch_date),
       planningFullLabel: flowmateDateFullLabel(item.publish_date || item.launch_date),
       createdAt: item.created_at,
-      createdLabel: flowmateDateFullLabel(item.created_at),
+      createdLabel: flowmateDateTimeBangkokLabel(item.created_at),
       deliveredAt: item.delivered_at,
       deliveredLabel: flowmateDateTimeFullLabel(item.delivered_at),
       urgentReason: item.urgent_reason || "",
