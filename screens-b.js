@@ -413,24 +413,26 @@ function BoardScreen({
         status: "error",
         message: "Live data unavailable: Supabase list loader is not ready."
       });
-      return;
+      return false;
     }
     try {
       const rows = await window.loadFlowMateListRows();
-      if (!isAlive()) return;
+      if (!isAlive()) return false;
       setSourceRows(rows);
       setLoadState({
         status: "live",
         message: "Live Supabase data"
       });
+      return true;
     } catch (error) {
-      if (!isAlive()) return;
+      if (!isAlive()) return false;
       console.error("[FlowMate Board] Supabase load failed:", error);
       setSourceRows([]);
       setLoadState({
         status: "error",
         message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}`
       });
+      return false;
     }
   }
   useEffectB(() => {
@@ -562,6 +564,41 @@ function BoardScreen({
       setBusy(false);
     }
   }
+  async function handleBoardRefresh() {
+    setBusy(true);
+    setFlash(null);
+    setLoadState({
+      status: "loading",
+      message: "Refreshing board data..."
+    });
+    try {
+      const ok = await loadRows();
+      if (!ok) {
+        setFlash({
+          tone: "bad",
+          text: "Refresh failed."
+        });
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+      setFlash({
+        tone: "ok",
+        text: "Board refreshed."
+      });
+    } catch (error) {
+      console.error("[FlowMate Board] manual refresh failed:", error);
+      setLoadState({
+        status: "error",
+        message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}`
+      });
+      setFlash({
+        tone: "bad",
+        text: window.flowmateUserError(error, "Refresh failed.")
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
   return React.createElement("div", {
     className: "page"
   }, React.createElement("div", {
@@ -579,7 +616,7 @@ function BoardScreen({
     className: "page__actions"
   }, React.createElement("button", {
     className: "btn btn--secondary",
-    onClick: () => loadRows(),
+    onClick: handleBoardRefresh,
     disabled: busy
   }, React.createElement(Icon, {
     name: "rerun"

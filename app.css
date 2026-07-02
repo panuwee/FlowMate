@@ -1276,6 +1276,13 @@ button:disabled {
   background: var(--garena-white);
   transform: rotate(45deg);
 }
+.gantt__legend-leave {
+  width: 18px;
+  height: 10px;
+  border: 1px solid #92400E;
+  border-radius: 999px;
+  background: #FEF3C7;
+}
 .gantt__legend-line {
   width: 2px;
   height: 14px;
@@ -1504,6 +1511,27 @@ button:disabled {
 .gantt__bar.is-urgent.is-overdue {
   background: var(--garena-red);
   color: var(--garena-white);
+}
+.gantt__leave {
+  position: relative;
+  z-index: 1;
+  height: 20px;
+  margin: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #92400E;
+  border-radius: 999px;
+  background: #FEF3C7;
+  color: #92400E;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  pointer-events: none;
+}
+.gantt__leave.is-partial {
+  border-style: dashed;
+  background: #FFF7ED;
 }
 .gantt__bar-date {
   flex: 0 0 auto;

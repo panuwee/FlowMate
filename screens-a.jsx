@@ -12,7 +12,6 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const [sourceRows, setSourceRows] = useState(WORK);
   const [loadState, setLoadState] = useState({ status: "loading", message: "Loading Supabase data..." });
   const [filterStatus, setFilterStatus] = useState("all");
-  const [showThisWeek, setShowThisWeek] = useState(false);
 
   async function loadMyWorkRows(isAlive = () => true) {
     if (!window.loadFlowMateListRows) {
@@ -165,12 +164,9 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const rawMine = window.getFlowMateMyWorkRows
     ? window.getFlowMateMyWorkRows(sourceRows, currentUser, window.MEMBERS || [], searchQuery)
     : sourceRows.filter(w => meIds.includes(w.assignee) && !["delivered", "cancelled", "done"].includes(w.status) && window.matchesFlowMateSearch(w, searchQuery));
-  const weekMine = showThisWeek
-    ? rawMine.filter(w => w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 6)
-    : rawMine;
   const mine = window.sortFlowMateMyWorkRows
-    ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(weekMine, filterStatus))
-    : weekMine;
+    ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(rawMine, filterStatus))
+    : rawMine;
   const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0)));
   const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned","in_progress","review"].includes(w.status)));
   const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)));
@@ -203,11 +199,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
         <div>
           <h1 className="page__title">My work</h1>
           <div className="page__sub">{loadState.message}</div>
-          <div className="page__sub">{currentUser.name ? `Hi ${currentUser.name} - ` : ""}Open work as of {new Date().toLocaleString("en-SG", { timeZone: "Asia/Singapore", dateStyle: "medium", timeStyle: "short" })} SGT.</div>
-        </div>
-        <div className="page__actions">
-          <button className={`btn btn--secondary ${showThisWeek ? "is-active" : ""}`} onClick={() => setShowThisWeek(current => !current)} title="Show work due in the next 7 days"><Icon name="calendar" /> This week</button>
-          <button className="btn btn--primary" onClick={() => onNav("create")}><Icon name="plus" /> New</button>
+          <div className="page__sub">{currentUser.name ? `Hi ${currentUser.name} - ` : ""}Open work as of {new Date().toLocaleString("en-SG", { timeZone: "Asia/Bangkok", dateStyle: "medium", timeStyle: "short" })} Bangkok.</div>
         </div>
       </div>
 

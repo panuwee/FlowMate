@@ -1931,6 +1931,23 @@ function ganttTaskModelC(row, monthKey, ganttWindow) {
   };
 }
 
+function ganttLeaveModelC(row, monthKey, ganttWindow) {
+  const leaveKey = ganttDateKeyFromRowC(row, ["calendarDate", "dueDate"]);
+  if (!leaveKey) return null;
+  const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
+  if (leaveKey < timeline.startKey || leaveKey > timeline.endKey) return null;
+  const startOffset = Math.floor((calendarParseKeyC(leaveKey).getTime() - timeline.startDate.getTime()) / 86400000);
+  const isPartial = Number(row.leaveUnits || 0) > 0 && Number(row.leaveUnits || 0) < 1;
+  return {
+    item: row,
+    leaveKey,
+    startOffset,
+    spanDays: 1,
+    isPartial,
+    label: isPartial ? `${row.halfLabel || "Half-day"} leave` : "Leave",
+  };
+}
+
 function TeamGanttScreen({ onOpen }) {
   const [sourceRows, setSourceRows] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
@@ -1993,13 +2010,18 @@ function TeamGanttScreen({ onOpen }) {
     .map(row => ganttTaskModelC(row, selectedGanttMonth, ganttWindow))
     .filter(Boolean)
     .sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
+  const ganttLeaves = (sourceRows || [])
+    .filter(row => row && row.type === "leave")
+    .map(row => ganttLeaveModelC(row, selectedGanttMonth, ganttWindow))
+    .filter(Boolean)
+    .sort((a, b) => a.leaveKey.localeCompare(b.leaveKey) || String(a.item.assignee || "").localeCompare(String(b.item.assignee || "")));
 
   const teamMap = new Map();
-  ganttTasks.forEach(task => {
-    const assigneeId = task.item.assignee || "unassigned";
+  function ensureGanttAssigneeGroup(row) {
+    const assigneeId = row.assignee || "unassigned";
     const member = MEMBERS_BY_ID[assigneeId];
-    const assigneeName = member ? member.name : (task.item.assigneeOtherName || "Unassigned");
-    const teamName = member ? (member.discipline || "No team") : (task.item.requesterTeam || "No team");
+    const assigneeName = member ? member.name : (row.assigneeOtherName || "Unassigned");
+    const teamName = member ? (member.discipline || "No team") : (row.requesterTeam || "No team");
     if (!teamMap.has(teamName)) teamMap.set(teamName, new Map());
     const assigneeMap = teamMap.get(teamName);
     if (!assigneeMap.has(assigneeId)) {
@@ -2008,9 +2030,19 @@ function TeamGanttScreen({ onOpen }) {
         assigneeName,
         member,
         tasks: [],
+        leaves: [],
       });
     }
-    assigneeMap.get(assigneeId).tasks.push(task);
+    return assigneeMap.get(assigneeId);
+  }
+  ganttTasks.forEach(task => {
+    ensureGanttAssigneeGroup(task.item).tasks.push(task);
+  });
+  ganttLeaves.forEach(leave => {
+    const assigneeId = leave.item.assignee || "unassigned";
+    const member = MEMBERS_BY_ID[assigneeId];
+    if (member && member.discipline !== "GD/VE") return;
+    ensureGanttAssigneeGroup(leave.item).leaves.push(leave);
   });
   const teamGroups = Array.from(teamMap.entries())
     .map(([teamName, assigneeMap]) => ({
@@ -2057,6 +2089,7 @@ function TeamGanttScreen({ onOpen }) {
           <span><i className="gantt__legend-dot gantt__legend-dot--normal"></i>Normal</span>
           <span><i className="gantt__legend-dot gantt__legend-dot--urgent"></i>Urgent</span>
           <span><i className="gantt__legend-diamond"></i>Launch</span>
+          <span><i className="gantt__legend-leave"></i>Leave / partial leave</span>
           <span><i className="gantt__legend-line"></i>Today</span>
         </div>
       </div>
@@ -2100,8 +2133,8 @@ function TeamGanttScreen({ onOpen }) {
           <section key={team.teamName} className="gantt__team">
             <div className="gantt__team-title">
               <span>{team.teamName}</span>
-              <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks</span>
-            </div>
+            <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks</span>
+          </div>
             {team.assignees.map(assignee => (
               <div key={assignee.assigneeId} className="gantt__row">
                 <div className="gantt__owner">
@@ -2113,6 +2146,17 @@ function TeamGanttScreen({ onOpen }) {
                 </div>
                 <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`, "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
                   {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
+                  {assignee.leaves.map(leave => (
+                    <div
+                      key={leave.item.id}
+                      className={`gantt__leave ${leave.isPartial ? "is-partial" : ""}`}
+                      style={{ gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}` }}
+                      title={`${assignee.assigneeName} ${leave.label} - ${calendarDateLabelC(leave.leaveKey)}`}
+                      data-testid="flowmate-gantt-leave-marker"
+                    >
+                      {leave.isPartial ? "Half" : "Leave"}
+                    </div>
+                  ))}
                   {assignee.tasks.map(task => (
                     <button
                       key={task.item.id}

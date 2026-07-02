@@ -17,7 +17,6 @@ function MyWorkScreen({
     message: "Loading Supabase data..."
   });
   const [filterStatus, setFilterStatus] = useState("all");
-  const [showThisWeek, setShowThisWeek] = useState(false);
   async function loadMyWorkRows(isAlive = () => true) {
     if (!window.loadFlowMateListRows) {
       setSourceRows([]);
@@ -204,8 +203,7 @@ function MyWorkScreen({
     }
   }
   const rawMine = window.getFlowMateMyWorkRows ? window.getFlowMateMyWorkRows(sourceRows, currentUser, window.MEMBERS || [], searchQuery) : sourceRows.filter(w => meIds.includes(w.assignee) && !["delivered", "cancelled", "done"].includes(w.status) && window.matchesFlowMateSearch(w, searchQuery));
-  const weekMine = showThisWeek ? rawMine.filter(w => w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 6) : rawMine;
-  const mine = window.sortFlowMateMyWorkRows ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(weekMine, filterStatus)) : weekMine;
+  const mine = window.sortFlowMateMyWorkRows ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(rawMine, filterStatus)) : rawMine;
   const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || w.dueDelta != null && w.dueDelta < 0));
   const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned", "in_progress", "review"].includes(w.status)));
   const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned", "in_progress", "review"].includes(w.status)));
@@ -244,23 +242,10 @@ function MyWorkScreen({
   }, loadState.message), React.createElement("div", {
     className: "page__sub"
   }, currentUser.name ? `Hi ${currentUser.name} - ` : "", "Open work as of ", new Date().toLocaleString("en-SG", {
-    timeZone: "Asia/Singapore",
+    timeZone: "Asia/Bangkok",
     dateStyle: "medium",
     timeStyle: "short"
-  }), " SGT.")), React.createElement("div", {
-    className: "page__actions"
-  }, React.createElement("button", {
-    className: `btn btn--secondary ${showThisWeek ? "is-active" : ""}`,
-    onClick: () => setShowThisWeek(current => !current),
-    title: "Show work due in the next 7 days"
-  }, React.createElement(Icon, {
-    name: "calendar"
-  }), " This week"), React.createElement("button", {
-    className: "btn btn--primary",
-    onClick: () => onNav("create")
-  }, React.createElement(Icon, {
-    name: "plus"
-  }), " New"))), React.createElement("div", {
+  }), " Bangkok."))), React.createElement("div", {
     className: "stat-strip"
   }, React.createElement("div", {
     className: "stat stat--accent"

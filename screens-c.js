@@ -2184,6 +2184,22 @@ function ganttTaskModelC(row, monthKey, ganttWindow) {
     displayLabel: row.type === "creative" ? "1st Draft" : "Due"
   };
 }
+function ganttLeaveModelC(row, monthKey, ganttWindow) {
+  const leaveKey = ganttDateKeyFromRowC(row, ["calendarDate", "dueDate"]);
+  if (!leaveKey) return null;
+  const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
+  if (leaveKey < timeline.startKey || leaveKey > timeline.endKey) return null;
+  const startOffset = Math.floor((calendarParseKeyC(leaveKey).getTime() - timeline.startDate.getTime()) / 86400000);
+  const isPartial = Number(row.leaveUnits || 0) > 0 && Number(row.leaveUnits || 0) < 1;
+  return {
+    item: row,
+    leaveKey,
+    startOffset,
+    spanDays: 1,
+    isPartial,
+    label: isPartial ? `${row.halfLabel || "Half-day"} leave` : "Leave"
+  };
+}
 function TeamGanttScreen({
   onOpen
 }) {
@@ -2247,12 +2263,13 @@ function TeamGanttScreen({
   const todayKey = calendarUtcKeyC(new Date());
   const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000) : null;
   const ganttTasks = (sourceRows || []).filter(row => row && row.type !== "leave" && !["cancelled"].includes(row.status)).map(row => ganttTaskModelC(row, selectedGanttMonth, ganttWindow)).filter(Boolean).sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
+  const ganttLeaves = (sourceRows || []).filter(row => row && row.type === "leave").map(row => ganttLeaveModelC(row, selectedGanttMonth, ganttWindow)).filter(Boolean).sort((a, b) => a.leaveKey.localeCompare(b.leaveKey) || String(a.item.assignee || "").localeCompare(String(b.item.assignee || "")));
   const teamMap = new Map();
-  ganttTasks.forEach(task => {
-    const assigneeId = task.item.assignee || "unassigned";
+  function ensureGanttAssigneeGroup(row) {
+    const assigneeId = row.assignee || "unassigned";
     const member = MEMBERS_BY_ID[assigneeId];
-    const assigneeName = member ? member.name : task.item.assigneeOtherName || "Unassigned";
-    const teamName = member ? member.discipline || "No team" : task.item.requesterTeam || "No team";
+    const assigneeName = member ? member.name : row.assigneeOtherName || "Unassigned";
+    const teamName = member ? member.discipline || "No team" : row.requesterTeam || "No team";
     if (!teamMap.has(teamName)) teamMap.set(teamName, new Map());
     const assigneeMap = teamMap.get(teamName);
     if (!assigneeMap.has(assigneeId)) {
@@ -2260,10 +2277,20 @@ function TeamGanttScreen({
         assigneeId,
         assigneeName,
         member,
-        tasks: []
+        tasks: [],
+        leaves: []
       });
     }
-    assigneeMap.get(assigneeId).tasks.push(task);
+    return assigneeMap.get(assigneeId);
+  }
+  ganttTasks.forEach(task => {
+    ensureGanttAssigneeGroup(task.item).tasks.push(task);
+  });
+  ganttLeaves.forEach(leave => {
+    const assigneeId = leave.item.assignee || "unassigned";
+    const member = MEMBERS_BY_ID[assigneeId];
+    if (member && member.discipline !== "GD/VE") return;
+    ensureGanttAssigneeGroup(leave.item).leaves.push(leave);
   });
   const teamGroups = Array.from(teamMap.entries()).map(([teamName, assigneeMap]) => ({
     teamName,
@@ -2327,6 +2354,8 @@ function TeamGanttScreen({
   }), "Urgent"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
   }), "Launch"), React.createElement("span", null, React.createElement("i", {
+    className: "gantt__legend-leave"
+  }), "Leave / partial leave"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-line"
   }), "Today"))), React.createElement("div", {
     className: "stat-strip",
@@ -2425,7 +2454,15 @@ function TeamGanttScreen({
   }, todayOffset !== null && React.createElement("div", {
     className: "gantt__today-line",
     "aria-hidden": "true"
-  }), assignee.tasks.map(task => React.createElement("button", {
+  }), assignee.leaves.map(leave => React.createElement("div", {
+    key: leave.item.id,
+    className: `gantt__leave ${leave.isPartial ? "is-partial" : ""}`,
+    style: {
+      gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}`
+    },
+    title: `${assignee.assigneeName} ${leave.label} - ${calendarDateLabelC(leave.leaveKey)}`,
+    "data-testid": "flowmate-gantt-leave-marker"
+  }, leave.isPartial ? "Half" : "Leave")), assignee.tasks.map(task => React.createElement("button", {
     key: task.item.id,
     type: "button",
     className: `gantt__bar ${task.spansToLaunch ? "gantt__bar--span" : "gantt__bar--marker"} ${task.priorityClass} ${task.statusClass} ${task.item.overdue ? "is-overdue" : ""}`,
