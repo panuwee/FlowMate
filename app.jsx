@@ -871,9 +871,11 @@ function normalizeMarketingPlanTimelineRow(row) {
     contentTeam: row.content_team || "",
     format: row.format || "",
     contentTier: row.content_tier || "",
+    picUserId: row.pic_user_id || "",
     picName: row.pic_name || "",
     briefLink: row.brief_link || "",
     flowmateWorkItemId: row.flowmate_work_item_id || "",
+    flowmateDisplayId: row.flowmate_display_id || "",
     flowmateStatus: row.flowmate_status || "",
     contentStatus: row.content_status || "",
     contentSortOrder: Number(row.content_sort_order || 0),
@@ -971,9 +973,15 @@ function isMarketingPlanFlowMateDetailLink(value) {
   return /#detail\/CR-\d{4,}(?:$|[/?#])/i.test(text);
 }
 
+function getMarketingPlanFlowMateDetailUrl(displayId) {
+  const id = String(displayId || "").trim();
+  if (!/^CR-\d{4,}$/i.test(id)) return "";
+  return `${window.location.origin}${window.location.pathname}#detail/${id.toUpperCase()}`;
+}
+
 function hasMarketingPlanLinkedCreativeRequest(row) {
   if (!row) return false;
-  if (String(row.flowmateWorkItemId || "").trim()) return true;
+  if (String(row.flowmateWorkItemId || "").trim() && String(row.flowmateDisplayId || "").trim()) return true;
   return isMarketingPlanFlowMateDetailLink(row.briefLink);
 }
 
@@ -1396,6 +1404,7 @@ function getMarketingPlanCurrentUserDefaults() {
   const user = window.FLOWMATE_CURRENT_USER || {};
   const member = user.team_member_id && window.MEMBERS_BY_ID ? window.MEMBERS_BY_ID[user.team_member_id] : null;
   return {
+    picUserId: user.id || "",
     team: user.requester_team || (member && member.discipline) || "",
     picName: user.name || user.email || "Unknown",
   };
@@ -1623,6 +1632,7 @@ async function createMarketingPlanWorkingSheetRow(form) {
     format: form.assetType || null,
     content_tier: form.contentTier || null,
     pic_name: getMarketingPlanCurrentUserDefaults().picName || null,
+    pic_user_id: getMarketingPlanCurrentUserDefaults().picUserId || null,
     brief_link: String(form.briefLink || "").trim() || null,
     source_start_date: form.launchDate || null,
     source_start_time: form.publishTime || null,
@@ -3189,6 +3199,12 @@ function MarketingPlanWorkingSheetScreen() {
   const visiblePlacementRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
   const visibleRows = groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel);
 
+  function canManageMarketingPlanWorkingRow(row) {
+    const currentUser = window.FLOWMATE_CURRENT_USER || {};
+    if (currentUser.role === "admin") return true;
+    return Boolean(row && row.picUserId && currentUser.id && row.picUserId === currentUser.id);
+  }
+
   function updateSheetForm(key, value) {
     setSheetForm(current => ({ ...current, [key]: value }));
   }
@@ -3209,6 +3225,10 @@ function MarketingPlanWorkingSheetScreen() {
   }
 
   function startEditWorkingRow(row) {
+    if (!canManageMarketingPlanWorkingRow(row)) {
+      setExportMessage("Only PIC or Admin can edit this row.");
+      return;
+    }
     const selectedChannels = Array.isArray(row.channels) && row.channels.length
       ? row.channels
       : (row.channel ? [row.channel] : ["facebook"]);
@@ -3276,10 +3296,31 @@ function MarketingPlanWorkingSheetScreen() {
   }
 
   async function handleDeleteWorkingRow(row) {
-    if (!window.confirm(`Delete ${row.contentTitle || "this Working Sheet row"}?`)) return;
+    if (!canManageMarketingPlanWorkingRow(row)) {
+      setExportMessage("Only PIC or Admin can delete this row.");
+      return;
+    }
+    const linkedFlowMateTask = hasMarketingPlanLinkedCreativeRequest(row);
+    const label = row.contentTitle || "this Working Sheet row";
+    const confirmMessage = linkedFlowMateTask
+      ? `Delete ${label}? Deleting it will cancel the FlowMate task and notify stakeholders. Continue?`
+      : `Delete ${label}?`;
+    if (!window.confirm(confirmMessage)) return;
     setUpdatingRowId(row.contentItemId);
     setExportMessage("");
     try {
+      if (linkedFlowMateTask) {
+        if (!row.flowmateDisplayId) {
+          throw new Error("Linked FlowMate task is missing its display ID. Run supabase/marketing_plan.sql and refresh before deleting.");
+        }
+        if (!window.cancelFlowMateWorkItem) {
+          throw new Error("FlowMate cancel action is not ready. Please refresh and try again.");
+        }
+        await window.cancelFlowMateWorkItem(
+          { id: row.flowmateDisplayId, type: "creative", isSupabaseRow: true },
+          `Marketing Plan row deleted: ${label}`,
+        );
+      }
       await deleteMarketingPlanWorkingSheetRow(row);
       if (editingWorkingRow && editingWorkingRow.contentItemId === row.contentItemId) {
         setEditingWorkingRow(null);
@@ -3349,6 +3390,10 @@ function MarketingPlanWorkingSheetScreen() {
   }
 
   async function handleWorkingRowStatusChange(row, nextStatus) {
+    if (!canManageMarketingPlanWorkingRow(row)) {
+      setExportMessage("Only PIC or Admin can update this row.");
+      return;
+    }
     setUpdatingRowId(row.contentItemId);
     setExportMessage("");
     try {
@@ -3357,6 +3402,34 @@ function MarketingPlanWorkingSheetScreen() {
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet status update failed:", error);
       setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Status update failed.") : "Status update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
+
+  async function handleRepairWorkingRowBriefLink(row) {
+    if (!canManageMarketingPlanWorkingRow(row)) {
+      setExportMessage("Only PIC or Admin can repair this row.");
+      return;
+    }
+    const detailUrl = getMarketingPlanFlowMateDetailUrl(row && row.flowmateDisplayId);
+    if (!detailUrl) {
+      setExportMessage("Linked FlowMate task is missing its display ID. Run supabase/marketing_plan.sql and refresh.");
+      return;
+    }
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(
+        row.contentItemId,
+        detailUrl,
+        row.flowmateWorkItemId || "",
+      );
+      await loadWorkingSheetRows({ alive: true });
+      setExportMessage(`Restored Brief Link for ${row.contentTitle || row.flowmateDisplayId}.`);
+    } catch (error) {
+      console.error("[Marketing Plan] Brief Link repair failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Brief Link repair failed.") : "Brief Link repair failed.");
     } finally {
       setUpdatingRowId("");
     }
@@ -3542,6 +3615,9 @@ function MarketingPlanWorkingSheetScreen() {
               <tbody>
                 {visibleRows.slice(0, 12).map(row => {
                   const rowStatusValue = getMarketingPlanViewStatus(row);
+                  const rowHasLinkedCreativeRequest = hasMarketingPlanLinkedCreativeRequest(row);
+                  const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
+                  const canManageRow = canManageMarketingPlanWorkingRow(row);
                   return (
                     <tr key={row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`}>
                       <td>{getMarketingPlanMonthLabel(row.monthKey)}</td>
@@ -3574,7 +3650,8 @@ function MarketingPlanWorkingSheetScreen() {
                         <select
                           className="select marketing-working-status"
                           value={rowStatusValue}
-                          disabled={updatingRowId === row.contentItemId}
+                          disabled={!canManageRow || updatingRowId === row.contentItemId}
+                          title={canManageRow ? "" : "Only PIC or Admin can edit this row."}
                           onChange={event => handleWorkingRowStatusChange(row, event.target.value)}
                         >
                           {MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => (
@@ -3589,16 +3666,28 @@ function MarketingPlanWorkingSheetScreen() {
                           <button
                             type="button"
                             className="btn btn--secondary btn--xs"
-                            disabled={updatingRowId === row.contentItemId}
+                            disabled={!canManageRow || updatingRowId === row.contentItemId}
+                            title={canManageRow ? "" : "Only PIC or Admin can edit this row."}
                             onClick={() => startEditWorkingRow(row)}
                           >
                             Edit
                           </button>
-                          {hasMarketingPlanLinkedCreativeRequest(row) ? null : (
+                          {rowNeedsBriefLinkRepair ? (
+                            <button
+                              type="button"
+                              className="btn btn--secondary btn--xs"
+                              disabled={!canManageRow || updatingRowId === row.contentItemId}
+                              title={canManageRow ? "" : "Only PIC or Admin can edit this row."}
+                              onClick={() => handleRepairWorkingRowBriefLink(row)}
+                            >
+                              Repair Link
+                            </button>
+                          ) : rowHasLinkedCreativeRequest ? null : (
                             <button
                               type="button"
                               className="btn btn--primary btn--xs"
-                              disabled={updatingRowId === row.contentItemId}
+                              disabled={!canManageRow || updatingRowId === row.contentItemId}
+                              title={canManageRow ? "" : "Only PIC or Admin can edit this row."}
                               onClick={() => openFlowMateCreativeBriefFromMarketingRow(row)}
                             >
                               Create Brief

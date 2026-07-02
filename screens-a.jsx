@@ -2054,7 +2054,13 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       await refreshDetailItem();
       setActionMsg({ tone: "ok", text: `${w.id} cancelled.` });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Cancel failed.") });
+      setActionMsg({
+        tone: "bad",
+        text: window.flowmateUserError(
+          error,
+          "Cancel failed. Run supabase/rpc_quick_task.sql and supabase/collaboration_admin.sql, then refresh.",
+        ),
+      });
     } finally {
       setPending(false);
     }

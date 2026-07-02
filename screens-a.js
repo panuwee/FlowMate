@@ -2646,7 +2646,7 @@ function DetailScreen({
     } catch (error) {
       setActionMsg({
         tone: "bad",
-        text: window.flowmateUserError(error, "Cancel failed.")
+        text: window.flowmateUserError(error, "Cancel failed. Run supabase/rpc_quick_task.sql and supabase/collaboration_admin.sql, then refresh.")
       });
     } finally {
       setPending(false);
