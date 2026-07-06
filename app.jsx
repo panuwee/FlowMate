@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260706-2";
+const FLOWMATE_APP_VERSION = "v20260706-3";
 
 const NAV = [
   { group: "Personal", items: [
@@ -961,6 +961,11 @@ function normalizeMarketingPlanTimeInput(value) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
+function normalizeMarketingPlanPublishTimeOption(value) {
+  const normalized = normalizeMarketingPlanTimeInput(value);
+  return MARKETING_PLAN_PUBLISH_TIME_OPTIONS.includes(normalized) ? normalized : "";
+}
+
 function formatMarketingPlanDate(value) {
   if (!value) return "-";
   const date = new Date(`${value}T00:00:00Z`);
@@ -1170,6 +1175,8 @@ const MARKETING_PLAN_ASSET_TYPES = [
 
 const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
 
+const MARKETING_PLAN_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
+
 const MARKETING_PLAN_WORKING_STATUS_OPTIONS = [
   { value: "planned", label: "Planned" },
   { value: "assigned", label: "Assigned" },
@@ -1194,7 +1201,7 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     productEvent: "",
     team: "",
     launchDate: today,
-    publishTime: "12:00",
+    publishTime: "11:00",
     assetType: "Banner",
     details: "",
     contentTier: "B",
@@ -3269,8 +3276,8 @@ function MarketingPlanWorkingSheetScreen() {
   }
 
   function normalizeSheetTimeValue() {
-    const normalizedTime = normalizeMarketingPlanTimeInput(sheetForm.publishTime);
-    updateSheetForm("publishTime", normalizedTime || "12:00");
+    const normalizedTime = normalizeMarketingPlanPublishTimeOption(sheetForm.publishTime);
+    updateSheetForm("publishTime", normalizedTime || "11:00");
   }
 
   function startEditWorkingRow(row) {
@@ -3285,7 +3292,7 @@ function MarketingPlanWorkingSheetScreen() {
     setEditForm({
       contentTitle: row.contentTitle || "",
       publishDate: row.publishDate || flowMateTodayDateKey(),
-      publishTime: formatMarketingPlanTime(row.publishTime) || "12:00",
+      publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || "",
       assetType: row.format || "Banner",
       contentTier: row.contentTier || "B",
       briefLink: row.briefLink || "",
@@ -3311,9 +3318,9 @@ function MarketingPlanWorkingSheetScreen() {
   async function handleSaveEditWorkingRow(event) {
     event.preventDefault();
     if (!editingWorkingRow || !editForm) return;
-    const normalizedTime = normalizeMarketingPlanTimeInput(editForm.publishTime);
+    const normalizedTime = normalizeMarketingPlanPublishTimeOption(editForm.publishTime);
     if (!normalizedTime) {
-      setExportMessage("Time must use HH:MM, for example 15:00.");
+      setExportMessage("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
       return;
     }
     if (!String(editForm.contentTitle || "").trim()) {
@@ -3400,9 +3407,9 @@ function MarketingPlanWorkingSheetScreen() {
       setSaveState({ status: "error", message: missing[1] });
       return;
     }
-    const normalizedTime = normalizeMarketingPlanTimeInput(sheetForm.publishTime);
+    const normalizedTime = normalizeMarketingPlanPublishTimeOption(sheetForm.publishTime);
     if (!normalizedTime) {
-      setSaveState({ status: "error", message: "Time must use HH:MM, for example 15:00." });
+      setSaveState({ status: "error", message: "Select a posting time: 11:00, 14:00, 18:00, or 21:00." });
       return;
     }
     if (!sheetForm.channels || sheetForm.channels.length === 0) {
@@ -3536,15 +3543,15 @@ function MarketingPlanWorkingSheetScreen() {
             </label>
             <label className="field">
               <span className="field__label">Time *</span>
-              <input
-                className="input"
-                type="text"
-                inputMode="numeric"
+              <select
+                className="select"
                 value={sheetForm.publishTime}
-                placeholder="HH:MM"
                 onChange={event => updateSheetForm("publishTime", event.target.value)}
-                onBlur={normalizeSheetTimeValue}
-              />
+              >
+                {MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time => (
+                  <option key={time} value={time}>{time}</option>
+                ))}
+              </select>
             </label>
             <label className="field">
               <span className="field__label">Asset Type *</span>
@@ -3788,15 +3795,16 @@ function MarketingPlanWorkingSheetScreen() {
               </label>
               <label className="field">
                 <span className="field__label">Time *</span>
-                <input
-                  className="input"
-                  type="text"
-                  inputMode="numeric"
+                <select
+                  className="select"
                   value={editForm.publishTime}
-                  placeholder="HH:MM"
                   onChange={event => updateEditForm("publishTime", event.target.value)}
-                  onBlur={event => updateEditForm("publishTime", normalizeMarketingPlanTimeInput(event.target.value) || editForm.publishTime)}
-                />
+                >
+                  <option value="">Select time</option>
+                  {MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span className="field__label">Asset Type *</span>
