@@ -568,6 +568,10 @@ button:disabled {
   color: var(--garena-grey);
   white-space: nowrap;
 }
+.marketing-timeline-channel-count--high {
+  font-weight: 800;
+  color: var(--garena-red);
+}
 
 .marketing-working-table {
   width: 100%;

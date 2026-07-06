@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260706-1";
+const FLOWMATE_APP_VERSION = "v20260706-2";
 
 const NAV = [
   { group: "Personal", items: [
@@ -2555,7 +2555,10 @@ function MarketingPlanTimelineScreen() {
                           {MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => {
                             const count = dayCounts[channel.key] || 0;
                             return count > 0 ? (
-                              <div key={channel.key} className="marketing-timeline-channel-count">
+                              <div
+                                key={channel.key}
+                                className={`marketing-timeline-channel-count${count > 4 ? " marketing-timeline-channel-count--high" : ""}`}
+                              >
                                 {channel.label} {count}
                               </div>
                             ) : null;
