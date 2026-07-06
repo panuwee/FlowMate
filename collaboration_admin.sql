@@ -800,6 +800,30 @@ begin
   where id = v_work.id
   returning * into v_work;
 
+  if v_work.work_type = 'creative_request'
+     and p_next_status in ('review', 'delivered')
+     and length(trim(coalesce(p_delivery_link, v_work.delivery_link, ''))) > 0 then
+    insert into public.work_item_links (
+      work_item_id,
+      url,
+      description,
+      created_by_user_id
+    )
+    select
+      v_work.id,
+      trim(coalesce(p_delivery_link, v_work.delivery_link)),
+      'Review Link',
+      v_actor_id
+    where not exists (
+      select 1
+      from public.work_item_links wil
+      where wil.work_item_id = v_work.id
+        and wil.deleted_at is null
+        and wil.url = trim(coalesce(p_delivery_link, v_work.delivery_link))
+        and coalesce(wil.description, '') = 'Review Link'
+    );
+  end if;
+
   insert into public.work_item_events (
     work_item_id,
     actor_user_id,
@@ -827,6 +851,47 @@ begin
       'cancel_reason_set', p_cancel_reason is not null
     )
   );
+
+  if v_work.work_type = 'creative_request'
+     and p_next_status = 'cancelled'
+     and to_regclass('public.marketing_channel_placements') is not null
+     and to_regclass('public.marketing_content_items') is not null then
+    with linked_content as (
+      update public.marketing_content_items mci
+      set brief_link = null,
+          flowmate_work_item_id = null,
+          status = 'not_started',
+          updated_at = now()
+      where mci.flowmate_work_item_id = v_work.id
+         or substring(mci.brief_link from '#detail/([^/?#]+)') = v_work.display_id
+      returning mci.id
+    )
+    update public.marketing_channel_placements mcp
+    set placement_status = 'planned',
+        updated_at = now()
+    from linked_content
+    where mcp.content_item_id = linked_content.id;
+
+  elsif v_work.work_type = 'creative_request'
+     and p_next_status in ('review', 'delivered')
+     and to_regclass('public.marketing_channel_placements') is not null
+     and to_regclass('public.marketing_content_items') is not null then
+    update public.marketing_channel_placements mcp
+    set placement_status = case
+          when p_next_status = 'review' then 'review'
+          when p_next_status = 'delivered' then 'ready_to_post'
+          else mcp.placement_status
+        end,
+        updated_at = now()
+    from public.marketing_content_items mci
+    where mci.id = mcp.content_item_id
+      and mci.flowmate_work_item_id = v_work.id
+      and mcp.placement_status <> case
+            when p_next_status = 'review' then 'review'
+            when p_next_status = 'delivered' then 'ready_to_post'
+            else mcp.placement_status
+          end;
+  end if;
 
   if v_work.work_type = 'creative_request'
      and p_next_status in ('delivered', 'cancelled') then
