@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260706-5";
+const FLOWMATE_APP_VERSION = "v20260706-6";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1785,7 +1785,7 @@ async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selected
 }
 
 async function syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime) {
-  if (!row || !row.flowmateWorkItemId) return false;
+  if (!row || !row.contentItemId || !hasMarketingPlanLinkedCreativeRequest(row)) return false;
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
