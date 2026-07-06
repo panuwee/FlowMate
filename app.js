@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260706-3";
+const FLOWMATE_APP_VERSION = "v20260706-4";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -1841,6 +1841,19 @@ async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selected
   }
   return true;
 }
+async function syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime) {
+  if (!row || !row.flowmateWorkItemId) return false;
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const result = await window.flowmateSupabase.rpc("marketing_plan_sync_flowmate_schedule", {
+    p_content_item_id: row.contentItemId,
+    p_launch_date: form.publishDate || null,
+    p_publish_time: normalizedTime || null
+  });
+  if (result.error) throw result.error;
+  return true;
+}
 async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
@@ -1863,6 +1876,7 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
   if (contentResult.error) throw contentResult.error;
   await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
+  await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime);
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
     detail: {
       reason: "marketing_plan_working_sheet_row_edited"
