@@ -929,6 +929,17 @@ function normalizeFlowMatePublishTimeInput(value) {
   if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
   return "";
 }
+const FLOWMATE_INVALID_BRIEF_LINK_MESSAGE = "กรุณาใส่ Brief Link ที่ถูกต้อง";
+function isFlowMateValidHttpUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  try {
+    const url = new URL(text);
+    return (url.protocol === "http:" || url.protocol === "https:") && Boolean(url.hostname);
+  } catch (error) {
+    return false;
+  }
+}
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
   quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority"],
   creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "platforms", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishTime", "marketingPlanContentItemId", "marketingPlanOriginalBriefLink", "marketingPlanProductEvent", "marketingPlanCampaignName"]
@@ -1011,6 +1022,12 @@ function getFlowMateCreateValidationErrors(mode, draft) {
       errors[field] = message;
     }
   }
+  function requireHttpUrl(field, message) {
+    const value = String(row[field] || "").trim();
+    if (value && !isFlowMateValidHttpUrl(value)) {
+      errors[field] = message;
+    }
+  }
   if (mode === "quick") {
     requireField("requesterTeam", "Requester team is required.");
     requireField("projectName", "Project / campaign is required.");
@@ -1027,6 +1044,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("platforms", "Channel Tag is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
+  requireHttpUrl("briefLink", FLOWMATE_INVALID_BRIEF_LINK_MESSAGE);
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
@@ -1205,8 +1223,17 @@ function CreateScreen({
     let submissionDraft = activeDraft;
     const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);
     if (Object.keys(nextValidationErrors).length > 0) {
+      const hasInvalidBriefLink = nextValidationErrors.briefLink === FLOWMATE_INVALID_BRIEF_LINK_MESSAGE;
+      if (hasInvalidBriefLink && window.flowmatePrompt) {
+        await window.flowmatePrompt({
+          title: "Brief Link ไม่ถูกต้อง",
+          hideInput: true,
+          note: FLOWMATE_INVALID_BRIEF_LINK_MESSAGE,
+          confirmText: "OK"
+        });
+      }
       setValidationErrors(nextValidationErrors);
-      setCreateAlert("Please complete the highlighted required fields.");
+      setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please complete the highlighted required fields.");
       return;
     }
     const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
