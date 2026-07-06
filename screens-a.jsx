@@ -1674,6 +1674,16 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     return () => { alive = false; };
   }, [id, w && w.id]);
 
+  useEffect(() => {
+    function onExternalDetailRefresh(event) {
+      if (!w || !w.isSupabaseRow) return;
+      if (event && event.detail && event.detail.reason && event.detail.reason !== "marketing_plan_working_sheet_row_edited") return;
+      refreshDetailItem();
+    }
+    window.addEventListener("flowmate:refresh-request", onExternalDetailRefresh);
+    return () => window.removeEventListener("flowmate:refresh-request", onExternalDetailRefresh);
+  }, [w && w.id, w && w.isSupabaseRow]);
+
   if (!w) {
     const isLoadingDirectDetail = directDetailLoadState.status === "loading";
     return (

@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260706-4";
+const FLOWMATE_APP_VERSION = "v20260706-5";
 const NAV = [{
   group: "Personal",
   items: [{
