@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260706-6";
+const FLOWMATE_APP_VERSION = "v20260707-2";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -358,6 +358,18 @@ function App() {
           status: "signed-in",
           user: realUser
         });
+        let shouldShowProductChoice = false;
+        try {
+          shouldShowProductChoice = sessionStorage.getItem("flowmate:showProductChoiceAfterLogin") === "1";
+        } catch (e) {}
+        if (shouldShowProductChoice) {
+          try {
+            sessionStorage.removeItem("flowmate:showProductChoiceAfterLogin");
+            sessionStorage.removeItem("flowmate:activeProduct");
+          } catch (e) {}
+          setActiveProduct(null);
+          return;
+        }
         let postLoginHash = null;
         try {
           postLoginHash = sessionStorage.getItem("flowmate:postLoginHash");
@@ -2176,6 +2188,10 @@ function MarketingPlanTimelineScreen() {
       });
       return;
     }
+    if (isAlive()) setLoadState({
+      status: "loading",
+      message: "Loading Marketing Plan timeline..."
+    });
     try {
       const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
         ascending: true
@@ -2375,7 +2391,7 @@ function MarketingPlanTimelineScreen() {
   }), " Manage Campaign"), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
-    onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
+    onClick: () => loadTimelineRows(() => true)
   }, React.createElement(Icon, {
     name: "refresh"
   }), " Refresh"))), campaignMessage && React.createElement("div", {
@@ -2694,53 +2710,58 @@ function MarketingPlanChannelPlanScreen() {
     status: "loading",
     message: "Loading Marketing Plan channel placements..."
   });
+  async function loadChannelPlanRows(isAlive = () => true) {
+    if (!window.flowmateSupabase) {
+      setLoadState({
+        status: "error",
+        message: "Supabase client is not ready. Please refresh after the app loads."
+      });
+      return;
+    }
+    if (isAlive()) setLoadState({
+      status: "loading",
+      message: "Loading Marketing Plan channel placements..."
+    });
+    try {
+      const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
+        ascending: true
+      }).order("channel", {
+        ascending: true
+      }).order("publish_date", {
+        ascending: true
+      }).order("publish_time", {
+        ascending: true
+      });
+      if (result.error) throw result.error;
+      const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
+      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      if (!isAlive()) return;
+      setRows(normalizedRows);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
+      setSelectedStatus(current => current || "all");
+      setSelectedChannel(current => current || "all");
+      setLoadState({
+        status: normalizedRows.length ? "live" : "empty",
+        message: normalizedRows.length ? "Live Marketing Plan channel data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+      });
+    } catch (error) {
+      if (!isAlive()) return;
+      console.error("[Marketing Plan] Channel Plan load failed:", error);
+      setRows([]);
+      setSelectedMonth("");
+      setSelectedStatus("all");
+      setSelectedChannel("all");
+      setLoadState({
+        status: "error",
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+      });
+    }
+  }
   useEffectApp(() => {
     let alive = true;
-    async function loadTimelineRows() {
-      if (!window.flowmateSupabase) {
-        setLoadState({
-          status: "error",
-          message: "Supabase client is not ready. Please refresh after the app loads."
-        });
-        return;
-      }
-      try {
-        const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
-          ascending: true
-        }).order("channel", {
-          ascending: true
-        }).order("publish_date", {
-          ascending: true
-        }).order("publish_time", {
-          ascending: true
-        });
-        if (result.error) throw result.error;
-        const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
-        const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
-        if (!alive) return;
-        setRows(normalizedRows);
-        setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
-        setSelectedStatus(current => current || "all");
-        setSelectedChannel(current => current || "all");
-        setLoadState({
-          status: normalizedRows.length ? "live" : "empty",
-          message: normalizedRows.length ? "Live Marketing Plan channel data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-        });
-      } catch (error) {
-        if (!alive) return;
-        console.error("[Marketing Plan] Channel Plan load failed:", error);
-        setRows([]);
-        setSelectedMonth("");
-        setSelectedStatus("all");
-        setSelectedChannel("all");
-        setLoadState({
-          status: "error",
-          message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-        });
-      }
-    }
-    loadTimelineRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadTimelineRows) : () => {};
+    const isAlive = () => alive;
+    loadChannelPlanRows(isAlive);
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadChannelPlanRows(isAlive)) : () => {};
     return () => {
       alive = false;
       cleanup();
@@ -2810,7 +2831,7 @@ function MarketingPlanChannelPlanScreen() {
   }, getMarketingPlanStatusLabel(status)))), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
-    onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
+    onClick: () => loadChannelPlanRows(() => true)
   }, React.createElement(Icon, {
     name: "refresh"
   }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
@@ -2942,35 +2963,40 @@ function MarketingPlanCalendarScreen() {
     status: "loading",
     message: "Loading Marketing Plan calendar..."
   });
+  async function loadCalendarRows(isAlive = () => true) {
+    if (isAlive()) setLoadState({
+      status: "loading",
+      message: "Loading Marketing Plan calendar..."
+    });
+    try {
+      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
+      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      if (!isAlive()) return;
+      setRows(normalizedRows);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
+      setSelectedChannel("all");
+      setSelectedScheduleDate("");
+      setLoadState({
+        status: normalizedRows.length ? "live" : "empty",
+        message: normalizedRows.length ? "Live Marketing Plan calendar data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+      });
+    } catch (error) {
+      if (!isAlive()) return;
+      console.error("[Marketing Plan] Calendar load failed:", error);
+      setRows([]);
+      setSelectedMonth("");
+      setSelectedChannel("all");
+      setLoadState({
+        status: "error",
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+      });
+    }
+  }
   useEffectApp(() => {
     let alive = true;
-    async function loadCalendarRows() {
-      try {
-        const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
-        const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
-        if (!alive) return;
-        setRows(normalizedRows);
-        setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
-        setSelectedChannel("all");
-        setSelectedScheduleDate("");
-        setLoadState({
-          status: normalizedRows.length ? "live" : "empty",
-          message: normalizedRows.length ? "Live Marketing Plan calendar data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-        });
-      } catch (error) {
-        if (!alive) return;
-        console.error("[Marketing Plan] Calendar load failed:", error);
-        setRows([]);
-        setSelectedMonth("");
-        setSelectedChannel("all");
-        setLoadState({
-          status: "error",
-          message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-        });
-      }
-    }
-    loadCalendarRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadCalendarRows) : () => {};
+    const isAlive = () => alive;
+    loadCalendarRows(isAlive);
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadCalendarRows(isAlive)) : () => {};
     return () => {
       alive = false;
       cleanup();
@@ -3087,7 +3113,7 @@ function MarketingPlanCalendarScreen() {
   }, option.label))), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
-    onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
+    onClick: () => loadCalendarRows(() => true)
   }, React.createElement(Icon, {
     name: "refresh"
   }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
