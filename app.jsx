@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260707-2";
+const FLOWMATE_APP_VERSION = "v20260707-3";
 
 const NAV = [
   { group: "Personal", items: [
@@ -1259,7 +1259,7 @@ function getMarketingPlanWorkingRowPublishTime(row) {
     const placementTime = normalizeMarketingPlanTimeInput(placement && placement.publishTime);
     if (placementTime) return placementTime;
   }
-  return "12:00";
+  return "11:00";
 }
 
 function createFlowMateDraftFromMarketingPlanRow(row) {

@@ -772,6 +772,7 @@ const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [{
   key: "other",
   label: "Other"
 }];
+const FLOWMATE_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
 function getFlowMateCreativeTypeOption(typeKey) {
   return FLOWMATE_CREATIVE_TYPE_OPTIONS.find(option => option.key === typeKey) || FLOWMATE_CREATIVE_TYPE_OPTIONS[0];
 }
@@ -918,7 +919,7 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetType: creativeType.assetType,
     assetSubtype: creativeType.key,
     assetCount,
-    publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || "12:00",
+    publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || FLOWMATE_PUBLISH_TIME_OPTIONS[0],
     launchDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate)
   };
@@ -979,7 +980,7 @@ function getDefaultCreativeDraft() {
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
     launchDate: todayDate,
-    publishTime: "12:00",
+    publishTime: FLOWMATE_PUBLISH_TIME_OPTIONS[0],
     marketingPlanContentItemId: "",
     marketingPlanOriginalBriefLink: "",
     marketingPlanProductEvent: "",
@@ -1905,17 +1906,14 @@ function CreativeRequestForm({
     className: "field__label"
   }, "Publish Time ", React.createElement("span", {
     className: "req"
-  }, "*")), React.createElement("input", {
-    className: "input",
-    type: "text",
-    inputMode: "numeric",
-    pattern: "[0-9]{2}:[0-9]{2}",
-    maxLength: 5,
+  }, "*")), React.createElement("select", {
+    className: "select",
     value: value.publishTime,
-    onChange: e => update("publishTime", e.target.value.replace(/[^\d:]/g, "").slice(0, 5)),
-    onBlur: e => update("publishTime", normalizeFlowMatePublishTimeInput(e.target.value) || value.publishTime || "12:00"),
-    placeholder: "14:00"
-  }), errors.publishTime && React.createElement("div", {
+    onChange: e => update("publishTime", e.target.value)
+  }, FLOWMATE_PUBLISH_TIME_OPTIONS.map(time => React.createElement("option", {
+    key: time,
+    value: time
+  }, time))), errors.publishTime && React.createElement("div", {
     className: "field__error"
   }, errors.publishTime)), React.createElement("div", {
     className: "field field--full"
