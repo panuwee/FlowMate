@@ -1119,7 +1119,7 @@ function ProductBookShell({
     name: "book",
     size: 15
   }), React.createElement("span", null, patch.name || patch.id))))), React.createElement("main", {
-    className: "app__main"
+    className: "app__main app__main--product-book"
   }, activePatch ? React.createElement(ProductBookPatchView, {
     patch: activePatch
   }) : React.createElement("div", {
@@ -1153,7 +1153,7 @@ function ProductBookPatchView({
     key: tag,
     className: "badge badge--quick"
   }, tag))), React.createElement("div", {
-    className: "section"
+    className: "section section--product-book"
   }, React.createElement(ProductBookMarkdown, {
     markdown: patch.contentMarkdown || ""
   })));

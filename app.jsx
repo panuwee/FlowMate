@@ -965,7 +965,7 @@ function ProductBookShell({
           ))}
         </div>
       </nav>
-      <main className="app__main">
+      <main className="app__main app__main--product-book">
         {activePatch ? (
           <ProductBookPatchView patch={activePatch} />
         ) : (
@@ -996,7 +996,7 @@ function ProductBookPatchView({ patch }) {
       <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         {tags.map(tag => <span key={tag} className="badge badge--quick">{tag}</span>)}
       </div>
-      <div className="section">
+      <div className="section section--product-book">
         <ProductBookMarkdown markdown={patch.contentMarkdown || ""} />
       </div>
     </div>
