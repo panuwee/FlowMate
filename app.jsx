@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260707-3";
+const FLOWMATE_APP_VERSION = "v20260708-1";
 
 const NAV = [
   { group: "Personal", items: [
@@ -45,6 +45,24 @@ function getFlowMateHashRouteKey(hashValue) {
   return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
 }
 
+function isProductChoicePath() {
+  return /\/home\/?$/.test(String(window.location.pathname || ""));
+}
+
+function showProductChoicePathInAddressBar() {
+  try {
+    const path = String(window.location.pathname || "/");
+    if (isProductChoicePath()) {
+      window.history.replaceState(null, "", path.replace(/\/$/, ""));
+      return;
+    }
+    const basePath = path.endsWith("/")
+      ? path
+      : path.replace(/\/[^/]*$/, "/");
+    window.history.replaceState(null, "", `${basePath}home`);
+  } catch (e) {}
+}
+
 function getVisibleNavGroups(role) {
   return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
 }
@@ -82,6 +100,7 @@ function App() {
   const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
+      if (isProductChoicePath()) return null;
       const hashKey = getFlowMateHashRouteKey();
       if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
       if (TITLE_MAP[hashKey]) return "flowmate";
@@ -308,6 +327,7 @@ function App() {
               sessionStorage.removeItem("flowmate:activeProduct");
             } catch (e) {}
             setActiveProduct(null);
+            showProductChoicePathInAddressBar();
             return;
           }
 
@@ -332,6 +352,11 @@ function App() {
   async function handleSignIn() {
     setIsSigningIn(true);
     try {
+      try {
+        sessionStorage.setItem("flowmate:showProductChoiceAfterLogin", "1");
+        sessionStorage.removeItem("flowmate:activeProduct");
+        sessionStorage.removeItem("flowmate:postLoginHash");
+      } catch (e) {}
       await window.flowmateSignInWithGoogle();
       // Browser is now redirecting to Google. Leave isSigningIn=true so
       // the button stays in its "Redirecting…" state until navigation.
