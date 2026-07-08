@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260708-6";
+const FLOWMATE_APP_VERSION = "v20260708-7";
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 
 const NAV = [
@@ -989,17 +989,19 @@ function ProductBookPatchView({ patch }) {
           <p>{patch.id || "MS26.07"} · {audience.join(", ") || "Team-facing patch note"}</p>
         </div>
       </div>
-      <div className="product-book-tag-nav" aria-label="Product Book sections">
-        {tags.map(tag => (
-          <button
-            key={tag}
-            type="button"
-            className="product-book-tag-nav__button"
-            onClick={() => scrollToProductBookSection(tagAnchors[tag])}
-          >
-            {tag}
-          </button>
-        ))}
+      <div className="product-book-sticky-zone">
+        <div className="product-book-tag-nav" aria-label="Product Book sections">
+          {tags.map(tag => (
+            <button
+              key={tag}
+              type="button"
+              className="product-book-tag-nav__button"
+              onClick={() => scrollToProductBookSection(tagAnchors[tag])}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="section section--product-book">
         <ProductBookMarkdown markdown={patch.contentMarkdown || ""} />

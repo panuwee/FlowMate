@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260708-6";
+const FLOWMATE_APP_VERSION = "v20260708-7";
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const NAV = [{
   group: "Personal",
@@ -1137,6 +1137,8 @@ function ProductBookPatchView({
   }, React.createElement("div", null, React.createElement("div", {
     className: "eyebrow"
   }, "Product Book / ", patch.monthLabel || patch.id), React.createElement("h1", null, patch.title || patch.id || "Patch Note"), React.createElement("p", null, patch.id || "MS26.07", " · ", audience.join(", ") || "Team-facing patch note"))), React.createElement("div", {
+    className: "product-book-sticky-zone"
+  }, React.createElement("div", {
     className: "product-book-tag-nav",
     "aria-label": "Product Book sections"
   }, tags.map(tag => React.createElement("button", {
@@ -1144,7 +1146,7 @@ function ProductBookPatchView({
     type: "button",
     className: "product-book-tag-nav__button",
     onClick: () => scrollToProductBookSection(tagAnchors[tag])
-  }, tag))), React.createElement("div", {
+  }, tag)))), React.createElement("div", {
     className: "section section--product-book"
   }, React.createElement(ProductBookMarkdown, {
     markdown: patch.contentMarkdown || ""

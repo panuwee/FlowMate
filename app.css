@@ -1111,11 +1111,21 @@ button:disabled {
 .chip:hover { border-color: var(--garena-iron); }
 .chip.is-active { background: var(--garena-iron); color: var(--garena-white); border-color: var(--garena-iron); }
 .chip .icon { width: 12px; height: 12px; }
+.product-book-sticky-zone {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  margin: 0 -2px 14px;
+  padding: 10px 2px;
+  background: rgba(247, 247, 248, 0.96);
+  border-bottom: var(--border-hairline);
+  backdrop-filter: blur(8px);
+}
 .product-book-tag-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 14px;
+  margin: 0;
 }
 .product-book-tag-nav__button {
   height: 26px;
@@ -1163,6 +1173,7 @@ button:disabled {
   color: var(--garena-black);
   font-weight: var(--weight-bold);
   letter-spacing: 0;
+  scroll-margin-top: 72px;
 }
 .app__main--product-book .product-book-content h2,
 .app__main:has(.product-book-content) .product-book-content h2 {
