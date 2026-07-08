@@ -1,7 +1,8 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260708-2";
+const FLOWMATE_APP_VERSION = "v20260708-3";
+const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 
 const NAV = [
   { group: "Personal", items: [
@@ -40,6 +41,7 @@ const TITLE_MAP = {
 
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 
 function getFlowMateHashRouteKey(hashValue) {
   return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
@@ -105,7 +107,7 @@ function App() {
       if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
       if (TITLE_MAP[hashKey]) return "flowmate";
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
-      if (savedProduct === "flowmate" || savedProduct === "marketing-plan") return savedProduct;
+      if (VALID_PRODUCT_KEYS.has(savedProduct)) return savedProduct;
     } catch (e) {}
     return null;
   });
@@ -402,6 +404,11 @@ function App() {
     }
   }
 
+  function chooseProductBookProduct() {
+    setActiveProduct(PRODUCT_BOOK_PRODUCT_KEY);
+    try { sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY); } catch (e) {}
+  }
+
   useEffectApp(() => {
     function onSwitchFlowMateProduct(event) {
       const routeKey = event && event.detail && event.detail.route ? event.detail.route : "my-work";
@@ -562,6 +569,7 @@ function App() {
         avatarMemberId={avatarMemberId}
         onChooseFlowMate={chooseFlowMateProduct}
         onChooseMarketingPlan={chooseMarketingPlanProduct}
+        onChooseProductBook={chooseProductBookProduct}
         onSignOut={handleSignOut}
       />
     );
@@ -577,6 +585,22 @@ function App() {
         onHome={returnToProductHome}
         onSwitchFlowMate={chooseFlowMateProduct}
         onSwitchMarketingPlan={chooseMarketingPlanProduct}
+        onSwitchProductBook={chooseProductBookProduct}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  if (activeProduct === PRODUCT_BOOK_PRODUCT_KEY) {
+    return (
+      <ProductBookShell
+        currentUserName={currentUserName}
+        currentUserEmail={currentUserEmail}
+        avatarMemberId={avatarMemberId}
+        onHome={returnToProductHome}
+        onSwitchFlowMate={chooseFlowMateProduct}
+        onSwitchMarketingPlan={chooseMarketingPlanProduct}
+        onSwitchProductBook={chooseProductBookProduct}
         onSignOut={handleSignOut}
       />
     );
@@ -597,6 +621,7 @@ function App() {
           activeProduct="flowmate"
           onSwitchFlowMate={chooseFlowMateProduct}
           onSwitchMarketingPlan={chooseMarketingPlanProduct}
+          onSwitchProductBook={chooseProductBookProduct}
         />
         <div className="searchbar-wrap" ref={searchWrapRef}>
           <div className="searchbar">
@@ -757,7 +782,7 @@ function App() {
   );
 }
 
-function ProductSwitch({ activeProduct, onSwitchFlowMate, onSwitchMarketingPlan }) {
+function ProductSwitch({ activeProduct, onSwitchFlowMate, onSwitchMarketingPlan, onSwitchProductBook }) {
   return (
     <div className="row" style={{ gap: 6, marginRight: 14 }} aria-label="Product switch">
       <button
@@ -773,6 +798,13 @@ function ProductSwitch({ activeProduct, onSwitchFlowMate, onSwitchMarketingPlan 
         onClick={onSwitchMarketingPlan}
       >
         Marketing Plan
+      </button>
+      <button
+        type="button"
+        className={`btn btn--xs ${activeProduct === PRODUCT_BOOK_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`}
+        onClick={onSwitchProductBook}
+      >
+        Product Book
       </button>
     </div>
   );
@@ -797,6 +829,7 @@ function ProductChoiceScreen({
   avatarMemberId,
   onChooseFlowMate,
   onChooseMarketingPlan,
+  onChooseProductBook,
   onSignOut,
 }) {
   const pageStyle = { minHeight: "100vh", background: "var(--garena-bg)", color: "var(--garena-iron)" };
@@ -838,7 +871,7 @@ function ProductChoiceScreen({
         <div className="eyebrow">Garena FCO Thailand</div>
         <h1 style={{ margin: "6px 0 8px", fontSize: 30 }}>Select product</h1>
         <p className="muted" style={{ margin: 0, maxWidth: 620 }}>
-          FlowMate handles task execution. Marketing Plan handles campaign and channel planning.
+          FlowMate handles task execution. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team.
         </p>
         <div style={gridStyle}>
           <button type="button" style={cardStyle} onClick={onChooseFlowMate}>
@@ -861,10 +894,166 @@ function ProductChoiceScreen({
               Plan campaigns, channels, publish dates, and monthly content before work moves into execution.
             </p>
           </button>
+          <button type="button" style={cardStyle} onClick={onChooseProductBook}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
+              <span className="badge badge--system">Knowledge</span>
+              <Icon name="book" size={18} />
+            </div>
+            <h2 style={{ fontSize: 22, margin: "18px 0 8px" }}>Product Book</h2>
+            <p className="muted" style={{ lineHeight: 1.55 }}>
+              Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.
+            </p>
+          </button>
         </div>
       </main>
     </div>
   );
+}
+
+function ProductBookShell({
+  currentUserName,
+  currentUserEmail,
+  avatarMemberId,
+  onHome,
+  onSwitchFlowMate,
+  onSwitchMarketingPlan,
+  onSwitchProductBook,
+  onSignOut,
+}) {
+  const patches = Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : [];
+  const [activePatchId, setActivePatchId] = useStateApp(() => patches[0] && patches[0].id ? patches[0].id : "MS26.07");
+  const activePatch = patches.find(patch => patch.id === activePatchId) || patches[0] || null;
+
+  return (
+    <div className="app">
+      <FlowMatePromptHost />
+      <div className="app__brand">
+        <img src="garena/logo_graphic.png" alt="Garena" />
+        <span className="app__brand-name">Product Book</span>
+        <span className="app__brand-version">{FLOWMATE_APP_VERSION}</span>
+      </div>
+      <div className="app__topbar">
+        <HomeButton onHome={onHome} />
+        <ProductSwitch
+          activeProduct={PRODUCT_BOOK_PRODUCT_KEY}
+          onSwitchFlowMate={onSwitchFlowMate}
+          onSwitchMarketingPlan={onSwitchMarketingPlan}
+          onSwitchProductBook={onSwitchProductBook}
+        />
+        <span className="topbar__spacer"></span>
+        <div className="topbar__user" title={`Signed in as ${currentUserEmail}`}>
+          <Avatar memberId={avatarMemberId} size="" />
+          <span className="topbar__user-name">{currentUserName}</span>
+        </div>
+        <button className="topbar__btn" onClick={onSignOut}>Sign out</button>
+      </div>
+      <nav className="app__sidebar">
+        <div>
+          <div className="nav-section">Product Book</div>
+          {patches.length === 0 && (
+            <div className="reason-box" style={{ margin: 12 }}>No patch notes found.</div>
+          )}
+          {patches.map(patch => (
+            <div
+              key={patch.id}
+              className={`nav-item ${activePatch && activePatch.id === patch.id ? "is-active" : ""}`}
+              onClick={() => setActivePatchId(patch.id)}
+            >
+              <Icon name="book" size={15} />
+              <span>{patch.name || patch.id}</span>
+            </div>
+          ))}
+        </div>
+      </nav>
+      <main className="app__main">
+        {activePatch ? (
+          <ProductBookPatchView patch={activePatch} />
+        ) : (
+          <div className="reason-box">Upload product-book-data.js with at least one patch note entry.</div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function ProductBookPatchView({ patch }) {
+  const tags = Array.isArray(patch.tags) ? patch.tags : [];
+  const audience = Array.isArray(patch.audience) ? patch.audience : [];
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="eyebrow">Product Book / {patch.monthLabel || patch.id}</div>
+          <h1>{patch.title || patch.id || "Patch Note"}</h1>
+          <p>{patch.id || "MS26.07"} · {audience.join(", ") || "Team-facing patch note"}</p>
+        </div>
+        {patch.sourcePdfUrl && (
+          <a className="btn btn--secondary" href={patch.sourcePdfUrl} target="_blank" rel="noreferrer">
+            <Icon name="link" /> Open PDF
+          </a>
+        )}
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        {tags.map(tag => <span key={tag} className="badge badge--quick">{tag}</span>)}
+      </div>
+      <div className="section">
+        <ProductBookMarkdown markdown={patch.contentMarkdown || ""} />
+      </div>
+    </div>
+  );
+}
+
+function ProductBookMarkdown({ markdown }) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const nodes = [];
+  let listItems = [];
+  function flushList() {
+    if (!listItems.length) return;
+    const items = listItems;
+    listItems = [];
+    nodes.push(<ul key={`ul-${nodes.length}`}>{items.map((item, index) => <li key={index}>{formatInlineMarkdown(item)}</li>)}</ul>);
+  }
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+    if (/^---+$/.test(trimmed)) {
+      flushList();
+      nodes.push(<hr key={`hr-${index}`} />);
+      return;
+    }
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushList();
+      const level = heading[1].length;
+      const text = formatInlineMarkdown(heading[2]);
+      if (level === 1) nodes.push(<h2 key={`h-${index}`}>{text}</h2>);
+      else if (level === 2) nodes.push(<h3 key={`h-${index}`}>{text}</h3>);
+      else nodes.push(<h4 key={`h-${index}`}>{text}</h4>);
+      return;
+    }
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      listItems.push(bullet[1]);
+      return;
+    }
+    flushList();
+    nodes.push(<p key={`p-${index}`}>{formatInlineMarkdown(trimmed)}</p>);
+  });
+  flushList();
+  return <div className="product-book-content">{nodes}</div>;
+}
+
+function formatInlineMarkdown(text) {
+  const parts = String(text || "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part;
+  });
 }
 
 function getMarketingPlanMonthLabel(monthKey) {
@@ -4278,6 +4467,7 @@ function MarketingPlanShell({
   onHome,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
+  onSwitchProductBook,
   onSignOut,
 }) {
   const isAdminUser = user.role === "admin";
@@ -4333,6 +4523,7 @@ function MarketingPlanShell({
           activeProduct="marketing-plan"
           onSwitchFlowMate={onSwitchFlowMate}
           onSwitchMarketingPlan={onSwitchMarketingPlan}
+          onSwitchProductBook={onSwitchProductBook}
         />
         <span className="topbar__spacer"></span>
         <div className="topbar__user" title={`Signed in as ${currentUserEmail}`}>

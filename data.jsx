@@ -4,6 +4,7 @@
 /* ---------- Inline icon set (Lucide-style 1.6 stroke) ---------- */
 const ICONS = {
   home: <><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></>,
+  book: <><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"></path><path d="M8 7h8"></path><path d="M8 11h6"></path></>,
   search: <><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></>,
   plus: <><path d="M12 5v14"></path><path d="M5 12h14"></path></>,
   bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10 21a2 2 0 0 0 4 0"></path></>,

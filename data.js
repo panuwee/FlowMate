@@ -7,6 +7,15 @@ const ICONS = {
   }), React.createElement("path", {
     d: "M9 20v-6h6v6"
   })),
+  book: React.createElement(React.Fragment, null, React.createElement("path", {
+    d: "M4 19.5A2.5 2.5 0 0 1 6.5 17H20"
+  }), React.createElement("path", {
+    d: "M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"
+  }), React.createElement("path", {
+    d: "M8 7h8"
+  }), React.createElement("path", {
+    d: "M8 11h6"
+  })),
   search: React.createElement(React.Fragment, null, React.createElement("circle", {
     cx: "11",
     cy: "11",

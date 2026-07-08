@@ -4,7 +4,8 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260708-2";
+const FLOWMATE_APP_VERSION = "v20260708-3";
+const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -83,6 +84,7 @@ const TITLE_MAP = {
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
   return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
 }
@@ -140,7 +142,7 @@ function App() {
       if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
       if (TITLE_MAP[hashKey]) return "flowmate";
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
-      if (savedProduct === "flowmate" || savedProduct === "marketing-plan") return savedProduct;
+      if (VALID_PRODUCT_KEYS.has(savedProduct)) return savedProduct;
     } catch (e) {}
     return null;
   });
@@ -462,6 +464,12 @@ function App() {
       window.location.hash = "campaign-timeline";
     }
   }
+  function chooseProductBookProduct() {
+    setActiveProduct(PRODUCT_BOOK_PRODUCT_KEY);
+    try {
+      sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
+    } catch (e) {}
+  }
   useEffectApp(() => {
     function onSwitchFlowMateProduct(event) {
       const routeKey = event && event.detail && event.detail.route ? event.detail.route : "my-work";
@@ -622,6 +630,7 @@ function App() {
       avatarMemberId: avatarMemberId,
       onChooseFlowMate: chooseFlowMateProduct,
       onChooseMarketingPlan: chooseMarketingPlanProduct,
+      onChooseProductBook: chooseProductBookProduct,
       onSignOut: handleSignOut
     });
   }
@@ -634,6 +643,19 @@ function App() {
       onHome: returnToProductHome,
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
+      onSwitchProductBook: chooseProductBookProduct,
+      onSignOut: handleSignOut
+    });
+  }
+  if (activeProduct === PRODUCT_BOOK_PRODUCT_KEY) {
+    return React.createElement(ProductBookShell, {
+      currentUserName: currentUserName,
+      currentUserEmail: currentUserEmail,
+      avatarMemberId: avatarMemberId,
+      onHome: returnToProductHome,
+      onSwitchFlowMate: chooseFlowMateProduct,
+      onSwitchMarketingPlan: chooseMarketingPlanProduct,
+      onSwitchProductBook: chooseProductBookProduct,
       onSignOut: handleSignOut
     });
   }
@@ -655,7 +677,8 @@ function App() {
   }), React.createElement(ProductSwitch, {
     activeProduct: "flowmate",
     onSwitchFlowMate: chooseFlowMateProduct,
-    onSwitchMarketingPlan: chooseMarketingPlanProduct
+    onSwitchMarketingPlan: chooseMarketingPlanProduct,
+    onSwitchProductBook: chooseProductBookProduct
   }), React.createElement("div", {
     className: "searchbar-wrap",
     ref: searchWrapRef
@@ -829,7 +852,8 @@ function App() {
 function ProductSwitch({
   activeProduct,
   onSwitchFlowMate,
-  onSwitchMarketingPlan
+  onSwitchMarketingPlan,
+  onSwitchProductBook
 }) {
   return React.createElement("div", {
     className: "row",
@@ -846,7 +870,11 @@ function ProductSwitch({
     type: "button",
     className: `btn btn--xs ${activeProduct === "marketing-plan" ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchMarketingPlan
-  }, "Marketing Plan"));
+  }, "Marketing Plan"), React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${activeProduct === PRODUCT_BOOK_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
+    onClick: onSwitchProductBook
+  }, "Product Book"));
 }
 function HomeButton({
   onHome
@@ -866,6 +894,7 @@ function ProductChoiceScreen({
   avatarMemberId,
   onChooseFlowMate,
   onChooseMarketingPlan,
+  onChooseProductBook,
   onSignOut
 }) {
   const pageStyle = {
@@ -948,7 +977,7 @@ function ProductChoiceScreen({
       margin: 0,
       maxWidth: 620
     }
-  }, "FlowMate handles task execution. Marketing Plan handles campaign and channel planning."), React.createElement("div", {
+  }, "FlowMate handles task execution. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team."), React.createElement("div", {
     style: gridStyle
   }, React.createElement("button", {
     type: "button",
@@ -1000,7 +1029,203 @@ function ProductChoiceScreen({
     style: {
       lineHeight: 1.55
     }
-  }, "Plan campaigns, channels, publish dates, and monthly content before work moves into execution.")))));
+  }, "Plan campaigns, channels, publish dates, and monthly content before work moves into execution.")), React.createElement("button", {
+    type: "button",
+    style: cardStyle,
+    onClick: onChooseProductBook
+  }, React.createElement("div", {
+    className: "row",
+    style: {
+      justifyContent: "space-between",
+      alignItems: "flex-start"
+    }
+  }, React.createElement("span", {
+    className: "badge badge--system"
+  }, "Knowledge"), React.createElement(Icon, {
+    name: "book",
+    size: 18
+  })), React.createElement("h2", {
+    style: {
+      fontSize: 22,
+      margin: "18px 0 8px"
+    }
+  }, "Product Book"), React.createElement("p", {
+    className: "muted",
+    style: {
+      lineHeight: 1.55
+    }
+  }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")))));
+}
+function ProductBookShell({
+  currentUserName,
+  currentUserEmail,
+  avatarMemberId,
+  onHome,
+  onSwitchFlowMate,
+  onSwitchMarketingPlan,
+  onSwitchProductBook,
+  onSignOut
+}) {
+  const patches = Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : [];
+  const [activePatchId, setActivePatchId] = useStateApp(() => patches[0] && patches[0].id ? patches[0].id : "MS26.07");
+  const activePatch = patches.find(patch => patch.id === activePatchId) || patches[0] || null;
+  return React.createElement("div", {
+    className: "app"
+  }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
+    className: "app__brand"
+  }, React.createElement("img", {
+    src: "garena/logo_graphic.png",
+    alt: "Garena"
+  }), React.createElement("span", {
+    className: "app__brand-name"
+  }, "Product Book"), React.createElement("span", {
+    className: "app__brand-version"
+  }, FLOWMATE_APP_VERSION)), React.createElement("div", {
+    className: "app__topbar"
+  }, React.createElement(HomeButton, {
+    onHome: onHome
+  }), React.createElement(ProductSwitch, {
+    activeProduct: PRODUCT_BOOK_PRODUCT_KEY,
+    onSwitchFlowMate: onSwitchFlowMate,
+    onSwitchMarketingPlan: onSwitchMarketingPlan,
+    onSwitchProductBook: onSwitchProductBook
+  }), React.createElement("span", {
+    className: "topbar__spacer"
+  }), React.createElement("div", {
+    className: "topbar__user",
+    title: `Signed in as ${currentUserEmail}`
+  }, React.createElement(Avatar, {
+    memberId: avatarMemberId,
+    size: ""
+  }), React.createElement("span", {
+    className: "topbar__user-name"
+  }, currentUserName)), React.createElement("button", {
+    className: "topbar__btn",
+    onClick: onSignOut
+  }, "Sign out")), React.createElement("nav", {
+    className: "app__sidebar"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "nav-section"
+  }, "Product Book"), patches.length === 0 && React.createElement("div", {
+    className: "reason-box",
+    style: {
+      margin: 12
+    }
+  }, "No patch notes found."), patches.map(patch => React.createElement("div", {
+    key: patch.id,
+    className: `nav-item ${activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
+    onClick: () => setActivePatchId(patch.id)
+  }, React.createElement(Icon, {
+    name: "book",
+    size: 15
+  }), React.createElement("span", null, patch.name || patch.id))))), React.createElement("main", {
+    className: "app__main"
+  }, activePatch ? React.createElement(ProductBookPatchView, {
+    patch: activePatch
+  }) : React.createElement("div", {
+    className: "reason-box"
+  }, "Upload product-book-data.js with at least one patch note entry.")));
+}
+function ProductBookPatchView({
+  patch
+}) {
+  const tags = Array.isArray(patch.tags) ? patch.tags : [];
+  const audience = Array.isArray(patch.audience) ? patch.audience : [];
+  return React.createElement("div", null, React.createElement("div", {
+    className: "page-head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "eyebrow"
+  }, "Product Book / ", patch.monthLabel || patch.id), React.createElement("h1", null, patch.title || patch.id || "Patch Note"), React.createElement("p", null, patch.id || "MS26.07", " · ", audience.join(", ") || "Team-facing patch note")), patch.sourcePdfUrl && React.createElement("a", {
+    className: "btn btn--secondary",
+    href: patch.sourcePdfUrl,
+    target: "_blank",
+    rel: "noreferrer"
+  }, React.createElement(Icon, {
+    name: "link"
+  }), " Open PDF")), React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 14
+    }
+  }, tags.map(tag => React.createElement("span", {
+    key: tag,
+    className: "badge badge--quick"
+  }, tag))), React.createElement("div", {
+    className: "section"
+  }, React.createElement(ProductBookMarkdown, {
+    markdown: patch.contentMarkdown || ""
+  })));
+}
+function ProductBookMarkdown({
+  markdown
+}) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const nodes = [];
+  let listItems = [];
+  function flushList() {
+    if (!listItems.length) return;
+    const items = listItems;
+    listItems = [];
+    nodes.push(React.createElement("ul", {
+      key: `ul-${nodes.length}`
+    }, items.map((item, index) => React.createElement("li", {
+      key: index
+    }, formatInlineMarkdown(item)))));
+  }
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+    if (/^---+$/.test(trimmed)) {
+      flushList();
+      nodes.push(React.createElement("hr", {
+        key: `hr-${index}`
+      }));
+      return;
+    }
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushList();
+      const level = heading[1].length;
+      const text = formatInlineMarkdown(heading[2]);
+      if (level === 1) nodes.push(React.createElement("h2", {
+        key: `h-${index}`
+      }, text));else if (level === 2) nodes.push(React.createElement("h3", {
+        key: `h-${index}`
+      }, text));else nodes.push(React.createElement("h4", {
+        key: `h-${index}`
+      }, text));
+      return;
+    }
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      listItems.push(bullet[1]);
+      return;
+    }
+    flushList();
+    nodes.push(React.createElement("p", {
+      key: `p-${index}`
+    }, formatInlineMarkdown(trimmed)));
+  });
+  flushList();
+  return React.createElement("div", {
+    className: "product-book-content"
+  }, nodes);
+}
+function formatInlineMarkdown(text) {
+  const parts = String(text || "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return React.createElement("strong", {
+        key: index
+      }, part.slice(2, -2));
+    }
+    return part;
+  });
 }
 function getMarketingPlanMonthLabel(monthKey) {
   if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return monthKey || "-";
@@ -4361,6 +4586,7 @@ function MarketingPlanShell({
   onHome,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
+  onSwitchProductBook,
   onSignOut
 }) {
   const isAdminUser = user.role === "admin";
@@ -4432,7 +4658,8 @@ function MarketingPlanShell({
   }), React.createElement(ProductSwitch, {
     activeProduct: "marketing-plan",
     onSwitchFlowMate: onSwitchFlowMate,
-    onSwitchMarketingPlan: onSwitchMarketingPlan
+    onSwitchMarketingPlan: onSwitchMarketingPlan,
+    onSwitchProductBook: onSwitchProductBook
   }), React.createElement("span", {
     className: "topbar__spacer"
   }), React.createElement("div", {
