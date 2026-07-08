@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260708-1";
+const FLOWMATE_APP_VERSION = "v20260708-2";
 
 const NAV = [
   { group: "Personal", items: [
@@ -377,6 +377,15 @@ function App() {
     }
   }
 
+  function returnToProductHome() {
+    setActiveProduct(null);
+    try {
+      sessionStorage.removeItem("flowmate:activeProduct");
+      sessionStorage.removeItem("flowmate:postLoginHash");
+    } catch (e) {}
+    showProductChoicePathInAddressBar();
+  }
+
   function chooseFlowMateProduct() {
     setActiveProduct("flowmate");
     try { sessionStorage.setItem("flowmate:activeProduct", "flowmate"); } catch (e) {}
@@ -565,6 +574,7 @@ function App() {
         currentUserName={currentUserName}
         currentUserEmail={currentUserEmail}
         avatarMemberId={avatarMemberId}
+        onHome={returnToProductHome}
         onSwitchFlowMate={chooseFlowMateProduct}
         onSwitchMarketingPlan={chooseMarketingPlanProduct}
         onSignOut={handleSignOut}
@@ -582,6 +592,7 @@ function App() {
       </div>
 
       <div className="app__topbar">
+        <HomeButton onHome={returnToProductHome} />
         <ProductSwitch
           activeProduct="flowmate"
           onSwitchFlowMate={chooseFlowMateProduct}
@@ -764,6 +775,19 @@ function ProductSwitch({ activeProduct, onSwitchFlowMate, onSwitchMarketingPlan 
         Marketing Plan
       </button>
     </div>
+  );
+}
+
+function HomeButton({ onHome }) {
+  return (
+    <button
+      type="button"
+      className="topbar__btn"
+      onClick={onHome}
+      title="Back to product home"
+    >
+      <Icon name="home" /> Home
+    </button>
   );
 }
 
@@ -4251,6 +4275,7 @@ function MarketingPlanShell({
   currentUserName,
   currentUserEmail,
   avatarMemberId,
+  onHome,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSignOut,
@@ -4303,6 +4328,7 @@ function MarketingPlanShell({
         <span className="app__brand-version">{FLOWMATE_APP_VERSION}</span>
       </div>
       <div className="app__topbar">
+        <HomeButton onHome={onHome} />
         <ProductSwitch
           activeProduct="marketing-plan"
           onSwitchFlowMate={onSwitchFlowMate}

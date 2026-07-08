@@ -1,5 +1,12 @@
 /* AUTO-GENERATED from data.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
 const ICONS = {
+  home: React.createElement(React.Fragment, null, React.createElement("path", {
+    d: "M3 10.5 12 3l9 7.5"
+  }), React.createElement("path", {
+    d: "M5 10v10h14V10"
+  }), React.createElement("path", {
+    d: "M9 20v-6h6v6"
+  })),
   search: React.createElement(React.Fragment, null, React.createElement("circle", {
     cx: "11",
     cy: "11",

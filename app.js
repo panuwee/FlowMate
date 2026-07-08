@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260708-1";
+const FLOWMATE_APP_VERSION = "v20260708-2";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -436,6 +436,14 @@ function App() {
       } catch (e) {}
     }
   }
+  function returnToProductHome() {
+    setActiveProduct(null);
+    try {
+      sessionStorage.removeItem("flowmate:activeProduct");
+      sessionStorage.removeItem("flowmate:postLoginHash");
+    } catch (e) {}
+    showProductChoicePathInAddressBar();
+  }
   function chooseFlowMateProduct() {
     setActiveProduct("flowmate");
     try {
@@ -623,6 +631,7 @@ function App() {
       currentUserName: currentUserName,
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
+      onHome: returnToProductHome,
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
       onSignOut: handleSignOut
@@ -641,7 +650,9 @@ function App() {
     className: "app__brand-version"
   }, FLOWMATE_APP_VERSION)), React.createElement("div", {
     className: "app__topbar"
-  }, React.createElement(ProductSwitch, {
+  }, React.createElement(HomeButton, {
+    onHome: returnToProductHome
+  }), React.createElement(ProductSwitch, {
     activeProduct: "flowmate",
     onSwitchFlowMate: chooseFlowMateProduct,
     onSwitchMarketingPlan: chooseMarketingPlanProduct
@@ -836,6 +847,18 @@ function ProductSwitch({
     className: `btn btn--xs ${activeProduct === "marketing-plan" ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchMarketingPlan
   }, "Marketing Plan"));
+}
+function HomeButton({
+  onHome
+}) {
+  return React.createElement("button", {
+    type: "button",
+    className: "topbar__btn",
+    onClick: onHome,
+    title: "Back to product home"
+  }, React.createElement(Icon, {
+    name: "home"
+  }), " Home");
 }
 function ProductChoiceScreen({
   currentUserName,
@@ -4335,6 +4358,7 @@ function MarketingPlanShell({
   currentUserName,
   currentUserEmail,
   avatarMemberId,
+  onHome,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSignOut
@@ -4403,7 +4427,9 @@ function MarketingPlanShell({
     className: "app__brand-version"
   }, FLOWMATE_APP_VERSION)), React.createElement("div", {
     className: "app__topbar"
-  }, React.createElement(ProductSwitch, {
+  }, React.createElement(HomeButton, {
+    onHome: onHome
+  }), React.createElement(ProductSwitch, {
     activeProduct: "marketing-plan",
     onSwitchFlowMate: onSwitchFlowMate,
     onSwitchMarketingPlan: onSwitchMarketingPlan
