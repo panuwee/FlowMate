@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260708-5";
+const FLOWMATE_APP_VERSION = "v20260708-6";
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 
 const NAV = [
@@ -979,6 +979,7 @@ function ProductBookShell({
 function ProductBookPatchView({ patch }) {
   const tags = Array.isArray(patch.tags) ? patch.tags : [];
   const audience = Array.isArray(patch.audience) ? patch.audience : [];
+  const tagAnchors = buildProductBookAnchorMap(patch);
   return (
     <div>
       <div className="page-head">
@@ -987,20 +988,99 @@ function ProductBookPatchView({ patch }) {
           <h1>{patch.title || patch.id || "Patch Note"}</h1>
           <p>{patch.id || "MS26.07"} · {audience.join(", ") || "Team-facing patch note"}</p>
         </div>
-        {patch.sourcePdfUrl && (
-          <a className="btn btn--secondary" href={patch.sourcePdfUrl} target="_blank" rel="noreferrer">
-            <Icon name="link" /> Open PDF
-          </a>
-        )}
       </div>
-      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        {tags.map(tag => <span key={tag} className="badge badge--quick">{tag}</span>)}
+      <div className="product-book-tag-nav" aria-label="Product Book sections">
+        {tags.map(tag => (
+          <button
+            key={tag}
+            type="button"
+            className="product-book-tag-nav__button"
+            onClick={() => scrollToProductBookSection(tagAnchors[tag])}
+          >
+            {tag}
+          </button>
+        ))}
       </div>
       <div className="section section--product-book">
         <ProductBookMarkdown markdown={patch.contentMarkdown || ""} />
       </div>
     </div>
   );
+}
+
+const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
+  enhancement: "3.-key-highlight-1",
+  "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
+  "transfer market": "5.-key-highlight-3-transfer-market-team-color",
+  "team color": "5.-key-highlight-3-transfer-market-team-color",
+  gameplay: "6.-key-highlight-4-gameplay-improvement-match-fairness",
+  qol: "7.-key-highlight-5-qol",
+  performance: "8.-performance-system-stability",
+};
+
+function normalizeProductBookLabel(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function productBookSlug(value) {
+  return normalizeProductBookLabel(value)
+    .replace(/[*_`]/g, "")
+    .replace(/[^a-z0-9.]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function stripInlineMarkdownText(value) {
+  return String(value || "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/[_*]/g, "");
+}
+
+function getProductBookHeadings(markdown) {
+  return String(markdown || "")
+    .split(/\r?\n/)
+    .map(line => line.trim().match(/^(#{1,4})\s+(.+)$/))
+    .filter(Boolean)
+    .map(match => {
+      const title = stripInlineMarkdownText(match[2]);
+      return { title, anchor: productBookSlug(title) };
+    })
+    .filter(item => item.anchor);
+}
+
+function buildProductBookAnchorMap(patch) {
+  const headings = getProductBookHeadings(patch && patch.contentMarkdown);
+  const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
+  const candidates = [
+    ...headings,
+    ...toc.map(item => ({ title: item.title, anchor: item.anchor })).filter(item => item.anchor),
+  ];
+  const result = {};
+  (Array.isArray(patch && patch.tags) ? patch.tags : []).forEach(tag => {
+    const key = normalizeProductBookLabel(tag);
+    const preferred = PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES[key];
+    const preferredExists = preferred && candidates.some(item => item.anchor === preferred);
+    if (preferredExists || preferred) {
+      result[tag] = preferred;
+      return;
+    }
+    const tagSlug = productBookSlug(tag);
+    const match = candidates.find(item => {
+      const title = normalizeProductBookLabel(item.title);
+      const anchor = normalizeProductBookLabel(item.anchor);
+      return title.includes(key) || anchor.includes(tagSlug);
+    });
+    result[tag] = match ? match.anchor : "";
+  });
+  return result;
+}
+
+function scrollToProductBookSection(anchorId) {
+  if (!anchorId) return;
+  const target = document.getElementById(anchorId);
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function ProductBookMarkdown({ markdown }) {
@@ -1028,10 +1108,11 @@ function ProductBookMarkdown({ markdown }) {
     if (heading) {
       flushList();
       const level = heading[1].length;
+      const anchorId = productBookSlug(stripInlineMarkdownText(heading[2])) || `product-book-heading-${index}`;
       const text = formatInlineMarkdown(heading[2]);
-      if (level === 1) nodes.push(<h2 key={`h-${index}`}>{text}</h2>);
-      else if (level === 2) nodes.push(<h3 key={`h-${index}`}>{text}</h3>);
-      else nodes.push(<h4 key={`h-${index}`}>{text}</h4>);
+      if (level === 1) nodes.push(<h2 id={anchorId} key={`h-${index}`}>{text}</h2>);
+      else if (level === 2) nodes.push(<h3 id={anchorId} key={`h-${index}`}>{text}</h3>);
+      else nodes.push(<h4 id={anchorId} key={`h-${index}`}>{text}</h4>);
       return;
     }
     const bullet = trimmed.match(/^[-*]\s+(.+)$/);
