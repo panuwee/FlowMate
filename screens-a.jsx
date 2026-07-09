@@ -492,6 +492,10 @@ function formatFlowMateCreativeChannels(value) {
 }
 
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
+const FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET = 4;
+const FLOWMATE_MIDDAY_CUTOFF_HOUR = 12;
+const FLOWMATE_PRODUCTION_CUTOFF_HOUR = 15;
+const FLOWMATE_REVIEW_BUFFER_WORKING_DAYS = 2;
 const FLOWMATE_CREATIVE_UNIT_EFFORT = {
   banner: 2,
   "hero-album": 16,
@@ -553,11 +557,37 @@ function clampFlowMateDateToToday(dateValue) {
 
 function getFlowMateDraftDateForLaunchDate(launchDate) {
   const nextLaunchDate = clampFlowMateDateToToday(launchDate);
-  const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, 5);
+  const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_REVIEW_BUFFER_WORKING_DAYS);
   return clampFlowMateDateToToday(draftDate);
 }
 
-function countFlowMateWorkingDaysInclusive(startDate, endDate) {
+function getFlowMateNextWorkingDay(dateValue) {
+  const parts = String(dateValue || "").slice(0, 10).split("-").map((part) => Number(part));
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return getFlowMateTodayDateKey();
+  const date = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  if (Number.isNaN(date.getTime())) return getFlowMateTodayDateKey();
+
+  while (date.getUTCDay() === 0 || date.getUTCDay() === 6) {
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+
+  return date.toISOString().slice(0, 10);
+}
+
+function getFlowMateProductionStartBucket(now = new Date()) {
+  const todayDate = getFlowMateTodayDateKey();
+  const isAfterCutoff = now.getHours() > FLOWMATE_PRODUCTION_CUTOFF_HOUR
+    || (now.getHours() === FLOWMATE_PRODUCTION_CUTOFF_HOUR && (now.getMinutes() > 0 || now.getSeconds() > 0));
+  const isAfterMidday = now.getHours() >= FLOWMATE_MIDDAY_CUTOFF_HOUR;
+  const startDate = getFlowMateNextWorkingDay(isAfterCutoff ? addFlowMateCalendarDays(todayDate, 1) : todayDate);
+  const todayIsWorkingDate = startDate === todayDate;
+  return {
+    date: startDate,
+    half: todayIsWorkingDate && isAfterMidday && !isAfterCutoff ? "pm" : "am",
+  };
+}
+
+function countFlowMateCapacityBucketsInclusive(startDate, startHalf, endDate) {
   const startValue = clampFlowMateDateToToday(startDate);
   const endValue = String(endDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(endValue) || endValue < startValue) return 0;
@@ -568,13 +598,16 @@ function countFlowMateWorkingDaysInclusive(startDate, endDate) {
   const end = new Date(Date.UTC(endParts[0], endParts[1] - 1, endParts[2]));
   if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime())) return 0;
 
-  let workingDays = 0;
+  let bucketCount = 0;
   while (cursor <= end) {
     const day = cursor.getUTCDay();
-    if (day >= 1 && day <= 5) workingDays += 1;
+    if (day >= 1 && day <= 5) {
+      const dateKey = cursor.toISOString().slice(0, 10);
+      bucketCount += dateKey === startValue && startHalf === "pm" ? 1 : 2;
+    }
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
-  return workingDays;
+  return bucketCount;
 }
 
 function getFlowMateCreativeEffortEstimate(draft) {
@@ -586,9 +619,11 @@ function getFlowMateCreativeEffortEstimate(draft) {
 
 function getFlowMateCreativeTimePressure(draft) {
   const launchDate = clampFlowMateDateToToday(draft?.launchDate);
-  const lastWorkDate = addFlowMateCalendarDays(launchDate, -1);
-  const workingDays = countFlowMateWorkingDaysInclusive(getFlowMateTodayDateKey(), lastWorkDate);
-  const normalCapacity = workingDays * FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY;
+  const dueDate = clampFlowMateDateToToday(draft?.dueDate || getFlowMateDraftDateForLaunchDate(launchDate));
+  const productionStart = getFlowMateProductionStartBucket();
+  const bucketCount = countFlowMateCapacityBucketsInclusive(productionStart.date, productionStart.half, dueDate);
+  const workingDays = bucketCount / 2;
+  const normalCapacity = bucketCount * FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET;
   const effort = getFlowMateCreativeEffortEstimate(draft);
   const assetCount = Math.max(1, Number(draft?.assetCount || 1));
   const skillLabel = getFlowMateCreativeTypeLabel(draft?.assetSubtype);
@@ -599,12 +634,15 @@ function getFlowMateCreativeTimePressure(draft) {
     assetCount,
     skillLabel,
     launchDate,
+    dueDate,
+    productionStart,
+    bucketCount,
     isInsufficient: effort > normalCapacity,
   };
 }
 
 function getFlowMateAutoUrgentReason(timePressure) {
-  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before launch.`;
+  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before 1st Draft.`;
 }
 
 function normalizeFlowMateQuickDraft(draft) {
@@ -1022,7 +1060,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
         ? await window.flowmatePrompt({
             title: "เวลาไม่เพียงพอ",
             hideInput: true,
-            note: `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before Launch Date. Priority will be set to Urgent.`,
+            note: `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before 1st Draft. Priority will be set to Urgent.`,
             confirmText: "Set Urgent and submit",
           })
         : "";
@@ -1455,7 +1493,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">1st Draft <span className="req">*</span></label>
           <input className="input" type="date" value={value.dueDate} readOnly disabled min={todayDate} />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Generated from Launch Date minus 5 working days.</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Generated from Launch Date minus 2 working days.</div>
           {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
         </div>
         <div className={`field ${errors.launchDate ? "field--error" : ""}`}>

@@ -1,7 +1,7 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260709-1";
+const FLOWMATE_APP_VERSION = "v20260709-4";
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 
 const NAV = [
