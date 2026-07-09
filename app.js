@@ -4,7 +4,7 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260708-7";
+const FLOWMATE_APP_VERSION = "v20260709-1";
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const NAV = [{
   group: "Personal",
@@ -84,12 +84,20 @@ const TITLE_MAP = {
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
   return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
 }
 function isProductChoicePath() {
   return /\/home\/?$/.test(String(window.location.pathname || ""));
+}
+function getProductFromHashRouteKey(hashValue) {
+  const hashKey = getFlowMateHashRouteKey(hashValue);
+  if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
+  if (PRODUCT_BOOK_HASH_KEYS.has(hashKey)) return PRODUCT_BOOK_PRODUCT_KEY;
+  if (TITLE_MAP[hashKey]) return "flowmate";
+  return "";
 }
 function showProductChoicePathInAddressBar() {
   try {
@@ -137,10 +145,10 @@ function App() {
   const [isGlobalLeaveModalOpen, setIsGlobalLeaveModalOpen] = useStateApp(false);
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
-      if (isProductChoicePath()) return null;
       const hashKey = getFlowMateHashRouteKey();
-      if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
-      if (TITLE_MAP[hashKey]) return "flowmate";
+      const hashProduct = getProductFromHashRouteKey(hashKey);
+      if (isProductChoicePath()) return hashProduct || null;
+      if (hashProduct) return hashProduct;
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
       if (VALID_PRODUCT_KEYS.has(savedProduct)) return savedProduct;
     } catch (e) {}
@@ -317,6 +325,11 @@ function App() {
         try {
           sessionStorage.setItem("flowmate:activeProduct", "marketing-plan");
         } catch (e) {}
+      } else if (PRODUCT_BOOK_HASH_KEYS.has(r)) {
+        setActiveProduct(PRODUCT_BOOK_PRODUCT_KEY);
+        try {
+          sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
+        } catch (e) {}
       } else if (TITLE_MAP[r]) {
         setActiveProduct("flowmate");
         try {
@@ -469,6 +482,7 @@ function App() {
     try {
       sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
     } catch (e) {}
+    window.location.hash = "product-book";
   }
   useEffectApp(() => {
     function onSwitchFlowMateProduct(event) {
