@@ -4,13 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <base href="../" />
-  <title>FlowMate - Home</title>
+  <title>FlowMate - Product Book</title>
   <link rel="icon" type="image/png" href="garena/logo_graphic.png" />
   <link rel="stylesheet" href="app.css?v=20260709-4" />
 </head>
 <body>
   <div id="root"></div>
 
+  <script>
+    if (!window.location.hash) {
+      window.location.hash = "product-book-latest";
+    }
+  </script>
   <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
   <script src="supabase-js-local.js"></script>
