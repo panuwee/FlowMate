@@ -364,10 +364,11 @@ Object.assign(window, {
    ============================================================ */
 function WorkloadScreen({ onOpen }) {
   const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
+  const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "blocked"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
     const requestedItems = WORK.filter(w => w.requesterUserId && w.requesterUserId === (m.userId || m.id));
-    const openCreative = mine.filter(w => w.type === "creative" && ["assigned","in_progress","review","blocked"].includes(w.status));
+    const openCreative = mine.filter(w => w.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(w.status));
     const wip = mine.filter(w => w.status === "in_progress" && w.type === "creative").length;
     const assignedEffort = openCreative.reduce((s, w) => s + (w.effort || 0), 0);
     const effectiveCap = m.availability === "partial" ? (m.capacityOverride || 0) : (m.availability === "leave" ? 0 : m.capacityPerDay);
@@ -456,7 +457,7 @@ function WorkloadScreen({ onOpen }) {
     const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthRequestedItems = flowMateFilterRowsByMonthC(r.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthOpenCreative = monthItems.filter(item =>
-      item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
+      item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status)
     );
     const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
     const capacityWindow = r.effectiveCap * selectedMonthWorkingDays;
@@ -519,7 +520,7 @@ function WorkloadScreen({ onOpen }) {
       const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
       const monthRequestedItems = flowMateFilterRowsByMonthC(row.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
       const monthOpenCreative = monthItems.filter(item =>
-        item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)
+        item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status)
       );
       const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
       const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
@@ -2036,6 +2037,36 @@ function ganttLeaveModelC(row, monthKey, ganttWindow) {
   };
 }
 
+function mergeGanttLeaveSegmentsC(leaves) {
+  const sortedLeaves = (leaves || [])
+    .slice()
+    .sort((a, b) => String(a.item.assignee || "").localeCompare(String(b.item.assignee || ""))
+      || a.leaveKey.localeCompare(b.leaveKey)
+      || String(a.item.id || "").localeCompare(String(b.item.id || "")));
+  const merged = [];
+  sortedLeaves.forEach(leave => {
+    const previous = merged[merged.length - 1];
+    const sameAssignee = previous && String(previous.item.assignee || "unassigned") === String(leave.item.assignee || "unassigned");
+    const sameLeaveType = previous && previous.isPartial === leave.isPartial && previous.label === leave.label;
+    const nextExpectedKey = previous ? calendarAddDaysC(previous.endKey, 1) : "";
+    if (sameAssignee && sameLeaveType && leave.leaveKey === nextExpectedKey) {
+      previous.endKey = leave.leaveKey;
+      previous.spanDays += leave.spanDays;
+      previous.ids.push(leave.item.id);
+      return;
+    }
+    merged.push({
+      ...leave,
+      endKey: leave.leaveKey,
+      ids: [leave.item.id],
+    });
+  });
+  return merged.map(leave => ({
+    ...leave,
+    segmentKey: `${leave.item.assignee || "unassigned"}:${leave.leaveKey}:${leave.endKey}:${leave.label}`,
+  }));
+}
+
 function TeamGanttScreen({ onOpen }) {
   const [sourceRows, setSourceRows] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
@@ -2103,6 +2134,7 @@ function TeamGanttScreen({ onOpen }) {
     .map(row => ganttLeaveModelC(row, selectedGanttMonth, ganttWindow))
     .filter(Boolean)
     .sort((a, b) => a.leaveKey.localeCompare(b.leaveKey) || String(a.item.assignee || "").localeCompare(String(b.item.assignee || "")));
+  const mergedGanttLeaves = mergeGanttLeaveSegmentsC(ganttLeaves);
 
   const teamMap = new Map();
   function ensureGanttAssigneeGroup(row) {
@@ -2126,7 +2158,7 @@ function TeamGanttScreen({ onOpen }) {
   ganttTasks.forEach(task => {
     ensureGanttAssigneeGroup(task.item).tasks.push(task);
   });
-  ganttLeaves.forEach(leave => {
+  mergedGanttLeaves.forEach(leave => {
     const assigneeId = leave.item.assignee || "unassigned";
     const member = MEMBERS_BY_ID[assigneeId];
     if (member && member.discipline !== "GD/VE") return;
@@ -2236,10 +2268,10 @@ function TeamGanttScreen({ onOpen }) {
                   {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
                   {assignee.leaves.map(leave => (
                     <div
-                      key={leave.item.id}
+                      key={leave.segmentKey || leave.item.id}
                       className={`gantt__leave ${leave.isPartial ? "is-partial" : ""}`}
                       style={{ gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}` }}
-                      title={`${assignee.assigneeName} ${leave.label} - ${calendarDateLabelC(leave.leaveKey)}`}
+                      title={`${assignee.assigneeName} ${leave.label} - ${calendarDateLabelC(leave.leaveKey)}${leave.endKey && leave.endKey !== leave.leaveKey ? ` to ${calendarDateLabelC(leave.endKey)}` : ""}`}
                       data-testid="flowmate-gantt-leave-marker"
                     >
                       {leave.isPartial ? "Half" : "Leave"}
@@ -2456,6 +2488,9 @@ function CalendarScreen({ onOpen }) {
 
   function calendarItem(item, compact = false) {
     const owner = item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : (item.assigneeOtherName || "Unassigned");
+    const isLeaveItem = item.type === "leave";
+    const leavePeriodLabel = item.leaveUnits === 0.5 ? `${item.halfLabel} Leave` : "AM + PM Leave";
+    const calendarTitle = isLeaveItem ? `${owner} on leave` : item.title;
     const textClampStyle = compact ? {
       display: "-webkit-box",
       WebkitLineClamp: 2,
@@ -2486,14 +2521,15 @@ function CalendarScreen({ onOpen }) {
         }}
       >
         <span style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%", minWidth: 0 }}>
-          <span className="row" style={{ justifyContent: "space-between", gap: 8, minWidth: 0 }}>
-            <span className="mono strong" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.id}</span>
-            {!compact && calendarTypePill(item)}
-          </span>
-          <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3, minWidth: 0, ...textClampStyle }}>{item.title}</span>
-          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner} - {item.type === "leave" ? (item.leaveUnits === 0.5 ? `${item.halfLabel} leave` : "AM + PM leave") : (STATUS_LABEL[item.status] || item.status)}</span>
+          {!isLeaveItem && (
+            <span className="row" style={{ justifyContent: "space-between", gap: 8, minWidth: 0 }}>
+              <span className="mono strong" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.id}</span>
+              {!compact && calendarTypePill(item)}
+            </span>
+          )}
+          <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3, minWidth: 0, ...textClampStyle }}>{calendarTitle}</span>
+          <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isLeaveItem ? leavePeriodLabel : `${owner} - ${STATUS_LABEL[item.status] || item.status}`}</span>
           {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
-          {!compact && item.type === "leave" && item.leaveReason && <span className="muted" style={{ fontSize: 11 }}>{item.leaveReason}</span>}
         </span>
       </button>
     );

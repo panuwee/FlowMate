@@ -1638,6 +1638,7 @@ button:disabled {
 .gantt__leave {
   position: relative;
   z-index: 1;
+  min-width: 0;
   height: 20px;
   margin: 0 3px;
   display: inline-flex;
@@ -1650,6 +1651,9 @@ button:disabled {
   font-size: 10px;
   font-weight: var(--weight-bold);
   line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   pointer-events: none;
 }
 .gantt__leave.is-partial {

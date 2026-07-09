@@ -335,10 +335,11 @@ function WorkloadScreen({
   onOpen
 }) {
   const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
+  const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "blocked"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
     const requestedItems = WORK.filter(w => w.requesterUserId && w.requesterUserId === (m.userId || m.id));
-    const openCreative = mine.filter(w => w.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(w.status));
+    const openCreative = mine.filter(w => w.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(w.status));
     const wip = mine.filter(w => w.status === "in_progress" && w.type === "creative").length;
     const assignedEffort = openCreative.reduce((s, w) => s + (w.effort || 0), 0);
     const effectiveCap = m.availability === "partial" ? m.capacityOverride || 0 : m.availability === "leave" ? 0 : m.capacityPerDay;
@@ -444,7 +445,7 @@ function WorkloadScreen({
   const monthRows = safeRows.map(r => {
     const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthRequestedItems = flowMateFilterRowsByMonthC(r.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-    const monthOpenCreative = monthItems.filter(item => item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status));
+    const monthOpenCreative = monthItems.filter(item => item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status));
     const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
     const capacityWindow = r.effectiveCap * selectedMonthWorkingDays;
     const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
@@ -509,7 +510,7 @@ function WorkloadScreen({
     const exportRows = visibleRows.map(row => {
       const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
       const monthRequestedItems = flowMateFilterRowsByMonthC(row.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-      const monthOpenCreative = monthItems.filter(item => item.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status));
+      const monthOpenCreative = monthItems.filter(item => item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status));
       const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
       const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
       const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
@@ -2256,6 +2257,31 @@ function ganttLeaveModelC(row, monthKey, ganttWindow) {
     label: isPartial ? `${row.halfLabel || "Half-day"} leave` : "Leave"
   };
 }
+function mergeGanttLeaveSegmentsC(leaves) {
+  const sortedLeaves = (leaves || []).slice().sort((a, b) => String(a.item.assignee || "").localeCompare(String(b.item.assignee || "")) || a.leaveKey.localeCompare(b.leaveKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
+  const merged = [];
+  sortedLeaves.forEach(leave => {
+    const previous = merged[merged.length - 1];
+    const sameAssignee = previous && String(previous.item.assignee || "unassigned") === String(leave.item.assignee || "unassigned");
+    const sameLeaveType = previous && previous.isPartial === leave.isPartial && previous.label === leave.label;
+    const nextExpectedKey = previous ? calendarAddDaysC(previous.endKey, 1) : "";
+    if (sameAssignee && sameLeaveType && leave.leaveKey === nextExpectedKey) {
+      previous.endKey = leave.leaveKey;
+      previous.spanDays += leave.spanDays;
+      previous.ids.push(leave.item.id);
+      return;
+    }
+    merged.push({
+      ...leave,
+      endKey: leave.leaveKey,
+      ids: [leave.item.id]
+    });
+  });
+  return merged.map(leave => ({
+    ...leave,
+    segmentKey: `${leave.item.assignee || "unassigned"}:${leave.leaveKey}:${leave.endKey}:${leave.label}`
+  }));
+}
 function TeamGanttScreen({
   onOpen
 }) {
@@ -2320,6 +2346,7 @@ function TeamGanttScreen({
   const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000) : null;
   const ganttTasks = (sourceRows || []).filter(row => row && row.type !== "leave" && !["cancelled"].includes(row.status)).map(row => ganttTaskModelC(row, selectedGanttMonth, ganttWindow)).filter(Boolean).sort((a, b) => a.dueKey.localeCompare(b.dueKey) || String(a.item.id || "").localeCompare(String(b.item.id || "")));
   const ganttLeaves = (sourceRows || []).filter(row => row && row.type === "leave").map(row => ganttLeaveModelC(row, selectedGanttMonth, ganttWindow)).filter(Boolean).sort((a, b) => a.leaveKey.localeCompare(b.leaveKey) || String(a.item.assignee || "").localeCompare(String(b.item.assignee || "")));
+  const mergedGanttLeaves = mergeGanttLeaveSegmentsC(ganttLeaves);
   const teamMap = new Map();
   function ensureGanttAssigneeGroup(row) {
     const assigneeId = row.assignee || "unassigned";
@@ -2342,7 +2369,7 @@ function TeamGanttScreen({
   ganttTasks.forEach(task => {
     ensureGanttAssigneeGroup(task.item).tasks.push(task);
   });
-  ganttLeaves.forEach(leave => {
+  mergedGanttLeaves.forEach(leave => {
     const assigneeId = leave.item.assignee || "unassigned";
     const member = MEMBERS_BY_ID[assigneeId];
     if (member && member.discipline !== "GD/VE") return;
@@ -2511,12 +2538,12 @@ function TeamGanttScreen({
     className: "gantt__today-line",
     "aria-hidden": "true"
   }), assignee.leaves.map(leave => React.createElement("div", {
-    key: leave.item.id,
+    key: leave.segmentKey || leave.item.id,
     className: `gantt__leave ${leave.isPartial ? "is-partial" : ""}`,
     style: {
       gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}`
     },
-    title: `${assignee.assigneeName} ${leave.label} - ${calendarDateLabelC(leave.leaveKey)}`,
+    title: `${assignee.assigneeName} ${leave.label} - ${calendarDateLabelC(leave.leaveKey)}${leave.endKey && leave.endKey !== leave.leaveKey ? ` to ${calendarDateLabelC(leave.endKey)}` : ""}`,
     "data-testid": "flowmate-gantt-leave-marker"
   }, leave.isPartial ? "Half" : "Leave")), assignee.tasks.map(task => React.createElement("button", {
     key: task.item.id,
@@ -2765,6 +2792,9 @@ function CalendarScreen({
   }
   function calendarItem(item, compact = false) {
     const owner = item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : item.assigneeOtherName || "Unassigned";
+    const isLeaveItem = item.type === "leave";
+    const leavePeriodLabel = item.leaveUnits === 0.5 ? `${item.halfLabel} Leave` : "AM + PM Leave";
+    const calendarTitle = isLeaveItem ? `${owner} on leave` : item.title;
     const textClampStyle = compact ? {
       display: "-webkit-box",
       WebkitLineClamp: 2,
@@ -2800,7 +2830,7 @@ function CalendarScreen({
         width: "100%",
         minWidth: 0
       }
-    }, React.createElement("span", {
+    }, !isLeaveItem && React.createElement("span", {
       className: "row",
       style: {
         justifyContent: "space-between",
@@ -2823,7 +2853,7 @@ function CalendarScreen({
         minWidth: 0,
         ...textClampStyle
       }
-    }, item.title), React.createElement("span", {
+    }, calendarTitle), React.createElement("span", {
       className: "muted",
       style: {
         fontSize: 11,
@@ -2832,17 +2862,12 @@ function CalendarScreen({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, owner, " - ", item.type === "leave" ? item.leaveUnits === 0.5 ? `${item.halfLabel} leave` : "AM + PM leave" : STATUS_LABEL[item.status] || item.status), !compact && item.launchLabel && React.createElement("span", {
+    }, isLeaveItem ? leavePeriodLabel : `${owner} - ${STATUS_LABEL[item.status] || item.status}`), !compact && item.launchLabel && React.createElement("span", {
       className: "muted",
       style: {
         fontSize: 11
       }
-    }, "Launch date: ", item.launchFullLabel || item.launchLabel), !compact && item.type === "leave" && item.leaveReason && React.createElement("span", {
-      className: "muted",
-      style: {
-        fontSize: 11
-      }
-    }, item.leaveReason)));
+    }, "Launch date: ", item.launchFullLabel || item.launchLabel)));
   }
   return React.createElement("div", {
     className: "page"
