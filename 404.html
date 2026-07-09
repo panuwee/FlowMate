@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FlowMate - Redirecting</title>
+  <script>
+    (function () {
+      var repoBase = "/FlowMate/";
+      var l = window.location;
+      var path = String(l.pathname || "");
+      var route = path.replace(repoBase, "").replace(/^\/+|\/+$/g, "");
+      var routeKey = route.split("/")[0] || "";
+      var targetHash = "my-work";
+
+      if (routeKey === "home") {
+        l.replace(l.origin + repoBase + "home");
+        return;
+      }
+
+      if (routeKey === "product-book") {
+        targetHash = "product-book-latest";
+      } else if (routeKey === "marketing-plan") {
+        targetHash = "campaign-timeline";
+      } else if (routeKey === "campaign-timeline" || routeKey === "channel-plan" || routeKey === "marketing-calendar" || routeKey === "working-sheet" || routeKey === "supervisor") {
+        targetHash = routeKey;
+      } else if (routeKey === "detail" && route.split("/")[1]) {
+        targetHash = "detail/" + route.split("/")[1];
+      } else if (routeKey === "my-work" || routeKey === "create" || routeKey === "board" || routeKey === "list" || routeKey === "calendar" || routeKey === "gantt" || routeKey === "queue" || routeKey === "workload" || routeKey === "kpi" || routeKey === "settings") {
+        targetHash = routeKey;
+      }
+
+      l.replace(l.origin + repoBase + "#" + targetHash);
+    })();
+  </script>
+</head>
+<body></body>
+</html>
