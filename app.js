@@ -1146,6 +1146,7 @@ function ProductBookPatchView({
   const tags = Array.isArray(patch.tags) ? patch.tags : [];
   const audience = Array.isArray(patch.audience) ? patch.audience : [];
   const tagAnchors = buildProductBookAnchorMap(patch);
+  const markdown = getProductBookPatchMarkdown(patch);
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("div", {
@@ -1163,10 +1164,12 @@ function ProductBookPatchView({
   }, tag)))), React.createElement("div", {
     className: "section section--product-book"
   }, React.createElement(ProductBookMarkdown, {
-    markdown: patch.contentMarkdown || ""
+    markdown: markdown
   })));
 }
 const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
+  "fp+10": "ms26.07-top-updates-fp-10-and-trait-update",
+  "trait update": "ms26.07-top-updates-fp-10-and-trait-update",
   enhancement: "3.-key-highlight-1",
   "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
   "transfer market": "5.-key-highlight-3-transfer-market-team-color",
@@ -1177,6 +1180,11 @@ const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
 };
 function normalizeProductBookLabel(value) {
   return String(value || "").trim().toLowerCase();
+}
+function getProductBookPatchMarkdown(patch) {
+  const topUpdates = String(patch && patch.topUpdatesMarkdown || "").trim();
+  const content = String(patch && patch.contentMarkdown || "").trim();
+  return [topUpdates, content].filter(Boolean).join("\r\n\r\n");
 }
 function productBookSlug(value) {
   return normalizeProductBookLabel(value).replace(/[*_`]/g, "").replace(/[^a-z0-9.]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
@@ -1194,7 +1202,7 @@ function getProductBookHeadings(markdown) {
   }).filter(item => item.anchor);
 }
 function buildProductBookAnchorMap(patch) {
-  const headings = getProductBookHeadings(patch && patch.contentMarkdown);
+  const headings = getProductBookHeadings(getProductBookPatchMarkdown(patch));
   const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
   const candidates = [...headings, ...toc.map(item => ({
     title: item.title,
