@@ -1,0 +1,13 @@
+providers = []
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm install -g serve@14"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "serve -l 80 ."
