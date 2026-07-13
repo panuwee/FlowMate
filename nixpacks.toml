@@ -10,4 +10,4 @@ cmds = ["npm install -g serve@14"]
 cmds = []
 
 [start]
-cmd = "serve -l 80 ."
+cmd = "npx serve -l 80 ."
