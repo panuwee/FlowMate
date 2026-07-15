@@ -84,16 +84,18 @@ button:disabled {
   max-width: 1480px;
 }
 .app__main--product-book {
-  padding: var(--s-5) var(--s-6) var(--s-7);
+  padding: 0 var(--s-6) var(--s-7);
 }
 .app__main:has(.product-book-content) {
-  padding: var(--s-5) var(--s-6) var(--s-7);
+  padding: 0 var(--s-6) var(--s-7);
 }
 .app__main--product-book > div {
   max-width: 1360px;
+  padding-top: var(--s-5);
 }
 .app__main:has(.product-book-content) > div {
   max-width: 1360px;
+  padding-top: var(--s-5);
 }
 
 /* ---------- Topbar pieces ---------- */

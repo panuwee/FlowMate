@@ -2,7 +2,7 @@
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260715-3";
+  const fallbackVersion = "v20260715-4";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
