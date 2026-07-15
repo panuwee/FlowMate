@@ -365,6 +365,14 @@ button:disabled {
   line-height: 1.4;
   margin: 4px 0 0;
 }
+.app__main--product-book .page-head {
+  align-items: flex-start;
+  padding-bottom: 4px;
+}
+.app__main--product-book .page-head h1 {
+  line-height: 1.32;
+  padding-bottom: 2px;
+}
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -1119,7 +1127,6 @@ button:disabled {
   padding: 10px 26px;
   background: #FAFAFA;
   border-bottom: var(--border-hairline);
-  box-shadow: 0 -28px 0 28px #FAFAFA;
 }
 .product-book-tag-nav {
   display: flex;

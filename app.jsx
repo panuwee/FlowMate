@@ -2,7 +2,7 @@
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260715-2";
+  const fallbackVersion = "v20260715-3";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -1006,7 +1006,6 @@ function ProductBookShell({
 
 function ProductBookPatchView({ patch }) {
   const tags = Array.isArray(patch.tags) ? patch.tags : [];
-  const audience = Array.isArray(patch.audience) ? patch.audience : [];
   const tagAnchors = buildProductBookAnchorMap(patch);
   const markdown = getProductBookPatchMarkdown(patch);
   return (
@@ -1014,8 +1013,6 @@ function ProductBookPatchView({ patch }) {
       <div className="page-head">
         <div>
           <div className="eyebrow">Product Book / {patch.monthLabel || patch.id}</div>
-          <h1>{patch.title || patch.id || "Patch Note"}</h1>
-          <p>{patch.id || "MS26.07"} · {audience.join(", ") || "Team-facing patch note"}</p>
         </div>
       </div>
       <div className="product-book-sticky-zone">

@@ -5,7 +5,7 @@ const {
   useRef: useRefApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260715-2";
+  const fallbackVersion = "v20260715-3";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -1158,14 +1158,13 @@ function ProductBookPatchView({
   patch
 }) {
   const tags = Array.isArray(patch.tags) ? patch.tags : [];
-  const audience = Array.isArray(patch.audience) ? patch.audience : [];
   const tagAnchors = buildProductBookAnchorMap(patch);
   const markdown = getProductBookPatchMarkdown(patch);
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("div", {
     className: "eyebrow"
-  }, "Product Book / ", patch.monthLabel || patch.id), React.createElement("h1", null, patch.title || patch.id || "Patch Note"), React.createElement("p", null, patch.id || "MS26.07", " · ", audience.join(", ") || "Team-facing patch note"))), React.createElement("div", {
+  }, "Product Book / ", patch.monthLabel || patch.id))), React.createElement("div", {
     className: "product-book-sticky-zone"
   }, React.createElement("div", {
     className: "product-book-tag-nav",
