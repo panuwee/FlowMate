@@ -1,7 +1,22 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260709-6";
+function getFlowMateAppVersion() {
+  const fallbackVersion = "v20260715-2";
+  try {
+    const scripts = Array.from(document.scripts || []);
+    const appScript = scripts.find(script => {
+      const src = script.getAttribute("src") || "";
+      return /(?:^|\/)app\.js(?:\?|$)/.test(src);
+    });
+    const src = appScript ? appScript.getAttribute("src") || "" : "";
+    const deployVersion = new URL(src, window.location.href).searchParams.get("v");
+    if (deployVersion) return deployVersion.startsWith("v") ? deployVersion : `v${deployVersion}`;
+  } catch (e) {}
+  return fallbackVersion;
+}
+
+const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 
 const NAV = [
