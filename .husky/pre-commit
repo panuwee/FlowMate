@@ -1,1 +1,9 @@
+staged_env_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)\.env(\..+)?$' || true)
+if [ -n "$staged_env_files" ]; then
+  echo "✖ Blocked: env file(s) staged for commit:"
+  echo "$staged_env_files"
+  echo "Run: git restore --staged <file> to unstage it, then commit again."
+  exit 1
+fi
+
 npx lint-staged
