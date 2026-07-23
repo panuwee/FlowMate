@@ -5,7 +5,7 @@ const {
   useRef: useRefApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260723-5";
+  const fallbackVersion = "v20260723-6";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -1569,7 +1569,7 @@ function getMarketingPlanAssetFirstPublishDate(asset) {
   return dates[0] || "9999-12-31";
 }
 function getMarketingPlanTimelineAssetMeta(asset) {
-  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" · ") || "No details";
+  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" เธขเธ— ") || "No details";
 }
 const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [{
   key: "facebook",
@@ -2318,8 +2318,14 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
     source_start_time: normalizedTime
   };
   if (!contentPayload.title) throw new Error("Content is required.");
-  const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
+  const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId).select("id,sub_pic_user_id,sub_pic_name").maybeSingle();
   if (contentResult.error) throw contentResult.error;
+  if (!contentResult.data) {
+    throw new Error("This Working Sheet row was not updated. You may no longer have permission; run the updated supabase/marketing_plan.sql and refresh.");
+  }
+  if (contentPayload.sub_pic_user_id && contentResult.data.sub_pic_user_id !== contentPayload.sub_pic_user_id) {
+    throw new Error("Sub PIC was not saved. Run the updated supabase/marketing_plan.sql and refresh before trying again.");
+  }
   await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
   await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime);
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
@@ -2887,7 +2893,7 @@ function MarketingPlanTimelineScreen() {
       style: {
         fontSize: 12
       }
-    }, [campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" · "))), React.createElement("div", {
+    }, [campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" เธขเธ— "))), React.createElement("div", {
       className: "row",
       style: {
         gap: 6
@@ -3077,7 +3083,7 @@ function MarketingPlanTimelineScreen() {
     style: {
       fontSize: 12
     }
-  }, campaign.team || "No team", " · ", campaign.assets.length, " assets")), React.createElement("div", null)), campaign.assets.map(asset => React.createElement("div", {
+  }, campaign.team || "No team", " เธขเธ— ", campaign.assets.length, " assets")), React.createElement("div", null)), campaign.assets.map(asset => React.createElement("div", {
     key: asset.id,
     style: {
       display: "grid",
@@ -3379,7 +3385,7 @@ function MarketingPlanChannelPlanScreen() {
     style: {
       fontSize: 12
     }
-  }, [placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" · ") || "No details")), React.createElement("td", null, placement.briefLink ? React.createElement("a", {
+  }, [placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" เธขเธ— ") || "No details")), React.createElement("td", null, placement.briefLink ? React.createElement("a", {
     className: "marketing-working-link",
     href: placement.briefLink,
     target: "_blank",
@@ -4360,7 +4366,10 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }, React.createElement(Icon, {
     name: "x"
-  }))), React.createElement("div", {
+  }))), exportMessage && React.createElement("div", {
+    className: "reason-box",
+    role: "alert"
+  }, exportMessage), React.createElement("div", {
     className: "form-grid"
   }, React.createElement("label", {
     className: "field field--full"
@@ -5488,7 +5497,7 @@ function LoadingScreen() {
     style: {
       fontSize: 13
     }
-  }, "Checking session…"), React.createElement("style", null, `@keyframes flowmate-spin { to { transform: rotate(360deg); } }`));
+  }, "Checking sessionเนโฌเธ"), React.createElement("style", null, `@keyframes flowmate-spin { to { transform: rotate(360deg); } }`));
 }
 function GoogleLogo() {
   return React.createElement("svg", {
@@ -5767,10 +5776,10 @@ function LoginScreen({
     fill: "var(--ink)"
   })))), React.createElement("p", {
     className: "wha-runes wha-runes--hero"
-  }, "· Garena · FCO · Thailand ·"), authError && React.createElement("div", {
+  }, "เธขเธ— Garena เธขเธ— FCO เธขเธ— Thailand เธขเธ—"), authError && React.createElement("div", {
     className: "wha-error wha-reveal",
     role: "alert"
-  }, React.createElement("strong", null, "⚠"), " ", authError), React.createElement("button", {
+  }, React.createElement("strong", null, "เนยย\xA0"), " ", authError), React.createElement("button", {
     type: "button",
     onClick: onSignIn,
     disabled: isSigningIn,
@@ -5780,9 +5789,9 @@ function LoginScreen({
     "aria-hidden": "true"
   }, React.createElement(GoogleLogo, null)), React.createElement("span", {
     className: "wha-cta__label"
-  }, isSigningIn ? "Crossing the threshold…" : "Sign in with Google")), React.createElement("p", {
+  }, isSigningIn ? "Crossing the thresholdเนโฌเธ" : "Sign in with Google")), React.createElement("p", {
     className: "wha-runes wha-runes--small"
-  }, "⚝ Garena Workspace only ⚝")));
+  }, "เนยย Garena Workspace only เนยย")));
 }
 function SigilGlyph({
   kind
@@ -6439,7 +6448,7 @@ const WHA_STYLES = `
   perspective: 1200px;
 }
 
-/* Innermost amber diamond — flips clockwise around the vertical axis. */
+/* Innermost amber diamond เนโฌโ€ flips clockwise around the vertical axis. */
 .wha-glass__amber {
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -6474,7 +6483,7 @@ const WHA_STYLES = `
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
 /* Rotation is driven by SMIL <animateTransform> inside the SVG (see the
-   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS —
+   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS เนโฌโ€
    desktop Chrome/Edge here would not animate these <g> groups via CSS
    transform (both transform-box: view-box and fill-box stayed frozen on PC
    while mobile rotated). No CSS animation here on purpose. */
@@ -6484,7 +6493,7 @@ const WHA_STYLES = `
   animation: wha-fade 1.4s ease-out 1.4s both;
 }
 .wha-sigil__glyphs g g {
-  /* Subtle individual glyph staggered breath — pulse opacity to mimic
+  /* Subtle individual glyph staggered breath เนโฌโ€ pulse opacity to mimic
      candle-lit ink that brightens unevenly. */
   animation: wha-glyph-breath 6s ease-in-out infinite;
   transform-box: fill-box;
@@ -6552,7 +6561,7 @@ const WHA_STYLES = `
   animation: wha-fade-up 0.7s cubic-bezier(0.16,1,0.3,1) 1.9s both;
 }
 .wha-cta::before, .wha-cta::after {
-  content: "✦"; position: absolute; top: 50%; transform: translateY(-50%);
+  content: "เนยเธ"; position: absolute; top: 50%; transform: translateY(-50%);
   color: var(--sienna); font-size: 10px; font-family: serif;
 }
 .wha-cta::before { left: 14px; }

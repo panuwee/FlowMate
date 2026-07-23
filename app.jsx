@@ -2,7 +2,7 @@
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260723-5";
+  const fallbackVersion = "v20260723-6";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -135,7 +135,7 @@ function App() {
     } catch (e) {}
     return null;
   });
-  // status: "loading" → "signed-in" | "signed-out".
+  // status: "loading" เนยโ€ "signed-in" | "signed-out".
   // Loading shows a small splash. Signed-out shows the Login landing page.
   // Signed-in renders the full FlowMate app.
   const [authState, setAuthState] = useStateApp({ status: "loading", user: null });
@@ -319,7 +319,7 @@ function App() {
     }
 
     // H-13: do NOT race the whole init against a hard timeout that commits to
-    // "signed-out" — a slow-but-valid session would then be stuck on the login
+    // "signed-out" เนโฌโ€ a slow-but-valid session would then be stuck on the login
     // screen with its real result discarded. Instead:
     //  - `decided` flips true when init resolves (the authoritative result).
     //  - the timeout only shows the login screen PROVISIONALLY while init is
@@ -388,7 +388,7 @@ function App() {
       } catch (e) {}
       await window.flowmateSignInWithGoogle();
       // Browser is now redirecting to Google. Leave isSigningIn=true so
-      // the button stays in its "Redirecting…" state until navigation.
+      // the button stays in its "Redirectingเนโฌเธ" state until navigation.
     } catch (error) {
       console.error("[FlowMate Auth] sign-in failed:", error);
       window.alert("Sign-in failed: " + window.flowmateUserError(error, "unknown error"));
@@ -1414,7 +1414,7 @@ function getMarketingPlanAssetFirstPublishDate(asset) {
 }
 
 function getMarketingPlanTimelineAssetMeta(asset) {
-  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" · ") || "No details";
+  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" เธขเธ— ") || "No details";
 }
 
 const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [
@@ -2251,8 +2251,16 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   const contentResult = await window.flowmateSupabase
     .from("marketing_content_items")
     .update(contentPayload)
-    .eq("id", row.contentItemId);
+    .eq("id", row.contentItemId)
+    .select("id,sub_pic_user_id,sub_pic_name")
+    .maybeSingle();
   if (contentResult.error) throw contentResult.error;
+  if (!contentResult.data) {
+    throw new Error("This Working Sheet row was not updated. You may no longer have permission; run the updated supabase/marketing_plan.sql and refresh.");
+  }
+  if (contentPayload.sub_pic_user_id && contentResult.data.sub_pic_user_id !== contentPayload.sub_pic_user_id) {
+    throw new Error("Sub PIC was not saved. Run the updated supabase/marketing_plan.sql and refresh before trying again.");
+  }
 
   await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
   await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime);
@@ -2864,7 +2872,7 @@ function MarketingPlanTimelineScreen() {
                     <div>
                       <div className="strong">{campaign.name}</div>
                       <div className="muted" style={{ fontSize: 12 }}>
-                        {[campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" · ")}
+                        {[campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" เธขเธ— ")}
                       </div>
                     </div>
                     <div className="row" style={{ gap: 6 }}>
@@ -3039,7 +3047,7 @@ function MarketingPlanTimelineScreen() {
                         background: "#F7F7F7",
                       }}>
                         <div className="strong">{campaign.name}</div>
-                        <div className="muted" style={{ fontSize: 12 }}>{campaign.team || "No team"} · {campaign.assets.length} assets</div>
+                        <div className="muted" style={{ fontSize: 12 }}>{campaign.team || "No team"} เธขเธ— {campaign.assets.length} assets</div>
                       </div>
                       <div></div>
                     </div>
@@ -3314,7 +3322,7 @@ function MarketingPlanChannelPlanScreen() {
                           <td>
                             <div>{placement.contentTitle}</div>
                             <div className="muted" style={{ fontSize: 12 }}>
-                              {[placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" · ") || "No details"}
+                              {[placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" เธขเธ— ") || "No details"}
                             </div>
                           </td>
                           <td>
@@ -4242,6 +4250,7 @@ function MarketingPlanWorkingSheetScreen() {
                 <Icon name="x" />
               </button>
             </div>
+            {exportMessage && <div className="reason-box" role="alert">{exportMessage}</div>}
             <div className="form-grid">
               <label className="field field--full">
                 <span className="field__label">Product / Event *</span>
@@ -5181,7 +5190,7 @@ function LoadingScreen() {
         borderTopColor: "var(--garena-deep-blue, #2E546D)",
         animation: "flowmate-spin 0.9s linear infinite",
       }} />
-      <div style={{ fontSize: 13 }}>Checking session…</div>
+      <div style={{ fontSize: 13 }}>Checking sessionเนโฌเธ</div>
       <style>{`@keyframes flowmate-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
@@ -5211,7 +5220,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     }
   }, []);
 
-  // Bioluminescent orb spawner — orbs rise on their own from the bottom of the
+  // Bioluminescent orb spawner เนโฌโ€ orbs rise on their own from the bottom of the
   // screen and drift up past the top, independent of the pointer. Uses the Web
   // Animations API rather than CSS keyframes + custom properties because some
   // desktop Chrome builds refuse to interpolate var(--wha-drift) inside a
@@ -5229,10 +5238,10 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
     function spawn() {
       const orb = document.createElement("span");
       orb.className = "wha-orb";
-      const size  = 18 + Math.random() * 20;                  // 18–38px
+      const size  = 18 + Math.random() * 20;                  // 18เนโฌโ€38px
       const c     = colors[Math.floor(Math.random() * colors.length)];
-      const drift = Math.random() * 160 - 80;                 // ±80px
-      const duration = 9000 + Math.random() * 7000;           // 9–16s
+      const drift = Math.random() * 160 - 80;                 // เธขเธ‘80px
+      const duration = 9000 + Math.random() * 7000;           // 9เนโฌโ€16s
 
       orb.style.width = orb.style.height = size + "px";
       orb.style.left  = (3 + Math.random() * 94) + "%";
@@ -5307,7 +5316,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
             <defs>
               <path id="wha-rune-arc" d="M 250,250 m -185,0 a 185,185 0 1,1 370,0 a 185,185 0 1,1 -370,0"/>
             </defs>
-            {/* outer ring + sigil glyphs — rotate CW together. Uses SMIL
+            {/* outer ring + sigil glyphs เนโฌโ€ rotate CW together. Uses SMIL
                 <animateTransform> with an explicit rotation centre (250,250)
                 instead of a CSS transform animation: desktop Chrome/Edge here
                 refused to animate the <g> via CSS (transform-box view-box AND
@@ -5335,7 +5344,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                         fill="var(--sienna)"
                         transform={`rotate(${deg} 250 250)`}/>
               ))}
-              {/* Sigil glyph ring — 8 hand-drawn marks at 45° intervals */}
+              {/* Sigil glyph ring เนโฌโ€ 8 hand-drawn marks at 45เธขเธ intervals */}
               <g className="wha-sigil__glyphs" aria-hidden="true">
                 {[0, 45, 90, 135, 180, 225, 270, 315].map((angle, i) => (
                   <g key={angle}
@@ -5345,7 +5354,7 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
                 ))}
               </g>
             </g>
-            {/* pentagram — rotates CCW via SMIL (see note above) */}
+            {/* pentagram เนโฌโ€ rotates CCW via SMIL (see note above) */}
             <g className="wha-sigil__penta">
               <animateTransform attributeName="transform" attributeType="XML"
                                 type="rotate" from="360 250 250" to="0 250 250"
@@ -5366,22 +5375,22 @@ function LoginScreen({ onSignIn, isSigningIn, authError }) {
           </svg>
         </div>
 
-        <p className="wha-runes wha-runes--hero">· Garena · FCO · Thailand ·</p>
+        <p className="wha-runes wha-runes--hero">เธขเธ— Garena เธขเธ— FCO เธขเธ— Thailand เธขเธ—</p>
 
         {authError && (
           <div className="wha-error wha-reveal" role="alert">
-            <strong>⚠</strong> {authError}
+            <strong>เนยย </strong> {authError}
           </div>
         )}
 
         <button type="button" onClick={onSignIn} disabled={isSigningIn} className="wha-cta">
           <span className="wha-cta__glyph" aria-hidden="true"><GoogleLogo /></span>
           <span className="wha-cta__label">
-            {isSigningIn ? "Crossing the threshold…" : "Sign in with Google"}
+            {isSigningIn ? "Crossing the thresholdเนโฌเธ" : "Sign in with Google"}
           </span>
         </button>
 
-        <p className="wha-runes wha-runes--small">⚝ Garena Workspace only ⚝</p>
+        <p className="wha-runes wha-runes--small">เนยย Garena Workspace only เนยย</p>
       </main>
     </div>
   );
@@ -5433,7 +5442,7 @@ function SigilGlyph({ kind }) {
           <path d="M -3,-8 Q 5,-3 0,0 Q -5,3 3,8"/>
         </g>
       );
-    case 4: // Boxed cross — square with inscribed diamond, cardinal lines
+    case 4: // Boxed cross เนโฌโ€ square with inscribed diamond, cardinal lines
       return (
         <g fill="none" stroke={stroke} strokeWidth={sw} strokeLinejoin="round">
           <rect x="-5" y="-5" width="10" height="10"/>
@@ -5702,7 +5711,7 @@ const WHA_STYLES = `
   perspective: 1200px;
 }
 
-/* Innermost amber diamond — flips clockwise around the vertical axis. */
+/* Innermost amber diamond เนโฌโ€ flips clockwise around the vertical axis. */
 .wha-glass__amber {
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -5737,7 +5746,7 @@ const WHA_STYLES = `
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
 /* Rotation is driven by SMIL <animateTransform> inside the SVG (see the
-   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS —
+   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS เนโฌโ€
    desktop Chrome/Edge here would not animate these <g> groups via CSS
    transform (both transform-box: view-box and fill-box stayed frozen on PC
    while mobile rotated). No CSS animation here on purpose. */
@@ -5747,7 +5756,7 @@ const WHA_STYLES = `
   animation: wha-fade 1.4s ease-out 1.4s both;
 }
 .wha-sigil__glyphs g g {
-  /* Subtle individual glyph staggered breath — pulse opacity to mimic
+  /* Subtle individual glyph staggered breath เนโฌโ€ pulse opacity to mimic
      candle-lit ink that brightens unevenly. */
   animation: wha-glyph-breath 6s ease-in-out infinite;
   transform-box: fill-box;
@@ -5815,7 +5824,7 @@ const WHA_STYLES = `
   animation: wha-fade-up 0.7s cubic-bezier(0.16,1,0.3,1) 1.9s both;
 }
 .wha-cta::before, .wha-cta::after {
-  content: "✦"; position: absolute; top: 50%; transform: translateY(-50%);
+  content: "เนยเธ"; position: absolute; top: 50%; transform: translateY(-50%);
   color: var(--sienna); font-size: 10px; font-family: serif;
 }
 .wha-cta::before { left: 14px; }
@@ -5975,7 +5984,7 @@ const WHA_STYLES = `
 `;
 
 // ===========================================================================
-// H-11: promise-based prompt modal — replaces window.prompt (which blocks the
+// H-11: promise-based prompt modal เนโฌโ€ replaces window.prompt (which blocks the
 // UI, can't validate, and is suppressed by some enterprise browsers).
 //   const value = await window.flowmatePrompt({ title, label, required, ... });
 //   -> resolves the trimmed string, or null if cancelled.
