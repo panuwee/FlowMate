@@ -299,7 +299,7 @@ async function loadFlowMateListRows() {
     throw new Error("Supabase client is not ready.");
   }
 
-  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult] = await Promise.all([
+  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_items")
       .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at")
@@ -344,6 +344,10 @@ async function loadFlowMateListRows() {
       .select("id,work_item_id,actor_user_id,event_type,from_status,to_status,metadata,created_at")
       .order("created_at", { ascending: false }),
     loadFlowMateLatestAssignmentRuns(),
+    window.flowmateSupabase
+      .from("marketing_content_items")
+      .select("flowmate_work_item_id,sub_pic_user_id,brief_link")
+      .not("sub_pic_user_id", "is", null),
   ]);
 
   const firstError =
@@ -358,7 +362,8 @@ async function loadFlowMateListRows() {
     watchersResult.error ||
     aiTagsResult.error ||
     eventsResult.error ||
-    assignmentRunsResult.error;
+    assignmentRunsResult.error ||
+    marketingSubPicResult.error;
 
   if (firstError) throw firstError;
 
@@ -434,6 +439,14 @@ async function loadFlowMateListRows() {
   (assignmentRunsResult.data || []).forEach((run) => {
     if (!assignmentRunByWorkItemId[run.work_item_id]) assignmentRunByWorkItemId[run.work_item_id] = run;
   });
+  const marketingSubPicByWorkItemId = Object.fromEntries(
+    (marketingSubPicResult.data || []).flatMap((row) => {
+      const keys = row.flowmate_work_item_id ? [row.flowmate_work_item_id] : [];
+      const match = String(row.brief_link || "").match(/#detail\/([^/?#]+)/i);
+      if (match && match[1]) keys.push(match[1].toUpperCase());
+      return keys.map((key) => [key, row.sub_pic_user_id]);
+    }),
+  );
 
   syncFlowMateMembers(membersResult.data || []);
   syncFlowMateMentionUsers(usersResult.data || []);
@@ -532,6 +545,7 @@ async function loadFlowMateListRows() {
       overdue: Boolean(flags.is_overdue),
       dueSoon: Boolean(flags.is_due_soon),
       isSupabaseRow: true,
+      marketingPlanSubPicUserId: marketingSubPicByWorkItemId[item.id] || marketingSubPicByWorkItemId[item.display_id] || null,
     };
   });
   emitFlowMateSynced("work_items");

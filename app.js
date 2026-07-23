@@ -1404,6 +1404,8 @@ function normalizeMarketingPlanTimelineRow(row) {
     contentTier: row.content_tier || "",
     picUserId: row.pic_user_id || "",
     picName: row.pic_name || "",
+    subPicUserId: row.sub_pic_user_id || "",
+    subPicName: row.sub_pic_name || "",
     briefLink: row.brief_link || "",
     flowmateWorkItemId: row.flowmate_work_item_id || "",
     flowmateDisplayId: row.flowmate_display_id || "",
@@ -1723,6 +1725,8 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     details: "",
     contentTier: "B",
     picName: "",
+    subPicUserId: "",
+    subPicName: "",
     briefLink: "",
     channels: ["facebook"],
     note: ""
@@ -1923,6 +1927,62 @@ function getMarketingPlanCurrentUserDefaults() {
     picName: user.name || user.email || "Unknown"
   };
 }
+function getMarketingPlanSubPicOptions() {
+  return (window.MEMBERS || []).filter(member => member && member.userId && member.name).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+function filterMarketingPlanSubPicOptions(options, query) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  if (!normalizedQuery) return [];
+  return (options || []).filter(option => String(option.name || "").toLowerCase().startsWith(normalizedQuery)).slice(0, 8);
+}
+function MarketingPlanSubPicPicker({
+  value,
+  onChange
+}) {
+  const selected = getMarketingPlanSubPicOptions().find(option => option.userId === value.subPicUserId);
+  const [query, setQuery] = useStateApp(value.subPicName || selected?.name || "");
+  useEffectApp(() => {
+    setQuery(value.subPicName || selected?.name || "");
+  }, [value.subPicUserId, value.subPicName]);
+  const matches = filterMarketingPlanSubPicOptions(getMarketingPlanSubPicOptions(), query);
+  function updateQuery(nextQuery) {
+    const exact = getMarketingPlanSubPicOptions().find(option => String(option.name).toLowerCase() === String(nextQuery || "").trim().toLowerCase());
+    setQuery(nextQuery);
+    onChange({
+      subPicUserId: exact ? exact.userId : "",
+      subPicName: nextQuery
+    });
+  }
+  function selectOption(option) {
+    setQuery(option.name);
+    onChange({
+      subPicUserId: option.userId,
+      subPicName: option.name
+    });
+  }
+  return React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Sub PIC"), React.createElement("div", {
+    className: "marketing-member-picker"
+  }, React.createElement("input", {
+    className: "input",
+    value: query,
+    onChange: event => updateQuery(event.target.value),
+    placeholder: "Search name, e.g. A",
+    autoComplete: "off"
+  }), matches.length > 0 && React.createElement("div", {
+    className: "marketing-member-picker__options",
+    role: "listbox"
+  }, matches.map(option => React.createElement("button", {
+    key: option.userId,
+    type: "button",
+    className: "marketing-member-picker__option",
+    onMouseDown: event => event.preventDefault(),
+    onClick: () => selectOption(option)
+  }, option.name)))));
+}
 function openNativeTimePicker(event) {
   const input = event.currentTarget;
   if (!input || typeof input.showPicker !== "function") return;
@@ -2116,6 +2176,8 @@ async function createMarketingPlanWorkingSheetRow(form) {
     content_tier: form.contentTier || null,
     pic_name: getMarketingPlanCurrentUserDefaults().picName || null,
     pic_user_id: getMarketingPlanCurrentUserDefaults().picUserId || null,
+    sub_pic_name: String(form.subPicName || "").trim() || null,
+    sub_pic_user_id: String(form.subPicUserId || "").trim() || null,
     brief_link: String(form.briefLink || "").trim() || null,
     source_start_date: form.launchDate || null,
     source_start_time: form.publishTime || null,
@@ -2244,6 +2306,8 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
     details: String(form.details || form.contentTitle || "").trim(),
     format: form.assetType || null,
     content_tier: form.contentTier || null,
+    sub_pic_name: String(form.subPicName || "").trim() || null,
+    sub_pic_user_id: String(form.subPicUserId || "").trim() || null,
     brief_link: String(form.briefLink || "").trim() || null,
     source_start_date: form.publishDate || null,
     source_start_time: normalizedTime
@@ -2278,8 +2342,8 @@ async function deleteMarketingPlanWorkingSheetRow(row) {
 }
 function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
   const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
-  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
-  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
+  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
+  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, row.subPicName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
   const channelSuffix = selectedChannel === "all" ? "all-channels" : selectedChannel;
   const filename = `marketing-plan-${selectedMonth || "no-month"}-${channelSuffix}.csv`;
   if (window.flowmateDownloadCsv) {
@@ -3702,7 +3766,7 @@ function MarketingPlanWorkingSheetScreen() {
   function canManageMarketingPlanWorkingRow(row) {
     const currentUser = window.FLOWMATE_CURRENT_USER || {};
     if (currentUser.role === "admin") return true;
-    return Boolean(row && row.picUserId && currentUser.id && row.picUserId === currentUser.id);
+    return Boolean(row && currentUser.id && (row.picUserId === currentUser.id || row.subPicUserId === currentUser.id));
   }
   function updateSheetForm(key, value) {
     setSheetForm(current => ({
@@ -3737,6 +3801,8 @@ function MarketingPlanWorkingSheetScreen() {
       publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || "",
       assetType: row.format || "Banner",
       contentTier: row.contentTier || "B",
+      subPicUserId: row.subPicUserId || "",
+      subPicName: row.subPicName || "",
       briefLink: row.briefLink || "",
       channels: selectedChannels
     });
@@ -3776,6 +3842,10 @@ function MarketingPlanWorkingSheetScreen() {
     }
     if (!editForm.channels || editForm.channels.length === 0) {
       setExportMessage("Select at least one Channel Tag.");
+      return;
+    }
+    if (String(editForm.subPicName || "").trim() && !String(editForm.subPicUserId || "").trim()) {
+      setExportMessage("Select a Sub PIC from the matching name suggestions.");
       return;
     }
     setUpdatingRowId(editingWorkingRow.contentItemId);
@@ -3860,6 +3930,13 @@ function MarketingPlanWorkingSheetScreen() {
       setSaveState({
         status: "error",
         message: "Select at least one Channel Tag."
+      });
+      return;
+    }
+    if (String(sheetForm.subPicName || "").trim() && !String(sheetForm.subPicUserId || "").trim()) {
+      setSaveState({
+        status: "error",
+        message: "Select a Sub PIC from the matching name suggestions."
       });
       return;
     }
@@ -4048,7 +4125,13 @@ function MarketingPlanWorkingSheetScreen() {
   }, MARKETING_PLAN_CONTENT_TIERS.map(tier => React.createElement("option", {
     key: tier,
     value: tier
-  }, tier)))), React.createElement("label", {
+  }, tier)))), React.createElement(MarketingPlanSubPicPicker, {
+    value: sheetForm,
+    onChange: changes => setSheetForm(current => ({
+      ...current,
+      ...changes
+    }))
+  }), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
@@ -4186,6 +4269,8 @@ function MarketingPlanWorkingSheetScreen() {
   }, "Brief Link"), React.createElement("th", {
     className: "col-pic"
   }, "PIC"), React.createElement("th", {
+    className: "col-sub-pic"
+  }, "Sub PIC"), React.createElement("th", {
     className: "col-status"
   }, "Status"), React.createElement("th", {
     className: "col-actions"
@@ -4211,7 +4296,7 @@ function MarketingPlanWorkingSheetScreen() {
       rel: "noreferrer"
     }, "Open") : React.createElement("span", {
       className: "muted"
-    }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
+    }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, row.subPicName || "-"), React.createElement("td", null, React.createElement("select", {
       className: "select marketing-working-status",
       value: rowStatusValue,
       disabled: !canManageRow || updatingRowId === row.contentItemId,
@@ -4242,7 +4327,7 @@ function MarketingPlanWorkingSheetScreen() {
       onClick: () => openFlowMateCreativeBriefFromMarketingRow(row)
     }, "Create Brief"))));
   }), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "12",
+    colSpan: "13",
     className: "muted"
   }, "No rows match the selected filters."))))))), editingWorkingRow && editForm && React.createElement("div", {
     className: "modal-backdrop",
@@ -4326,7 +4411,13 @@ function MarketingPlanWorkingSheetScreen() {
   }, MARKETING_PLAN_CONTENT_TIERS.map(tier => React.createElement("option", {
     key: tier,
     value: tier
-  }, tier)))), React.createElement("label", {
+  }, tier)))), React.createElement(MarketingPlanSubPicPicker, {
+    value: editForm,
+    onChange: changes => setEditForm(current => ({
+      ...(current || {}),
+      ...changes
+    }))
+  }), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"

@@ -628,8 +628,33 @@ button:disabled {
 .marketing-working-table .col-time { width: 72px; }
 .marketing-working-table .col-link { width: 76px; }
 .marketing-working-table .col-pic { width: 58px; }
+.marketing-working-table .col-sub-pic { width: 76px; }
 .marketing-working-table .col-status { width: 108px; }
 .marketing-working-table .col-actions { width: 124px; }
+
+.marketing-member-picker { position: relative; }
+.marketing-member-picker__options {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  top: calc(100% + 3px);
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  background: var(--garena-white);
+  border: 1px solid var(--garena-light-grey);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, .12);
+}
+.marketing-member-picker__option {
+  border: 0;
+  background: transparent;
+  padding: 7px 8px;
+  text-align: left;
+  color: var(--garena-black);
+  cursor: pointer;
+}
+.marketing-member-picker__option:hover { background: var(--garena-badge-bg); }
 .marketing-channel-tags {
   display: flex;
   flex-wrap: wrap;

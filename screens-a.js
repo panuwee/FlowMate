@@ -2269,7 +2269,7 @@ function DetailScreen({
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.channel || w.size || w.campaign || w.publishLabel || w.launchLabel);
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
-  const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || currentUserId === w.requesterUserId || currentUserId === w.assigneeUserId || owner?.userId === currentUserId));
+  const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || currentUserId === w.requesterUserId || currentUserId === w.assigneeUserId || owner?.userId === currentUserId || currentUserId === w.marketingPlanSubPicUserId));
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;

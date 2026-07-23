@@ -1760,7 +1760,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     isAdminUser ||
     currentUserId === w.requesterUserId ||
     currentUserId === w.assigneeUserId ||
-    owner?.userId === currentUserId
+    owner?.userId === currentUserId ||
+    currentUserId === w.marketingPlanSubPicUserId
   ));
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
