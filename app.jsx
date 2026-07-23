@@ -1,7 +1,22 @@
 ﻿// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
-const FLOWMATE_APP_VERSION = "v20260709-6";
+function getFlowMateAppVersion() {
+  const fallbackVersion = "v20260715-4";
+  try {
+    const scripts = Array.from(document.scripts || []);
+    const appScript = scripts.find(script => {
+      const src = script.getAttribute("src") || "";
+      return /(?:^|\/)app\.js(?:\?|$)/.test(src);
+    });
+    const src = appScript ? appScript.getAttribute("src") || "" : "";
+    const deployVersion = new URL(src, window.location.href).searchParams.get("v");
+    if (deployVersion) return deployVersion.startsWith("v") ? deployVersion : `v${deployVersion}`;
+  } catch (e) {}
+  return fallbackVersion;
+}
+
+const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 
 const NAV = [
@@ -991,15 +1006,13 @@ function ProductBookShell({
 
 function ProductBookPatchView({ patch }) {
   const tags = Array.isArray(patch.tags) ? patch.tags : [];
-  const audience = Array.isArray(patch.audience) ? patch.audience : [];
   const tagAnchors = buildProductBookAnchorMap(patch);
+  const markdown = getProductBookPatchMarkdown(patch);
   return (
     <div>
       <div className="page-head">
         <div>
           <div className="eyebrow">Product Book / {patch.monthLabel || patch.id}</div>
-          <h1>{patch.title || patch.id || "Patch Note"}</h1>
-          <p>{patch.id || "MS26.07"} · {audience.join(", ") || "Team-facing patch note"}</p>
         </div>
       </div>
       <div className="product-book-sticky-zone">
@@ -1017,13 +1030,15 @@ function ProductBookPatchView({ patch }) {
         </div>
       </div>
       <div className="section section--product-book">
-        <ProductBookMarkdown markdown={patch.contentMarkdown || ""} />
+        <ProductBookMarkdown markdown={markdown} />
       </div>
     </div>
   );
 }
 
 const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
+  "fp+10": "ms26.07-top-updates-fp-10-and-trait-update",
+  "trait update": "ms26.07-top-updates-fp-10-and-trait-update",
   enhancement: "3.-key-highlight-1",
   "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
   "transfer market": "5.-key-highlight-3-transfer-market-team-color",
@@ -1035,6 +1050,12 @@ const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
 
 function normalizeProductBookLabel(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function getProductBookPatchMarkdown(patch) {
+  const topUpdates = String((patch && patch.topUpdatesMarkdown) || "").trim();
+  const content = String((patch && patch.contentMarkdown) || "").trim();
+  return [topUpdates, content].filter(Boolean).join("\r\n\r\n");
 }
 
 function productBookSlug(value) {
@@ -1065,7 +1086,7 @@ function getProductBookHeadings(markdown) {
 }
 
 function buildProductBookAnchorMap(patch) {
-  const headings = getProductBookHeadings(patch && patch.contentMarkdown);
+  const headings = getProductBookHeadings(getProductBookPatchMarkdown(patch));
   const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
   const candidates = [
     ...headings,

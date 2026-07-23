@@ -84,16 +84,18 @@ button:disabled {
   max-width: 1480px;
 }
 .app__main--product-book {
-  padding: var(--s-5) var(--s-6) var(--s-7);
+  padding: 0 var(--s-6) var(--s-7);
 }
 .app__main:has(.product-book-content) {
-  padding: var(--s-5) var(--s-6) var(--s-7);
+  padding: 0 var(--s-6) var(--s-7);
 }
 .app__main--product-book > div {
   max-width: 1360px;
+  padding-top: var(--s-5);
 }
 .app__main:has(.product-book-content) > div {
   max-width: 1360px;
+  padding-top: var(--s-5);
 }
 
 /* ---------- Topbar pieces ---------- */
@@ -364,6 +366,14 @@ button:disabled {
   color: var(--garena-grey);
   line-height: 1.4;
   margin: 4px 0 0;
+}
+.app__main--product-book .page-head {
+  align-items: flex-start;
+  padding-bottom: 4px;
+}
+.app__main--product-book .page-head h1 {
+  line-height: 1.32;
+  padding-bottom: 2px;
 }
 
 /* ---------- Buttons ---------- */
@@ -1114,12 +1124,11 @@ button:disabled {
 .product-book-sticky-zone {
   position: sticky;
   top: 0;
-  z-index: 8;
-  margin: 0 -2px 14px;
-  padding: 10px 2px;
-  background: rgba(247, 247, 248, 0.96);
+  z-index: 30;
+  margin: 0 -26px 14px;
+  padding: 10px 26px;
+  background: #FAFAFA;
   border-bottom: var(--border-hairline);
-  backdrop-filter: blur(8px);
 }
 .product-book-tag-nav {
   display: flex;

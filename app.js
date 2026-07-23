@@ -4,7 +4,21 @@ const {
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260709-6";
+function getFlowMateAppVersion() {
+  const fallbackVersion = "v20260715-4";
+  try {
+    const scripts = Array.from(document.scripts || []);
+    const appScript = scripts.find(script => {
+      const src = script.getAttribute("src") || "";
+      return /(?:^|\/)app\.js(?:\?|$)/.test(src);
+    });
+    const src = appScript ? appScript.getAttribute("src") || "" : "";
+    const deployVersion = new URL(src, window.location.href).searchParams.get("v");
+    if (deployVersion) return deployVersion.startsWith("v") ? deployVersion : `v${deployVersion}`;
+  } catch (e) {}
+  return fallbackVersion;
+}
+const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const NAV = [{
   group: "Personal",
@@ -1144,13 +1158,13 @@ function ProductBookPatchView({
   patch
 }) {
   const tags = Array.isArray(patch.tags) ? patch.tags : [];
-  const audience = Array.isArray(patch.audience) ? patch.audience : [];
   const tagAnchors = buildProductBookAnchorMap(patch);
+  const markdown = getProductBookPatchMarkdown(patch);
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("div", {
     className: "eyebrow"
-  }, "Product Book / ", patch.monthLabel || patch.id), React.createElement("h1", null, patch.title || patch.id || "Patch Note"), React.createElement("p", null, patch.id || "MS26.07", " · ", audience.join(", ") || "Team-facing patch note"))), React.createElement("div", {
+  }, "Product Book / ", patch.monthLabel || patch.id))), React.createElement("div", {
     className: "product-book-sticky-zone"
   }, React.createElement("div", {
     className: "product-book-tag-nav",
@@ -1163,10 +1177,12 @@ function ProductBookPatchView({
   }, tag)))), React.createElement("div", {
     className: "section section--product-book"
   }, React.createElement(ProductBookMarkdown, {
-    markdown: patch.contentMarkdown || ""
+    markdown: markdown
   })));
 }
 const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
+  "fp+10": "ms26.07-top-updates-fp-10-and-trait-update",
+  "trait update": "ms26.07-top-updates-fp-10-and-trait-update",
   enhancement: "3.-key-highlight-1",
   "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
   "transfer market": "5.-key-highlight-3-transfer-market-team-color",
@@ -1177,6 +1193,11 @@ const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
 };
 function normalizeProductBookLabel(value) {
   return String(value || "").trim().toLowerCase();
+}
+function getProductBookPatchMarkdown(patch) {
+  const topUpdates = String(patch && patch.topUpdatesMarkdown || "").trim();
+  const content = String(patch && patch.contentMarkdown || "").trim();
+  return [topUpdates, content].filter(Boolean).join("\r\n\r\n");
 }
 function productBookSlug(value) {
   return normalizeProductBookLabel(value).replace(/[*_`]/g, "").replace(/[^a-z0-9.]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
@@ -1194,7 +1215,7 @@ function getProductBookHeadings(markdown) {
   }).filter(item => item.anchor);
 }
 function buildProductBookAnchorMap(patch) {
-  const headings = getProductBookHeadings(patch && patch.contentMarkdown);
+  const headings = getProductBookHeadings(getProductBookPatchMarkdown(patch));
   const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
   const candidates = [...headings, ...toc.map(item => ({
     title: item.title,

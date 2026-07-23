@@ -85,6 +85,7 @@ alter table public.comments enable row level security;
 alter table public.checklist_items enable row level security;
 alter table public.notifications enable row level security;
 alter table public.capacity_overrides enable row level security;
+alter table public.flowmate_capacity_allocations enable row level security;
 alter table public.user_whitelist enable row level security;
 
 drop policy if exists "active users can read users" on public.users;
@@ -194,6 +195,11 @@ with check (
       and tm.user_id = public.current_app_user_id()
   )
 );
+
+-- Capacity allocations are an internal assignment-engine table.
+-- Reads/writes happen through security-definer RPCs, not direct client access.
+revoke all on table public.flowmate_capacity_allocations from anon;
+revoke all on table public.flowmate_capacity_allocations from authenticated;
 
 drop policy if exists "active users can read whitelist" on public.user_whitelist;
 create policy "active users can read whitelist"

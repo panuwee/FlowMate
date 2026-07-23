@@ -22,6 +22,8 @@
     "summaryLanguage": "th",
     "tags": [
       "Enhancement",
+      "FP+10",
+      "Trait Update",
       "Ranked Mode 4.5",
       "Transfer Market",
       "Team Color",
@@ -29,6 +31,7 @@
       "QoL",
       "Performance"
     ],
+    "topUpdatesMarkdown": "# MS26.07 Top Updates: FP+10 and Trait Update\r\n\r\n## FP+10\r\n\r\n* เพิ่มข้อมูล **FP+10** เป็นหนึ่งในหัวข้ออัปเดตสำคัญของ MS26.07\r\n\r\n## นิสัยปรับใหม่ MS26.07\r\n\r\n* **Grade 5:** Normal trait x1 หรือ นิสัยธรรมดา\r\n* **Grade 8:** Gold trait x1 หรือ นิสัยพิเศษ\r\n* **Grade 11:** Coach trait x1 หรือ นิสัยโค้ช\r\n\r\n---\r\n\r\n",
     "tableOfContents": [
       {
         "level": 1,
