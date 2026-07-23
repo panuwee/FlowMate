@@ -1,4 +1,4 @@
-﻿// FlowMate - Screens part A: My Work, Create, Detail
+// FlowMate - Screens part A: My Work, Create, Detail
 const { useState, useEffect } = React;
 
 /* ============================================================
@@ -610,11 +610,18 @@ function countFlowMateCapacityBucketsInclusive(startDate, startHalf, endDate) {
   return bucketCount;
 }
 
-function getFlowMateCreativeEffortEstimate(draft) {
-  const typeKey = getFlowMateCreativeTypeOption(draft?.assetSubtype).key;
+function getFlowMateCreativeEffortForItem(assetSubtype, assetCount) {
+  const typeKey = getFlowMateCreativeTypeOption(assetSubtype).key;
   const unitEffort = FLOWMATE_CREATIVE_UNIT_EFFORT[typeKey] || 4;
-  const assetCount = Math.max(1, Number(draft?.assetCount || 1));
-  return Math.max(1, Math.ceil(unitEffort * assetCount));
+  return Math.max(1, Math.ceil(unitEffort * Math.max(1, Number(assetCount || 1))));
+}
+
+function getFlowMateCreativeEffortEstimate(draft) {
+  let effort = getFlowMateCreativeEffortForItem(draft?.assetSubtype, draft?.assetCount);
+  if (String(draft?.assetSubtype2 || "").trim()) {
+    effort += getFlowMateCreativeEffortForItem(draft.assetSubtype2, draft.assetCount2);
+  }
+  return effort;
 }
 
 function getFlowMateCreativeTimePressure(draft) {
@@ -626,12 +633,14 @@ function getFlowMateCreativeTimePressure(draft) {
   const normalCapacity = bucketCount * FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET;
   const effort = getFlowMateCreativeEffortEstimate(draft);
   const assetCount = Math.max(1, Number(draft?.assetCount || 1));
-  const skillLabel = getFlowMateCreativeTypeLabel(draft?.assetSubtype);
+  const hasSecondItem = Boolean(String(draft?.assetSubtype2 || "").trim());
+  const skillLabel = [getFlowMateCreativeTypeLabel(draft?.assetSubtype), hasSecondItem ? getFlowMateCreativeTypeLabel(draft.assetSubtype2) : ""].filter(Boolean).join(" + ");
+  const assetCountLabel = hasSecondItem ? `${assetCount} + ${Math.max(1, Number(draft?.assetCount2 || 1))}` : String(assetCount);
   return {
     effort,
     workingDays,
     normalCapacity,
-    assetCount,
+    assetCount: assetCountLabel,
     skillLabel,
     launchDate,
     dueDate,
@@ -657,15 +666,21 @@ function normalizeFlowMateQuickDraft(draft) {
 function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
+  const creativeType2 = String(nextDraft.assetSubtype2 || "").trim() ? getFlowMateCreativeTypeOption(nextDraft.assetSubtype2) : null;
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
+  const assetCount2Number = Number(nextDraft.assetCount2);
+  const assetCount2 = creativeType2 && Number.isInteger(assetCount2Number) && assetCount2Number >= 1 ? String(assetCount2Number) : String(nextDraft.assetCount2 || "");
   return {
     ...nextDraft,
     requesterTeam: getDefaultRequesterTeam(),
     assetType: creativeType.assetType,
     assetSubtype: creativeType.key,
     assetCount,
+    assetType2: creativeType2 ? creativeType2.assetType : "",
+    assetSubtype2: creativeType2 ? creativeType2.key : "",
+    assetCount2,
     publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || FLOWMATE_PUBLISH_TIME_OPTIONS[0],
     launchDate,
     dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
@@ -712,6 +727,9 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "assetType",
     "assetSubtype",
     "assetCount",
+    "assetType2",
+    "assetSubtype2",
+    "assetCount2",
     "platforms",
     "sizeFormat",
     "briefLink",
@@ -756,6 +774,9 @@ function getDefaultCreativeDraft() {
     assetType: "static-graphic",
     assetSubtype: FLOWMATE_CREATIVE_TYPE_OPTIONS[0].key,
     assetCount: "1",
+    assetType2: "",
+    assetSubtype2: "",
+    assetCount2: "",
     platforms: "Instagram",
     sizeFormat: "1080x1080",
     briefLink: "",
@@ -833,6 +854,11 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("productEvent", "Product / Event is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
+  if (String(row.assetSubtype2 || "").trim()) {
+    requirePositiveInteger("assetCount2", "Asset Count 2 must be at least 1 when Type / Skill 2 is selected.");
+  } else if (String(row.assetCount2 || "").trim()) {
+    errors.assetSubtype2 = "Type / Skill 2 is required when Asset Count 2 is provided.";
+  }
   requireField("platforms", "Channel Tag is required.");
   requireField("sizeFormat", "Size / format is required.");
   requireField("briefLink", "Brief link is required.");
@@ -1360,6 +1386,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
 }
 function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
+  const selectedCreativeType2Key = String(value.assetSubtype2 || "").trim();
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
@@ -1388,6 +1415,15 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
       onChange({ ...value, assetType: nextType.assetType, assetSubtype: nextType.key });
+      return;
+    }
+    if (field === "assetSubtype2") {
+      if (!next) {
+        onChange({ ...value, assetType2: "", assetSubtype2: "", assetCount2: "" });
+        return;
+      }
+      const nextType = getFlowMateCreativeTypeOption(next);
+      onChange({ ...value, assetType2: nextType.assetType, assetSubtype2: nextType.key, assetCount2: value.assetCount2 || "1" });
       return;
     }
     if (field === "launchDate") {
@@ -1442,6 +1478,19 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <label className="field__label">Asset Count <span className="req">*</span></label>
           <input className="input" type="number" min="1" step="1" value={value.assetCount} onChange={e => update("assetCount", e.target.value)} placeholder="1" />
           {errors.assetCount && <div className="field__error">{errors.assetCount}</div>}
+        </div>
+        <div className={`field ${errors.assetSubtype2 ? "field--error" : ""}`}>
+          <label className="field__label">Type / Skill 2</label>
+          <select className="select" value={selectedCreativeType2Key} onChange={e => update("assetSubtype2", e.target.value)}>
+            <option value="">No second item</option>
+            {FLOWMATE_CREATIVE_TYPE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select>
+          {errors.assetSubtype2 && <div className="field__error">{errors.assetSubtype2}</div>}
+        </div>
+        <div className={`field ${errors.assetCount2 ? "field--error" : ""}`}>
+          <label className="field__label">Asset Count 2 {selectedCreativeType2Key && <span className="req">*</span>}</label>
+          <input className="input" type="number" min="1" step="1" value={value.assetCount2 || ""} onChange={e => update("assetCount2", e.target.value)} placeholder={selectedCreativeType2Key ? "1" : "Optional"} disabled={!selectedCreativeType2Key} />
+          {errors.assetCount2 && <div className="field__error">{errors.assetCount2}</div>}
         </div>
         <div className={`field ${errors.platforms ? "field--error" : ""}`}>
           <label className="field__label">Channel Tag <span className="req">*</span></label>
@@ -2266,6 +2315,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Channel</div><div className="meta-row__val">{w.channel || w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Type / Skill</div><div className="meta-row__val">{w.subtype ? getFlowMateCreativeTypeLabel(w.subtype) : (ASSET_LABEL[w.assetType] || w.assetType || "-")}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Asset Count</div><div className="meta-row__val">{w.assetCount || 1}</div></div>
+                {w.subtype2 && <div className="meta-row"><div className="meta-row__lbl">Type / Skill 2</div><div className="meta-row__val">{getFlowMateCreativeTypeLabel(w.subtype2)}</div></div>}
+                {w.subtype2 && <div className="meta-row"><div className="meta-row__lbl">Asset Count 2</div><div className="meta-row__val">{w.assetCount2 || 1}</div></div>}
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.briefLink) ? <a href={window.flowmateSafeHttpUrl(w.briefLink)} target="_blank" rel="noopener noreferrer">Open brief</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.referenceLink) ? <a href={window.flowmateSafeHttpUrl(w.referenceLink)} target="_blank" rel="noopener noreferrer">Open reference</a> : "-"}</div></div>

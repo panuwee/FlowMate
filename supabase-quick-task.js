@@ -547,6 +547,8 @@ async function createFlowMateCreativeRequest(input) {
     ? input.platforms
     : (input.platforms || "").split(",").map((p) => p.trim()).filter(Boolean);
 
+  const assetSubtype2 = String(input.assetSubtype2 || "").trim();
+
   const { data, error } = await window.flowmateSupabase.rpc("create_creative_request", {
     p_actor_user_id:    flowmateActorId(),
     p_title:            input.title.trim(),
@@ -555,6 +557,9 @@ async function createFlowMateCreativeRequest(input) {
     p_asset_type:       input.assetType,
     p_asset_subtype:    input.assetSubtype || "",
     p_asset_count:      Number(input.assetCount || 1),
+    p_asset_type_2:     assetSubtype2 ? input.assetType2 : null,
+    p_asset_subtype_2:  assetSubtype2 || null,
+    p_asset_count_2:    assetSubtype2 ? Number(input.assetCount2 || 0) : null,
     p_platforms:        platforms,
     p_size_format:      input.sizeFormat || "",
     p_brief_link:       input.briefLink || "",
@@ -894,9 +899,14 @@ async function flowmateSignInWithGoogle() {
   // IMPORTANT: redirectTo MUST NOT contain a hash. Supabase appends
   // `#access_token=...` to the URL, and our own `#board` route fragment
   // would collide ("#board#access_token=...") and break token parsing.
-  // We stash the post-login route in sessionStorage and the App component
-  // restores it after auth init completes.
-  try { sessionStorage.setItem("flowmate:postLoginHash", "my-work"); } catch (e) {}
+  // New interactive sign-ins should land on the workspace chooser. Direct
+  // deep links still work for already-signed-in sessions because this marker
+  // is only written when the user actively clicks the Google login button.
+  try {
+    sessionStorage.removeItem("flowmate:postLoginHash");
+    sessionStorage.removeItem("flowmate:activeProduct");
+    sessionStorage.setItem("flowmate:showProductChoiceAfterLogin", "1");
+  } catch (e) {}
 
   const redirectTo = window.location.origin + window.location.pathname;
   const { error } = await window.flowmateSupabase.auth.signInWithOAuth({

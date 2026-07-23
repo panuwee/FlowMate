@@ -318,7 +318,7 @@ async function loadFlowMateListRows() {
       .select("id,user_id,display_name,initials,color,discipline_short,active"),
     window.flowmateSupabase
       .from("creative_request_details")
-      .select("work_item_id,asset_type,asset_subtype,asset_count,platforms,size_format,brief_link,reference_link,brief_missing_reason"),
+      .select("work_item_id,asset_type,asset_subtype,asset_count,asset_type_2,asset_subtype_2,asset_count_2,platforms,size_format,brief_link,reference_link,brief_missing_reason"),
     window.flowmateSupabase
       .from("checklist_items")
       .select("id,work_item_id,title,is_done,sort_order")
@@ -511,6 +511,9 @@ async function loadFlowMateListRows() {
       assetType: flowmateToKebab(details.asset_type),
       subtype: details.asset_subtype || "",
       assetCount: details.asset_count || 1,
+      assetType2: flowmateToKebab(details.asset_type_2),
+      subtype2: details.asset_subtype_2 || "",
+      assetCount2: details.asset_count_2 || null,
       platforms: details.platforms || [],
       platform: (details.platforms || []).join(", "),
       channel: (details.platforms || []).join(", "),
