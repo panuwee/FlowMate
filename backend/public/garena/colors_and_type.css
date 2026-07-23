@@ -1,0 +1,236 @@
+/* =============================================================
+   Garena Design System — Color & Typography Tokens
+   Per Garena Brand Book 2023-02
+   Inter loaded from Google Fonts CDN (open-license stand-in for Helvetica Neue)
+   ============================================================= */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;700&display=swap");
+
+:root {
+  /* ---------- Primary brand color (the only brand colour) ---- */
+  --garena-red: #E41E26;            /* PANTONE 485 C • CMYK 4-100-98-0 */
+
+  /* ---------- Backgrounds — logo may ONLY sit on these ------ */
+  --garena-white: #FFFFFF;
+  --garena-black: #000000;
+
+  /* ---------- Neutrals --------------------------------------- */
+  --garena-iron:        #4D4D4D;    /* Body copy, source citations */
+  --garena-grey:        #808080;    /* Axis labels, secondary metadata */
+  --garena-light-grey:  #E2E2E2;    /* Grid lines, dividers, alt rows */
+  --garena-badge-bg:    #F6F6F6;    /* Badge ground only */
+
+  /* ---------- Garena Red tonal range (tone-on-tone only) ----- */
+  --garena-red-deep:     #C0504D;   /* Secondary emphasis / chart accent */
+  --garena-red-light-1:  #F2B4B6;
+  --garena-red-light-2:  #F5DBDD;
+
+  /* ---------- Chart accent palette (in fixed order) ---------- */
+  --garena-deep-blue:  #2E546D;     /* Series 1 — protagonist */
+  --garena-orange:     #EFA15C;     /* Series 2 — comparison partner */
+  --garena-light-blue: #A8CAEA;     /* Series 3 */
+  --garena-accent-red: #C0504D;     /* Series 4 — emphasis only */
+  --garena-blue-grey:  #AFC5CD;     /* Series 5 */
+  --garena-brown:      #BF6B00;     /* Series 6 */
+  --garena-cream:      #ECDDB6;     /* Series 7 */
+
+  /* ---------- Semantic (universal convention) ---------------- */
+  --garena-positive: #16A34A;
+  --garena-negative: #DC2626;       /* Distinct from brand red */
+
+  /* ---------- Foreground tokens ------------------------------ */
+  --fg-primary:    var(--garena-iron);
+  --fg-secondary:  var(--garena-grey);
+  --fg-muted:      #B3B3B3;
+  --fg-on-red:     var(--garena-white);
+  --fg-on-black:   var(--garena-white);
+  --fg-on-white:   var(--garena-iron);
+  --fg-emphasis:   var(--garena-black);
+  --fg-brand:      var(--garena-red);
+
+  /* ---------- Surface tokens --------------------------------- */
+  --surface-page:    var(--garena-white);
+  --surface-section: var(--garena-white);
+  --surface-card:    var(--garena-white);
+  --surface-divider: var(--garena-light-grey);
+  --surface-inverse: var(--garena-black);
+  --surface-brand:   var(--garena-red);
+
+  /* ---------- Type families ---------------------------------- */
+  --garena-font-en:  "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --garena-font-cjk: "Noto Sans TC", "Microsoft YaHei",
+                     "PingFang TC", "Inter", "Helvetica Neue", sans-serif;
+  --garena-font-vn:  "Be Vietnam Pro", "Inter", "Helvetica Neue",
+                     Helvetica, Arial, sans-serif;
+
+  /* ---------- Type weights (brand-endorsed only) ------------- */
+  --weight-light:   300;   /* Helvetica Neue Light — body default */
+  --weight-regular: 400;
+  --weight-bold:    700;
+
+  /* ---------- Web type scale --------------------------------- */
+  --fs-hero:    72px;
+  --fs-h1:      56px;
+  --fs-h2:      40px;
+  --fs-h3:      28px;
+  --fs-h4:      20px;
+  --fs-body:    16px;
+  --fs-small:   14px;
+  --fs-caption: 12px;
+
+  /* ---------- Line height ----------------------------------- */
+  --lh-tight: 1.1;
+  --lh-snug:  1.2;
+  --lh-body:  1.5;
+  --lh-cjk-body: 1.65;
+
+  /* ---------- Letter spacing ------------------------------- */
+  --tracking-tight:  -0.01em;
+  --tracking-normal: 0em;
+  --tracking-wide:   0.04em;
+
+  /* ---------- Spacing scale (4px base) -------------------- */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+
+  /* ---------- Radii (small, restrained) ------------------- */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  /* ---------- Borders ------------------------------------- */
+  --border-hairline: 1px solid var(--garena-light-grey);
+  --border-divider:  1px solid var(--garena-light-grey);
+  --border-strong:   2px solid var(--garena-iron);
+  --border-brand:    2px solid var(--garena-red);
+
+  /* ---------- Elevation (subtle; brand is clean) ---------- */
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.04);
+  --shadow-2: 0 2px 6px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-3: 0 8px 24px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+  --shadow-focus: 0 0 0 3px rgba(228,30,38,0.25);
+
+  /* ---------- Motion -------------------------------------- */
+  --ease-out:    cubic-bezier(0.2, 0.6, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast:    120ms;
+  --dur-base:    200ms;
+  --dur-slow:    320ms;
+}
+
+html, body {
+  font-family: var(--garena-font-en);
+  font-weight: var(--weight-light);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--fg-primary);
+  background: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1, .h1 {
+  font-family: var(--garena-font-en);
+  font-weight: var(--weight-bold);
+  font-size: var(--fs-h1);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-emphasis);
+  margin: 0;
+}
+
+h2, .h2 {
+  font-family: var(--garena-font-en);
+  font-weight: var(--weight-bold);
+  font-size: var(--fs-h2);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-emphasis);
+  margin: 0;
+}
+
+h3, .h3 {
+  font-family: var(--garena-font-en);
+  font-weight: var(--weight-bold);
+  font-size: var(--fs-h3);
+  line-height: var(--lh-snug);
+  color: var(--fg-emphasis);
+  margin: 0;
+}
+
+h4, .h4 {
+  font-family: var(--garena-font-en);
+  font-weight: var(--weight-regular);
+  font-size: var(--fs-h4);
+  line-height: var(--lh-snug);
+  color: var(--fg-emphasis);
+  margin: 0;
+}
+
+p, .body {
+  font-weight: var(--weight-light);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--fg-primary);
+  margin: 0;
+}
+
+.tagline {
+  font-family: var(--garena-font-en);
+  font-weight: var(--weight-bold);
+  font-size: 24pt;
+  color: var(--garena-red);
+  line-height: 1.2;
+}
+
+.eyebrow {
+  font-weight: var(--weight-bold);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--garena-red);
+}
+
+.caption, small {
+  font-size: var(--fs-caption);
+  color: var(--fg-secondary);
+  line-height: var(--lh-body);
+}
+
+.source-citation {
+  font-size: 9pt;
+  font-weight: var(--weight-regular);
+  color: var(--garena-iron);
+}
+
+a {
+  color: var(--garena-red);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+a:hover { border-bottom-color: var(--garena-red); }
+
+hr {
+  border: none;
+  border-top: var(--border-divider);
+  margin: var(--s-6) 0;
+}
+
+.cjk {
+  font-family: var(--garena-font-cjk);
+  line-height: var(--lh-cjk-body);
+}
+
+.vi {
+  font-family: var(--garena-font-vn);
+}
