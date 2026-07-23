@@ -17,17 +17,31 @@ If the project uses pre-commit hooks (e.g. Husky), run `npm install` once after 
 
 ## Creating a New Branch
 
+`main` is a protected branch — nobody pushes to it directly. All changes go through a new branch first, then a Merge Request.
+
 1. Go to Code → Branches.
 2. Click New branch.
-3. Enter a branch name and create the branch.
+3. Enter a branch name following the **Branch Naming Convention** below, and create the branch.
 4. Make your code changes in this branch.
 5. After testing is complete, create a Merge Request to merge your changes into the main branch.
+
+### Branch Naming Convention
+
+Since `main` is protected, branch names follow a simple incrementing version pattern — no spaces (git branch names cannot contain spaces):
+
+```
+version1, version2, version3, ...
+```
+
+- Start a new round of changes → create the next number in the sequence (e.g. if `version3` is the latest existing branch, the next one is `version4`).
+- Don't reuse or go back to an old version branch once its Merge Request has been merged into `main`.
+- This is separate from the deployment tag version (see **Tag Naming Convention** below) — the branch number just tracks the order changes were made, it doesn't need to match the tag's semantic version.
 
 ## Push Code
 
 Make sure you are on your feature branch (not main):
 ```bash
-git checkout -b <branch-name>
+git checkout -b version1
 ```
 
 Stage and commit your changes:
@@ -38,7 +52,7 @@ git commit -m "your message"
 
 Push the branch to GitLab:
 ```bash
-git push -u origin <branch-name>
+git push -u origin version1
 ```
 
 Then open a Merge Request as described below.
