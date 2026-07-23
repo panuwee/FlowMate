@@ -1,8 +1,8 @@
-﻿// FlowMate - app shell + routing
+// FlowMate - app shell + routing
 const { useState: useStateApp, useEffect: useEffectApp, useRef: useRefApp } = React;
 
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260715-4";
+  const fallbackVersion = "v20260723-5";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -1824,6 +1824,7 @@ function filterMarketingPlanSubPicOptions(options, query) {
 function MarketingPlanSubPicPicker({ value, onChange }) {
   const selected = getMarketingPlanSubPicOptions().find(option => option.userId === value.subPicUserId);
   const [query, setQuery] = useStateApp(value.subPicName || selected?.name || "");
+  const [isOpen, setIsOpen] = useStateApp(false);
   useEffectApp(() => {
     setQuery(value.subPicName || selected?.name || "");
   }, [value.subPicUserId, value.subPicName]);
@@ -1832,11 +1833,13 @@ function MarketingPlanSubPicPicker({ value, onChange }) {
   function updateQuery(nextQuery) {
     const exact = getMarketingPlanSubPicOptions().find(option => String(option.name).toLowerCase() === String(nextQuery || "").trim().toLowerCase());
     setQuery(nextQuery);
+    setIsOpen(true);
     onChange({ subPicUserId: exact ? exact.userId : "", subPicName: nextQuery });
   }
 
   function selectOption(option) {
     setQuery(option.name);
+    setIsOpen(false);
     onChange({ subPicUserId: option.userId, subPicName: option.name });
   }
 
@@ -1844,8 +1847,8 @@ function MarketingPlanSubPicPicker({ value, onChange }) {
     <label className="field">
       <span className="field__label">Sub PIC</span>
       <div className="marketing-member-picker">
-        <input className="input" value={query} onChange={event => updateQuery(event.target.value)} placeholder="Search name, e.g. A" autoComplete="off" />
-        {matches.length > 0 && (
+        <input className="input" value={query} onFocus={() => setIsOpen(true)} onBlur={() => setIsOpen(false)} onChange={event => updateQuery(event.target.value)} placeholder="Search name, e.g. A" autoComplete="off" />
+        {isOpen && matches.length > 0 && (
           <div className="marketing-member-picker__options" role="listbox">
             {matches.map(option => (
               <button key={option.userId} type="button" className="marketing-member-picker__option" onMouseDown={event => event.preventDefault()} onClick={() => selectOption(option)}>
