@@ -2414,21 +2414,6 @@ function TeamGanttScreen({
     className: "gantt__toolbar",
     "aria-label": "Gantt read-only controls"
   }, React.createElement("div", {
-    className: "gantt__toolbar-group"
-  }, React.createElement("span", {
-    className: "gantt__chip"
-  }, React.createElement(Icon, {
-    name: "chart",
-    size: 13
-  }), " Trello Power-Up Lite"), React.createElement("span", {
-    className: "gantt__chip"
-  }, "Two-month window"), React.createElement("span", {
-    className: "gantt__chip"
-  }, "Scroll right to see the second month"), React.createElement("span", {
-    className: "gantt__chip"
-  }, "Grouped by team / assignee"), React.createElement("span", {
-    className: "gantt__chip"
-  }, "Click bar to open task")), React.createElement("div", {
     className: "gantt__legend"
   }, React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-dot gantt__legend-dot--normal"
