@@ -1,10 +1,25 @@
-﻿/* AUTO-GENERATED from app.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
+/* AUTO-GENERATED from app.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
 const {
   useState: useStateApp,
   useEffect: useEffectApp,
   useRef: useRefApp
 } = React;
-const FLOWMATE_APP_VERSION = "v20260723-8";
+function getFlowMateAppVersion() {
+  const fallbackVersion = "v20260723-9";
+  try {
+    const scripts = Array.from(document.scripts || []);
+    const appScript = scripts.find(script => {
+      const src = script.getAttribute("src") || "";
+      return /(?:^|\/)app\.js(?:\?|$)/.test(src);
+    });
+    const src = appScript ? appScript.getAttribute("src") || "" : "";
+    const deployVersion = new URL(src, window.location.href).searchParams.get("v");
+    if (deployVersion) return deployVersion.startsWith("v") ? deployVersion : `v${deployVersion}`;
+  } catch (e) {}
+  return fallbackVersion;
+}
+const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
+const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const NAV = [{
   group: "Personal",
   items: [{
@@ -83,8 +98,31 @@ const TITLE_MAP = {
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
+const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
   return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+}
+function isProductChoicePath() {
+  return /\/home\/?$/.test(String(window.location.pathname || ""));
+}
+function getProductFromHashRouteKey(hashValue) {
+  const hashKey = getFlowMateHashRouteKey(hashValue);
+  if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
+  if (PRODUCT_BOOK_HASH_KEYS.has(hashKey)) return PRODUCT_BOOK_PRODUCT_KEY;
+  if (TITLE_MAP[hashKey]) return "flowmate";
+  return "";
+}
+function showProductChoicePathInAddressBar() {
+  try {
+    const path = String(window.location.pathname || "/");
+    if (isProductChoicePath()) {
+      window.history.replaceState(null, "", path.replace(/\/$/, ""));
+      return;
+    }
+    const basePath = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
+    window.history.replaceState(null, "", `${basePath}home`);
+  } catch (e) {}
 }
 function getVisibleNavGroups(role) {
   return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
@@ -122,10 +160,11 @@ function App() {
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
       const hashKey = getFlowMateHashRouteKey();
-      if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
-      if (TITLE_MAP[hashKey]) return "flowmate";
+      const hashProduct = getProductFromHashRouteKey(hashKey);
+      if (isProductChoicePath()) return hashProduct || null;
+      if (hashProduct) return hashProduct;
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
-      if (savedProduct === "flowmate" || savedProduct === "marketing-plan") return savedProduct;
+      if (VALID_PRODUCT_KEYS.has(savedProduct)) return savedProduct;
     } catch (e) {}
     return null;
   });
@@ -300,6 +339,11 @@ function App() {
         try {
           sessionStorage.setItem("flowmate:activeProduct", "marketing-plan");
         } catch (e) {}
+      } else if (PRODUCT_BOOK_HASH_KEYS.has(r)) {
+        setActiveProduct(PRODUCT_BOOK_PRODUCT_KEY);
+        try {
+          sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
+        } catch (e) {}
       } else if (TITLE_MAP[r]) {
         setActiveProduct("flowmate");
         try {
@@ -358,6 +402,19 @@ function App() {
           status: "signed-in",
           user: realUser
         });
+        let shouldShowProductChoice = false;
+        try {
+          shouldShowProductChoice = sessionStorage.getItem("flowmate:showProductChoiceAfterLogin") === "1";
+        } catch (e) {}
+        if (shouldShowProductChoice) {
+          try {
+            sessionStorage.removeItem("flowmate:showProductChoiceAfterLogin");
+            sessionStorage.removeItem("flowmate:activeProduct");
+          } catch (e) {}
+          setActiveProduct(null);
+          showProductChoicePathInAddressBar();
+          return;
+        }
         let postLoginHash = null;
         try {
           postLoginHash = sessionStorage.getItem("flowmate:postLoginHash");
@@ -384,6 +441,11 @@ function App() {
   async function handleSignIn() {
     setIsSigningIn(true);
     try {
+      try {
+        sessionStorage.setItem("flowmate:showProductChoiceAfterLogin", "1");
+        sessionStorage.removeItem("flowmate:activeProduct");
+        sessionStorage.removeItem("flowmate:postLoginHash");
+      } catch (e) {}
       await window.flowmateSignInWithGoogle();
     } catch (error) {
       console.error("[FlowMate Auth] sign-in failed:", error);
@@ -403,6 +465,14 @@ function App() {
       } catch (e) {}
     }
   }
+  function returnToProductHome() {
+    setActiveProduct(null);
+    try {
+      sessionStorage.removeItem("flowmate:activeProduct");
+      sessionStorage.removeItem("flowmate:postLoginHash");
+    } catch (e) {}
+    showProductChoicePathInAddressBar();
+  }
   function chooseFlowMateProduct() {
     setActiveProduct("flowmate");
     try {
@@ -420,6 +490,13 @@ function App() {
     if (!MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey())) {
       window.location.hash = "campaign-timeline";
     }
+  }
+  function chooseProductBookProduct() {
+    setActiveProduct(PRODUCT_BOOK_PRODUCT_KEY);
+    try {
+      sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
+    } catch (e) {}
+    window.location.hash = "product-book";
   }
   useEffectApp(() => {
     function onSwitchFlowMateProduct(event) {
@@ -581,6 +658,7 @@ function App() {
       avatarMemberId: avatarMemberId,
       onChooseFlowMate: chooseFlowMateProduct,
       onChooseMarketingPlan: chooseMarketingPlanProduct,
+      onChooseProductBook: chooseProductBookProduct,
       onSignOut: handleSignOut
     });
   }
@@ -590,8 +668,22 @@ function App() {
       currentUserName: currentUserName,
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
+      onHome: returnToProductHome,
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
+      onSwitchProductBook: chooseProductBookProduct,
+      onSignOut: handleSignOut
+    });
+  }
+  if (activeProduct === PRODUCT_BOOK_PRODUCT_KEY) {
+    return React.createElement(ProductBookShell, {
+      currentUserName: currentUserName,
+      currentUserEmail: currentUserEmail,
+      avatarMemberId: avatarMemberId,
+      onHome: returnToProductHome,
+      onSwitchFlowMate: chooseFlowMateProduct,
+      onSwitchMarketingPlan: chooseMarketingPlanProduct,
+      onSwitchProductBook: chooseProductBookProduct,
       onSignOut: handleSignOut
     });
   }
@@ -608,10 +700,13 @@ function App() {
     className: "app__brand-version"
   }, FLOWMATE_APP_VERSION)), React.createElement("div", {
     className: "app__topbar"
-  }, React.createElement(ProductSwitch, {
+  }, React.createElement(HomeButton, {
+    onHome: returnToProductHome
+  }), React.createElement(ProductSwitch, {
     activeProduct: "flowmate",
     onSwitchFlowMate: chooseFlowMateProduct,
-    onSwitchMarketingPlan: chooseMarketingPlanProduct
+    onSwitchMarketingPlan: chooseMarketingPlanProduct,
+    onSwitchProductBook: chooseProductBookProduct
   }), React.createElement("div", {
     className: "searchbar-wrap",
     ref: searchWrapRef
@@ -785,7 +880,8 @@ function App() {
 function ProductSwitch({
   activeProduct,
   onSwitchFlowMate,
-  onSwitchMarketingPlan
+  onSwitchMarketingPlan,
+  onSwitchProductBook
 }) {
   return React.createElement("div", {
     className: "row",
@@ -802,7 +898,23 @@ function ProductSwitch({
     type: "button",
     className: `btn btn--xs ${activeProduct === "marketing-plan" ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchMarketingPlan
-  }, "Marketing Plan"));
+  }, "Marketing Plan"), React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${activeProduct === PRODUCT_BOOK_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
+    onClick: onSwitchProductBook
+  }, "Product Book"));
+}
+function HomeButton({
+  onHome
+}) {
+  return React.createElement("button", {
+    type: "button",
+    className: "topbar__btn",
+    onClick: onHome,
+    title: "Back to product home"
+  }, React.createElement(Icon, {
+    name: "home"
+  }), " Home");
 }
 function ProductChoiceScreen({
   currentUserName,
@@ -810,6 +922,7 @@ function ProductChoiceScreen({
   avatarMemberId,
   onChooseFlowMate,
   onChooseMarketingPlan,
+  onChooseProductBook,
   onSignOut
 }) {
   const pageStyle = {
@@ -892,7 +1005,7 @@ function ProductChoiceScreen({
       margin: 0,
       maxWidth: 620
     }
-  }, "FlowMate handles task execution. Marketing Plan handles campaign and channel planning."), React.createElement("div", {
+  }, "FlowMate handles task execution. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team."), React.createElement("div", {
     style: gridStyle
   }, React.createElement("button", {
     type: "button",
@@ -944,7 +1057,270 @@ function ProductChoiceScreen({
     style: {
       lineHeight: 1.55
     }
-  }, "Plan campaigns, channels, publish dates, and monthly content before work moves into execution.")))));
+  }, "Plan campaigns, channels, publish dates, and monthly content before work moves into execution.")), React.createElement("button", {
+    type: "button",
+    style: cardStyle,
+    onClick: onChooseProductBook
+  }, React.createElement("div", {
+    className: "row",
+    style: {
+      justifyContent: "space-between",
+      alignItems: "flex-start"
+    }
+  }, React.createElement("span", {
+    className: "badge badge--system"
+  }, "Knowledge"), React.createElement(Icon, {
+    name: "book",
+    size: 18
+  })), React.createElement("h2", {
+    style: {
+      fontSize: 22,
+      margin: "18px 0 8px"
+    }
+  }, "Product Book"), React.createElement("p", {
+    className: "muted",
+    style: {
+      lineHeight: 1.55
+    }
+  }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")))));
+}
+function ProductBookShell({
+  currentUserName,
+  currentUserEmail,
+  avatarMemberId,
+  onHome,
+  onSwitchFlowMate,
+  onSwitchMarketingPlan,
+  onSwitchProductBook,
+  onSignOut
+}) {
+  const patches = Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : [];
+  const [activePatchId, setActivePatchId] = useStateApp(() => patches[0] && patches[0].id ? patches[0].id : "MS26.07");
+  const activePatch = patches.find(patch => patch.id === activePatchId) || patches[0] || null;
+  return React.createElement("div", {
+    className: "app"
+  }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
+    className: "app__brand"
+  }, React.createElement("img", {
+    src: "garena/logo_graphic.png",
+    alt: "Garena"
+  }), React.createElement("span", {
+    className: "app__brand-name"
+  }, "Product Book"), React.createElement("span", {
+    className: "app__brand-version"
+  }, FLOWMATE_APP_VERSION)), React.createElement("div", {
+    className: "app__topbar"
+  }, React.createElement(HomeButton, {
+    onHome: onHome
+  }), React.createElement(ProductSwitch, {
+    activeProduct: PRODUCT_BOOK_PRODUCT_KEY,
+    onSwitchFlowMate: onSwitchFlowMate,
+    onSwitchMarketingPlan: onSwitchMarketingPlan,
+    onSwitchProductBook: onSwitchProductBook
+  }), React.createElement("span", {
+    className: "topbar__spacer"
+  }), React.createElement("div", {
+    className: "topbar__user",
+    title: `Signed in as ${currentUserEmail}`
+  }, React.createElement(Avatar, {
+    memberId: avatarMemberId,
+    size: ""
+  }), React.createElement("span", {
+    className: "topbar__user-name"
+  }, currentUserName)), React.createElement("button", {
+    className: "topbar__btn",
+    onClick: onSignOut
+  }, "Sign out")), React.createElement("nav", {
+    className: "app__sidebar"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "nav-section"
+  }, "Product Book"), patches.length === 0 && React.createElement("div", {
+    className: "reason-box",
+    style: {
+      margin: 12
+    }
+  }, "No patch notes found."), patches.map(patch => React.createElement("div", {
+    key: patch.id,
+    className: `nav-item ${activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
+    onClick: () => setActivePatchId(patch.id)
+  }, React.createElement(Icon, {
+    name: "book",
+    size: 15
+  }), React.createElement("span", null, patch.name || patch.id))))), React.createElement("main", {
+    className: "app__main app__main--product-book"
+  }, activePatch ? React.createElement(ProductBookPatchView, {
+    patch: activePatch
+  }) : React.createElement("div", {
+    className: "reason-box"
+  }, "Upload product-book-data.js with at least one patch note entry.")));
+}
+function ProductBookPatchView({
+  patch
+}) {
+  const tags = Array.isArray(patch.tags) ? patch.tags : [];
+  const tagAnchors = buildProductBookAnchorMap(patch);
+  const markdown = getProductBookPatchMarkdown(patch);
+  return React.createElement("div", null, React.createElement("div", {
+    className: "page-head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "eyebrow"
+  }, "Product Book / ", patch.monthLabel || patch.id))), React.createElement("div", {
+    className: "product-book-sticky-zone"
+  }, React.createElement("div", {
+    className: "product-book-tag-nav",
+    "aria-label": "Product Book sections"
+  }, tags.map(tag => React.createElement("button", {
+    key: tag,
+    type: "button",
+    className: "product-book-tag-nav__button",
+    onClick: () => scrollToProductBookSection(tagAnchors[tag])
+  }, tag)))), React.createElement("div", {
+    className: "section section--product-book"
+  }, React.createElement(ProductBookMarkdown, {
+    markdown: markdown
+  })));
+}
+const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
+  "fp+10": "ms26.07-top-updates-fp-10-and-trait-update",
+  "trait update": "ms26.07-top-updates-fp-10-and-trait-update",
+  enhancement: "3.-key-highlight-1",
+  "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
+  "transfer market": "5.-key-highlight-3-transfer-market-team-color",
+  "team color": "5.-key-highlight-3-transfer-market-team-color",
+  gameplay: "6.-key-highlight-4-gameplay-improvement-match-fairness",
+  qol: "7.-key-highlight-5-qol",
+  performance: "8.-performance-system-stability"
+};
+function normalizeProductBookLabel(value) {
+  return String(value || "").trim().toLowerCase();
+}
+function getProductBookPatchMarkdown(patch) {
+  const topUpdates = String(patch && patch.topUpdatesMarkdown || "").trim();
+  const content = String(patch && patch.contentMarkdown || "").trim();
+  return [topUpdates, content].filter(Boolean).join("\r\n\r\n");
+}
+function productBookSlug(value) {
+  return normalizeProductBookLabel(value).replace(/[*_`]/g, "").replace(/[^a-z0-9.]+/g, "-").replace(/-{2,}/g, "-").replace(/^-|-$/g, "");
+}
+function stripInlineMarkdownText(value) {
+  return String(value || "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/`(.+?)`/g, "$1").replace(/[_*]/g, "");
+}
+function getProductBookHeadings(markdown) {
+  return String(markdown || "").split(/\r?\n/).map(line => line.trim().match(/^(#{1,4})\s+(.+)$/)).filter(Boolean).map(match => {
+    const title = stripInlineMarkdownText(match[2]);
+    return {
+      title,
+      anchor: productBookSlug(title)
+    };
+  }).filter(item => item.anchor);
+}
+function buildProductBookAnchorMap(patch) {
+  const headings = getProductBookHeadings(getProductBookPatchMarkdown(patch));
+  const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
+  const candidates = [...headings, ...toc.map(item => ({
+    title: item.title,
+    anchor: item.anchor
+  })).filter(item => item.anchor)];
+  const result = {};
+  (Array.isArray(patch && patch.tags) ? patch.tags : []).forEach(tag => {
+    const key = normalizeProductBookLabel(tag);
+    const preferred = PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES[key];
+    const preferredExists = preferred && candidates.some(item => item.anchor === preferred);
+    if (preferredExists || preferred) {
+      result[tag] = preferred;
+      return;
+    }
+    const tagSlug = productBookSlug(tag);
+    const match = candidates.find(item => {
+      const title = normalizeProductBookLabel(item.title);
+      const anchor = normalizeProductBookLabel(item.anchor);
+      return title.includes(key) || anchor.includes(tagSlug);
+    });
+    result[tag] = match ? match.anchor : "";
+  });
+  return result;
+}
+function scrollToProductBookSection(anchorId) {
+  if (!anchorId) return;
+  const target = document.getElementById(anchorId);
+  if (!target) return;
+  target.scrollIntoView({
+    behavior: "smooth",
+    block: "start"
+  });
+}
+function ProductBookMarkdown({
+  markdown
+}) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  const nodes = [];
+  let listItems = [];
+  function flushList() {
+    if (!listItems.length) return;
+    const items = listItems;
+    listItems = [];
+    nodes.push(React.createElement("ul", {
+      key: `ul-${nodes.length}`
+    }, items.map((item, index) => React.createElement("li", {
+      key: index
+    }, formatInlineMarkdown(item)))));
+  }
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+    if (/^---+$/.test(trimmed)) {
+      flushList();
+      nodes.push(React.createElement("hr", {
+        key: `hr-${index}`
+      }));
+      return;
+    }
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      flushList();
+      const level = heading[1].length;
+      const anchorId = productBookSlug(stripInlineMarkdownText(heading[2])) || `product-book-heading-${index}`;
+      const text = formatInlineMarkdown(heading[2]);
+      if (level === 1) nodes.push(React.createElement("h2", {
+        id: anchorId,
+        key: `h-${index}`
+      }, text));else if (level === 2) nodes.push(React.createElement("h3", {
+        id: anchorId,
+        key: `h-${index}`
+      }, text));else nodes.push(React.createElement("h4", {
+        id: anchorId,
+        key: `h-${index}`
+      }, text));
+      return;
+    }
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      listItems.push(bullet[1]);
+      return;
+    }
+    flushList();
+    nodes.push(React.createElement("p", {
+      key: `p-${index}`
+    }, formatInlineMarkdown(trimmed)));
+  });
+  flushList();
+  return React.createElement("div", {
+    className: "product-book-content"
+  }, nodes);
+}
+function formatInlineMarkdown(text) {
+  const parts = String(text || "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return React.createElement("strong", {
+        key: index
+      }, part.slice(2, -2));
+    }
+    return part;
+  });
 }
 function getMarketingPlanMonthLabel(monthKey) {
   if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return monthKey || "-";
@@ -1028,6 +1404,8 @@ function normalizeMarketingPlanTimelineRow(row) {
     contentTier: row.content_tier || "",
     picUserId: row.pic_user_id || "",
     picName: row.pic_name || "",
+    subPicUserId: row.sub_pic_user_id || "",
+    subPicName: row.sub_pic_name || "",
     briefLink: row.brief_link || "",
     flowmateWorkItemId: row.flowmate_work_item_id || "",
     flowmateDisplayId: row.flowmate_display_id || "",
@@ -1191,7 +1569,7 @@ function getMarketingPlanAssetFirstPublishDate(asset) {
   return dates[0] || "9999-12-31";
 }
 function getMarketingPlanTimelineAssetMeta(asset) {
-  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" ยท ") || "No details";
+  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" - ");
 }
 const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [{
   key: "facebook",
@@ -1347,6 +1725,8 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     details: "",
     contentTier: "B",
     picName: "",
+    subPicUserId: "",
+    subPicName: "",
     briefLink: "",
     channels: ["facebook"],
     note: ""
@@ -1382,7 +1762,7 @@ function getMarketingPlanWorkingRowPublishTime(row) {
     const placementTime = normalizeMarketingPlanTimeInput(placement && placement.publishTime);
     if (placementTime) return placementTime;
   }
-  return "12:00";
+  return "11:00";
 }
 function createFlowMateDraftFromMarketingPlanRow(row) {
   const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
@@ -1449,10 +1829,11 @@ function getMarketingPlanChannelOptions(rows, selectedMonth) {
   });
   return Array.from(channels).sort((a, b) => getMarketingPlanChannelLabel(a).localeCompare(getMarketingPlanChannelLabel(b)));
 }
-function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all") {
+function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all", assignedUserId = "") {
   return (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
     if (rowMonth !== selectedMonth) return false;
+    if (assignedUserId && row.picUserId !== assignedUserId && row.subPicUserId !== assignedUserId) return false;
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
 }
@@ -2438,7 +2819,7 @@ function MarketingPlanTimelineScreen() {
       style: {
         fontSize: 12
       }
-    }, [campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" ยท "))), React.createElement("div", {
+    }, [campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" · "))), React.createElement("div", {
       className: "row",
       style: {
         gap: 6
@@ -2628,7 +3009,7 @@ function MarketingPlanTimelineScreen() {
     style: {
       fontSize: 12
     }
-  }, campaign.team || "No team", " ยท ", campaign.assets.length, " assets")), React.createElement("div", null)), campaign.assets.map(asset => React.createElement("div", {
+  }, campaign.team || "No team", " · ", campaign.assets.length, " assets")), React.createElement("div", null)), campaign.assets.map(asset => React.createElement("div", {
     key: asset.id,
     style: {
       display: "grid",
@@ -2925,7 +3306,7 @@ function MarketingPlanChannelPlanScreen() {
     style: {
       fontSize: 12
     }
-  }, [placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" ยท ") || "No details")), React.createElement("td", null, placement.briefLink ? React.createElement("a", {
+  }, [placement.format, placement.contentTier, placement.placementNote].filter(Boolean).join(" · ") || "No details")), React.createElement("td", null, placement.briefLink ? React.createElement("a", {
     className: "marketing-working-link",
     href: placement.briefLink,
     target: "_blank",
@@ -4997,7 +5378,7 @@ function LoadingScreen() {
     style: {
       fontSize: 13
     }
-  }, "Checking sessionโ€ฆ"), React.createElement("style", null, `@keyframes flowmate-spin { to { transform: rotate(360deg); } }`));
+  }, "Checking session..."), React.createElement("style", null, `@keyframes flowmate-spin { to { transform: rotate(360deg); } }`));
 }
 function GoogleLogo() {
   return React.createElement("svg", {
@@ -5276,10 +5657,10 @@ function LoginScreen({
     fill: "var(--ink)"
   })))), React.createElement("p", {
     className: "wha-runes wha-runes--hero"
-  }, "ยท Garena ยท FCO ยท Thailand ยท"), authError && React.createElement("div", {
+  }, "Garena · FCO · Thailand"), authError && React.createElement("div", {
     className: "wha-error wha-reveal",
     role: "alert"
-  }, React.createElement("strong", null, "โ "), " ", authError), React.createElement("button", {
+  }, React.createElement("strong", null, "!"), " ", authError), React.createElement("button", {
     type: "button",
     onClick: onSignIn,
     disabled: isSigningIn,
@@ -5289,9 +5670,9 @@ function LoginScreen({
     "aria-hidden": "true"
   }, React.createElement(GoogleLogo, null)), React.createElement("span", {
     className: "wha-cta__label"
-  }, isSigningIn ? "Crossing the thresholdโ€ฆ" : "Sign in with Google")), React.createElement("p", {
+  }, isSigningIn ? "Crossing the threshold..." : "Sign in with Google")), React.createElement("p", {
     className: "wha-runes wha-runes--small"
-  }, "โ Garena Workspace only โ")));
+  }, "Garena Workspace only")));
 }
 function SigilGlyph({
   kind
@@ -5948,7 +6329,7 @@ const WHA_STYLES = `
   perspective: 1200px;
 }
 
-/* Innermost amber diamond โ€” flips clockwise around the vertical axis. */
+/* Innermost amber diamond - flips clockwise around the vertical axis. */
 .wha-glass__amber {
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -5983,7 +6364,7 @@ const WHA_STYLES = `
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
 /* Rotation is driven by SMIL <animateTransform> inside the SVG (see the
-   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS โ€”
+   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS -
    desktop Chrome/Edge here would not animate these <g> groups via CSS
    transform (both transform-box: view-box and fill-box stayed frozen on PC
    while mobile rotated). No CSS animation here on purpose. */
@@ -5993,7 +6374,7 @@ const WHA_STYLES = `
   animation: wha-fade 1.4s ease-out 1.4s both;
 }
 .wha-sigil__glyphs g g {
-  /* Subtle individual glyph staggered breath โ€” pulse opacity to mimic
+  /* Subtle individual glyph staggered breath - pulse opacity to mimic
      candle-lit ink that brightens unevenly. */
   animation: wha-glyph-breath 6s ease-in-out infinite;
   transform-box: fill-box;
@@ -6061,7 +6442,7 @@ const WHA_STYLES = `
   animation: wha-fade-up 0.7s cubic-bezier(0.16,1,0.3,1) 1.9s both;
 }
 .wha-cta::before, .wha-cta::after {
-  content: "โฆ"; position: absolute; top: 50%; transform: translateY(-50%);
+  content: "*"; position: absolute; top: 50%; transform: translateY(-50%);
   color: var(--sienna); font-size: 10px; font-family: serif;
 }
 .wha-cta::before { left: 14px; }
@@ -6390,4 +6771,3 @@ function FlowMatePromptHost() {
   }, req.confirmText || "OK")))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
-
