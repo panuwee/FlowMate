@@ -460,6 +460,23 @@ const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
   { key: "other", label: "Other" },
 ];
 
+const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
+  Facebook: ["1200x1200", "1200x1500"],
+  TikTok: ["1080x1920", "1200x1500"],
+  Instagram: ["1200x1200", "1200x1500"],
+  YouTube: ["1920x1080"],
+  "In-game": ["custom"],
+  Other: ["custom"],
+};
+
+const FLOWMATE_CREATIVE_FORMAT_LABELS = {
+  "1200x1200": "1200×1200 (1:1)",
+  "1200x1500": "1200×1500 (4:5)",
+  "1080x1920": "1080×1920 (9:16)",
+  "1920x1080": "1920×1080 (16:9)",
+  custom: "Custom",
+};
+
 const FLOWMATE_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
 
 function getFlowMateCreativeTypeOption(typeKey) {
@@ -489,6 +506,47 @@ function normalizeFlowMateCreativeChannels(value) {
 
 function formatFlowMateCreativeChannels(value) {
   return normalizeFlowMateCreativeChannels(value).join(", ");
+}
+
+function normalizeFlowMateCreativeFormatKey(option) {
+  if (typeof option === "string") return option.trim();
+  if (!option || typeof option !== "object") return "";
+  return String(option.key || option.value || option.formatKey || "").trim();
+}
+
+function getFlowMateCreativeFormatOptions(channelLabels) {
+  const normalizedChannels = normalizeFlowMateCreativeChannels(channelLabels);
+  const workflowMvp = typeof window !== "undefined" ? window.FlowMateWorkflowMvp : null;
+  if (workflowMvp && typeof workflowMvp.getFormatOptionsForChannels === "function") {
+    const workflowOptions = workflowMvp.getFormatOptionsForChannels(normalizedChannels);
+    if (Array.isArray(workflowOptions)) {
+      return Array.from(new Set(workflowOptions.map(normalizeFlowMateCreativeFormatKey).filter(Boolean)));
+    }
+  }
+  return Array.from(new Set(normalizedChannels.flatMap(
+    (channelLabel) => FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL[channelLabel] || ["custom"],
+  )));
+}
+
+function isFlowMateCreativeFormatValid(formatKey, channelLabels) {
+  const normalizedFormatKey = String(formatKey || "").trim();
+  if (!normalizedFormatKey) return false;
+  const normalizedChannels = normalizeFlowMateCreativeChannels(channelLabels);
+  const workflowMvp = typeof window !== "undefined" ? window.FlowMateWorkflowMvp : null;
+  if (workflowMvp && typeof workflowMvp.isFormatValidForChannels === "function") {
+    return Boolean(workflowMvp.isFormatValidForChannels(normalizedFormatKey, normalizedChannels));
+  }
+  return getFlowMateCreativeFormatOptions(normalizedChannels).includes(normalizedFormatKey);
+}
+
+function getFlowMateCreativeFormatLabel(formatKey) {
+  const normalizedFormatKey = String(formatKey || "").trim();
+  const workflowMvp = typeof window !== "undefined" ? window.FlowMateWorkflowMvp : null;
+  if (workflowMvp && typeof workflowMvp.formatLabel === "function") {
+    const workflowLabel = workflowMvp.formatLabel(normalizedFormatKey);
+    if (workflowLabel) return workflowLabel;
+  }
+  return FLOWMATE_CREATIVE_FORMAT_LABELS[normalizedFormatKey] || normalizedFormatKey;
 }
 
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
@@ -778,7 +836,7 @@ function getDefaultCreativeDraft() {
     assetSubtype2: "",
     assetCount2: "",
     platforms: "Instagram",
-    sizeFormat: "1080x1080",
+    sizeFormat: "1200x1200",
     briefLink: "",
     briefNote: "",
     referenceLink: "",
@@ -861,6 +919,12 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   }
   requireField("platforms", "Channel Tag is required.");
   requireField("sizeFormat", "Size / format is required.");
+  if (
+    String(row.sizeFormat || "").trim()
+    && !isFlowMateCreativeFormatValid(row.sizeFormat, normalizeFlowMateCreativeChannels(row.platforms))
+  ) {
+    errors.sizeFormat = "Choose a Size / format that is valid for the selected Channel Tag(s).";
+  }
   requireField("briefLink", "Brief link is required.");
   requireHttpUrl("briefLink", FLOWMATE_INVALID_BRIEF_LINK_MESSAGE);
   requireField("priority", "Priority is required.");
@@ -1389,7 +1453,14 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType2Key = String(value.assetSubtype2 || "").trim();
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+  const [formatPrompt, setFormatPrompt] = useState("");
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
+  const formatOptions = getFlowMateCreativeFormatOptions(selectedChannels);
+  const hasValidSelectedFormat = isFlowMateCreativeFormatValid(value.sizeFormat, selectedChannels);
+  const visibleFormatPrompt = formatPrompt
+    || (String(value.sizeFormat || "").trim() && !hasValidSelectedFormat
+      ? "The selected Size / format is not valid for the selected Channel Tag(s). Choose a valid option."
+      : "");
 
   useEffect(() => {
     let alive = true;
@@ -1443,7 +1514,21 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     const nextChannels = currentChannels.includes(channelLabel)
       ? currentChannels.filter(channel => channel !== channelLabel)
       : [...currentChannels, channelLabel];
-    update("platforms", nextChannels.length ? nextChannels.join(", ") : channelLabel);
+    const normalizedNextChannels = nextChannels.length ? nextChannels : [channelLabel];
+    const nextValue = {
+      ...value,
+      platforms: normalizedNextChannels.join(", "),
+    };
+    if (
+      String(value.sizeFormat || "").trim()
+      && !isFlowMateCreativeFormatValid(value.sizeFormat, normalizedNextChannels)
+    ) {
+      nextValue.sizeFormat = "";
+      setFormatPrompt("Channel Tags changed. Choose a Size / format that is valid for the selected channels.");
+    } else {
+      setFormatPrompt("");
+    }
+    onChange(nextValue);
   }
 
   return (
@@ -1499,6 +1584,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
               <label key={channel.key} className="check-pill">
                 <input
                   type="checkbox"
+                  data-testid={`creative-channel-${channel.key.replace("_", "-")}`}
                   checked={selectedChannels.includes(channel.label)}
                   onChange={() => toggleChannel(channel.label)}
                 />
@@ -1508,10 +1594,34 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           </div>
           {errors.platforms && <div className="field__error">{errors.platforms}</div>}
         </div>
-        <div className={`field ${errors.sizeFormat ? "field--error" : ""}`}>
+        <div className={`field ${errors.sizeFormat || visibleFormatPrompt ? "field--error" : ""}`} data-testid="creative-format-field">
           <label className="field__label">Size / format <span className="req">*</span></label>
-          <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="e.g. 1080x1350, 1080x1920" />
-          {errors.sizeFormat && <div className="field__error">{errors.sizeFormat}</div>}
+          <select
+            className="select"
+            data-testid="creative-format-select"
+            value={hasValidSelectedFormat ? value.sizeFormat : ""}
+            onChange={(event) => {
+              setFormatPrompt("");
+              update("sizeFormat", event.target.value);
+            }}
+          >
+            <option value="">Choose Size / format</option>
+            {formatOptions.map(formatKey => (
+              <option
+                key={formatKey}
+                value={formatKey}
+                data-testid={`creative-format-option-${formatKey}`}
+              >
+                {getFlowMateCreativeFormatLabel(formatKey)}
+              </option>
+            ))}
+          </select>
+          {visibleFormatPrompt && (
+            <div className="field__error" data-testid="creative-format-prompt">{visibleFormatPrompt}</div>
+          )}
+          {errors.sizeFormat && (
+            <div className="field__error" data-testid="creative-format-error">{errors.sizeFormat}</div>
+          )}
         </div>
         <div className={`field ${errors.briefLink ? "field--error" : ""}`}>
           <label className="field__label">Brief link <span className="req">*</span></label>

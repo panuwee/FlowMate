@@ -1,4 +1,111 @@
 window.FLOWMATE_CURRENT_USER = window.FLOWMATE_CURRENT_USER || null;
+window.FLOWMATE_ACTIVE_TEAM = window.FLOWMATE_ACTIVE_TEAM || "";
+
+function normalizeFlowMateWorkspaceTeam(value) {
+  if (window.FlowMateWorkflowMvp && window.FlowMateWorkflowMvp.normalizeTeamKey) {
+    return window.FlowMateWorkflowMvp.normalizeTeamKey(value);
+  }
+  const compact = String(value || "").trim().toLowerCase().replace(/[\s_/-]+/g, "");
+  if (["gdve", "gd", "ve", "creative", "design", "video"].includes(compact)) return "gdve";
+  if (["ops", "operation", "operations"].includes(compact)) return "ops";
+  if (["mkt", "marketing"].includes(compact)) return "mkt";
+  if (["esport", "esports"].includes(compact)) return "esport";
+  return "";
+}
+
+function getFlowMateAccessibleTeamKeys(user = window.FLOWMATE_CURRENT_USER) {
+  if (!user) return [];
+  if (user.can_access_all_teams || user.role === "admin") return ["gdve", "ops", "mkt", "esport"];
+  const source = Array.isArray(user.accessible_teams) ? user.accessible_teams : [user.requester_team];
+  return Array.from(new Set(source.map(normalizeFlowMateWorkspaceTeam).filter(Boolean)));
+}
+
+function getFlowMateActiveTeam() {
+  return normalizeFlowMateWorkspaceTeam(window.FLOWMATE_ACTIVE_TEAM);
+}
+
+function setFlowMateActiveTeam(teamKey, options = {}) {
+  const normalized = normalizeFlowMateWorkspaceTeam(teamKey);
+  const allowed = getFlowMateAccessibleTeamKeys();
+  if (!normalized || !allowed.includes(normalized)) {
+    throw new Error("You do not have access to that team workspace.");
+  }
+  window.FLOWMATE_ACTIVE_TEAM = normalized;
+  try {
+    window.sessionStorage.setItem("flowmate:activeTeam:v1", normalized);
+  } catch (error) {}
+  if (options.announce !== false) {
+    window.dispatchEvent(new CustomEvent("flowmate:team-workspace-changed", {
+      detail: { teamKey: normalized },
+    }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+      detail: { reason: "team_workspace_changed", teamKey: normalized },
+    }));
+  }
+  return normalized;
+}
+
+function initializeFlowMateActiveTeam(user) {
+  const allowed = getFlowMateAccessibleTeamKeys(user);
+  let saved = "";
+  try {
+    saved = normalizeFlowMateWorkspaceTeam(window.sessionStorage.getItem("flowmate:activeTeam:v1"));
+  } catch (error) {}
+  const next = saved && allowed.includes(saved) ? saved : allowed[0] || "";
+  window.FLOWMATE_ACTIVE_TEAM = next;
+  if (next) {
+    try {
+      window.sessionStorage.setItem("flowmate:activeTeam:v1", next);
+    } catch (error) {}
+  }
+  return next;
+}
+
+async function loadFlowMateCreativeFormatCatalog() {
+  if (!window.flowmateSupabase || !window.FlowMateWorkflowMvp?.setCreativeFormatCatalog) return [];
+  const [mappingResult, formatResult] = await Promise.all([
+    window.flowmateSupabase
+      .from("creative_channel_formats")
+      .select("channel_code,format_code"),
+    window.flowmateSupabase
+      .from("creative_formats")
+      .select("code,width_px,height_px,aspect_ratio,display_label,active")
+      .eq("active", true),
+  ]);
+  if (mappingResult.error || formatResult.error) {
+    const message = mappingResult.error?.message || formatResult.error?.message || "";
+    if (!/does not exist|schema cache|relation/i.test(message)) {
+      console.warn("[FlowMate Create] format catalog load failed:", message);
+    }
+    return [];
+  }
+  const formatsByCode = Object.fromEntries((formatResult.data || []).map(row => [row.code, row]));
+  const rows = (mappingResult.data || []).flatMap(mapping => {
+    const format = formatsByCode[mapping.format_code];
+    if (!format) return [];
+    return [{
+      channel_code: mapping.channel_code,
+      format_code: mapping.format_code,
+      width_px: format.width_px,
+      height_px: format.height_px,
+      aspect_ratio: format.aspect_ratio,
+      display_label: format.display_label,
+    }];
+  });
+  window.FlowMateWorkflowMvp.setCreativeFormatCatalog(rows);
+  window.dispatchEvent(new CustomEvent("flowmate:creative-format-catalog-updated", {
+    detail: { rows },
+  }));
+  return rows;
+}
+
+Object.assign(window, {
+  normalizeFlowMateWorkspaceTeam,
+  getFlowMateAccessibleTeamKeys,
+  getFlowMateActiveTeam,
+  setFlowMateActiveTeam,
+  loadFlowMateCreativeFormatCatalog,
+});
 
 function flowmateActorId() {
   return (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id) || null;
@@ -764,11 +871,22 @@ async function flowmateInitAuth() {
     return null;
   }
 
-  const { data: profile, error: profileError } = await window.flowmateSupabase
+  let { data: profile, error: profileError } = await window.flowmateSupabase
     .from("users")
-    .select("id, email, display_name, requester_team, is_active, role")
+    .select("id, email, display_name, requester_team, is_active, role, can_access_all_teams")
     .eq("id", session.user.id)
     .maybeSingle();
+
+  // Backward-compatible while workflow_team_workspaces.sql is waiting to run.
+  if (profileError && /can_access_all_teams|column/i.test(profileError.message || "")) {
+    const fallbackProfile = await window.flowmateSupabase
+      .from("users")
+      .select("id, email, display_name, requester_team, is_active, role")
+      .eq("id", session.user.id)
+      .maybeSingle();
+    profile = fallbackProfile.data;
+    profileError = fallbackProfile.error;
+  }
 
   if (profileError) {
     console.warn("[FlowMate Auth] profile lookup failed:", profileError.message);
@@ -807,6 +925,26 @@ async function flowmateInitAuth() {
     .eq("user_id", profile.id)
     .maybeSingle();
 
+  let accessibleTeams = [];
+  if (profile.can_access_all_teams || profile.role === "admin") {
+    accessibleTeams = ["gdve", "ops", "mkt", "esport"];
+  } else {
+    const membershipResult = await window.flowmateSupabase
+      .from("user_team_memberships")
+      .select("team_code,is_primary")
+      .eq("user_id", profile.id)
+      .order("is_primary", { ascending: false });
+    if (!membershipResult.error) {
+      accessibleTeams = (membershipResult.data || []).map(row => normalizeFlowMateWorkspaceTeam(row.team_code)).filter(Boolean);
+    } else if (!/does not exist|schema cache|relation/i.test(membershipResult.error.message || "")) {
+      console.warn("[FlowMate Auth] team memberships lookup failed:", membershipResult.error.message);
+    }
+    if (accessibleTeams.length === 0) {
+      const legacyTeam = normalizeFlowMateWorkspaceTeam(profile.requester_team);
+      if (legacyTeam) accessibleTeams = [legacyTeam];
+    }
+  }
+
   window.FLOWMATE_CURRENT_USER = {
     id: profile.id,
     name: profile.display_name,
@@ -814,8 +952,12 @@ async function flowmateInitAuth() {
     team_member_id: member ? member.id : null,
     requester_team: profile.requester_team || null,
     role: profile.role || "member",
+    can_access_all_teams: Boolean(profile.can_access_all_teams || profile.role === "admin"),
+    accessible_teams: Array.from(new Set(accessibleTeams)),
     is_authenticated: true,
   };
+  initializeFlowMateActiveTeam(window.FLOWMATE_CURRENT_USER);
+  await loadFlowMateCreativeFormatCatalog();
   return window.FLOWMATE_CURRENT_USER;
 }
 
