@@ -297,12 +297,17 @@ async function loadFlowMateAiTagRowsForList() {
 async function loadFlowMateWorkItemsForList() {
   const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
+  const isGdveCreativeWorkspace = activeTeam === "gdve";
   let query = window.flowmateSupabase
     .from("work_items")
     .select(`${baseColumns},owning_team_code`)
     .is("archived_at", null)
     .order("due_date", { ascending: true });
-  if (activeTeam) query = query.eq("owning_team_code", activeTeam);
+  if (isGdveCreativeWorkspace) {
+    query = query.eq("work_type", "creative_request");
+  } else if (activeTeam) {
+    query = query.eq("owning_team_code", activeTeam);
+  }
   let result = await query;
 
   // Allow the frontend bundle to be uploaded before the SQL migration.
@@ -314,6 +319,9 @@ async function loadFlowMateWorkItemsForList() {
       .order("due_date", { ascending: true });
     if (!result.error && activeTeam) {
       result.data = (result.data || []).filter((item) => {
+        if (isGdveCreativeWorkspace) {
+          return item.work_type === "creative_request";
+        }
         const itemTeam = window.normalizeFlowMateWorkspaceTeam
           ? window.normalizeFlowMateWorkspaceTeam(item.requester_team)
           : "";

@@ -5,7 +5,7 @@ const {
   useRef: useRefApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260723-9";
+  const fallbackVersion = "v20260724-4";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -5322,6 +5322,16 @@ function GlobalSearchResultsPanel({
   onOpen
 }) {
   const safeResults = results || [];
+  function getAssigneeName(row) {
+    if (row.assignee && MEMBERS_BY_ID[row.assignee]) {
+      return MEMBERS_BY_ID[row.assignee].name;
+    }
+    return row.assigneeOtherName || "Unassigned";
+  }
+  function getContextValue(value, fallback) {
+    const normalized = String(value || "").trim();
+    return normalized || fallback;
+  }
   return React.createElement("div", {
     className: "searchbar-results",
     role: "listbox",
@@ -5350,12 +5360,24 @@ function GlobalSearchResultsPanel({
   }, row.id), React.createElement("span", {
     className: "searchbar__result-title"
   }, row.title)), React.createElement("span", {
+    className: "searchbar__result-context"
+  }, React.createElement("span", {
+    className: "searchbar__result-context-item"
+  }, React.createElement("strong", null, "Campaign"), getContextValue(row.campaign, "No campaign")), React.createElement("span", {
+    className: "searchbar__result-context-item"
+  }, React.createElement("strong", null, "Team"), getContextValue(row.requesterTeam || row.owningTeamKey, "No team")), React.createElement("span", {
+    className: "searchbar__result-context-item"
+  }, React.createElement("strong", null, "Requester"), getContextValue(row.requester, "Unknown"))), React.createElement("span", {
     className: "searchbar__result-meta"
   }, React.createElement(TypePill, {
     type: row.type
   }), React.createElement(StatusBadge, {
     status: row.status
-  }), React.createElement("span", null, row.assignee && MEMBERS_BY_ID[row.assignee] ? MEMBERS_BY_ID[row.assignee].name : row.assigneeOtherName || "Unassigned")))));
+  }), React.createElement("span", {
+    className: "searchbar__result-meta-item"
+  }, React.createElement("strong", null, "Assignee"), getAssigneeName(row)), React.createElement("span", {
+    className: "searchbar__result-meta-item"
+  }, React.createElement("strong", null, "Due"), getContextValue(row.dueFullLabel || row.dueLabel, "No due date"))))));
 }
 function NotificationCenterPanel({
   notifications,
