@@ -294,19 +294,43 @@ async function loadFlowMateAiTagRowsForList() {
   return res;
 }
 
+async function loadFlowMateWorkItemsForList() {
+  const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
+  const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
+  let query = window.flowmateSupabase
+    .from("work_items")
+    .select(`${baseColumns},owning_team_code`)
+    .is("archived_at", null)
+    .order("due_date", { ascending: true });
+  if (activeTeam) query = query.eq("owning_team_code", activeTeam);
+  let result = await query;
+
+  // Allow the frontend bundle to be uploaded before the SQL migration.
+  if (result.error && /owning_team_code|column/i.test(result.error.message || "")) {
+    result = await window.flowmateSupabase
+      .from("work_items")
+      .select(baseColumns)
+      .is("archived_at", null)
+      .order("due_date", { ascending: true });
+    if (!result.error && activeTeam) {
+      result.data = (result.data || []).filter((item) => {
+        const itemTeam = window.normalizeFlowMateWorkspaceTeam
+          ? window.normalizeFlowMateWorkspaceTeam(item.requester_team)
+          : "";
+        return itemTeam === activeTeam;
+      });
+    }
+  }
+  return result;
+}
+
 async function loadFlowMateListRows() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
 
   const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = await Promise.all([
-    window.flowmateSupabase
-      .from("work_items")
-      .select("id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at")
-      // O-5: exclude archived items at the DB instead of fetching then dropping
-      // them client-side. (List/Board/Queue/My Work never show archived rows.)
-      .is("archived_at", null)
-      .order("due_date", { ascending: true }),
+    loadFlowMateWorkItemsForList(),
     window.flowmateSupabase
       .from("work_item_flags_v")
       .select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked"),
@@ -522,6 +546,7 @@ async function loadFlowMateListRows() {
       referenceLink: details.reference_link || "",
       missingBriefReason: details.brief_missing_reason || item.assignment_reason || "",
       campaign: item.campaign_name || item.project_name || "",
+      owningTeamKey: item.owning_team_code || (window.normalizeFlowMateWorkspaceTeam ? window.normalizeFlowMateWorkspaceTeam(item.requester_team) : ""),
       requesterTeam: requesterTeam || "No team",
       requesterUserId: item.requester_user_id,
       assigneeUserId: item.assignee_user_id,
@@ -740,6 +765,18 @@ window.attachFlowMateLiveRefresh = attachFlowMateLiveRefresh;
 async function loadFlowMateRequesterTeams() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
+  }
+  const accessibleKeys = window.getFlowMateAccessibleTeamKeys
+    ? window.getFlowMateAccessibleTeamKeys()
+    : [];
+  if (accessibleKeys.length) {
+    const labelsByKey = {
+      gdve: "GD/VE",
+      ops: "Operations",
+      mkt: "Marketing",
+      esport: "Esport",
+    };
+    return accessibleKeys.map((key) => labelsByKey[key]).filter(Boolean);
   }
 
   const { data, error } = await window.flowmateSupabase

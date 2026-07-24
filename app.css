@@ -2405,6 +2405,278 @@ button:disabled {
   .modal-backdrop { align-items: flex-start; padding: 12px; }
 }
 
+/* ---------- Workflow Management MVP: theme, filters, campaign tags ---------- */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: var(--border-hairline);
+  border-radius: var(--radius-pill);
+  background: var(--garena-badge-bg);
+}
+.theme-toggle__option {
+  min-width: 48px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--garena-grey);
+  font-size: 11px;
+}
+.theme-toggle__option.is-active {
+  background: var(--garena-white);
+  color: var(--garena-black);
+  box-shadow: var(--shadow-1);
+  font-weight: var(--weight-bold);
+}
+.team-workspace-selector {
+  display: inline-flex;
+  min-width: 142px;
+}
+.team-workspace-selector__control {
+  width: 100%;
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.marketing-working-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr)) minmax(190px, 1.5fr) auto auto auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.marketing-working-filters__search {
+  min-width: 190px;
+}
+.marketing-working-count {
+  white-space: nowrap;
+  color: var(--garena-iron);
+  font-weight: var(--weight-bold);
+}
+.marketing-working-active-filters {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--garena-badge-bg);
+  color: var(--garena-grey);
+  font-size: 12px;
+}
+.marketing-campaign-manager__filters {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) minmax(130px, 0.8fr) minmax(150px, 0.9fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 16px 0;
+}
+.marketing-campaign-manager__identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.marketing-campaign-manager__actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.marketing-campaign-manager__row.is-archived {
+  opacity: 0.72;
+}
+.campaign-colour-action {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--garena-grey);
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  text-transform: uppercase;
+}
+.campaign-colour-action .select {
+  min-width: 112px;
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  text-transform: none;
+}
+.campaign-function-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  background: var(--campaign-function-bg-light);
+  color: var(--campaign-function-fg-light);
+  font-size: 11px;
+  font-weight: var(--weight-bold);
+}
+.campaign-group-toggle {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 6px;
+}
+.campaign-group-toggle:hover,
+.campaign-group-toggle:focus-visible {
+  background: var(--garena-light-grey) !important;
+}
+.campaign-group-toggle:focus-visible {
+  outline: 2px solid var(--garena-red);
+  outline-offset: -2px;
+}
+.campaign-group-toggle__icon {
+  grid-row: 1 / span 2;
+  color: var(--garena-red);
+  font-size: 14px;
+}
+.campaign-group-toggle .campaign-function-tag {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --garena-white: #171A1F;
+  --garena-black: #F5F7FA;
+  --garena-iron: #D7DCE2;
+  --garena-grey: #AAB2BD;
+  --garena-light-grey: #39414B;
+  --garena-badge-bg: #232830;
+  --garena-red-light-1: #713A3F;
+  --garena-red-light-2: #42262A;
+  --garena-deep-blue: #86B9D8;
+  --garena-positive: #5FD18A;
+  --garena-orange: #F4B879;
+  --garena-bg: #101318;
+  --surface-page: var(--garena-bg);
+  --surface-section: var(--garena-white);
+  --surface-card: var(--garena-white);
+  --surface-divider: var(--garena-light-grey);
+  --fg-primary: var(--garena-iron);
+  --fg-secondary: var(--garena-grey);
+  --fg-muted: #89939F;
+  --fg-emphasis: var(--garena-black);
+}
+html[data-theme="dark"] body,
+html[data-theme="dark"] #root {
+  background: var(--garena-bg);
+  color: var(--garena-iron);
+}
+html[data-theme="dark"] .app__main {
+  background: var(--garena-bg);
+}
+html[data-theme="dark"] .modal-backdrop {
+  background: rgba(0, 0, 0, 0.66);
+}
+html[data-theme="dark"] .badge--new,
+html[data-theme="dark"] .badge--queued,
+html[data-theme="dark"] .badge--cancelled {
+  background: #2A3038;
+  color: var(--garena-iron);
+}
+html[data-theme="dark"] .badge--need,
+html[data-theme="dark"] .badge--review,
+html[data-theme="dark"] .badge--soon {
+  background: #4A3525;
+  color: #FFD2A5;
+}
+html[data-theme="dark"] .badge--assigned {
+  background: #243B4A;
+  color: #B9DDF4;
+}
+html[data-theme="dark"] .badge--delivered {
+  background: #203C2C;
+  color: #A3E7BE;
+}
+html[data-theme="dark"] .campaign-function-tag {
+  background: var(--campaign-function-bg-dark);
+  color: var(--campaign-function-fg-dark);
+}
+html[data-theme="dark"] .tbl tbody tr:hover,
+html[data-theme="dark"] .table tbody tr:hover {
+  background: var(--garena-badge-bg);
+}
+html[data-theme="dark"] .choice-card.is-active {
+  background: #2C2023;
+}
+
+@media (max-width: 1180px) {
+  .marketing-working-filters {
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+  }
+  .marketing-campaign-manager__row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .marketing-campaign-manager__actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 72px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+  .app__brand {
+    padding: 0 10px;
+    justify-content: center;
+  }
+  .app__brand-name,
+  .app__brand-version,
+  .app__brand-name::before,
+  .nav-section,
+  .nav-item span {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .app__topbar {
+    gap: 6px;
+    padding: 0 8px;
+    overflow-x: auto;
+  }
+  .topbar__user-name {
+    display: none;
+  }
+  .theme-toggle__option {
+    min-width: 38px;
+    padding: 0 6px;
+  }
+  .team-workspace-selector {
+    min-width: 124px;
+  }
+  .app__main--marketing {
+    padding: 12px;
+  }
+  .marketing-working-filters,
+  .marketing-campaign-manager__filters {
+    grid-template-columns: 1fr;
+  }
+  .marketing-working-filters > *,
+  .marketing-working-filters__search {
+    width: 100%;
+    min-width: 0;
+  }
+  .marketing-campaign-manager__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .campaign-colour-action .select {
+    width: 100%;
+  }
+}
+
 /* Source citation (per Garena rule) */
 .src { font-size: 11px; color: var(--garena-iron); padding-top: 12px; }
 .src--right { text-align: right; }
