@@ -655,6 +655,9 @@ async function createFlowMateCreativeRequest(input) {
     : (input.platforms || "").split(",").map((p) => p.trim()).filter(Boolean);
 
   const assetSubtype2 = String(input.assetSubtype2 || "").trim();
+  const selectedFormats = Array.isArray(input.sizeFormats)
+    ? input.sizeFormats.map((format) => String(format || "").trim()).filter(Boolean)
+    : String(input.sizeFormat || "").split(",").map((format) => format.trim()).filter(Boolean);
 
   const { data, error } = await window.flowmateSupabase.rpc("create_creative_request", {
     p_actor_user_id:    flowmateActorId(),
@@ -668,7 +671,7 @@ async function createFlowMateCreativeRequest(input) {
     p_asset_subtype_2:  assetSubtype2 || null,
     p_asset_count_2:    assetSubtype2 ? Number(input.assetCount2 || 0) : null,
     p_platforms:        platforms,
-    p_size_format:      input.sizeFormat || "",
+    p_size_format:      Array.from(new Set(selectedFormats)).join(","),
     p_brief_link:       input.briefLink || "",
     p_brief_note:       input.briefNote || null,
     p_reference_link:   input.referenceLink || null,

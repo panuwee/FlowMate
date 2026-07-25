@@ -453,6 +453,7 @@ const FLOWMATE_CREATIVE_TYPE_OPTIONS = [
 
 const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
   { key: "facebook", label: "Facebook" },
+  { key: "facebook_esport", label: "FB eSport" },
   { key: "tiktok", label: "TikTok" },
   { key: "instagram", label: "Instagram" },
   { key: "in_game", label: "In-game" },
@@ -462,6 +463,7 @@ const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
 
 const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
   Facebook: ["1200x1200", "1200x1500"],
+  "FB eSport": ["1200x1200", "1200x1500"],
   TikTok: ["1080x1920", "1200x1500"],
   Instagram: ["1200x1200", "1200x1500"],
   YouTube: ["1920x1080"],
@@ -476,6 +478,7 @@ const FLOWMATE_CREATIVE_FORMAT_LABELS = {
   "1920x1080": "1920×1080 (16:9)",
   custom: "Custom",
 };
+const FLOWMATE_CREATIVE_FORMAT_DISPLAY_ORDER = ["1200x1200", "1200x1500", "1080x1920", "1920x1080", "custom"];
 
 const FLOWMATE_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
 
@@ -547,6 +550,19 @@ function getFlowMateCreativeFormatLabel(formatKey) {
     if (workflowLabel) return workflowLabel;
   }
   return FLOWMATE_CREATIVE_FORMAT_LABELS[normalizedFormatKey] || normalizedFormatKey;
+}
+
+function normalizeFlowMateCreativeFormatKeys(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+  return Array.from(new Set(rawValues.map(normalizeFlowMateCreativeFormatKey).filter(Boolean)));
+}
+
+function getFlowMateSelectedCreativeFormatKeys(draft) {
+  const structured = normalizeFlowMateCreativeFormatKeys(draft && draft.sizeFormats);
+  if (structured.length) return structured;
+  return normalizeFlowMateCreativeFormatKeys(draft && draft.sizeFormat);
 }
 
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
@@ -789,6 +805,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "assetSubtype2",
     "assetCount2",
     "platforms",
+    "sizeFormats",
     "sizeFormat",
     "briefLink",
     "briefNote",
@@ -836,6 +853,7 @@ function getDefaultCreativeDraft() {
     assetSubtype2: "",
     assetCount2: "",
     platforms: "Instagram",
+    sizeFormats: ["1200x1200", "1200x1500"],
     sizeFormat: "1200x1200",
     briefLink: "",
     briefNote: "",
@@ -860,7 +878,7 @@ function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {
   const fields = FLOWMATE_CREATE_DRAFT_FIELDS[kind] || [];
   return fields.reduce((payload, field) => {
     const value = Object.prototype.hasOwnProperty.call(draft || {}, field) ? draft[field] : fallback[field];
-    payload[field] = typeof value === "string" ? value : "";
+    payload[field] = Array.isArray(value) ? value.slice() : typeof value === "string" ? value : "";
     return payload;
   }, {});
 }
@@ -918,11 +936,12 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     errors.assetSubtype2 = "Type / Skill 2 is required when Asset Count 2 is provided.";
   }
   requireField("platforms", "Channel Tag is required.");
-  requireField("sizeFormat", "Size / format is required.");
-  if (
-    String(row.sizeFormat || "").trim()
-    && !isFlowMateCreativeFormatValid(row.sizeFormat, normalizeFlowMateCreativeChannels(row.platforms))
-  ) {
+  const selectedFormatKeys = getFlowMateSelectedCreativeFormatKeys(row);
+  if (selectedFormatKeys.length === 0) {
+    errors.sizeFormat = "Select at least one Size / format.";
+  } else if (selectedFormatKeys.some(formatKey => (
+    !isFlowMateCreativeFormatValid(formatKey, normalizeFlowMateCreativeChannels(row.platforms))
+  ))) {
     errors.sizeFormat = "Choose a Size / format that is valid for the selected Channel Tag(s).";
   }
   requireField("briefLink", "Brief link is required.");
@@ -1456,9 +1475,15 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
   const [formatPrompt, setFormatPrompt] = useState("");
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
   const formatOptions = getFlowMateCreativeFormatOptions(selectedChannels);
-  const hasValidSelectedFormat = isFlowMateCreativeFormatValid(value.sizeFormat, selectedChannels);
+  const selectedFormatKeys = getFlowMateSelectedCreativeFormatKeys(value);
+  const invalidSelectedFormatKeys = selectedFormatKeys.filter(formatKey => !formatOptions.includes(formatKey));
+  const formatDisplayOptions = Array.from(new Set([
+    ...FLOWMATE_CREATIVE_FORMAT_DISPLAY_ORDER,
+    ...formatOptions,
+    ...selectedFormatKeys,
+  ]));
   const visibleFormatPrompt = formatPrompt
-    || (String(value.sizeFormat || "").trim() && !hasValidSelectedFormat
+    || (invalidSelectedFormatKeys.length
       ? "The selected Size / format is not valid for the selected Channel Tag(s). Choose a valid option."
       : "");
 
@@ -1519,16 +1544,24 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
       ...value,
       platforms: normalizedNextChannels.join(", "),
     };
-    if (
-      String(value.sizeFormat || "").trim()
-      && !isFlowMateCreativeFormatValid(value.sizeFormat, normalizedNextChannels)
-    ) {
-      nextValue.sizeFormat = "";
-      setFormatPrompt("Channel Tags changed. Choose a Size / format that is valid for the selected channels.");
-    } else {
-      setFormatPrompt("");
-    }
+    const nextFormatKeys = getFlowMateCreativeFormatOptions(normalizedNextChannels);
+    nextValue.sizeFormats = nextFormatKeys;
+    nextValue.sizeFormat = nextFormatKeys[0] || "";
+    setFormatPrompt(nextFormatKeys.length ? "Size / format updated automatically from the selected Channel Tags." : "");
     onChange(nextValue);
+  }
+
+  function toggleFormat(formatKey) {
+    if (!formatOptions.includes(formatKey)) return;
+    const nextFormatKeys = selectedFormatKeys.includes(formatKey)
+      ? selectedFormatKeys.filter(key => key !== formatKey)
+      : [...selectedFormatKeys, formatKey];
+    setFormatPrompt("");
+    onChange({
+      ...value,
+      sizeFormats: nextFormatKeys,
+      sizeFormat: nextFormatKeys[0] || "",
+    });
   }
 
   return (
@@ -1596,26 +1629,26 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
         </div>
         <div className={`field ${errors.sizeFormat || visibleFormatPrompt ? "field--error" : ""}`} data-testid="creative-format-field">
           <label className="field__label">Size / format <span className="req">*</span></label>
-          <select
-            className="select"
-            data-testid="creative-format-select"
-            value={hasValidSelectedFormat ? value.sizeFormat : ""}
-            onChange={(event) => {
-              setFormatPrompt("");
-              update("sizeFormat", event.target.value);
-            }}
-          >
-            <option value="">Choose Size / format</option>
-            {formatOptions.map(formatKey => (
-              <option
-                key={formatKey}
-                value={formatKey}
-                data-testid={`creative-format-option-${formatKey}`}
-              >
-                {getFlowMateCreativeFormatLabel(formatKey)}
-              </option>
-            ))}
-          </select>
+          <div className="check-row" data-testid="creative-format-checkboxes">
+            {formatDisplayOptions.map(formatKey => {
+              const isAvailable = formatOptions.includes(formatKey);
+              return (
+                <label key={formatKey} className={`check-pill${isAvailable ? "" : " is-disabled"}`}>
+                  <input
+                    type="checkbox"
+                    data-testid={`creative-format-${formatKey}`}
+                    checked={selectedFormatKeys.includes(formatKey)}
+                    disabled={!isAvailable}
+                    onChange={() => toggleFormat(formatKey)}
+                  />
+                  <span>{getFlowMateCreativeFormatLabel(formatKey)}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            Valid formats are selected automatically from Channel Tags. Uncheck any format that is not required.
+          </div>
           {visibleFormatPrompt && (
             <div className="field__error" data-testid="creative-format-prompt">{visibleFormatPrompt}</div>
           )}

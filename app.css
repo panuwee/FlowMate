@@ -752,6 +752,74 @@ button:disabled {
   width: min(720px, 100%);
 }
 
+.marketing-sub-pic-search {
+  position: relative;
+}
+.marketing-sub-pic-search__control {
+  position: relative;
+}
+.marketing-sub-pic-search__control .input {
+  padding-right: 38px;
+}
+.marketing-sub-pic-search__clear {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+.marketing-sub-pic-search__clear:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+.marketing-sub-pic-search__results {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+.marketing-sub-pic-search__option {
+  display: flex;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.marketing-sub-pic-search__option:last-child {
+  border-bottom: 0;
+}
+.marketing-sub-pic-search__option:hover,
+.marketing-sub-pic-search__option:focus-visible {
+  background: var(--surface-muted);
+  outline: none;
+}
+.marketing-sub-pic-search__empty {
+  padding: 10px 11px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .marketing-campaign-manager {
   display: grid;
   gap: 8px;

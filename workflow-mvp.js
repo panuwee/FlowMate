@@ -13,6 +13,7 @@
 
   const CHANNEL_FORMAT_KEYS = Object.freeze({
     facebook: Object.freeze(["1200x1200", "1200x1500"]),
+    facebook_esport: Object.freeze(["1200x1200", "1200x1500"]),
     tiktok: Object.freeze(["1080x1920", "1200x1500"]),
     instagram: Object.freeze(["1200x1200", "1200x1500"]),
     youtube: Object.freeze(["1920x1080"]),
@@ -39,6 +40,7 @@
 
   function normalizeChannel(value) {
     const compact = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+    if (["fbesport", "fbesports", "facebookesport", "facebookesports", "esportfacebook"].includes(compact)) return "facebook_esport";
     if (["facebook", "fb", "meta"].includes(compact)) return "facebook";
     if (["tiktok", "tk"].includes(compact)) return "tiktok";
     if (["instagram", "ig", "insta", "reels"].includes(compact)) return "instagram";

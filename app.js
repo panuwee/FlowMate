@@ -5,7 +5,7 @@ const {
   useRef: useRefApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260724-4";
+  const fallbackVersion = "v20260725-2";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -1520,7 +1520,8 @@ function getMarketingPlanTimelineWindow(monthKey) {
       days: []
     };
   }
-  const monthKeys = [monthKey, getNextMarketingPlanMonthKey(monthKey)].filter(Boolean);
+  const nextMonthKey = getNextMarketingPlanMonthKey(monthKey);
+  const monthKeys = [monthKey, nextMonthKey, getNextMarketingPlanMonthKey(nextMonthKey)].filter(Boolean);
   const monthGroups = monthKeys.map(key => {
     const days = getMarketingPlanDays(key).map(day => ({
       ...day,
@@ -1699,10 +1700,15 @@ function getMarketingPlanCalendarViewDays(selectedMonth, viewMode) {
       length: 7
     }, (_, index) => addMarketingPlanDays(start, index));
   }
-  return getMarketingPlanDays(selectedMonth).map(day => day.key);
+  return getMarketingPlanTimelineWindow(selectedMonth).days.map(day => day.key);
 }
 function getMarketingPlanCalendarRangeLabel(days, viewMode, selectedMonth) {
-  if (viewMode === "month") return `${getMarketingPlanMonthLabel(selectedMonth)} publishing calendar`;
+  if (viewMode === "month" || viewMode === "schedule" && (!days || days.length > 1)) {
+    const window = getMarketingPlanTimelineWindow(selectedMonth);
+    const first = window.monthGroups[0];
+    const last = window.monthGroups[window.monthGroups.length - 1];
+    return first && last ? `${first.label} - ${last.label} publishing calendar` : "Publishing calendar";
+  }
   if (!days || days.length === 0) return "Publishing calendar";
   if (days.length === 1) return formatMarketingPlanDate(days[0]);
   return `${formatMarketingPlanDate(days[0])} - ${formatMarketingPlanDate(days[days.length - 1])}`;
@@ -1813,6 +1819,9 @@ const MARKETING_PLAN_CHANNELS = [{
   key: "facebook",
   label: "Facebook"
 }, {
+  key: "facebook_esport",
+  label: "FB eSport"
+}, {
   key: "tiktok",
   label: "TikTok"
 }, {
@@ -1827,6 +1836,16 @@ const MARKETING_PLAN_CHANNELS = [{
 }, {
   key: "other",
   label: "Other"
+}];
+const MARKETING_PLAN_FUNCTION_FILTER_OPTIONS = [{
+  code: "ops",
+  label: "Ops"
+}, {
+  code: "mkt",
+  label: "MKT"
+}, {
+  code: "esport",
+  label: "eSport"
 }];
 const MARKETING_PLAN_ASSET_TYPES = ["Banner", "Video", "Shorts/Reels", "Story", "Album", "Cover/Profile", "PR", "GIF", "Live"];
 const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
@@ -1925,6 +1944,7 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
   const requesterTeam = currentUserDefaults.team || "Operations";
   const campaignName = row.campaignName || "";
   const assetSubtype = getFlowMateCreativeSubtypeFromMarketingAssetType(row.format);
+  const formatOptions = window.FlowMateWorkflowMvp && window.FlowMateWorkflowMvp.getFormatOptionsForChannels ? window.FlowMateWorkflowMvp.getFormatOptionsForChannels(channels.split(",").map(channel => channel.trim())).map(option => option.key).filter(Boolean) : ["1200x1200"];
   return {
     title: window.buildFlowMateTemplateTitle ? window.buildFlowMateTemplateTitle({
       launchDate,
@@ -1939,7 +1959,8 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     assetSubtype,
     assetCount: "1",
     platforms: channels,
-    sizeFormat: "1080x1080",
+    sizeFormats: formatOptions,
+    sizeFormat: formatOptions[0] || "1200x1200",
     briefLink: row.briefLink || "",
     briefNote: row.contentDetails || row.placementNote || "",
     referenceLink: "",
@@ -1975,24 +1996,20 @@ function openFlowMateCreativeBriefFromMarketingRow(row) {
   }));
 }
 function getMarketingPlanChannelOptions(rows, selectedMonth) {
-  const channels = new Set();
-  (rows || []).forEach(row => {
-    const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth === selectedMonth && row.channel) channels.add(row.channel);
-  });
-  return Array.from(channels).sort((a, b) => getMarketingPlanChannelLabel(a).localeCompare(getMarketingPlanChannelLabel(b)));
+  return MARKETING_PLAN_CHANNELS.map(channel => channel.key);
 }
-function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all", assignedUserId = "") {
+function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all", assignedUserId = "", includeTimelineWindow = false) {
+  const allowedMonths = includeTimelineWindow ? new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys) : null;
   return (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth !== selectedMonth) return false;
+    if (allowedMonths ? !allowedMonths.has(rowMonth) : rowMonth !== selectedMonth) return false;
     if (assignedUserId && row.picUserId !== assignedUserId && row.subPicUserId !== assignedUserId) return false;
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
 }
 function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel = "all") {
   const groups = new Map();
-  filterMarketingPlanRows(rows, selectedMonth, selectedChannel).forEach(row => {
+  filterMarketingPlanRows(rows, selectedMonth, selectedChannel, "", true).forEach(row => {
     const key = row.contentItemId || `${row.campaignName}-${row.contentTitle}`;
     if (!groups.has(key)) {
       groups.set(key, {
@@ -2085,6 +2102,7 @@ function getMarketingPlanChannelAbbrev(channel) {
   const normalized = channel || "other";
   const labels = {
     facebook: "FB",
+    facebook_esport: "FB ESP",
     tiktok: "TT",
     instagram: "IG",
     in_game: "Game",
@@ -2141,13 +2159,51 @@ function openNativeTimePicker(event) {
     input.showPicker();
   } catch (error) {}
 }
-function getMarketingPlanPlacementStatusOptions(rows, selectedMonth) {
+function getMarketingPlanPlacementStatusOptions(rows, selectedMonth, includeTimelineWindow = false) {
   const statuses = new Set();
+  const allowedMonths = includeTimelineWindow ? new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys) : null;
   (rows || []).forEach(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth === selectedMonth) statuses.add(getMarketingPlanViewStatus(row));
+    if (allowedMonths ? allowedMonths.has(rowMonth) : rowMonth === selectedMonth) statuses.add(getMarketingPlanViewStatus(row));
   });
   return Array.from(statuses).sort();
+}
+function filterMarketingPlanRowsByFunctions(rows, selectedCodes, campaignCatalogRows) {
+  const selected = new Set(selectedCodes || []);
+  if (selected.size === MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.length) return rows || [];
+  if (selected.size === 0) return [];
+  const campaignByName = new Map((campaignCatalogRows || []).map(campaign => [getMarketingPlanCampaignKey(campaign.name), String(campaign.functionCode || "").toLowerCase()]));
+  return (rows || []).filter(row => selected.has(campaignByName.get(getMarketingPlanCampaignKey(row.campaignName))));
+}
+function MarketingPlanFunctionFilter({
+  selectedCodes,
+  onChange
+}) {
+  function toggleFunction(code) {
+    const current = new Set(selectedCodes || []);
+    if (current.has(code)) current.delete(code);else current.add(code);
+    onChange(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code).filter(optionCode => current.has(optionCode)));
+  }
+  return React.createElement("div", {
+    className: "check-row",
+    "data-testid": "marketing-function-filter",
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("span", {
+    className: "muted",
+    style: {
+      alignSelf: "center",
+      marginRight: 4
+    }
+  }, "Filter by Function:"), MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => React.createElement("label", {
+    key: option.code,
+    className: "check-pill"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: (selectedCodes || []).includes(option.code),
+    onChange: () => toggleFunction(option.code)
+  }), React.createElement("span", null, option.label))));
 }
 async function loadMarketingPlanTimelineRows(orderBy = "publish_date") {
   if (!window.flowmateSupabase) {
@@ -2425,6 +2481,8 @@ async function createMarketingPlanWorkingSheetRow(form) {
     content_tier: form.contentTier || null,
     pic_name: getMarketingPlanCurrentUserDefaults().picName || null,
     pic_user_id: getMarketingPlanCurrentUserDefaults().picUserId || null,
+    sub_pic_user_id: form.subPicUserId || null,
+    sub_pic_name: form.subPicUserId ? String(form.subPicName || "").trim() || null : null,
     brief_link: String(form.briefLink || "").trim() || null,
     source_start_date: form.launchDate || null,
     source_start_time: form.publishTime || null,
@@ -2560,6 +2618,13 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!contentPayload.title) throw new Error("Content is required.");
   const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
   if (contentResult.error) throw contentResult.error;
+  if ((row.subPicUserId || "") !== (form.subPicUserId || "")) {
+    const subPicResult = await window.flowmateSupabase.rpc("marketing_plan_assign_sub_pic", {
+      p_content_item_id: row.contentItemId,
+      p_sub_pic_user_id: form.subPicUserId || null
+    });
+    if (subPicResult.error) throw subPicResult.error;
+  }
   await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
   await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime);
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
@@ -2609,6 +2674,87 @@ function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all"
   link.remove();
   URL.revokeObjectURL(url);
   return visibleRows.length;
+}
+function MarketingPlanSubPicSearch({
+  inputId,
+  users,
+  userId,
+  value,
+  disabled = false,
+  onChange
+}) {
+  const [isOpen, setIsOpen] = useStateApp(false);
+  const normalizedQuery = String(value || "").trim().toLowerCase();
+  const matchingUsers = (users || []).filter(user => {
+    if (!user || !user.id || !normalizedQuery) return false;
+    return `${user.name || ""} ${user.email || ""}`.toLowerCase().includes(normalizedQuery);
+  }).slice(0, 8);
+  function chooseUser(user) {
+    onChange({
+      userId: user.id,
+      name: user.name || user.email || ""
+    });
+    setIsOpen(false);
+  }
+  return React.createElement("div", {
+    className: "marketing-sub-pic-search"
+  }, React.createElement("div", {
+    className: "marketing-sub-pic-search__control"
+  }, React.createElement("input", {
+    id: inputId,
+    className: "input",
+    type: "search",
+    autoComplete: "off",
+    value: value || "",
+    disabled,
+    placeholder: "Search active user, e.g. Aof",
+    "aria-label": "Sub PIC",
+    "aria-autocomplete": "list",
+    "aria-expanded": isOpen && !userId && Boolean(normalizedQuery),
+    "aria-controls": `${inputId}-results`,
+    onFocus: () => setIsOpen(true),
+    onBlur: () => window.setTimeout(() => setIsOpen(false), 120),
+    onChange: event => {
+      onChange({
+        userId: "",
+        name: event.target.value
+      });
+      setIsOpen(true);
+    }
+  }), userId && React.createElement("button", {
+    type: "button",
+    className: "marketing-sub-pic-search__clear",
+    disabled,
+    "aria-label": "Clear Sub PIC",
+    onMouseDown: event => event.preventDefault(),
+    onClick: () => {
+      onChange({
+        userId: "",
+        name: ""
+      });
+      setIsOpen(false);
+    }
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), isOpen && !userId && normalizedQuery && React.createElement("div", {
+    id: `${inputId}-results`,
+    className: "marketing-sub-pic-search__results",
+    role: "listbox",
+    "aria-label": "Sub PIC suggestions"
+  }, matchingUsers.length ? matchingUsers.map(user => React.createElement("button", {
+    key: user.id,
+    type: "button",
+    className: "marketing-sub-pic-search__option",
+    role: "option",
+    onMouseDown: event => event.preventDefault(),
+    onClick: () => chooseUser(user)
+  }, React.createElement("span", {
+    className: "strong"
+  }, user.name), user.email && user.email !== user.name && React.createElement("span", {
+    className: "muted"
+  }, user.email))) : React.createElement("div", {
+    className: "marketing-sub-pic-search__empty"
+  }, "No matching active user.")));
 }
 function normalizeMarketingPlanSupervisorRow(row) {
   return {
@@ -2819,15 +2965,16 @@ function exportMarketingPlanSupervisorCsv(rows, filters) {
   URL.revokeObjectURL(url);
   return visibleRows.length;
 }
-function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel = "all") {
+function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel = "all", includeTimelineWindow = false) {
   const groups = MARKETING_PLAN_CHANNELS.map(channel => ({
     ...channel,
     placements: []
   }));
   const groupMap = new Map(groups.map(group => [group.key, group]));
+  const allowedMonths = includeTimelineWindow ? new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys) : null;
   (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth !== selectedMonth) return false;
+    if (allowedMonths ? !allowedMonths.has(rowMonth) : rowMonth !== selectedMonth) return false;
     if (selectedStatus !== "all" && getMarketingPlanViewStatus(row) !== selectedStatus) return false;
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).forEach(row => {
@@ -2859,6 +3006,7 @@ function getMarketingCampaignFunctionStyle(campaign) {
 function MarketingPlanTimelineScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
   const [campaignMessage, setCampaignMessage] = useStateApp("");
   const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useStateApp(false);
   const [campaignManagerRows, setCampaignManagerRows] = useStateApp([]);
@@ -2943,10 +3091,14 @@ function MarketingPlanTimelineScreen() {
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
-  const groupedCampaigns = groupMarketingPlanTimelineRows(rows, selectedMonth);
+  const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
+  const officialTimelineRows = functionFilteredRows.filter(row => row.channel !== "facebook_esport");
+  const facebookEsportRows = functionFilteredRows.filter(row => row.channel === "facebook_esport");
+  const groupedCampaigns = groupMarketingPlanTimelineRows(officialTimelineRows, selectedMonth);
+  const facebookEsportCampaigns = groupMarketingPlanTimelineRows(facebookEsportRows, selectedMonth);
   const campaignCatalogByName = new Map(campaignCatalogRows.map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
   const canArchiveCampaignTags = Boolean(window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin");
-  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth);
+  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(officialTimelineRows, selectedMonth);
   const columnWidth = 38;
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
@@ -3142,6 +3294,63 @@ function MarketingPlanTimelineScreen() {
       style: getMarketingCampaignFunctionStyle(catalog)
     }, catalog && catalog.functionLabel || "Unassigned");
   }
+  function renderEsportTimelineCard() {
+    if (loadState.status !== "live") return null;
+    const placements = facebookEsportCampaigns.flatMap(campaign => campaign.assets.flatMap(asset => asset.placements.map(placement => ({
+      ...placement,
+      campaignName: campaign.name,
+      campaignTeam: campaign.team,
+      assetTitle: asset.title,
+      assetMeta: getMarketingPlanTimelineAssetMeta(asset)
+    })))).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")));
+    return React.createElement("div", {
+      className: "card",
+      "data-testid": "facebook-esport-timeline",
+      style: {
+        marginTop: 16
+      }
+    }, React.createElement("div", {
+      className: "card__head"
+    }, React.createElement("div", null, React.createElement("span", {
+      className: "card__title"
+    }, "FB eSport Timeline"), React.createElement("div", {
+      className: "card__sub"
+    }, timelineWindow.monthGroups.map(group => group.label).join(" + "), " · separated from Official Facebook post counts")), React.createElement("span", {
+      className: "badge badge--assigned"
+    }, placements.length, " posts")), React.createElement("div", {
+      className: "card__body card__body--flush",
+      style: {
+        overflowX: "auto"
+      }
+    }, React.createElement("table", {
+      className: "table table--dense"
+    }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Publish date"), React.createElement("th", null, "Time"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Product / Event"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, placements.map(placement => React.createElement("tr", {
+      key: placement.placementId || `${placement.campaignName}-${placement.assetTitle}-${placement.publishDate}-${placement.publishTime}`
+    }, React.createElement("td", null, formatMarketingPlanDate(placement.publishDate)), React.createElement("td", {
+      className: "mono"
+    }, formatMarketingPlanTime(placement.publishTime) || "-"), React.createElement("td", null, React.createElement("div", {
+      className: "strong"
+    }, placement.campaignName), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 12
+      }
+    }, placement.campaignTeam || "No team")), React.createElement("td", null, React.createElement("div", null, placement.assetTitle), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 12
+      }
+    }, placement.assetMeta || "FB eSport")), React.createElement("td", null, React.createElement("span", {
+      className: `badge ${getMarketingPlanStatusClass(placement.placementStatus)}`
+    }, getMarketingPlanStatusLabel(placement.placementStatus))))), placements.length === 0 && React.createElement("tr", null, React.createElement("td", {
+      colSpan: 5,
+      className: "muted",
+      style: {
+        textAlign: "center",
+        padding: 20
+      }
+    }, "No FB eSport placements match the selected month and Function filters."))))));
+  }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("h1", null, "Campaign Timeline"), React.createElement("p", null, "Campaign rows, Product / Event sub-rows, and channel placements by publish date.")), React.createElement("div", {
@@ -3174,7 +3383,10 @@ function MarketingPlanTimelineScreen() {
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), campaignMessage && React.createElement("div", {
+  }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
+    selectedCodes: selectedFunctionCodes,
+    onChange: setSelectedFunctionCodes
+  }), campaignMessage && React.createElement("div", {
     className: "reason-box",
     style: {
       marginBottom: 16
@@ -3307,13 +3519,13 @@ function MarketingPlanTimelineScreen() {
     }
   }, "Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();")), loadState.status === "live" && groupedCampaigns.length === 0 && React.createElement("div", {
     className: "reason-box"
-  }, "No placements in ", getMarketingPlanMonthLabel(selectedMonth), ". The month dropdown only shows months found in Marketing Plan data."), loadState.status === "live" && groupedCampaigns.length > 0 && React.createElement("div", {
+  }, "No placements in ", timelineWindow.monthGroups.map(group => group.label).join(" + "), ". Check the Function filters or month selection."), loadState.status === "live" && groupedCampaigns.length > 0 && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
   }, React.createElement("div", null, React.createElement("span", {
     className: "card__title"
-  }, getMarketingPlanMonthLabel(selectedMonth), " + ", getMarketingPlanMonthLabel(getNextMarketingPlanMonthKey(selectedMonth)), " campaign timeline"), React.createElement("div", {
+  }, timelineWindow.monthGroups.map(group => group.label).join(" + "), " campaign timeline"), React.createElement("div", {
     className: "card__sub"
   }, "Main row = Campaign, sub-row = Product / Event, columns = publish date")), React.createElement("div", {
     className: "row",
@@ -3514,13 +3726,15 @@ function MarketingPlanTimelineScreen() {
         gap: 3
       }
     }, dayPlacements.map(renderPlacementBadge)));
-  })))))))))));
+  })))))))))), renderEsportTimelineCard());
 }
 function MarketingPlanChannelPlanScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedStatus, setSelectedStatus] = useStateApp("all");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
+  const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
+  const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan channel placements..."
@@ -3571,6 +3785,14 @@ function MarketingPlanChannelPlanScreen() {
       }
     }
     loadTimelineRows();
+    if (window.loadFlowMateMarketingCampaignOptions) {
+      window.loadFlowMateMarketingCampaignOptions({
+        includeArchived: true,
+        announce: false
+      }).then(campaigns => {
+        if (alive) setCampaignCatalogRows(campaigns || []);
+      }).catch(error => console.warn("[Marketing Plan] Channel function options load failed:", error && error.message));
+    }
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadTimelineRows) : () => {};
     return () => {
       alive = false;
@@ -3578,9 +3800,11 @@ function MarketingPlanChannelPlanScreen() {
     };
   }, []);
   const monthOptions = getMarketingPlanMonthOptions(rows);
-  const statusOptions = getMarketingPlanPlacementStatusOptions(rows, selectedMonth);
-  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel);
+  const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
+  const statusOptions = getMarketingPlanPlacementStatusOptions(functionFilteredRows, selectedMonth, true);
+  const channelOptions = getMarketingPlanChannelOptions(functionFilteredRows, selectedMonth);
+  const groupedChannels = groupMarketingPlanRowsByChannel(functionFilteredRows, selectedMonth, selectedStatus, selectedChannel, true);
+  const channelPlanWindow = getMarketingPlanTimelineWindow(selectedMonth);
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
     return React.createElement("span", {
@@ -3644,7 +3868,10 @@ function MarketingPlanChannelPlanScreen() {
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
+  }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
+    selectedCodes: selectedFunctionCodes,
+    onChange: setSelectedFunctionCodes
+  }), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan channel placements..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -3677,7 +3904,7 @@ function MarketingPlanChannelPlanScreen() {
     className: "card__head"
   }, React.createElement("div", null, React.createElement("span", {
     className: "card__title"
-  }, getMarketingPlanMonthLabel(selectedMonth), " channel plan"), React.createElement("div", {
+  }, channelPlanWindow.monthGroups.map(group => group.label).join(" + "), " channel plan"), React.createElement("div", {
     className: "card__sub"
   }, "Grouped by channel first. Schedule uses publish date and publish time from Marketing Plan placements.")), React.createElement("div", {
     className: "row",
@@ -3767,6 +3994,8 @@ function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
+  const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
+  const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
   const [calendarViewMode, setCalendarViewMode] = useStateApp("schedule");
   const [selectedScheduleDate, setSelectedScheduleDate] = useStateApp("");
   const [loadState, setLoadState] = useStateApp({
@@ -3801,6 +4030,14 @@ function MarketingPlanCalendarScreen() {
       }
     }
     loadCalendarRows();
+    if (window.loadFlowMateMarketingCampaignOptions) {
+      window.loadFlowMateMarketingCampaignOptions({
+        includeArchived: true,
+        announce: false
+      }).then(campaigns => {
+        if (alive) setCampaignCatalogRows(campaigns || []);
+      }).catch(error => console.warn("[Marketing Plan] Calendar function options load failed:", error && error.message));
+    }
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadCalendarRows) : () => {};
     return () => {
       alive = false;
@@ -3808,8 +4045,9 @@ function MarketingPlanCalendarScreen() {
     };
   }, []);
   const monthOptions = getMarketingPlanMonthOptions(rows);
-  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const monthDays = getMarketingPlanDays(selectedMonth);
+  const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
+  const channelOptions = getMarketingPlanChannelOptions(functionFilteredRows, selectedMonth);
+  const monthDays = getMarketingPlanTimelineWindow(selectedMonth).days;
   const viewDays = getMarketingPlanCalendarViewDays(selectedMonth, calendarViewMode);
   const scheduleDayKeys = calendarViewMode === "schedule" && selectedScheduleDate ? [selectedScheduleDate] : viewDays;
   const calendarHours = Array.from({
@@ -3822,7 +4060,7 @@ function MarketingPlanCalendarScreen() {
     key: `blank-${index}`,
     isBlank: true
   })), ...monthDays];
-  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+  const visibleRows = filterMarketingPlanRows(functionFilteredRows, selectedMonth, selectedChannel, "", true);
   const rowsByDate = visibleRows.reduce((map, row) => {
     if (!map.has(row.publishDate)) map.set(row.publishDate, []);
     map.get(row.publishDate).push(row);
@@ -3921,7 +4159,10 @@ function MarketingPlanCalendarScreen() {
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
+  }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
+    selectedCodes: selectedFunctionCodes,
+    onChange: setSelectedFunctionCodes
+  }), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan calendar..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -3948,7 +4189,7 @@ function MarketingPlanCalendarScreen() {
     }
   }, "Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();")), loadState.status === "live" && visibleRows.length === 0 && React.createElement("div", {
     className: "reason-box"
-  }, "No placements match ", getMarketingPlanMonthLabel(selectedMonth), " and ", selectedChannel === "all" ? "all channels" : getMarketingPlanChannelLabel(selectedChannel), "."), loadState.status === "live" && visibleRows.length > 0 && React.createElement("div", {
+  }, "No placements match ", getMarketingPlanTimelineWindow(selectedMonth).monthGroups.map(group => group.label).join(" + "), " and ", selectedChannel === "all" ? "all channels" : getMarketingPlanChannelLabel(selectedChannel), "."), loadState.status === "live" && visibleRows.length > 0 && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
@@ -4074,6 +4315,7 @@ function MarketingPlanWorkingSheetScreen() {
   const [selectedWorkingOwner, setSelectedWorkingOwner] = useStateApp("all");
   const [workingSearch, setWorkingSearch] = useStateApp("");
   const [campaignOptions, setCampaignOptions] = useStateApp(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+  const [subPicUsers, setSubPicUsers] = useStateApp(() => window.FLOWMATE_MENTION_USERS || []);
   const [exportMessage, setExportMessage] = useStateApp("");
   const [sheetForm, setSheetForm] = useStateApp(getDefaultMarketingPlanWorkingSheetForm);
   const [saveState, setSaveState] = useStateApp({
@@ -4121,6 +4363,18 @@ function MarketingPlanWorkingSheetScreen() {
     return () => {
       aliveRef.alive = false;
       cleanup();
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
+    if (!window.loadFlowMateMentionUsers) return () => {
+      alive = false;
+    };
+    window.loadFlowMateMentionUsers().then(users => {
+      if (alive) setSubPicUsers(users || []);
+    }).catch(error => console.warn("[Marketing Plan] Sub PIC users load failed:", error && error.message));
+    return () => {
+      alive = false;
     };
   }, []);
   useEffectApp(() => {
@@ -4192,6 +4446,8 @@ function MarketingPlanWorkingSheetScreen() {
       publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || "",
       assetType: row.format || "Banner",
       contentTier: row.contentTier || "B",
+      subPicUserId: row.subPicUserId || "",
+      subPicName: row.subPicName || "",
       briefLink: row.briefLink || "",
       channels: selectedChannels
     });
@@ -4231,6 +4487,10 @@ function MarketingPlanWorkingSheetScreen() {
     }
     if (!editForm.channels || editForm.channels.length === 0) {
       setExportMessage("Select at least one Channel Tag.");
+      return;
+    }
+    if (String(editForm.subPicName || "").trim() && !editForm.subPicUserId) {
+      setExportMessage("Select Sub PIC from the suggested active users.");
       return;
     }
     setUpdatingRowId(editingWorkingRow.contentItemId);
@@ -4300,6 +4560,13 @@ function MarketingPlanWorkingSheetScreen() {
       setSaveState({
         status: "error",
         message: missing[1]
+      });
+      return;
+    }
+    if (String(sheetForm.subPicName || "").trim() && !sheetForm.subPicUserId) {
+      setSaveState({
+        status: "error",
+        message: "Select Sub PIC from the suggested active users."
       });
       return;
     }
@@ -4511,6 +4778,20 @@ function MarketingPlanWorkingSheetScreen() {
     key: tier,
     value: tier
   }, tier)))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Sub PIC"), React.createElement(MarketingPlanSubPicSearch, {
+    inputId: "marketing-plan-sub-pic",
+    users: subPicUsers,
+    userId: sheetForm.subPicUserId,
+    value: sheetForm.subPicName,
+    onChange: selection => setSheetForm(current => ({
+      ...current,
+      subPicUserId: selection.userId,
+      subPicName: selection.name
+    }))
+  })), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
@@ -4844,6 +5125,21 @@ function MarketingPlanWorkingSheetScreen() {
     key: tier,
     value: tier
   }, tier)))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Sub PIC"), React.createElement(MarketingPlanSubPicSearch, {
+    inputId: "marketing-plan-edit-sub-pic",
+    users: subPicUsers,
+    userId: editForm.subPicUserId,
+    value: editForm.subPicName,
+    disabled: !((window.FLOWMATE_CURRENT_USER || {}).role === "admin" || editingWorkingRow.picUserId === (window.FLOWMATE_CURRENT_USER || {}).id),
+    onChange: selection => setEditForm(current => ({
+      ...(current || {}),
+      subPicUserId: selection.userId,
+      subPicName: selection.name
+    }))
+  })), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
