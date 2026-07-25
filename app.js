@@ -5,7 +5,7 @@ const {
   useRef: useRefApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260725-2";
+  const fallbackVersion = "v20260725-3";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -158,7 +158,7 @@ const TITLE_MAP = {
   "admin-whitelist": "Whitelist"
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
-const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
@@ -1740,9 +1740,13 @@ const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [{
   key: "instagram",
   label: "IG"
 }];
-function getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth) {
+const MARKETING_PLAN_ESPORT_TIMELINE_COUNT_CHANNELS = [{
+  key: "facebook_esport",
+  label: "FB ESP"
+}];
+function getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth, channels = MARKETING_PLAN_TIMELINE_COUNT_CHANNELS) {
   const windowMonths = new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys);
-  const countChannels = new Set(MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => channel.key));
+  const countChannels = new Set(channels.map(channel => channel.key));
   const countsByDay = {};
   (rows || []).forEach(row => {
     const publishDate = String(row.publishDate || "");
@@ -2987,9 +2991,10 @@ function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, se
   return groups.filter(group => group.placements.length > 0);
 }
 const MARKETING_TIMELINE_COLLAPSE_KEY = "flowmate:marketing-plan:collapsed-campaigns";
-function getStoredMarketingTimelineCollapsedCampaigns() {
+const MARKETING_ESPORT_TIMELINE_COLLAPSE_KEY = "flowmate:marketing-plan:facebook-esport:collapsed-campaigns";
+function getStoredMarketingTimelineCollapsedCampaigns(storageKey = MARKETING_TIMELINE_COLLAPSE_KEY) {
   try {
-    const parsed = JSON.parse(window.sessionStorage.getItem(MARKETING_TIMELINE_COLLAPSE_KEY) || "[]");
+    const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) || "[]");
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
     return [];
@@ -3003,7 +3008,11 @@ function getMarketingCampaignFunctionStyle(campaign) {
     "--campaign-function-fg-dark": campaign && campaign.darkForeground || "#F7F7F7"
   };
 }
-function MarketingPlanTimelineScreen() {
+function MarketingPlanTimelineScreen({
+  channelMode = "official"
+} = {}) {
+  const isFacebookEsportTimeline = channelMode === "facebook_esport";
+  const collapseStorageKey = isFacebookEsportTimeline ? MARKETING_ESPORT_TIMELINE_COLLAPSE_KEY : MARKETING_TIMELINE_COLLAPSE_KEY;
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
@@ -3018,7 +3027,7 @@ function MarketingPlanTimelineScreen() {
   const [campaignManagerIncludeArchived, setCampaignManagerIncludeArchived] = useStateApp(false);
   const [campaignFunctionOptions, setCampaignFunctionOptions] = useStateApp([]);
   const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
-  const [collapsedCampaignKeys, setCollapsedCampaignKeys] = useStateApp(getStoredMarketingTimelineCollapsedCampaigns);
+  const [collapsedCampaignKeys, setCollapsedCampaignKeys] = useStateApp(() => getStoredMarketingTimelineCollapsedCampaigns(collapseStorageKey));
   const [campaignManagerState, setCampaignManagerState] = useStateApp({
     status: "idle",
     message: ""
@@ -3092,13 +3101,12 @@ function MarketingPlanTimelineScreen() {
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
-  const officialTimelineRows = functionFilteredRows.filter(row => row.channel !== "facebook_esport");
-  const facebookEsportRows = functionFilteredRows.filter(row => row.channel === "facebook_esport");
-  const groupedCampaigns = groupMarketingPlanTimelineRows(officialTimelineRows, selectedMonth);
-  const facebookEsportCampaigns = groupMarketingPlanTimelineRows(facebookEsportRows, selectedMonth);
+  const timelineRows = isFacebookEsportTimeline ? functionFilteredRows.filter(row => row.channel === "facebook_esport") : functionFilteredRows.filter(row => row.channel !== "facebook_esport");
+  const groupedCampaigns = groupMarketingPlanTimelineRows(timelineRows, selectedMonth);
   const campaignCatalogByName = new Map(campaignCatalogRows.map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
   const canArchiveCampaignTags = Boolean(window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin");
-  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(officialTimelineRows, selectedMonth);
+  const timelineCountChannels = isFacebookEsportTimeline ? MARKETING_PLAN_ESPORT_TIMELINE_COUNT_CHANNELS : MARKETING_PLAN_TIMELINE_COUNT_CHANNELS;
+  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(timelineRows, selectedMonth, timelineCountChannels);
   const columnWidth = 38;
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
@@ -3214,7 +3222,7 @@ function MarketingPlanTimelineScreen() {
   function toggleCampaignCollapsed(campaignKey) {
     setCollapsedCampaignKeys(current => {
       const next = current.includes(campaignKey) ? current.filter(key => key !== campaignKey) : [...current, campaignKey];
-      window.sessionStorage.setItem(MARKETING_TIMELINE_COLLAPSE_KEY, JSON.stringify(next));
+      window.sessionStorage.setItem(collapseStorageKey, JSON.stringify(next));
       return next;
     });
   }
@@ -3294,66 +3302,9 @@ function MarketingPlanTimelineScreen() {
       style: getMarketingCampaignFunctionStyle(catalog)
     }, catalog && catalog.functionLabel || "Unassigned");
   }
-  function renderEsportTimelineCard() {
-    if (loadState.status !== "live") return null;
-    const placements = facebookEsportCampaigns.flatMap(campaign => campaign.assets.flatMap(asset => asset.placements.map(placement => ({
-      ...placement,
-      campaignName: campaign.name,
-      campaignTeam: campaign.team,
-      assetTitle: asset.title,
-      assetMeta: getMarketingPlanTimelineAssetMeta(asset)
-    })))).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")));
-    return React.createElement("div", {
-      className: "card",
-      "data-testid": "facebook-esport-timeline",
-      style: {
-        marginTop: 16
-      }
-    }, React.createElement("div", {
-      className: "card__head"
-    }, React.createElement("div", null, React.createElement("span", {
-      className: "card__title"
-    }, "FB eSport Timeline"), React.createElement("div", {
-      className: "card__sub"
-    }, timelineWindow.monthGroups.map(group => group.label).join(" + "), " · separated from Official Facebook post counts")), React.createElement("span", {
-      className: "badge badge--assigned"
-    }, placements.length, " posts")), React.createElement("div", {
-      className: "card__body card__body--flush",
-      style: {
-        overflowX: "auto"
-      }
-    }, React.createElement("table", {
-      className: "table table--dense"
-    }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Publish date"), React.createElement("th", null, "Time"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Product / Event"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, placements.map(placement => React.createElement("tr", {
-      key: placement.placementId || `${placement.campaignName}-${placement.assetTitle}-${placement.publishDate}-${placement.publishTime}`
-    }, React.createElement("td", null, formatMarketingPlanDate(placement.publishDate)), React.createElement("td", {
-      className: "mono"
-    }, formatMarketingPlanTime(placement.publishTime) || "-"), React.createElement("td", null, React.createElement("div", {
-      className: "strong"
-    }, placement.campaignName), React.createElement("div", {
-      className: "muted",
-      style: {
-        fontSize: 12
-      }
-    }, placement.campaignTeam || "No team")), React.createElement("td", null, React.createElement("div", null, placement.assetTitle), React.createElement("div", {
-      className: "muted",
-      style: {
-        fontSize: 12
-      }
-    }, placement.assetMeta || "FB eSport")), React.createElement("td", null, React.createElement("span", {
-      className: `badge ${getMarketingPlanStatusClass(placement.placementStatus)}`
-    }, getMarketingPlanStatusLabel(placement.placementStatus))))), placements.length === 0 && React.createElement("tr", null, React.createElement("td", {
-      colSpan: 5,
-      className: "muted",
-      style: {
-        textAlign: "center",
-        padding: 20
-      }
-    }, "No FB eSport placements match the selected month and Function filters."))))));
-  }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
-  }, React.createElement("div", null, React.createElement("h1", null, "Campaign Timeline"), React.createElement("p", null, "Campaign rows, Product / Event sub-rows, and channel placements by publish date.")), React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("h1", null, isFacebookEsportTimeline ? "FB eSport Timeline" : "Campaign Timeline"), React.createElement("p", null, isFacebookEsportTimeline ? "Gantt view for Working Sheet rows tagged FB eSport only." : "Campaign rows, Product / Event sub-rows, and Official channel placements by publish date.")), React.createElement("div", {
     className: "row",
     style: {
       gap: 8
@@ -3519,13 +3470,13 @@ function MarketingPlanTimelineScreen() {
     }
   }, "Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();")), loadState.status === "live" && groupedCampaigns.length === 0 && React.createElement("div", {
     className: "reason-box"
-  }, "No placements in ", timelineWindow.monthGroups.map(group => group.label).join(" + "), ". Check the Function filters or month selection."), loadState.status === "live" && groupedCampaigns.length > 0 && React.createElement("div", {
+  }, isFacebookEsportTimeline ? "No FB eSport placements in " : "No Official channel placements in ", timelineWindow.monthGroups.map(group => group.label).join(" + "), ". Check the Function filters or month selection."), loadState.status === "live" && groupedCampaigns.length > 0 && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
   }, React.createElement("div", null, React.createElement("span", {
     className: "card__title"
-  }, timelineWindow.monthGroups.map(group => group.label).join(" + "), " campaign timeline"), React.createElement("div", {
+  }, timelineWindow.monthGroups.map(group => group.label).join(" + "), isFacebookEsportTimeline ? " FB eSport timeline" : " campaign timeline"), React.createElement("div", {
     className: "card__sub"
   }, "Main row = Campaign, sub-row = Product / Event, columns = publish date")), React.createElement("div", {
     className: "row",
@@ -3624,7 +3575,7 @@ function MarketingPlanTimelineScreen() {
         background: day.isWeekend ? "var(--garena-badge-bg)" : "var(--garena-white)",
         textAlign: "center"
       }
-    }, MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => {
+    }, timelineCountChannels.map(channel => {
       const count = dayCounts[channel.key] || 0;
       return count > 0 ? React.createElement("div", {
         key: channel.key,
@@ -3726,7 +3677,7 @@ function MarketingPlanTimelineScreen() {
         gap: 3
       }
     }, dayPlacements.map(renderPlacementBadge)));
-  })))))))))), renderEsportTimelineCard());
+  })))))))))));
 }
 function MarketingPlanChannelPlanScreen() {
   const [rows, setRows] = useStateApp([]);
@@ -5510,6 +5461,11 @@ function MarketingPlanShell({
     detail: "Campaign rows with Product / Event sub-rows and publish dates.",
     icon: "chart"
   }, {
+    key: "facebook-esport-timeline",
+    label: "FB eSport Timeline",
+    detail: "Gantt timeline for Working Sheet rows tagged FB eSport.",
+    icon: "chart"
+  }, {
     key: "channel-plan",
     label: "Channel Plan",
     detail: "View content by Facebook, TikTok, Instagram, LINE, YouTube, and in-game.",
@@ -5594,7 +5550,11 @@ function MarketingPlanShell({
     size: 15
   }), React.createElement("span", null, section.label))))), React.createElement("main", {
     className: "app__main app__main--marketing"
-  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, null), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null), activeSection.key === "supervisor" && !isAdminUser && React.createElement("div", {
+  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, {
+    channelMode: "official"
+  }), activeSection.key === "facebook-esport-timeline" && React.createElement(MarketingPlanTimelineScreen, {
+    channelMode: "facebook_esport"
+  }), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null), activeSection.key === "supervisor" && !isAdminUser && React.createElement("div", {
     className: "card",
     style: {
       maxWidth: 720
