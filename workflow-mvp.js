@@ -19,6 +19,7 @@
     youtube: Object.freeze(["1920x1080"]),
     in_game: Object.freeze(["custom"]),
     other: Object.freeze(["custom"]),
+    no_tag: Object.freeze(["custom"]),
   });
   let runtimeFormatOptions = { ...FORMAT_OPTIONS };
   let runtimeChannelFormatKeys = Object.fromEntries(
@@ -40,6 +41,7 @@
 
   function normalizeChannel(value) {
     const compact = String(value || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+    if (["notag", "none", "untagged"].includes(compact)) return "no_tag";
     if (["fbesport", "fbesports", "facebookesport", "facebookesports", "esportfacebook"].includes(compact)) return "facebook_esport";
     if (["facebook", "fb", "meta"].includes(compact)) return "facebook";
     if (["tiktok", "tk"].includes(compact)) return "tiktok";

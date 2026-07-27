@@ -774,6 +774,9 @@ const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [{
 }, {
   key: "other",
   label: "Other"
+}, {
+  key: "no_tag",
+  label: "No Tag"
 }];
 const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
   Facebook: ["1200x1200", "1200x1500"],
@@ -782,7 +785,8 @@ const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
   Instagram: ["1200x1200", "1200x1500"],
   YouTube: ["1920x1080"],
   "In-game": ["custom"],
-  Other: ["custom"]
+  Other: ["custom"],
+  "No Tag": ["custom"]
 };
 const FLOWMATE_CREATIVE_FORMAT_LABELS = {
   "1200x1200": "1200×1200 (1:1)",
@@ -1835,7 +1839,7 @@ function CreativeRequestForm({
   }
   function toggleChannel(channelLabel) {
     const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
-    const nextChannels = currentChannels.includes(channelLabel) ? currentChannels.filter(channel => channel !== channelLabel) : [...currentChannels, channelLabel];
+    const nextChannels = channelLabel === "No Tag" ? ["No Tag"] : currentChannels.filter(channel => channel !== "No Tag").includes(channelLabel) ? currentChannels.filter(channel => channel !== "No Tag" && channel !== channelLabel) : [...currentChannels.filter(channel => channel !== "No Tag"), channelLabel];
     const normalizedNextChannels = nextChannels.length ? nextChannels : [channelLabel];
     const nextValue = {
       ...value,

@@ -459,6 +459,7 @@ const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
   { key: "in_game", label: "In-game" },
   { key: "youtube", label: "YouTube" },
   { key: "other", label: "Other" },
+  { key: "no_tag", label: "No Tag" },
 ];
 
 const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
@@ -469,6 +470,7 @@ const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
   YouTube: ["1920x1080"],
   "In-game": ["custom"],
   Other: ["custom"],
+  "No Tag": ["custom"],
 };
 
 const FLOWMATE_CREATIVE_FORMAT_LABELS = {
@@ -1536,9 +1538,11 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
 
   function toggleChannel(channelLabel) {
     const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
-    const nextChannels = currentChannels.includes(channelLabel)
-      ? currentChannels.filter(channel => channel !== channelLabel)
-      : [...currentChannels, channelLabel];
+    const nextChannels = channelLabel === "No Tag"
+      ? ["No Tag"]
+      : (currentChannels.filter(channel => channel !== "No Tag").includes(channelLabel)
+        ? currentChannels.filter(channel => channel !== "No Tag" && channel !== channelLabel)
+        : [...currentChannels.filter(channel => channel !== "No Tag"), channelLabel]);
     const normalizedNextChannels = nextChannels.length ? nextChannels : [channelLabel];
     const nextValue = {
       ...value,

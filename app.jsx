@@ -4,7 +4,7 @@ const {
   useRef: useRefApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260725-3";
+  const fallbackVersion = "v20260727-1";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -1839,6 +1839,9 @@ const MARKETING_PLAN_CHANNELS = [{
 }, {
   key: "other",
   label: "Other"
+}, {
+  key: "no_tag",
+  label: "No Tag"
 }];
 const MARKETING_PLAN_FUNCTION_FILTER_OPTIONS = [{
   code: "ops",
@@ -1906,6 +1909,16 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     channels: ["facebook"],
     note: ""
   };
+}
+function getMarketingPlanExclusiveChannels(currentChannels, channelKey) {
+  const current = Array.isArray(currentChannels) ? currentChannels : [];
+  if (channelKey === "no_tag") return ["no_tag"];
+  const withoutNoTag = current.filter(channel => channel !== "no_tag");
+  const nextChannels = withoutNoTag.includes(channelKey) ? withoutNoTag.filter(channel => channel !== channelKey) : [...withoutNoTag, channelKey];
+  return nextChannels.length ? nextChannels : [channelKey];
+}
+function isMarketingPlanPublishableChannel(channel) {
+  return Boolean(channel) && channel !== "no_tag";
 }
 function marketingPlanMonthKeyFromDate(dateKey) {
   return dateKey && /^\d{4}-\d{2}-\d{2}/.test(String(dateKey)) ? String(dateKey).slice(0, 7) : flowMateTodayDateKey().slice(0, 7);
@@ -2110,7 +2123,8 @@ function getMarketingPlanChannelAbbrev(channel) {
     instagram: "IG",
     in_game: "Game",
     youtube: "YT",
-    other: "Other"
+    other: "Other",
+    no_tag: "No Tag"
   };
   return labels[normalized] || getMarketingPlanChannelLabel(normalized).slice(0, 6);
 }
@@ -3105,7 +3119,7 @@ function MarketingPlanTimelineScreen({
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
-  const timelineRows = isFacebookEsportTimeline ? functionFilteredRows.filter(row => row.channel === "facebook_esport") : functionFilteredRows.filter(row => row.channel !== "facebook_esport");
+  const timelineRows = isFacebookEsportTimeline ? functionFilteredRows.filter(row => row.channel === "facebook_esport") : functionFilteredRows.filter(row => row.channel !== "facebook_esport" && isMarketingPlanPublishableChannel(row.channel));
   const groupedCampaigns = groupMarketingPlanTimelineRows(timelineRows, selectedMonth);
   const campaignCatalogByName = new Map(campaignCatalogRows.map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
   const canArchiveCampaignTags = Boolean(window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin");
@@ -3759,9 +3773,10 @@ function MarketingPlanChannelPlanScreen() {
   }, []);
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
-  const statusOptions = getMarketingPlanPlacementStatusOptions(functionFilteredRows, selectedMonth, true);
-  const channelOptions = getMarketingPlanChannelOptions(functionFilteredRows, selectedMonth);
-  const groupedChannels = groupMarketingPlanRowsByChannel(functionFilteredRows, selectedMonth, selectedStatus, selectedChannel, true);
+  const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
+  const statusOptions = getMarketingPlanPlacementStatusOptions(publishableRows, selectedMonth, true);
+  const channelOptions = getMarketingPlanChannelOptions(publishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
+  const groupedChannels = groupMarketingPlanRowsByChannel(publishableRows, selectedMonth, selectedStatus, selectedChannel, true);
   const channelPlanWindow = getMarketingPlanTimelineWindow(selectedMonth);
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
@@ -3870,7 +3885,7 @@ function MarketingPlanChannelPlanScreen() {
       gap: 6,
       flexWrap: "wrap"
     }
-  }, MARKETING_PLAN_CHANNELS.map(channel => React.createElement("span", {
+  }, MARKETING_PLAN_CHANNELS.filter(channel => isMarketingPlanPublishableChannel(channel.key)).map(channel => React.createElement("span", {
     key: channel.key,
     className: "badge badge--neutral"
   }, channel.label)))), React.createElement("div", {
@@ -4004,7 +4019,8 @@ function MarketingPlanCalendarScreen() {
   }, []);
   const monthOptions = getMarketingPlanMonthOptions(rows);
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
-  const channelOptions = getMarketingPlanChannelOptions(functionFilteredRows, selectedMonth);
+  const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
+  const channelOptions = getMarketingPlanChannelOptions(publishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
   const monthDays = getMarketingPlanTimelineWindow(selectedMonth).days;
   const viewDays = getMarketingPlanCalendarViewDays(selectedMonth, calendarViewMode);
   const scheduleDayKeys = calendarViewMode === "schedule" && selectedScheduleDate ? [selectedScheduleDate] : viewDays;
@@ -4018,7 +4034,7 @@ function MarketingPlanCalendarScreen() {
     key: `blank-${index}`,
     isBlank: true
   })), ...monthDays];
-  const visibleRows = filterMarketingPlanRows(functionFilteredRows, selectedMonth, selectedChannel, "", true);
+  const visibleRows = filterMarketingPlanRows(publishableRows, selectedMonth, selectedChannel, "", true);
   const rowsByDate = visibleRows.reduce((map, row) => {
     if (!map.has(row.publishDate)) map.set(row.publishDate, []);
     map.get(row.publishDate).push(row);
@@ -4379,11 +4395,9 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function toggleSheetChannel(channelKey) {
     setSheetForm(current => {
-      const currentChannels = Array.isArray(current.channels) ? current.channels : [];
-      const nextChannels = currentChannels.includes(channelKey) ? currentChannels.filter(channel => channel !== channelKey) : [...currentChannels, channelKey];
       return {
         ...current,
-        channels: nextChannels.length ? nextChannels : [channelKey]
+        channels: getMarketingPlanExclusiveChannels(current.channels, channelKey)
       };
     });
   }
@@ -4419,11 +4433,9 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function toggleEditChannel(channelKey) {
     setEditForm(current => {
-      const currentChannels = Array.isArray(current && current.channels) ? current.channels : [];
-      const nextChannels = currentChannels.includes(channelKey) ? currentChannels.filter(channel => channel !== channelKey) : [...currentChannels, channelKey];
       return {
         ...(current || {}),
-        channels: nextChannels.length ? nextChannels : [channelKey]
+        channels: getMarketingPlanExclusiveChannels(current && current.channels, channelKey)
       };
     });
   }
@@ -4808,7 +4820,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "card__title"
   }, "Current working rows"), React.createElement("div", {
     className: "card__sub"
-  }, "These rows feed Campaign Timeline, Channel Plan, Calendar, and CSV export."))), React.createElement("div", {
+  }, "Rows with publishing Channel Tags feed Timeline, Channel Plan, and Calendar. All rows remain available in Working Sheet and CSV export."))), React.createElement("div", {
     className: "card__body"
   }, React.createElement("div", {
     className: "marketing-working-filters",
@@ -5017,7 +5029,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "modal__head"
   }, React.createElement("div", null, React.createElement("h2", null, "Edit Working Sheet row"), React.createElement("div", {
     className: "muted"
-  }, "Changes update Timeline, Channel Plan, Calendar, and CSV export.")), React.createElement("button", {
+  }, "Publishing Channel Tags update Timeline, Channel Plan, and Calendar. No Tag stays in Working Sheet and CSV only.")), React.createElement("button", {
     type: "button",
     className: "iconbtn",
     onClick: () => {
