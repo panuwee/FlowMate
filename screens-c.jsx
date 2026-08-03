@@ -1,4 +1,4 @@
-﻿// FlowMate - Screens part C: Workload, KPI, Team Settings
+// FlowMate - Screens part C: Workload, KPI, Team Settings
 const { useState: useStateC, useEffect: useEffectC } = React;
 
 function exportFlowMateCsvC(filename, columns, rows) {
@@ -2198,13 +2198,6 @@ function TeamGanttScreen({ onOpen }) {
       </div>
 
       <div className="gantt__toolbar" aria-label="Gantt read-only controls">
-        <div className="gantt__toolbar-group">
-          <span className="gantt__chip"><Icon name="chart" size={13} /> Trello Power-Up Lite</span>
-          <span className="gantt__chip">Two-month window</span>
-          <span className="gantt__chip">Scroll right to see the second month</span>
-          <span className="gantt__chip">Grouped by team / assignee</span>
-          <span className="gantt__chip">Click bar to open task</span>
-        </div>
         <div className="gantt__legend">
           <span><i className="gantt__legend-dot gantt__legend-dot--normal"></i>Normal</span>
           <span><i className="gantt__legend-dot gantt__legend-dot--urgent"></i>Urgent</span>
@@ -2212,6 +2205,7 @@ function TeamGanttScreen({ onOpen }) {
           <span><i className="gantt__legend-leave"></i>Leave / partial leave</span>
           <span><i className="gantt__legend-line"></i>Today</span>
         </div>
+        <span className="muted" style={{ fontSize: 12 }}>Bars show 1st Draft to Launch; assignment capacity is calculated only through 1st Draft.</span>
       </div>
 
       <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>

@@ -1,7 +1,8 @@
 const {
   useState: useStateApp,
   useEffect: useEffectApp,
-  useRef: useRefApp
+  useRef: useRefApp,
+  useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
   const fallbackVersion = "v20260727-1";
@@ -1574,12 +1575,20 @@ function normalizeMarketingPlanTimelineRow(row) {
   };
 }
 function getMarketingPlanMonthOptions(rows) {
-  const months = new Set();
+  const months = new Set([getMarketingPlanCurrentMonthKey()]);
   (rows || []).forEach(row => {
     const monthKey = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
     if (monthKey) months.add(monthKey);
   });
   return Array.from(months).sort();
+}
+function getMarketingPlanCurrentMonthKey() {
+  return flowMateTodayDateKey().slice(0, 7);
+}
+function getDefaultMarketingPlanMonth(monthOptions) {
+  const currentMonth = getMarketingPlanCurrentMonthKey();
+  if ((monthOptions || []).includes(currentMonth)) return currentMonth;
+  return (monthOptions || [])[monthOptions.length - 1] || currentMonth;
 }
 function normalizeMarketingPlanCampaignOption(row, plan) {
   return {
@@ -2227,45 +2236,98 @@ function MarketingPlanFunctionFilter({
     onChange: () => toggleFunction(option.code)
   }), React.createElement("span", null, option.label))));
 }
-async function loadMarketingPlanTimelineRows(orderBy = "publish_date") {
+const MARKETING_PLAN_TIMELINE_SELECT_COLUMNS = ["plan_id", "month_key", "plan_title", "market", "audience_scope", "campaign_id", "campaign_name", "campaign_team", "campaign_sort_order", "content_item_id", "content_title", "content_team", "format", "content_tier", "pic_user_id", "pic_name", "sub_pic_user_id", "sub_pic_name", "brief_link", "flowmate_work_item_id", "flowmate_display_id", "flowmate_status", "content_status", "content_sort_order", "placement_id", "channel", "publish_date", "publish_time", "placement_status", "placement_note"].join(",");
+const MARKETING_PLAN_TIMELINE_CACHE_TTL_MS = 60000;
+const marketingPlanTimelineCache = new Map();
+const marketingPlanTimelineRequests = new Map();
+let marketingPlanMonthOptionsCache = null;
+let marketingPlanMonthOptionsRequest = null;
+function getMarketingPlanTimelineCacheKey(monthKey) {
+  return getMarketingPlanTimelineWindow(monthKey).monthKeys.join("|");
+}
+function sortMarketingPlanTimelineRows(rows, orderBy = "publish_date") {
+  const sortedRows = [...(rows || [])];
+  return sortedRows.sort((a, b) => {
+    const monthOrder = String(a.monthKey || "").localeCompare(String(b.monthKey || ""));
+    if (monthOrder) return monthOrder;
+    if (orderBy === "channel") {
+      return String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || ""));
+    }
+    if (orderBy === "campaign") {
+      return Number(a.campaignSortOrder || 0) - Number(b.campaignSortOrder || 0) || Number(a.contentSortOrder || 0) - Number(b.contentSortOrder || 0) || String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || ""));
+    }
+    return String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || Number(a.campaignSortOrder || 0) - Number(b.campaignSortOrder || 0) || Number(a.contentSortOrder || 0) - Number(b.contentSortOrder || 0);
+  });
+}
+function invalidateMarketingPlanDataCache() {
+  marketingPlanTimelineCache.clear();
+  marketingPlanMonthOptionsCache = null;
+}
+async function loadMarketingPlanAvailableMonths(options = {}) {
+  const force = options.force === true;
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
-  let query = window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
+  if (!force && marketingPlanMonthOptionsCache) return marketingPlanMonthOptionsCache;
+  if (marketingPlanMonthOptionsRequest) return marketingPlanMonthOptionsRequest;
+  marketingPlanMonthOptionsRequest = (async () => {
+    const result = await window.flowmateSupabase.from("marketing_plans").select("month_key").neq("status", "archived").order("month_key", {
+      ascending: true
+    });
+    if (result.error) throw result.error;
+    const monthOptions = getMarketingPlanMonthOptions((result.data || []).map(row => ({
+      monthKey: row.month_key
+    })));
+    marketingPlanMonthOptionsCache = monthOptions;
+    return monthOptions;
+  })().finally(() => {
+    marketingPlanMonthOptionsRequest = null;
+  });
+  return marketingPlanMonthOptionsRequest;
+}
+async function loadMarketingPlanTimelineRows(orderBy = "publish_date", monthKey = getMarketingPlanCurrentMonthKey(), options = {}) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const targetMonthKey = /^\d{4}-\d{2}$/.test(String(monthKey || "")) ? monthKey : getMarketingPlanCurrentMonthKey();
+  const windowMonths = getMarketingPlanTimelineWindow(targetMonthKey).monthKeys;
+  const cacheKey = getMarketingPlanTimelineCacheKey(targetMonthKey);
+  const cached = marketingPlanTimelineCache.get(cacheKey);
+  const force = options.force === true;
+  const cacheAge = cached ? Date.now() - cached.loadedAt : Number.POSITIVE_INFINITY;
+  if (!force && cached && cacheAge < MARKETING_PLAN_TIMELINE_CACHE_TTL_MS) {
+    return sortMarketingPlanTimelineRows(cached.rows, orderBy);
+  }
+  if (marketingPlanTimelineRequests.has(cacheKey)) {
+    const rows = await marketingPlanTimelineRequests.get(cacheKey);
+    return sortMarketingPlanTimelineRows(rows, orderBy);
+  }
+  let query = window.flowmateSupabase.from("marketing_plan_timeline_v").select(MARKETING_PLAN_TIMELINE_SELECT_COLUMNS).in("month_key", windowMonths).order("month_key", {
+    ascending: true
+  }).order("publish_date", {
+    ascending: true
+  }).order("publish_time", {
+    ascending: true
+  }).order("campaign_sort_order", {
+    ascending: true
+  }).order("content_sort_order", {
     ascending: true
   });
-  if (orderBy === "channel") {
-    query = query.order("channel", {
-      ascending: true
-    }).order("publish_date", {
-      ascending: true
-    }).order("publish_time", {
-      ascending: true
+  const request = (async () => {
+    const result = await query;
+    if (result.error) throw result.error;
+    const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
+    marketingPlanTimelineCache.set(cacheKey, {
+      rows: normalizedRows,
+      loadedAt: Date.now()
     });
-  } else if (orderBy === "campaign") {
-    query = query.order("campaign_sort_order", {
-      ascending: true
-    }).order("content_sort_order", {
-      ascending: true
-    }).order("publish_date", {
-      ascending: true
-    }).order("publish_time", {
-      ascending: true
-    });
-  } else {
-    query = query.order("publish_date", {
-      ascending: true
-    }).order("publish_time", {
-      ascending: true
-    }).order("campaign_sort_order", {
-      ascending: true
-    }).order("content_sort_order", {
-      ascending: true
-    });
-  }
-  const result = await query;
-  if (result.error) throw result.error;
-  return (result.data || []).map(normalizeMarketingPlanTimelineRow);
+    return normalizedRows;
+  })().finally(() => {
+    marketingPlanTimelineRequests.delete(cacheKey);
+  });
+  marketingPlanTimelineRequests.set(cacheKey, request);
+  const rows = await request;
+  return sortMarketingPlanTimelineRows(rows, orderBy);
 }
 async function findOrCreateMarketingPlan(monthKey) {
   const title = `Marketing Plan - ${getMarketingPlanMonthLabel(monthKey)}`;
@@ -3032,7 +3094,8 @@ function MarketingPlanTimelineScreen({
   const isFacebookEsportTimeline = channelMode === "facebook_esport";
   const collapseStorageKey = isFacebookEsportTimeline ? MARKETING_ESPORT_TIMELINE_COLLAPSE_KEY : MARKETING_TIMELINE_COLLAPSE_KEY;
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
   const [campaignMessage, setCampaignMessage] = useStateApp("");
   const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useStateApp(false);
@@ -3054,7 +3117,7 @@ function MarketingPlanTimelineScreen({
     status: "loading",
     message: "Loading Marketing Plan timeline..."
   });
-  async function loadTimelineRows(isAlive = () => true) {
+  async function loadTimelineRows(isAlive = () => true, options = {}) {
     if (!window.flowmateSupabase) {
       setLoadState({
         status: "error",
@@ -3063,23 +3126,9 @@ function MarketingPlanTimelineScreen({
       return;
     }
     try {
-      const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
-        ascending: true
-      }).order("campaign_sort_order", {
-        ascending: true
-      }).order("content_sort_order", {
-        ascending: true
-      }).order("publish_date", {
-        ascending: true
-      }).order("publish_time", {
-        ascending: true
-      });
-      if (result.error) throw result.error;
-      const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
-      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      const normalizedRows = await loadMarketingPlanTimelineRows("campaign", selectedMonth, options);
       if (!isAlive()) return;
       setRows(normalizedRows);
-      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || flowMateTodayDateKey().slice(0, 7));
       setLoadState({
         status: normalizedRows.length ? "live" : "empty",
         message: normalizedRows.length ? "Live Marketing Plan data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
@@ -3088,7 +3137,6 @@ function MarketingPlanTimelineScreen({
       if (!isAlive()) return;
       console.error("[Marketing Plan] Timeline load failed:", error);
       setRows([]);
-      setSelectedMonth("");
       setLoadState({
         status: "error",
         message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan timeline load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan timeline load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
@@ -3097,8 +3145,29 @@ function MarketingPlanTimelineScreen({
   }
   useEffectApp(() => {
     let alive = true;
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
     const isAlive = () => alive;
     loadTimelineRows(isAlive);
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows(isAlive, {
+      force: true
+    })) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
     if (window.loadFlowMateMarketingCampaignOptions) {
       window.loadFlowMateMarketingCampaignOptions({
         includeArchived: true,
@@ -3109,13 +3178,10 @@ function MarketingPlanTimelineScreen({
         console.warn("[Marketing Plan] Campaign options load failed:", error && error.message);
       });
     }
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows(isAlive)) : () => {};
     return () => {
       alive = false;
-      cleanup();
     };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
@@ -3177,7 +3243,9 @@ function MarketingPlanTimelineScreen({
         message: `Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}.`
       });
       await loadCampaignManagerRows();
-      await loadTimelineRows(() => true);
+      await loadTimelineRows(() => true, {
+        force: true
+      });
     } catch (error) {
       console.error("[Marketing Plan] Add campaign failed:", error);
       setCampaignManagerState({
@@ -3229,7 +3297,9 @@ function MarketingPlanTimelineScreen({
         status: "saved",
         message: `Updated Colour Tag for "${campaign.name}".`
       });
-      await loadTimelineRows(() => true);
+      await loadTimelineRows(() => true, {
+        force: true
+      });
     } catch (error) {
       setCampaignManagerState({
         status: "error",
@@ -3702,7 +3772,8 @@ function MarketingPlanTimelineScreen({
 }
 function MarketingPlanChannelPlanScreen() {
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedStatus, setSelectedStatus] = useStateApp("all");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
   const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
@@ -3713,7 +3784,18 @@ function MarketingPlanChannelPlanScreen() {
   });
   useEffectApp(() => {
     let alive = true;
-    async function loadTimelineRows() {
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
+    async function loadTimelineRows(options = {}) {
       if (!window.flowmateSupabase) {
         setLoadState({
           status: "error",
@@ -3722,21 +3804,9 @@ function MarketingPlanChannelPlanScreen() {
         return;
       }
       try {
-        const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
-          ascending: true
-        }).order("channel", {
-          ascending: true
-        }).order("publish_date", {
-          ascending: true
-        }).order("publish_time", {
-          ascending: true
-        });
-        if (result.error) throw result.error;
-        const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
-        const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+        const normalizedRows = await loadMarketingPlanTimelineRows("channel", selectedMonth, options);
         if (!alive) return;
         setRows(normalizedRows);
-        setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
         setSelectedStatus(current => current || "all");
         setSelectedChannel(current => current || "all");
         setLoadState({
@@ -3747,7 +3817,6 @@ function MarketingPlanChannelPlanScreen() {
         if (!alive) return;
         console.error("[Marketing Plan] Channel Plan load failed:", error);
         setRows([]);
-        setSelectedMonth("");
         setSelectedStatus("all");
         setSelectedChannel("all");
         setLoadState({
@@ -3757,6 +3826,16 @@ function MarketingPlanChannelPlanScreen() {
       }
     }
     loadTimelineRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows({
+      force: true
+    })) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
     if (window.loadFlowMateMarketingCampaignOptions) {
       window.loadFlowMateMarketingCampaignOptions({
         includeArchived: true,
@@ -3765,13 +3844,10 @@ function MarketingPlanChannelPlanScreen() {
         if (alive) setCampaignCatalogRows(campaigns || []);
       }).catch(error => console.warn("[Marketing Plan] Channel function options load failed:", error && error.message));
     }
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadTimelineRows) : () => {};
     return () => {
       alive = false;
-      cleanup();
     };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
   const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
   const statusOptions = getMarketingPlanPlacementStatusOptions(publishableRows, selectedMonth, true);
@@ -3965,7 +4041,8 @@ function MarketingPlanChannelPlanScreen() {
 }
 function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
   const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
   const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
@@ -3977,13 +4054,22 @@ function MarketingPlanCalendarScreen() {
   });
   useEffectApp(() => {
     let alive = true;
-    async function loadCalendarRows() {
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
+    async function loadCalendarRows(options = {}) {
       try {
-        const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
-        const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+        const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, options);
         if (!alive) return;
         setRows(normalizedRows);
-        setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
         setSelectedChannel("all");
         setSelectedScheduleDate("");
         setLoadState({
@@ -3994,7 +4080,6 @@ function MarketingPlanCalendarScreen() {
         if (!alive) return;
         console.error("[Marketing Plan] Calendar load failed:", error);
         setRows([]);
-        setSelectedMonth("");
         setSelectedChannel("all");
         setLoadState({
           status: "error",
@@ -4003,6 +4088,16 @@ function MarketingPlanCalendarScreen() {
       }
     }
     loadCalendarRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadCalendarRows({
+      force: true
+    })) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
     if (window.loadFlowMateMarketingCampaignOptions) {
       window.loadFlowMateMarketingCampaignOptions({
         includeArchived: true,
@@ -4011,13 +4106,10 @@ function MarketingPlanCalendarScreen() {
         if (alive) setCampaignCatalogRows(campaigns || []);
       }).catch(error => console.warn("[Marketing Plan] Calendar function options load failed:", error && error.message));
     }
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadCalendarRows) : () => {};
     return () => {
       alive = false;
-      cleanup();
     };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
   const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
   const channelOptions = getMarketingPlanChannelOptions(publishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
@@ -4282,7 +4374,8 @@ function MarketingPlanCalendarScreen() {
 }
 function MarketingPlanWorkingSheetScreen() {
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
   const [selectedWorkingStatus, setSelectedWorkingStatus] = useStateApp("all");
   const [selectedWorkingTeam, setSelectedWorkingTeam] = useStateApp("all");
@@ -4303,13 +4396,11 @@ function MarketingPlanWorkingSheetScreen() {
     status: "loading",
     message: "Loading Marketing Plan working sheet..."
   });
-  async function loadWorkingSheetRows(aliveRef) {
+  async function loadWorkingSheetRows(aliveRef, options = {}) {
     try {
-      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
-      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, options);
       if (aliveRef && !aliveRef.alive) return;
       setRows(normalizedRows);
-      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || marketingPlanMonthKeyFromDate(sheetForm.launchDate));
       setSelectedChannel("all");
       setLoadState({
         status: normalizedRows.length ? "live" : "empty",
@@ -4319,7 +4410,6 @@ function MarketingPlanWorkingSheetScreen() {
       if (aliveRef && !aliveRef.alive) return;
       console.error("[Marketing Plan] Working Sheet load failed:", error);
       setRows([]);
-      setSelectedMonth("");
       setSelectedChannel("all");
       setLoadState({
         status: "error",
@@ -4328,17 +4418,30 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
   useEffectApp(() => {
+    let alive = true;
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
     const aliveRef = {
       alive: true
     };
-    const loadRows = () => loadWorkingSheetRows(aliveRef);
+    const loadRows = options => loadWorkingSheetRows(aliveRef, options);
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadRows({
+      force: true
+    })) : () => {};
     return () => {
       aliveRef.alive = false;
       cleanup();
     };
-  }, []);
+  }, [selectedMonth]);
   useEffectApp(() => {
     let alive = true;
     if (!window.loadFlowMateMentionUsers) return () => {
@@ -4368,18 +4471,17 @@ function MarketingPlanWorkingSheetScreen() {
       window.removeEventListener("flowmate:marketing-campaigns-updated", syncCampaignOptions);
     };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
-  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const groupedWorkingRows = groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel);
-  const workingFilterOptions = getMarketingPlanWorkingFilterOptions(groupedWorkingRows);
-  const visibleRows = filterMarketingPlanWorkingRows(groupedWorkingRows, {
+  const channelOptions = useMemoApp(() => getMarketingPlanChannelOptions(rows, selectedMonth), [rows, selectedMonth]);
+  const groupedWorkingRows = useMemoApp(() => groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel), [rows, selectedMonth, selectedChannel]);
+  const workingFilterOptions = useMemoApp(() => getMarketingPlanWorkingFilterOptions(groupedWorkingRows), [groupedWorkingRows]);
+  const visibleRows = useMemoApp(() => filterMarketingPlanWorkingRows(groupedWorkingRows, {
     status: selectedWorkingStatus,
     team: selectedWorkingTeam,
     owner: selectedWorkingOwner,
     search: workingSearch
-  });
-  const visibleContentIds = new Set(visibleRows.map(row => row.contentItemId).filter(Boolean));
-  const visiblePlacementRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel).filter(row => visibleContentIds.has(row.contentItemId));
+  }), [groupedWorkingRows, selectedWorkingStatus, selectedWorkingTeam, selectedWorkingOwner, workingSearch]);
+  const visibleContentIds = useMemoApp(() => new Set(visibleRows.map(row => row.contentItemId).filter(Boolean)), [visibleRows]);
+  const visiblePlacementRows = useMemoApp(() => filterMarketingPlanRows(rows, selectedMonth, selectedChannel).filter(row => visibleContentIds.has(row.contentItemId)), [rows, selectedMonth, selectedChannel, visibleContentIds]);
   const activeWorkingFilters = [selectedMonth ? getMarketingPlanMonthLabel(selectedMonth) : "", selectedChannel !== "all" ? getMarketingPlanChannelLabel(selectedChannel) : "", selectedWorkingStatus !== "all" ? getMarketingPlanStatusLabel(selectedWorkingStatus) : "", selectedWorkingTeam !== "all" ? selectedWorkingTeam : "", selectedWorkingOwner !== "all" ? (workingFilterOptions.owners.find(owner => owner.key === selectedWorkingOwner) || {}).name : "", workingSearch.trim() ? `Search: ${workingSearch.trim()}` : ""].filter(Boolean);
   const hasClearableWorkingFilters = selectedChannel !== "all" || selectedWorkingStatus !== "all" || selectedWorkingTeam !== "all" || selectedWorkingOwner !== "all" || Boolean(workingSearch.trim());
   function canManageMarketingPlanWorkingRow(row) {
@@ -4474,6 +4576,8 @@ function MarketingPlanWorkingSheetScreen() {
       setEditForm(null);
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet row edit failed:", error);
@@ -4514,6 +4618,8 @@ function MarketingPlanWorkingSheetScreen() {
       }
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet row delete failed:", error);
@@ -4574,14 +4680,17 @@ function MarketingPlanWorkingSheetScreen() {
         publishTime: normalizedTime,
         campaignName: current.campaignName
       }));
-      await loadWorkingSheetRows({
+      const reloadPromise = loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
         detail: {
           reason: "marketing_plan_working_sheet_saved"
         }
       }));
+      await reloadPromise;
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet save failed:", error);
       setSaveState({
@@ -4614,6 +4723,8 @@ function MarketingPlanWorkingSheetScreen() {
       });
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet status update failed:", error);
@@ -4638,6 +4749,8 @@ function MarketingPlanWorkingSheetScreen() {
       await updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(row.contentItemId, detailUrl, row.flowmateWorkItemId || "");
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
       setExportMessage(`Restored Brief Link for ${row.contentTitle || row.flowmateDisplayId}.`);
     } catch (error) {

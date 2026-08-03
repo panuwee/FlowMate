@@ -2425,7 +2425,12 @@ function TeamGanttScreen({
     className: "gantt__legend-leave"
   }), "Leave / partial leave"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-line"
-  }), "Today"))), React.createElement("div", {
+  }), "Today")), React.createElement("span", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, "Bars show 1st Draft to Launch; assignment capacity is calculated only through 1st Draft.")), React.createElement("div", {
     className: "stat-strip",
     style: {
       gridTemplateColumns: "repeat(4, 1fr)"

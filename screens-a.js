@@ -921,6 +921,24 @@ function getFlowMateDraftDateForLaunchDate(launchDate) {
   const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_REVIEW_BUFFER_WORKING_DAYS);
   return clampFlowMateDateToToday(draftDate);
 }
+function getFlowMateEarliestCreativeDraftDate(draft, now = new Date()) {
+  const productionStart = getFlowMateProductionStartBucket(now);
+  let remainingBuckets = Math.max(1, Math.ceil(getFlowMateCreativeEffortEstimate(draft) / FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET));
+  let cursorDate = productionStart.date;
+  remainingBuckets -= productionStart.half === "pm" ? 1 : 2;
+  while (remainingBuckets > 0) {
+    cursorDate = getFlowMateNextWorkingDay(addFlowMateCalendarDays(cursorDate, 1));
+    remainingBuckets -= 2;
+  }
+  return cursorDate;
+}
+function getFlowMateAutoCreativeDraftDate(draft, now = new Date()) {
+  const launchDate = clampFlowMateDateToToday(draft?.launchDate);
+  const reviewTargetDate = getFlowMateDraftDateForLaunchDate(launchDate);
+  const earliestProductionDate = getFlowMateEarliestCreativeDraftDate(draft, now);
+  const effortAwareDate = reviewTargetDate > earliestProductionDate ? reviewTargetDate : earliestProductionDate;
+  return effortAwareDate > launchDate ? launchDate : effortAwareDate;
+}
 function getFlowMateNextWorkingDay(dateValue) {
   const parts = String(dateValue || "").slice(0, 10).split("-").map(part => Number(part));
   if (parts.length !== 3 || parts.some(part => !Number.isFinite(part))) return getFlowMateTodayDateKey();
@@ -976,12 +994,14 @@ function getFlowMateCreativeEffortEstimate(draft) {
 }
 function getFlowMateCreativeTimePressure(draft) {
   const launchDate = clampFlowMateDateToToday(draft?.launchDate);
-  const dueDate = clampFlowMateDateToToday(draft?.dueDate || getFlowMateDraftDateForLaunchDate(launchDate));
+  const dueDate = clampFlowMateDateToToday(draft?.dueDate || getFlowMateAutoCreativeDraftDate(draft));
   const productionStart = getFlowMateProductionStartBucket();
   const bucketCount = countFlowMateCapacityBucketsInclusive(productionStart.date, productionStart.half, dueDate);
   const workingDays = bucketCount / 2;
   const normalCapacity = bucketCount * FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET;
   const effort = getFlowMateCreativeEffortEstimate(draft);
+  const reviewTargetDate = getFlowMateDraftDateForLaunchDate(launchDate);
+  const earliestProductionDate = getFlowMateEarliestCreativeDraftDate(draft);
   const assetCount = Math.max(1, Number(draft?.assetCount || 1));
   const hasSecondItem = Boolean(String(draft?.assetSubtype2 || "").trim());
   const skillLabel = [getFlowMateCreativeTypeLabel(draft?.assetSubtype), hasSecondItem ? getFlowMateCreativeTypeLabel(draft.assetSubtype2) : ""].filter(Boolean).join(" + ");
@@ -996,10 +1016,17 @@ function getFlowMateCreativeTimePressure(draft) {
     dueDate,
     productionStart,
     bucketCount,
-    isInsufficient: effort > normalCapacity
+    isInsufficient: effort > normalCapacity,
+    reviewTargetDate,
+    earliestProductionDate,
+    isReviewBufferAtRisk: dueDate > reviewTargetDate,
+    requiresUrgent: effort > normalCapacity || dueDate > reviewTargetDate
   };
 }
 function getFlowMateAutoUrgentReason(timePressure) {
+  if (timePressure.isReviewBufferAtRisk && !timePressure.isInsufficient) {
+    return `Auto urgent: earliest feasible 1st Draft is ${timePressure.dueDate}, leaving less than ${FLOWMATE_REVIEW_BUFFER_WORKING_DAYS} working days before Launch ${timePressure.launchDate}.`;
+  }
   return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before 1st Draft.`;
 }
 function normalizeFlowMateQuickDraft(draft) {
@@ -1025,7 +1052,7 @@ function normalizeFlowMateCreativeDraft(draft) {
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   const assetCount2Number = Number(nextDraft.assetCount2);
   const assetCount2 = creativeType2 && Number.isInteger(assetCount2Number) && assetCount2Number >= 1 ? String(assetCount2Number) : String(nextDraft.assetCount2 || "");
-  return {
+  const normalizedDraft = {
     ...nextDraft,
     requesterTeam: getDefaultRequesterTeam(),
     assetType: creativeType.assetType,
@@ -1035,8 +1062,11 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetSubtype2: creativeType2 ? creativeType2.key : "",
     assetCount2,
     publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || FLOWMATE_PUBLISH_TIME_OPTIONS[0],
-    launchDate,
-    dueDate: getFlowMateDraftDateForLaunchDate(launchDate)
+    launchDate
+  };
+  return {
+    ...normalizedDraft,
+    dueDate: getFlowMateAutoCreativeDraftDate(normalizedDraft)
   };
 }
 function normalizeFlowMatePublishTimeInput(value) {
@@ -1367,12 +1397,12 @@ function CreateScreen({
       return;
     }
     const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
-    if (timePressure && timePressure.isInsufficient && submissionDraft.priority !== "urgent") {
+    if (timePressure && timePressure.requiresUrgent && submissionDraft.priority !== "urgent") {
       const autoUrgentReason = getFlowMateAutoUrgentReason(timePressure);
       const confirmed = window.flowmatePrompt ? await window.flowmatePrompt({
         title: "เวลาไม่เพียงพอ",
         hideInput: true,
-        note: `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before 1st Draft. Priority will be set to Urgent.`,
+        note: timePressure.isInsufficient ? `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before 1st Draft. Priority will be set to Urgent.` : `The earliest feasible 1st Draft is ${timePressure.dueDate}, leaving less than ${FLOWMATE_REVIEW_BUFFER_WORKING_DAYS} working days before Launch. Priority will be set to Urgent.`,
         confirmText: "Set Urgent and submit"
       }) : "";
       if (confirmed === null) {
@@ -1795,47 +1825,51 @@ function CreativeRequestForm({
     };
   }, []);
   function update(field, next) {
+    const applyAutoDraftDate = nextValue => ({
+      ...nextValue,
+      dueDate: getFlowMateAutoCreativeDraftDate(nextValue)
+    });
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
-      onChange({
+      onChange(applyAutoDraftDate({
         ...value,
         assetType: nextType.assetType,
         assetSubtype: nextType.key
-      });
+      }));
       return;
     }
     if (field === "assetSubtype2") {
       if (!next) {
-        onChange({
+        onChange(applyAutoDraftDate({
           ...value,
           assetType2: "",
           assetSubtype2: "",
           assetCount2: ""
-        });
+        }));
         return;
       }
       const nextType = getFlowMateCreativeTypeOption(next);
-      onChange({
+      onChange(applyAutoDraftDate({
         ...value,
         assetType2: nextType.assetType,
         assetSubtype2: nextType.key,
         assetCount2: value.assetCount2 || "1"
-      });
+      }));
       return;
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
-      onChange({
+      onChange(applyAutoDraftDate({
         ...value,
-        launchDate: nextLaunchDate,
-        dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate)
-      });
+        launchDate: nextLaunchDate
+      }));
       return;
     }
-    onChange({
+    const nextValue = {
       ...value,
       [field]: next
-    });
+    };
+    onChange(["assetCount", "assetCount2"].includes(field) ? applyAutoDraftDate(nextValue) : nextValue);
   }
   function toggleChannel(channelLabel) {
     const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
@@ -2112,7 +2146,7 @@ function CreativeRequestForm({
       fontSize: 12,
       marginTop: 6
     }
-  }, "Generated from Launch Date minus 2 working days."), errors.dueDate && React.createElement("div", {
+  }, "Generated from effort, current production cutoff, and Launch Date review buffer."), errors.dueDate && React.createElement("div", {
     className: "field__error"
   }, errors.dueDate)), React.createElement("div", {
     className: `field ${errors.launchDate ? "field--error" : ""}`
@@ -2469,7 +2503,17 @@ function DetailScreen({
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
   const visibleAiTags = detailAiTags;
-  const visibleActivityEvents = w.activityEvents || [];
+  const visibleActivityEvents = (() => {
+    const seenAssignmentResults = new Set();
+    return (w.activityEvents || []).filter(event => {
+      if (event.event_type !== "assignment_ran") return true;
+      const metadata = getFlowMateActivityMetadata(event);
+      const key = `${metadata.result || event.to_status || ""}|${metadata.reason || ""}`;
+      if (seenAssignmentResults.has(key)) return false;
+      seenAssignmentResults.add(key);
+      return true;
+    });
+  })();
   const mentionQueryMatch = commentBody.match(/(^|\s)@([^\s@]*)$/);
   const mentionQuery = mentionQueryMatch ? mentionQueryMatch[2].toLowerCase() : null;
   const mentionSuggestions = mentionQuery == null ? [] : mentionUsers.filter(user => user.id !== currentUserId).filter(user => {
@@ -2534,7 +2578,8 @@ function DetailScreen({
     if (event.event_type === "created") return `${actor} created this task${suffix}`;
     if (event.event_type === "assignment_ran") {
       const result = metadata.result ? `: ${metadata.result}` : "";
-      return `Assignment engine ran${result}${suffix}`;
+      const reason = String(metadata.reason || "").trim();
+      return `Assignment engine ran${result}${reason ? ` - ${reason}` : ""}${suffix}`;
     }
     if (event.event_type === "status_changed" || event.from_status || event.to_status) {
       return `${actor} moved status from ${event.from_status || "-"} to ${event.to_status || "-"}${suffix}`;
