@@ -2371,6 +2371,9 @@ function ganttMemberBucketCapacityC(member, leaves, bucketDate, bucketHalf) {
   const dailyCapacity = member.availability === "partial" ? Number(member.capacityOverridePerDay || 0) : Number(member.capacityPerDay || 8);
   return Math.max(0, dailyCapacity / 2);
 }
+function ganttMemberDailyCapacityC(member, leaves, bucketDate) {
+  return Number((ganttMemberBucketCapacityC(member, leaves, bucketDate, "am") + ganttMemberBucketCapacityC(member, leaves, bucketDate, "pm")).toFixed(2));
+}
 function ganttCapacityClassC(usedPoint, bucketCapacity, isLeave) {
   if (isLeave) return "is-leave";
   if (usedPoint > bucketCapacity) return "is-over-capacity";
@@ -2379,8 +2382,8 @@ function ganttCapacityClassC(usedPoint, bucketCapacity, isLeave) {
   if (usedPoint === bucketCapacity) return "is-full";
   return "is-partial";
 }
-function ganttCapacityTitleC(bucketDate, bucketHalf, usedPoint, bucketCapacity, entries, isLeave) {
-  const slotLabel = `${calendarDateLabelC(bucketDate)} ${bucketHalf.toUpperCase()}`;
+function ganttCapacityTitleC(bucketDate, usedPoint, bucketCapacity, entries, isLeave) {
+  const slotLabel = calendarDateLabelC(bucketDate);
   if (isLeave) return `${slotLabel}: leave / unavailable`;
   const taskText = (entries || []).map(entry => `${entry.item.id} ${entry.point} pt`).join(", ");
   if (usedPoint > bucketCapacity) {
@@ -2473,7 +2476,7 @@ function TeamGanttScreen({
         setCapacityRows(rows);
         setCapacityLoadState({
           status: "live",
-          message: "Live capacity allocation"
+          message: "Live daily workload"
         });
       } catch (error) {
         if (!alive) return;
@@ -2566,7 +2569,7 @@ function TeamGanttScreen({
     onClick: () => setShowCapacity(value => !value),
     "aria-pressed": showCapacity,
     "data-testid": "flowmate-gantt-capacity-toggle"
-  }, showCapacity ? "Hide capacity" : "Show capacity"), React.createElement("select", {
+  }, showCapacity ? "Hide workload" : "Show workload"), React.createElement("select", {
     className: "select",
     value: selectedGanttMonth,
     onChange: event => setMonthKey(event.target.value),
@@ -2598,7 +2601,7 @@ function TeamGanttScreen({
     className: "gantt__legend-capacity gantt__legend-capacity--available"
   }), "Available"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-capacity gantt__legend-capacity--used"
-  }), "Capacity allocated"), React.createElement("span", null, React.createElement("i", {
+  }), "Daily workload"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-capacity gantt__legend-capacity--over"
   }), "Over capacity (advisory)"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-line"
@@ -2607,7 +2610,7 @@ function TeamGanttScreen({
     style: {
       fontSize: 12
     }
-  }, "Capacity warnings are advisory: AM/PM allocation may exceed nominal capacity. Task bars still show 1st Draft to Launch.")), React.createElement("div", {
+  }, "Daily workload is planned automatically. Over-capacity warnings are advisory; adjust priority or reassign when needed.")), React.createElement("div", {
     className: "stat-strip",
     style: {
       gridTemplateColumns: "repeat(4, 1fr)"
@@ -2636,7 +2639,7 @@ function TeamGanttScreen({
     className: "stat__num mono"
   }, ganttCapacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0)), React.createElement("div", {
     className: "stat__lbl"
-  }, "Allocated pt"))), React.createElement("div", {
+  }, "Planned pt"))), React.createElement("div", {
     className: "gantt",
     "data-testid": "flowmate-team-gantt-chart"
   }, React.createElement("div", {
@@ -2697,7 +2700,7 @@ function TeamGanttScreen({
       className: "gantt__owner-name"
     }, assignee.assigneeName), React.createElement("span", {
       className: "muted"
-    }, assignee.member ? assignee.member.discipline : "Unassigned", showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt allocated` : ""))), React.createElement("div", {
+    }, assignee.member ? assignee.member.discipline : "Unassigned", showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt planned` : ""))), React.createElement("div", {
       className: "gantt__tracks",
       style: {
         "--gantt-days": ganttWindow.totalDays,
@@ -2718,32 +2721,48 @@ function TeamGanttScreen({
         key: `${assignee.assigneeId}:${cell.dateKey}`,
         className: `gantt__capacity-day ${cell.isWeekend ? "is-weekend" : ""}`,
         "data-testid": "flowmate-gantt-capacity-day"
-      }, ["am", "pm"].map(bucketHalf => {
-        const half = bucket?.halves?.[bucketHalf] || {
-          point: 0,
-          entries: []
+      }, (() => {
+        const halves = bucket?.halves || {
+          am: {
+            point: 0,
+            entries: []
+          },
+          pm: {
+            point: 0,
+            entries: []
+          }
         };
-        const isLeave = ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, bucketHalf);
-        const bucketCapacity = ganttMemberBucketCapacityC(assignee.member, assignee.capacityLeaves, cell.dateKey, bucketHalf);
-        const stateClass = ganttCapacityClassC(half.point, bucketCapacity, isLeave);
-        const title = ganttCapacityTitleC(cell.dateKey, bucketHalf, half.point, bucketCapacity, half.entries, isLeave);
+        const usedPoint = Number((halves.am.point + halves.pm.point).toFixed(2));
+        const bucketCapacity = ganttMemberDailyCapacityC(assignee.member, assignee.capacityLeaves, cell.dateKey);
+        const isLeave = bucketCapacity <= 0 && (ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, "am") || ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, "pm") || assignee.member?.availability === "leave");
+        const entryMap = new Map();
+        [...halves.am.entries, ...halves.pm.entries].forEach(entry => {
+          const key = entry.item.id;
+          const current = entryMap.get(key) || {
+            item: entry.item,
+            point: 0
+          };
+          current.point = Number((current.point + entry.point).toFixed(2));
+          entryMap.set(key, current);
+        });
+        const entries = Array.from(entryMap.values());
+        const stateClass = ganttCapacityClassC(usedPoint, bucketCapacity, isLeave);
+        const title = ganttCapacityTitleC(cell.dateKey, usedPoint, bucketCapacity, entries, isLeave);
         const isOverCapacity = stateClass === "is-over-capacity";
-        const content = React.createElement(React.Fragment, null, React.createElement("span", null, bucketHalf === "am" ? "A" : "P"), React.createElement("strong", null, isLeave ? "LV" : isOverCapacity ? `OVER ${half.point}` : half.point || "-"));
-        return half.entries.length ? React.createElement("button", {
-          key: bucketHalf,
+        const content = React.createElement(React.Fragment, null, React.createElement("strong", null, isLeave ? "Leave" : isOverCapacity ? `OVER ${usedPoint}` : `${usedPoint} / ${bucketCapacity}`), !isLeave && React.createElement("span", null, "pt"));
+        return entries.length ? React.createElement("button", {
           type: "button",
-          className: `gantt__capacity-half ${stateClass}`,
-          onClick: () => openGanttItem(half.entries[0]),
+          className: `gantt__capacity-summary ${stateClass}`,
+          onClick: () => openGanttItem(entries[0]),
           title: title,
           "aria-label": title,
           "data-testid": "flowmate-gantt-capacity-allocation"
         }, content) : React.createElement("span", {
-          key: bucketHalf,
-          className: `gantt__capacity-half ${stateClass}`,
+          className: `gantt__capacity-summary ${stateClass}`,
           title: title,
           "aria-label": title
         }, content);
-      }));
+      })());
     })), showCapacity && capacityLoadState.status === "error" && React.createElement("div", {
       className: "gantt__capacity-error",
       role: "status"
@@ -2786,7 +2805,7 @@ function TeamGanttScreen({
     style: {
       marginTop: 16
     }
-  }, "Gantt rule: due date is the task bar start and Launch is the marker/end. Capacity Allocation is a separate production layer: A/P cells show AM/PM points reserved by the assignment engine from the assignment window through 1st Draft. Warnings are advisory and allocation may exceed nominal capacity. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity."), React.createElement(Source, null, loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data", " - ", capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable", " - Team Gantt Chart - ", flowMateMonthLabelC(selectedGanttMonth), " plus next month"));
+  }, "Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity."), React.createElement(Source, null, loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data", " - ", capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable", " - Team Gantt Chart - ", flowMateMonthLabelC(selectedGanttMonth), " plus next month"));
 }
 function CalendarScreen({
   onOpen

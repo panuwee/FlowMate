@@ -2148,6 +2148,13 @@ function ganttMemberBucketCapacityC(member, leaves, bucketDate, bucketHalf) {
   return Math.max(0, dailyCapacity / 2);
 }
 
+function ganttMemberDailyCapacityC(member, leaves, bucketDate) {
+  return Number((
+    ganttMemberBucketCapacityC(member, leaves, bucketDate, "am")
+    + ganttMemberBucketCapacityC(member, leaves, bucketDate, "pm")
+  ).toFixed(2));
+}
+
 function ganttCapacityClassC(usedPoint, bucketCapacity, isLeave) {
   if (isLeave) return "is-leave";
   if (usedPoint > bucketCapacity) return "is-over-capacity";
@@ -2157,8 +2164,8 @@ function ganttCapacityClassC(usedPoint, bucketCapacity, isLeave) {
   return "is-partial";
 }
 
-function ganttCapacityTitleC(bucketDate, bucketHalf, usedPoint, bucketCapacity, entries, isLeave) {
-  const slotLabel = `${calendarDateLabelC(bucketDate)} ${bucketHalf.toUpperCase()}`;
+function ganttCapacityTitleC(bucketDate, usedPoint, bucketCapacity, entries, isLeave) {
+  const slotLabel = calendarDateLabelC(bucketDate);
   if (isLeave) return `${slotLabel}: leave / unavailable`;
   const taskText = (entries || []).map(entry => `${entry.item.id} ${entry.point} pt`).join(", ");
   if (usedPoint > bucketCapacity) {
@@ -2239,7 +2246,7 @@ function TeamGanttScreen({ onOpen }) {
         const rows = await window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey);
         if (!alive) return;
         setCapacityRows(rows);
-        setCapacityLoadState({ status: "live", message: "Live capacity allocation" });
+        setCapacityLoadState({ status: "live", message: "Live daily workload" });
       } catch (error) {
         if (!alive) return;
         console.error("[FlowMate Gantt Capacity] Supabase load failed:", error);
@@ -2338,7 +2345,7 @@ function TeamGanttScreen({ onOpen }) {
             aria-pressed={showCapacity}
             data-testid="flowmate-gantt-capacity-toggle"
           >
-            {showCapacity ? "Hide capacity" : "Show capacity"}
+            {showCapacity ? "Hide workload" : "Show workload"}
           </button>
           <select
             className="select"
@@ -2360,18 +2367,18 @@ function TeamGanttScreen({ onOpen }) {
           <span><i className="gantt__legend-diamond"></i>Launch</span>
           <span><i className="gantt__legend-leave"></i>Leave / partial leave</span>
           <span><i className="gantt__legend-capacity gantt__legend-capacity--available"></i>Available</span>
-          <span><i className="gantt__legend-capacity gantt__legend-capacity--used"></i>Capacity allocated</span>
+          <span><i className="gantt__legend-capacity gantt__legend-capacity--used"></i>Daily workload</span>
           <span><i className="gantt__legend-capacity gantt__legend-capacity--over"></i>Over capacity (advisory)</span>
           <span><i className="gantt__legend-line"></i>Today</span>
         </div>
-        <span className="muted" style={{ fontSize: 12 }}>Capacity warnings are advisory: AM/PM allocation may exceed nominal capacity. Task bars still show 1st Draft to Launch.</span>
+        <span className="muted" style={{ fontSize: 12 }}>Daily workload is planned automatically. Over-capacity warnings are advisory; adjust priority or reassign when needed.</span>
       </div>
 
       <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="stat"><div className="stat__num mono">{ganttTasks.length}</div><div className="stat__lbl">Visible tasks</div></div>
         <div className="stat stat--info"><div className="stat__num mono">{teamGroups.length}</div><div className="stat__lbl">Teams</div></div>
         <div className="stat stat--ok"><div className="stat__num mono">{teamGroups.reduce((sum, team) => sum + team.assignees.length, 0)}</div><div className="stat__lbl">Assignees</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{ganttCapacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0)}</div><div className="stat__lbl">Allocated pt</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{ganttCapacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0)}</div><div className="stat__lbl">Planned pt</div></div>
       </div>
 
       <div className="gantt" data-testid="flowmate-team-gantt-chart">
@@ -2417,7 +2424,7 @@ function TeamGanttScreen({ onOpen }) {
                   <Avatar memberId={assignee.assigneeId} size="avatar--lg" />
                   <span>
                     <span className="gantt__owner-name">{assignee.assigneeName}</span>
-                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}{showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt allocated` : ""}</span>
+                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}{showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt planned` : ""}</span>
                   </span>
                 </div>
                 <div className="gantt__tracks" style={{ "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
@@ -2436,33 +2443,44 @@ function TeamGanttScreen({ onOpen }) {
                           className={`gantt__capacity-day ${cell.isWeekend ? "is-weekend" : ""}`}
                           data-testid="flowmate-gantt-capacity-day"
                         >
-                          {["am", "pm"].map(bucketHalf => {
-                            const half = bucket?.halves?.[bucketHalf] || { point: 0, entries: [] };
-                            const isLeave = ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, bucketHalf);
-                            const bucketCapacity = ganttMemberBucketCapacityC(assignee.member, assignee.capacityLeaves, cell.dateKey, bucketHalf);
-                            const stateClass = ganttCapacityClassC(half.point, bucketCapacity, isLeave);
-                            const title = ganttCapacityTitleC(cell.dateKey, bucketHalf, half.point, bucketCapacity, half.entries, isLeave);
+                          {(() => {
+                            const halves = bucket?.halves || { am: { point: 0, entries: [] }, pm: { point: 0, entries: [] } };
+                            const usedPoint = Number((halves.am.point + halves.pm.point).toFixed(2));
+                            const bucketCapacity = ganttMemberDailyCapacityC(assignee.member, assignee.capacityLeaves, cell.dateKey);
+                            const isLeave = bucketCapacity <= 0 && (
+                              ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, "am")
+                              || ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, "pm")
+                              || assignee.member?.availability === "leave"
+                            );
+                            const entryMap = new Map();
+                            [...halves.am.entries, ...halves.pm.entries].forEach(entry => {
+                              const key = entry.item.id;
+                              const current = entryMap.get(key) || { item: entry.item, point: 0 };
+                              current.point = Number((current.point + entry.point).toFixed(2));
+                              entryMap.set(key, current);
+                            });
+                            const entries = Array.from(entryMap.values());
+                            const stateClass = ganttCapacityClassC(usedPoint, bucketCapacity, isLeave);
+                            const title = ganttCapacityTitleC(cell.dateKey, usedPoint, bucketCapacity, entries, isLeave);
                             const isOverCapacity = stateClass === "is-over-capacity";
-                            const content = <><span>{bucketHalf === "am" ? "A" : "P"}</span><strong>{isLeave ? "LV" : isOverCapacity ? `OVER ${half.point}` : half.point || "-"}</strong></>;
-                            return half.entries.length ? (
+                            const content = <><strong>{isLeave ? "Leave" : isOverCapacity ? `OVER ${usedPoint}` : `${usedPoint} / ${bucketCapacity}`}</strong>{!isLeave && <span>pt</span>}</>;
+                            return entries.length ? (
                               <button
-                                key={bucketHalf}
                                 type="button"
-                                className={`gantt__capacity-half ${stateClass}`}
-                                onClick={() => openGanttItem(half.entries[0])}
+                                className={`gantt__capacity-summary ${stateClass}`}
+                                onClick={() => openGanttItem(entries[0])}
                                 title={title}
                                 aria-label={title}
                                 data-testid="flowmate-gantt-capacity-allocation"
                               >{content}</button>
                             ) : (
                               <span
-                                key={bucketHalf}
-                                className={`gantt__capacity-half ${stateClass}`}
+                                className={`gantt__capacity-summary ${stateClass}`}
                                 title={title}
                                 aria-label={title}
                               >{content}</span>
                             );
-                          })}
+                          })()}
                         </div>
                       );
                     })}
@@ -2518,7 +2536,7 @@ function TeamGanttScreen({ onOpen }) {
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
-        Gantt rule: due date is the task bar start and Launch is the marker/end. Capacity Allocation is a separate production layer: A/P cells show AM/PM points reserved by the assignment engine from the assignment window through 1st Draft. Warnings are advisory and allocation may exceed nominal capacity. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity.
+        Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity.
       </div>
       <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - {capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable"} - Team Gantt Chart - {flowMateMonthLabelC(selectedGanttMonth)} plus next month</Source>
     </div>

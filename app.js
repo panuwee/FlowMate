@@ -6,7 +6,7 @@ const {
   useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260803-3";
+  const fallbackVersion = "v20260803-4";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {

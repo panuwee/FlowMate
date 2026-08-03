@@ -749,7 +749,7 @@ const FLOWMATE_ATTENTION_CATEGORIES_B = [{
 }, {
   code: "over_capacity",
   label: "Over capacity",
-  hint: "Owner load exceeds nominal capacity; review the AM/PM allocation."
+  hint: "Owner workload exceeds their normal daily capacity; review priority or reassign the task."
 }, {
   code: "wip_exceeded",
   label: "WIP exceeded",

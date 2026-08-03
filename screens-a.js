@@ -2384,11 +2384,6 @@ function DetailScreen({
   const [activeCreativeMembers, setActiveCreativeMembers] = useState([]);
   const [assigneeTargetMemberId, setAssigneeTargetMemberId] = useState(w && w.assignee || "");
   const [assigneeReason, setAssigneeReason] = useState("");
-  const [capacityAllocations, setCapacityAllocations] = useState([]);
-  const [capacityEditorState, setCapacityEditorState] = useState({
-    status: "idle",
-    message: ""
-  });
   useEffect(() => {
     if (!w) return;
     setDetailLinks(w.links || []);
@@ -2402,41 +2397,18 @@ function DetailScreen({
       alive = false;
     };
     setAssigneeTargetMemberId(w.assignee || "");
-    setCapacityEditorState({
-      status: "loading",
-      message: "Loading assignment controls..."
-    });
     const membersPromise = window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve((window.MEMBERS || []).filter(member => member.active !== false && window.isFlowMateGdVeMember?.(member)));
-    const allocationsPromise = window.loadFlowMateCapacityAllocationsForWorkItem && w.workItemId ? window.loadFlowMateCapacityAllocationsForWorkItem(w.workItemId) : Promise.resolve([]);
-    Promise.all([membersPromise, allocationsPromise]).then(([members, allocations]) => {
+    membersPromise.then(members => {
       if (!alive) return;
       setActiveCreativeMembers(members || []);
-      const editorRows = (allocations || []).map(allocation => ({
-        bucketDate: allocation.bucketDate,
-        bucketHalf: allocation.bucketHalf === "pm" ? "pm" : "am",
-        capacityPoint: String(allocation.capacityPoint || "")
-      }));
-      setCapacityAllocations(editorRows.length ? editorRows : Number(w.effort) > 0 && w.dueDate ? [{
-        bucketDate: w.dueDate,
-        bucketHalf: "am",
-        capacityPoint: String(w.effort)
-      }] : []);
-      setCapacityEditorState({
-        status: "ready",
-        message: ""
-      });
     }).catch(error => {
       if (!alive) return;
       console.warn("[FlowMate Detail] Assignment controls load failed:", error && error.message);
-      setCapacityEditorState({
-        status: "error",
-        message: window.flowmateUserError(error, "Assignment controls could not be loaded.")
-      });
     });
     return () => {
       alive = false;
     };
-  }, [w && w.id, w && w.workItemId, w && w.assignee, w && w.effort, w && w.dueDate, w && w.isSupabaseRow, w && w.type]);
+  }, [w && w.id, w && w.assignee, w && w.isSupabaseRow, w && w.type]);
   useEffect(() => {
     let alive = true;
     if (!w || !w.isSupabaseRow || !window.loadFlowMateAiTags) return () => {
@@ -2594,10 +2566,8 @@ function DetailScreen({
   const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
   const canManageAssignee = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
   const canSelfAssignUnassigned = Boolean(w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
-  const canEditCapacityAllocation = Boolean(w.isSupabaseRow && w.type !== "quick" && w.assignee && (isAdminUser || isRequesterUser || isOwnerUser));
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : w.assignmentWarnings || [];
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
-  const capacityAllocationTotal = Number(capacityAllocations.reduce((sum, allocation) => sum + (Number(allocation.capacityPoint) || 0), 0).toFixed(4));
   const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || currentUserId === w.requesterUserId || currentUserId === w.assigneeUserId || owner?.userId === currentUserId || currentUserId === w.marketingPlanSubPicUserId));
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
@@ -3029,100 +2999,6 @@ function DetailScreen({
       setActionMsg({
         tone: "bad",
         text: window.flowmateUserError(error, "Self-assignment was rejected by the backend.")
-      });
-    } finally {
-      setPending(false);
-    }
-  }
-  function updateCapacityAllocation(index, field, value) {
-    setCapacityAllocations(current => current.map((allocation, rowIndex) => rowIndex === index ? {
-      ...allocation,
-      [field]: value
-    } : allocation));
-  }
-  function addCapacityAllocation() {
-    setCapacityAllocations(current => [...current, {
-      bucketDate: w.dueDate || "",
-      bucketHalf: "am",
-      capacityPoint: ""
-    }]);
-  }
-  function removeCapacityAllocation(index) {
-    setCapacityAllocations(current => current.filter((allocation, rowIndex) => rowIndex !== index));
-  }
-  function validateCapacityAllocations() {
-    if (!capacityAllocations.length) return {
-      error: "At least one allocation row is required."
-    };
-    const seenBuckets = new Set();
-    const payload = [];
-    for (const allocation of capacityAllocations) {
-      const bucketDate = String(allocation.bucketDate || "");
-      const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(bucketDate) ? new Date(`${bucketDate}T00:00:00Z`) : null;
-      if (!dateValue || Number.isNaN(dateValue.getTime()) || dateValue.toISOString().slice(0, 10) !== bucketDate) {
-        return {
-          error: "Every allocation needs a valid date."
-        };
-      }
-      if (!["am", "pm"].includes(allocation.bucketHalf)) return {
-        error: "Every allocation must use AM or PM."
-      };
-      const capacityPoint = Number(allocation.capacityPoint);
-      if (!Number.isFinite(capacityPoint) || capacityPoint <= 0) return {
-        error: "Allocation points must be greater than zero."
-      };
-      const bucketKey = `${bucketDate}:${allocation.bucketHalf}`;
-      if (seenBuckets.has(bucketKey)) return {
-        error: "Each date and AM/PM pair must be unique."
-      };
-      seenBuckets.add(bucketKey);
-      payload.push({
-        bucket_date: bucketDate,
-        bucket_half: allocation.bucketHalf,
-        capacity_point: capacityPoint
-      });
-    }
-    const total = Number(payload.reduce((sum, allocation) => sum + allocation.capacity_point, 0).toFixed(4));
-    const expected = Number(Number(w.effort || 0).toFixed(4));
-    if (total !== expected) return {
-      error: `Allocation total must equal exactly ${expected} pt. Current total is ${total} pt.`
-    };
-    return {
-      payload,
-      total
-    };
-  }
-  async function submitCapacityAllocations(event) {
-    event.preventDefault();
-    if (!canEditCapacityAllocation || !window.rescheduleFlowMateCapacityAllocation) return;
-    const validation = validateCapacityAllocations();
-    if (validation.error) {
-      setCapacityEditorState({
-        status: "error",
-        message: validation.error
-      });
-      return;
-    }
-    setPending(true);
-    setCapacityEditorState({
-      status: "saving",
-      message: "Saving allocation..."
-    });
-    try {
-      await window.rescheduleFlowMateCapacityAllocation(w.id, validation.payload);
-      await refreshDetailItem();
-      setCapacityEditorState({
-        status: "ready",
-        message: `Saved ${validation.total} pt.`
-      });
-      setActionMsg({
-        tone: "ok",
-        text: "AM/PM capacity allocation updated."
-      });
-    } catch (error) {
-      setCapacityEditorState({
-        status: "error",
-        message: window.flowmateUserError(error, "Capacity allocation was rejected by the backend.")
       });
     } finally {
       setPending(false);
@@ -3887,97 +3763,7 @@ function DetailScreen({
     disabled: pending || !w.isSupabaseRow || !window.addFlowMateAiTag
   }, React.createElement(Icon, {
     name: "plus"
-  }), " Add AI Tag")))))), canEditCapacityAllocation && React.createElement("div", {
-    className: "card"
-  }, React.createElement("div", {
-    className: "card__head"
-  }, React.createElement("span", {
-    className: "card__title"
-  }, "AM/PM capacity allocation"), React.createElement("span", {
-    className: "card__sub"
-  }, capacityAllocationTotal, " / ", Number(w.effort || 0), " pt")), React.createElement("form", {
-    className: "card__body",
-    onSubmit: submitCapacityAllocations,
-    "aria-label": "Edit AM PM capacity allocation"
-  }, React.createElement("div", {
-    className: "reason-box",
-    style: {
-      marginBottom: 12
-    }
-  }, "Edit allocation buckets only. 1st Draft and Launch dates are not changed here."), React.createElement("div", {
-    style: {
-      overflowX: "auto"
-    }
-  }, React.createElement("table", {
-    className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Date"), React.createElement("th", null, "Period"), React.createElement("th", null, "Points"), React.createElement("th", {
-    className: "col-right"
-  }, "Action"))), React.createElement("tbody", null, capacityAllocations.map((allocation, index) => React.createElement("tr", {
-    key: `${allocation.bucketDate}:${allocation.bucketHalf}:${index}`
-  }, React.createElement("td", null, React.createElement("input", {
-    className: "input",
-    type: "date",
-    value: allocation.bucketDate,
-    onChange: event => updateCapacityAllocation(index, "bucketDate", event.target.value),
-    "aria-label": `Allocation ${index + 1} date`,
-    required: true,
-    disabled: pending
-  })), React.createElement("td", null, React.createElement("select", {
-    className: "select",
-    value: allocation.bucketHalf,
-    onChange: event => updateCapacityAllocation(index, "bucketHalf", event.target.value),
-    "aria-label": `Allocation ${index + 1} period`,
-    disabled: pending
-  }, React.createElement("option", {
-    value: "am"
-  }, "AM"), React.createElement("option", {
-    value: "pm"
-  }, "PM"))), React.createElement("td", null, React.createElement("input", {
-    className: "input",
-    type: "number",
-    min: "0.01",
-    step: "0.01",
-    value: allocation.capacityPoint,
-    onChange: event => updateCapacityAllocation(index, "capacityPoint", event.target.value),
-    "aria-label": `Allocation ${index + 1} points`,
-    required: true,
-    disabled: pending
-  })), React.createElement("td", {
-    className: "col-right"
-  }, React.createElement("button", {
-    type: "button",
-    className: "btn btn--xs btn--ghost",
-    onClick: () => removeCapacityAllocation(index),
-    "aria-label": `Remove allocation ${index + 1}`,
-    disabled: pending
-  }, "Remove"))))))), React.createElement("div", {
-    className: "row",
-    style: {
-      gap: 8,
-      marginTop: 12,
-      flexWrap: "wrap"
-    }
-  }, React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary",
-    onClick: addCapacityAllocation,
-    disabled: pending
-  }, React.createElement(Icon, {
-    name: "plus"
-  }), " Add allocation"), React.createElement("span", {
-    className: "muted"
-  }, "Exact required total: ", Number(w.effort || 0), " pt"), React.createElement("span", {
-    className: "spacer"
-  }), React.createElement("button", {
-    type: "submit",
-    className: "btn btn--primary",
-    disabled: pending || capacityEditorState.status === "loading"
-  }, "Save allocation")), capacityEditorState.message && React.createElement("div", {
-    className: `reason-box ${capacityEditorState.status === "error" ? "reason-box--need" : ""}`,
-    style: {
-      marginTop: 10
-    }
-  }, capacityEditorState.message))), React.createElement("div", {
+  }), " Add AI Tag")))))), React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
