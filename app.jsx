@@ -1251,6 +1251,7 @@ function getProductBookStaticPublishedPatches() {
 }
 function isProductBookOpsUser(user) {
   const currentUser = user || {};
+  if (currentUser.role === "admin") return true;
   const teamValues = [currentUser.requester_team, currentUser.requesterTeam, currentUser.team].concat(Array.isArray(currentUser.accessible_teams) ? currentUser.accessible_teams : []).concat(Array.isArray(currentUser.accessibleTeams) ? currentUser.accessibleTeams : []);
   return teamValues.some(value => normalizeFlowMateTeamKey(value) === "ops");
 }
