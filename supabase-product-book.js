@@ -37,6 +37,13 @@
     return result.data;
   }
 
+  async function loadProductBookPatchRevisions(patchCode) {
+    const client = requireProductBookClient();
+    const result = await client.rpc("product_book_list_revisions", { p_patch_code: patchCode });
+    if (result.error) throw result.error;
+    return normalizeProductBookRpcRows(result.data);
+  }
+
   async function archiveProductBookPatch(patchCode) {
     const client = requireProductBookClient();
     const result = await client.rpc("product_book_archive", { p_patch_code: patchCode });
@@ -54,8 +61,8 @@
   window.loadProductBookPatches = loadProductBookPatches;
   window.saveProductBookDraft = saveProductBookDraft;
   window.publishProductBookPatch = publishProductBookPatch;
+  window.loadProductBookPatchRevisions = loadProductBookPatchRevisions;
   window.archiveProductBookPatch = archiveProductBookPatch;
   window.restoreProductBookPatch = restoreProductBookPatch;
   window.normalizeProductBookRpcRows = normalizeProductBookRpcRows;
 })();
-

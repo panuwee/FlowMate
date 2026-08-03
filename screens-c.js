@@ -335,7 +335,7 @@ function WorkloadScreen({
   onOpen
 }) {
   const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
-  const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "blocked"];
+  const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
     const requestedItems = WORK.filter(w => w.requesterUserId && w.requesterUserId === (m.userId || m.id));
@@ -2201,7 +2201,7 @@ function ganttDateKeyFromRowC(row, fields) {
   return "";
 }
 function ganttTimelineWindowC(monthKey) {
-  const visibleMonthCount = 2;
+  const visibleMonthCount = 1;
   const startKey = `${monthKey}-01`;
   const startDate = calendarParseKeyC(startKey);
   const endDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + visibleMonthCount, 0));
@@ -2249,11 +2249,34 @@ function ganttTimelineWindowC(monthKey) {
     monthGroups
   };
 }
-function ganttTaskModelC(row, monthKey, ganttWindow) {
+function ganttSubtractWorkingDaysC(dateKey, workingDays) {
+  let cursor = calendarParseKeyC(dateKey);
+  let remaining = Math.max(0, Number(workingDays || 0));
+  while (remaining > 0) {
+    cursor = new Date(cursor.getTime() - 86400000);
+    if (cursor.getUTCDay() !== 0 && cursor.getUTCDay() !== 6) remaining -= 1;
+  }
+  return calendarUtcKeyC(cursor);
+}
+function ganttSuggestedStartKeyC(row, allocationStartKey) {
+  const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
+  if (!dueKey) return "";
+  const actualStartKey = ganttDateKeyFromRowC(row, ["startedAt", "started_at"]);
+  if (actualStartKey) return actualStartKey;
+  const persistedSuggestedStartKey = ganttDateKeyFromRowC(row, ["suggestedStartDate", "suggested_start_date"]);
+  if (persistedSuggestedStartKey) return persistedSuggestedStartKey;
+  if (allocationStartKey) return allocationStartKey;
+  const member = MEMBERS_BY_ID[row?.assignee];
+  const capacityPerDay = Math.max(1, Number(member?.capacityPerDay || 8));
+  const effort = Math.max(1, Number(row?.effort || 1));
+  const workingDays = Math.max(1, Math.ceil(effort / capacityPerDay));
+  return ganttSubtractWorkingDaysC(dueKey, workingDays - 1);
+}
+function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return null;
   const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
-  const rawStartKey = launchKey && launchKey > dueKey ? dueKey : dueKey;
+  const rawStartKey = ganttSuggestedStartKeyC(row, allocationStartKey) || dueKey;
   const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
   const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
   if (rawEndKey < timeline.startKey || rawStartKey > timeline.endKey) return null;
@@ -2261,15 +2284,21 @@ function ganttTaskModelC(row, monthKey, ganttWindow) {
   const clampedEndKey = rawEndKey > timeline.endKey ? timeline.endKey : rawEndKey;
   const startOffset = Math.floor((calendarParseKeyC(clampedStartKey).getTime() - timeline.startDate.getTime()) / 86400000);
   const endOffset = Math.floor((calendarParseKeyC(clampedEndKey).getTime() - timeline.startDate.getTime()) / 86400000);
+  const draftOffset = dueKey >= timeline.startKey && dueKey <= timeline.endKey ? Math.floor((calendarParseKeyC(dueKey).getTime() - timeline.startDate.getTime()) / 86400000) : dueKey < timeline.startKey ? 0 : timeline.totalDays - 1;
   const launchOffset = launchKey && launchKey >= timeline.startKey && launchKey <= timeline.endKey ? Math.floor((calendarParseKeyC(launchKey).getTime() - timeline.startDate.getTime()) / 86400000) : null;
   return {
     item: row,
     dueKey,
     launchKey,
     startOffset,
+    draftOffset,
+    productionSpanDays: Math.max(1, draftOffset - startOffset + 1),
+    reviewStartOffset: draftOffset,
+    reviewSpanDays: launchOffset === null ? 0 : Math.max(1, launchOffset - draftOffset + 1),
     spanDays: Math.max(1, endOffset - startOffset + 1),
     launchOffset,
     spansToLaunch: Boolean(launchKey && launchKey > dueKey),
+    isSuggestedStart: !ganttDateKeyFromRowC(row, ["startedAt", "started_at"]),
     priorityClass: row.priority === "urgent" ? "is-urgent" : row.priority === "high" ? "is-high" : row.priority === "low" ? "is-low" : "is-normal",
     statusClass: row.status ? `is-status-${row.status}` : "is-status-unknown",
     displayLabel: row.type === "creative" ? "1st Draft" : "Due"
@@ -2324,7 +2353,7 @@ function ganttCapacityBucketsC(rows, sourceRows, monthKey, ganttWindow) {
     const bucketDate = String(allocation?.bucketDate || "").slice(0, 10);
     const item = workById.get(allocation?.workItemId);
     if (!item || !allocation?.assignee || !bucketDate) return;
-    if (!["assigned", "in_progress", "blocked"].includes(item.status)) return;
+    if (!["assigned", "in_progress", "review", "blocked"].includes(item.status)) return;
     if (bucketDate < timeline.startKey || bucketDate > timeline.endKey) return;
     const bucketHalf = allocation.bucketHalf === "pm" ? "pm" : "am";
     const key = `${allocation.assignee}:${bucketDate}`;
@@ -2392,7 +2421,90 @@ function ganttCapacityTitleC(bucketDate, usedPoint, bucketCapacity, entries, isL
   }
   return `${slotLabel}: ${usedPoint}/${bucketCapacity} pt used${taskText ? ` - ${taskText}` : " - available"}`;
 }
-function TeamGanttScreen({
+const TEAM_SCHEDULE_CAPACITY_STATUSES_C = ["assigned", "in_progress", "review", "blocked"];
+function teamScheduleMonthOptionsC(rows, currentMonthKey) {
+  const options = flowMateRowsMonthOptionsC(rows, ["startedAt", "dueDate", "launchDate"]);
+  if (!options.some(option => option.key === currentMonthKey)) {
+    options.push({
+      key: currentMonthKey,
+      label: flowMateMonthLabelC(currentMonthKey)
+    });
+  }
+  return options.sort((a, b) => b.key.localeCompare(a.key));
+}
+function teamScheduleWeekStartC(dateKey) {
+  const date = calendarParseKeyC(dateKey);
+  const day = date.getUTCDay();
+  return calendarAddDaysC(dateKey, day === 0 ? -6 : 1 - day);
+}
+function teamScheduleWeeksC(ganttWindow) {
+  const weeks = [];
+  let weekStart = teamScheduleWeekStartC(ganttWindow.startKey);
+  while (weekStart <= ganttWindow.endKey) {
+    const weekEnd = calendarAddDaysC(weekStart, 6);
+    const visibleStart = weekStart < ganttWindow.startKey ? ganttWindow.startKey : weekStart;
+    const visibleEnd = weekEnd > ganttWindow.endKey ? ganttWindow.endKey : weekEnd;
+    weeks.push({
+      key: weekStart,
+      startKey: weekStart,
+      endKey: weekEnd,
+      visibleStart,
+      visibleEnd,
+      label: `${calendarParseKeyC(visibleStart).getUTCDate()}-${calendarParseKeyC(visibleEnd).getUTCDate()} ${ganttWindow.dayCells.find(cell => cell.dateKey === visibleEnd)?.monthLabel || ""}`
+    });
+    weekStart = calendarAddDaysC(weekStart, 7);
+  }
+  return weeks;
+}
+function teamScheduleLeaveUnitsC(leaves, assigneeId, dateKey) {
+  return (leaves || []).reduce((sum, leave) => {
+    if (leave.item?.assignee !== assigneeId || leave.leaveKey !== dateKey) return sum;
+    const units = Number(leave.item?.leaveUnits || 0);
+    return Math.min(1, sum + (units > 0 ? units : 1));
+  }, 0);
+}
+function teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows) {
+  const memberId = member?.id || "unassigned";
+  const dailyCapacity = member?.availability === "leave" ? 0 : member?.availability === "partial" ? Number(member?.capacityOverridePerDay || 0) : Number(member?.capacityPerDay || 8);
+  let available = 0;
+  let cursor = week.visibleStart;
+  while (cursor <= week.visibleEnd) {
+    const date = calendarParseKeyC(cursor);
+    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6 && !holidayKeys.has(cursor)) {
+      available += dailyCapacity * Math.max(0, 1 - teamScheduleLeaveUnitsC(leaves, memberId, cursor));
+    }
+    cursor = calendarAddDaysC(cursor, 1);
+  }
+  const sourceByWorkId = new Map((sourceRows || []).map(row => [row.workItemId, row]));
+  const entryMap = new Map();
+  (capacityRows || []).forEach(allocation => {
+    const dateKey = String(allocation?.bucketDate || "").slice(0, 10);
+    if (allocation?.assignee !== memberId || dateKey < week.visibleStart || dateKey > week.visibleEnd) return;
+    const item = sourceByWorkId.get(allocation.workItemId);
+    if (!item || !TEAM_SCHEDULE_CAPACITY_STATUSES_C.includes(item.status)) return;
+    const current = entryMap.get(item.id) || {
+      item,
+      point: 0
+    };
+    current.point = Number((current.point + Math.max(0, Number(allocation.capacityPoint || 0))).toFixed(2));
+    entryMap.set(item.id, current);
+  });
+  const entries = Array.from(entryMap.values()).sort((a, b) => b.point - a.point || a.item.id.localeCompare(b.item.id));
+  const used = Number(entries.reduce((sum, entry) => sum + entry.point, 0).toFixed(2));
+  const roundedAvailable = Number(available.toFixed(2));
+  const percent = roundedAvailable > 0 ? Math.round(used / roundedAvailable * 100) : used > 0 ? 999 : 0;
+  const stateClass = used > roundedAvailable ? "is-over" : percent >= 85 ? "is-near" : used > 0 ? "is-healthy" : "is-available";
+  return {
+    memberId,
+    week,
+    used,
+    available: roundedAvailable,
+    percent,
+    entries,
+    stateClass
+  };
+}
+function LegacyTeamGanttScreen({
   onOpen
 }) {
   const [sourceRows, setSourceRows] = useStateC(WORK);
@@ -2806,6 +2918,440 @@ function TeamGanttScreen({
       marginTop: 16
     }
   }, "Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity."), React.createElement(Source, null, loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data", " - ", capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable", " - Team Gantt Chart - ", flowMateMonthLabelC(selectedGanttMonth), " plus next month"));
+}
+function TeamGanttScreen({
+  onOpen
+}) {
+  const [sourceRows, setSourceRows] = useStateC([]);
+  const [members, setMembers] = useStateC([]);
+  const [capacityRows, setCapacityRows] = useStateC([]);
+  const [holidays, setHolidays] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({
+    status: "loading",
+    message: "Loading Team Schedule..."
+  });
+  const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
+  const [viewMode, setViewMode] = useStateC(() => {
+    try {
+      return sessionStorage.getItem("flowmate:team-schedule:view") || "timeline";
+    } catch (error) {
+      return "timeline";
+    }
+  });
+  const [assigneeFilter, setAssigneeFilter] = useStateC("all");
+  const [statusFilter, setStatusFilter] = useStateC("all");
+  const [skillFilter, setSkillFilter] = useStateC("all");
+  const [overOnly, setOverOnly] = useStateC(false);
+  const [selectedWorkload, setSelectedWorkload] = useStateC(null);
+  useEffectC(() => {
+    let alive = true;
+    async function loadSchedule() {
+      const taskLoader = window.loadFlowMateTeamScheduleRows || window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      if (!taskLoader) {
+        if (alive) setLoadState({
+          status: "error",
+          message: "Team Schedule loader is not ready."
+        });
+        return;
+      }
+      try {
+        const [rows, memberRows] = await Promise.all([taskLoader(), window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve([])]);
+        if (!alive) return;
+        setSourceRows(rows || []);
+        setMembers(memberRows || []);
+        setLoadState({
+          status: "live",
+          message: "Live Supabase data"
+        });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Team Schedule] load failed:", error);
+        setLoadState({
+          status: "error",
+          message: window.flowmateUserError(error, "Could not load Team Schedule.")
+        });
+      }
+    }
+    loadSchedule();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadSchedule) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
+  const monthOptions = teamScheduleMonthOptionsC(sourceRows, monthKey);
+  const ganttWindow = ganttTimelineWindowC(monthKey);
+  useEffectC(() => {
+    let alive = true;
+    async function loadCapacityAndHolidays() {
+      try {
+        const [allocationRows, holidayRows] = await Promise.all([window.loadFlowMateCapacityAllocationRows ? window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey) : Promise.resolve([]), window.loadFlowMateNonWorkingDays ? window.loadFlowMateNonWorkingDays(ganttWindow.startKey, ganttWindow.endKey) : Promise.resolve([])]);
+        if (!alive) return;
+        setCapacityRows(allocationRows || []);
+        setHolidays(holidayRows || []);
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Team Schedule] capacity load failed:", error);
+        setCapacityRows([]);
+        setHolidays([]);
+      }
+    }
+    loadCapacityAndHolidays();
+    return () => {
+      alive = false;
+    };
+  }, [monthKey]);
+  useEffectC(() => {
+    try {
+      sessionStorage.setItem("flowmate:team-schedule:view", viewMode);
+    } catch (error) {}
+  }, [viewMode]);
+  const todayKey = calendarUtcKeyC(new Date());
+  const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000) : null;
+  const allocationStartByWorkId = new Map();
+  capacityRows.forEach(allocation => {
+    const dateKey = String(allocation?.bucketDate || "").slice(0, 10);
+    if (!dateKey || !allocation?.workItemId) return;
+    const previous = allocationStartByWorkId.get(allocation.workItemId);
+    if (!previous || dateKey < previous) allocationStartByWorkId.set(allocation.workItemId, dateKey);
+  });
+  const skillOptions = Array.from(new Set(sourceRows.filter(row => row && row.type !== "leave").map(row => row.subtype || row.assetType).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  const filteredRows = sourceRows.filter(row => {
+    if (!row || row.type === "leave" || !TEAM_SCHEDULE_CAPACITY_STATUSES_C.includes(row.status)) return false;
+    if (assigneeFilter !== "all" && row.assignee !== assigneeFilter) return false;
+    if (statusFilter !== "all" && row.status !== statusFilter) return false;
+    if (skillFilter !== "all" && (row.subtype || row.assetType) !== skillFilter) return false;
+    return true;
+  });
+  const tasks = filteredRows.map(row => ganttTaskModelC(row, monthKey, ganttWindow, allocationStartByWorkId.get(row.workItemId))).filter(Boolean).sort((a, b) => a.startOffset - b.startOffset || a.dueKey.localeCompare(b.dueKey));
+  const leaves = sourceRows.filter(row => row?.type === "leave").map(row => ganttLeaveModelC(row, monthKey, ganttWindow)).filter(Boolean);
+  const holidayKeys = new Set(holidays.filter(row => row.active !== false).map(row => String(row.date || row.day || "").slice(0, 10)));
+  const weeks = teamScheduleWeeksC(ganttWindow);
+  const memberMap = new Map();
+  (members || []).forEach(member => memberMap.set(member.id, member));
+  tasks.forEach(task => {
+    const id = task.item.assignee || "unassigned";
+    if (!memberMap.has(id)) memberMap.set(id, MEMBERS_BY_ID[id] || {
+      id,
+      name: task.item.assigneeOtherName || "Unassigned",
+      discipline: "GD/VE",
+      capacityPerDay: 8
+    });
+  });
+  const visibleMembers = Array.from(memberMap.values()).filter(member => assigneeFilter === "all" || member.id === assigneeFilter).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  const cellsByMember = new Map(visibleMembers.map(member => [member.id, weeks.map(week => teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows))]));
+  const visibleMembersAfterOverFilter = overOnly ? visibleMembers.filter(member => (cellsByMember.get(member.id) || []).some(cell => cell.stateClass === "is-over")) : visibleMembers;
+  const overCapacityWeeks = new Set();
+  cellsByMember.forEach(cells => cells.forEach(cell => {
+    if (cell.stateClass === "is-over") overCapacityWeeks.add(cell.week.key);
+  }));
+  const dueSoonCount = filteredRows.filter(row => {
+    const dueKey = ganttDateKeyFromRowC(row, ["dueDate"]);
+    return dueKey && dueKey >= todayKey && dueKey <= calendarAddDaysC(todayKey, 7);
+  }).length;
+  function openScheduleItem(item) {
+    window.flowmateSelectedWorkItem = item;
+    onOpen(item.id);
+  }
+  function resetFilters() {
+    setAssigneeFilter("all");
+    setStatusFilter("all");
+    setSkillFilter("all");
+    setOverOnly(false);
+  }
+  return React.createElement("div", {
+    className: "page team-schedule",
+    "data-testid": "flowmate-team-gantt-route",
+    "data-flowmate-route": "team-schedule"
+  }, React.createElement("div", {
+    className: "page__header team-schedule__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Team Schedule"), React.createElement("div", {
+    className: "page__sub"
+  }, "Production timing and weekly capacity for GD/VE - ", loadState.message)), React.createElement("select", {
+    className: "select",
+    value: monthKey,
+    onChange: event => setMonthKey(event.target.value),
+    "data-testid": "flowmate-gantt-month",
+    "aria-label": "Schedule month"
+  }, monthOptions.map(option => React.createElement("option", {
+    key: option.key,
+    value: option.key
+  }, option.label)))), React.createElement("div", {
+    className: "team-schedule__controls"
+  }, React.createElement("div", {
+    className: "team-schedule__view-tabs",
+    role: "tablist",
+    "aria-label": "Team Schedule view"
+  }, React.createElement("button", {
+    type: "button",
+    role: "tab",
+    "aria-selected": viewMode === "timeline",
+    className: viewMode === "timeline" ? "is-active" : "",
+    onClick: () => setViewMode("timeline"),
+    "data-testid": "flowmate-team-schedule-timeline-tab"
+  }, "Timeline"), React.createElement("button", {
+    type: "button",
+    role: "tab",
+    "aria-selected": viewMode === "workload",
+    className: viewMode === "workload" ? "is-active" : "",
+    onClick: () => setViewMode("workload"),
+    "data-testid": "flowmate-team-schedule-workload-tab"
+  }, "Workload")), React.createElement("div", {
+    className: "team-schedule__filters"
+  }, React.createElement("select", {
+    className: "select",
+    value: assigneeFilter,
+    onChange: event => setAssigneeFilter(event.target.value),
+    "aria-label": "Filter assignee"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All assignees"), Array.from(memberMap.values()).sort((a, b) => String(a.name).localeCompare(String(b.name))).map(member => React.createElement("option", {
+    key: member.id,
+    value: member.id
+  }, member.name))), React.createElement("select", {
+    className: "select",
+    value: statusFilter,
+    onChange: event => setStatusFilter(event.target.value),
+    "aria-label": "Filter status"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All active statuses"), React.createElement("option", {
+    value: "assigned"
+  }, "Assigned"), React.createElement("option", {
+    value: "in_progress"
+  }, "In Progress"), React.createElement("option", {
+    value: "review"
+  }, "Review"), React.createElement("option", {
+    value: "blocked"
+  }, "Blocked")), React.createElement("select", {
+    className: "select",
+    value: skillFilter,
+    onChange: event => setSkillFilter(event.target.value),
+    "aria-label": "Filter skill"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All skills"), skillOptions.map(skill => React.createElement("option", {
+    key: skill,
+    value: skill
+  }, skill))), React.createElement("label", {
+    className: "team-schedule__over-filter"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: overOnly,
+    onChange: event => setOverOnly(event.target.checked)
+  }), " Over capacity only"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--sm",
+    onClick: resetFilters
+  }, "Clear"))), React.createElement("div", {
+    className: "stat-strip team-schedule__stats"
+  }, React.createElement("div", {
+    className: "stat"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, tasks.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Active tasks")), React.createElement("div", {
+    className: "stat stat--info"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, visibleMembersAfterOverFilter.length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Assignees")), React.createElement("div", {
+    className: "stat stat--warn"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, overCapacityWeeks.size), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Over-capacity weeks")), React.createElement("div", {
+    className: "stat stat--ok"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, dueSoonCount), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Due in 7 days"))), viewMode === "timeline" ? React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "team-schedule__legend",
+    "aria-label": "Timeline legend"
+  }, React.createElement("span", null, React.createElement("i", {
+    className: "schedule-legend is-assigned"
+  }), "Assigned"), React.createElement("span", null, React.createElement("i", {
+    className: "schedule-legend is-progress"
+  }), "In Progress"), React.createElement("span", null, React.createElement("i", {
+    className: "schedule-legend is-review"
+  }), "Review"), React.createElement("span", null, React.createElement("i", {
+    className: "schedule-legend is-blocked"
+  }), "Blocked"), React.createElement("span", null, React.createElement("i", {
+    className: "gantt__legend-diamond"
+  }), "Launch"), React.createElement("span", null, React.createElement("i", {
+    className: "gantt__legend-line"
+  }), "Today"), React.createElement("span", null, "⚑ Urgent")), React.createElement("div", {
+    className: "gantt team-schedule__timeline",
+    "data-testid": "flowmate-team-gantt-chart"
+  }, React.createElement("div", {
+    className: "gantt__header"
+  }, React.createElement("div", {
+    className: "gantt__owner-head"
+  }, "Assignee"), React.createElement("div", {
+    className: "gantt__timeline-head",
+    style: {
+      "--gantt-days": ganttWindow.totalDays,
+      "--gantt-today-offset": todayOffset ?? 0
+    }
+  }, React.createElement("div", {
+    className: "gantt__month-scale",
+    style: {
+      gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`
+    }
+  }, React.createElement("div", {
+    className: "gantt__month-group",
+    style: {
+      gridColumn: `1 / span ${ganttWindow.totalDays}`
+    }
+  }, flowMateMonthLabelC(monthKey))), React.createElement("div", {
+    className: "gantt__scale",
+    style: {
+      gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`,
+      "--gantt-days": ganttWindow.totalDays
+    }
+  }, ganttWindow.dayCells.map(cell => React.createElement("div", {
+    key: cell.dateKey,
+    className: `gantt__day ${cell.isWeekend ? "is-weekend" : ""}`
+  }, React.createElement("span", {
+    className: "mono"
+  }, cell.day), React.createElement("span", null, cell.label)))), todayOffset !== null && React.createElement("div", {
+    className: "gantt__today-line gantt__today-line--header",
+    "aria-hidden": "true"
+  }))), visibleMembersAfterOverFilter.map(member => {
+    const memberTasks = tasks.filter(task => task.item.assignee === member.id);
+    const memberLeaves = mergeGanttLeaveSegmentsC(leaves.filter(leave => leave.item.assignee === member.id));
+    return React.createElement("div", {
+      key: member.id,
+      className: "gantt__row team-schedule__row"
+    }, React.createElement("div", {
+      className: "gantt__owner"
+    }, React.createElement(Avatar, {
+      memberId: member.id,
+      size: "avatar--lg"
+    }), React.createElement("span", null, React.createElement("span", {
+      className: "gantt__owner-name"
+    }, member.name), React.createElement("span", {
+      className: "muted"
+    }, memberTasks.length, " active tasks"))), React.createElement("div", {
+      className: "gantt__tracks",
+      style: {
+        "--gantt-days": ganttWindow.totalDays,
+        "--gantt-today-offset": todayOffset ?? 0
+      }
+    }, todayOffset !== null && React.createElement("div", {
+      className: "gantt__today-line",
+      "aria-hidden": "true"
+    }), React.createElement("div", {
+      className: "gantt__lane team-schedule__lane",
+      style: {
+        gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`
+      }
+    }, memberLeaves.map(leave => React.createElement("div", {
+      key: leave.segmentKey,
+      className: `gantt__leave ${leave.isPartial ? "is-partial" : ""}`,
+      style: {
+        gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}`
+      }
+    }, leave.isPartial ? "Half leave" : "Leave")), memberTasks.map(task => React.createElement("button", {
+      key: task.item.id,
+      type: "button",
+      className: `team-schedule__task ${task.statusClass} ${task.priorityClass}`,
+      style: {
+        gridColumn: `${task.startOffset + 1} / span ${task.spanDays}`
+      },
+      onClick: () => openScheduleItem(task.item),
+      title: `${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\n1st Draft: ${calendarDateLabelC(task.dueKey)}${task.launchKey ? `\nLaunch: ${calendarDateLabelC(task.launchKey)}` : ""}`,
+      "data-testid": "flowmate-gantt-task-bar"
+    }, React.createElement("span", {
+      className: "team-schedule__production",
+      style: {
+        width: `${Math.min(100, task.productionSpanDays / task.spanDays * 100)}%`
+      }
+    }), task.reviewSpanDays > 0 && React.createElement("span", {
+      className: "team-schedule__review-span",
+      style: {
+        left: `${Math.max(0, (task.draftOffset - task.startOffset) / task.spanDays * 100)}%`,
+        width: `${Math.min(100, task.reviewSpanDays / task.spanDays * 100)}%`
+      }
+    }), React.createElement("span", {
+      className: "team-schedule__task-label"
+    }, task.item.priority === "urgent" ? "⚑ " : "", React.createElement("b", {
+      className: "mono"
+    }, task.item.id), " ", task.item.title), React.createElement("span", {
+      className: "team-schedule__draft-marker",
+      style: {
+        left: `${Math.min(100, Math.max(0, (task.draftOffset - task.startOffset + 0.5) / task.spanDays * 100))}%`
+      },
+      title: "1st Draft"
+    }), task.launchOffset !== null && React.createElement("span", {
+      className: "gantt__launch-marker",
+      title: "Launch"
+    }))))));
+  }), visibleMembersAfterOverFilter.length === 0 && React.createElement("div", {
+    className: "gantt__empty"
+  }, "No assignees match the active filters."))) : React.createElement("div", {
+    className: "team-schedule__workload-wrap"
+  }, React.createElement("div", {
+    className: "team-schedule__workload",
+    style: {
+      "--schedule-weeks": weeks.length
+    },
+    "data-testid": "flowmate-team-schedule-workload"
+  }, React.createElement("div", {
+    className: "team-schedule__workload-head"
+  }, React.createElement("span", null, "Assignee"), weeks.map(week => React.createElement("span", {
+    key: week.key
+  }, "Week ", week.label))), visibleMembersAfterOverFilter.map(member => React.createElement("div", {
+    key: member.id,
+    className: "team-schedule__workload-row"
+  }, React.createElement("div", {
+    className: "team-schedule__workload-owner"
+  }, React.createElement(Avatar, {
+    memberId: member.id
+  }), React.createElement("span", null, React.createElement("b", null, member.name), React.createElement("small", null, Number(member.capacityPerDay || 8), " pt/day"))), (cellsByMember.get(member.id) || []).map(cell => React.createElement("button", {
+    key: cell.week.key,
+    type: "button",
+    className: `team-schedule__capacity-cell ${cell.stateClass}`,
+    onClick: () => setSelectedWorkload({
+      ...cell,
+      member
+    }),
+    "aria-label": `${member.name}, week ${cell.week.label}: ${cell.used} of ${cell.available} points`,
+    "data-testid": "flowmate-team-schedule-capacity-cell"
+  }, React.createElement("strong", null, cell.used, " / ", cell.available, " pt"), React.createElement("span", null, cell.percent > 999 ? "Over" : `${cell.percent}%`)))))), React.createElement("aside", {
+    className: `team-schedule__inspector ${selectedWorkload ? "is-open" : ""}`,
+    "aria-live": "polite",
+    "data-testid": "flowmate-team-schedule-workload-inspector"
+  }, selectedWorkload ? React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "team-schedule__inspector-head"
+  }, React.createElement("div", null, React.createElement("b", null, selectedWorkload.member.name), React.createElement("span", null, "Week ", selectedWorkload.week.label)), React.createElement("button", {
+    type: "button",
+    className: "icon-btn",
+    onClick: () => setSelectedWorkload(null),
+    "aria-label": "Close workload details"
+  }, "×")), React.createElement("div", {
+    className: "team-schedule__inspector-total"
+  }, React.createElement("strong", null, selectedWorkload.used, " / ", selectedWorkload.available, " pt"), React.createElement("span", null, selectedWorkload.percent, "% allocated")), React.createElement("div", {
+    className: "team-schedule__inspector-list"
+  }, selectedWorkload.entries.map(entry => React.createElement("button", {
+    type: "button",
+    key: entry.item.id,
+    onClick: () => openScheduleItem(entry.item)
+  }, React.createElement("span", null, React.createElement("b", {
+    className: "mono"
+  }, entry.item.id), entry.item.title), React.createElement("strong", null, entry.point, " pt"))), selectedWorkload.entries.length === 0 && React.createElement("p", {
+    className: "muted"
+  }, "No allocated tasks in this week."))) : React.createElement("p", {
+    className: "muted"
+  }, "Select a week to see every contributing task and point allocation."))), React.createElement("div", {
+    className: "reason-box team-schedule__rule"
+  }, "Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes."), React.createElement(Source, null, "Team Schedule - ", flowMateMonthLabelC(monthKey), " - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days"));
 }
 function CalendarScreen({
   onOpen
