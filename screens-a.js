@@ -3631,7 +3631,7 @@ function DetailScreen({
     className: "select",
     value: assigneeTargetMemberId,
     onChange: event => setAssigneeTargetMemberId(event.target.value),
-    disabled: pending || capacityEditorState.status === "loading"
+    disabled: pending
   }, React.createElement("option", {
     value: ""
   }, "Unassigned"), activeCreativeMembers.map(member => React.createElement("option", {

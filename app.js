@@ -6,7 +6,7 @@ const {
   useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260803-4";
+  const fallbackVersion = "v20260803-6";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -775,6 +775,7 @@ function App() {
   }
   if (activeProduct === PRODUCT_BOOK_PRODUCT_KEY) {
     return React.createElement(ProductBookShell, {
+      user: user,
       currentUserName: currentUserName,
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
@@ -1243,7 +1244,96 @@ function ProductChoiceScreen({
     }
   }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")))));
 }
+function normalizeProductBookArrayInput(value) {
+  return Array.from(new Set(String(value || "").split(/[\n,]/).map(item => item.trim()).filter(Boolean)));
+}
+function getProductBookStaticPublishedPatches() {
+  return (Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : []).filter(patch => String(patch && patch.status || "published").toLowerCase() === "published");
+}
+function isProductBookOpsUser(user) {
+  const currentUser = user || {};
+  const teamValues = [currentUser.requester_team, currentUser.requesterTeam, currentUser.team].concat(Array.isArray(currentUser.accessible_teams) ? currentUser.accessible_teams : []).concat(Array.isArray(currentUser.accessibleTeams) ? currentUser.accessibleTeams : []);
+  return teamValues.some(value => normalizeFlowMateTeamKey(value) === "ops");
+}
+function productBookHasMojibake(value) {
+  return /\uFFFD|เน€|[\u0080-\u009f]/.test(String(value || ""));
+}
+function getProductBookMonthLabel(year, month) {
+  const safeYear = Number(year);
+  const safeMonth = Number(month);
+  if (!Number.isInteger(safeYear) || !Number.isInteger(safeMonth) || safeMonth < 1 || safeMonth > 12) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(new Date(Date.UTC(safeYear, safeMonth - 1, 1)));
+}
+function createProductBookEditorDraft(patch) {
+  const source = patch || {};
+  return {
+    patchCode: source.id || source.name || "",
+    title: source.title || "",
+    product: source.product || "FC Online",
+    milestone: source.milestone || "MS",
+    year: Number(source.year || new Date().getFullYear()),
+    month: Number(source.month || new Date().getMonth() + 1),
+    monthLabel: source.monthLabel || "",
+    audienceText: (Array.isArray(source.audience) ? source.audience : ["Ops", "Marketing", "Esport"]).join(", "),
+    sourceType: source.sourceType || "manual-markdown",
+    sourcePdfUrl: source.sourcePdfUrl || "",
+    summaryLanguage: source.summaryLanguage || "th",
+    tagsText: (Array.isArray(source.tags) ? source.tags : []).join(", "),
+    topUpdatesMarkdown: source.topUpdatesMarkdown || "",
+    contentMarkdown: source.contentMarkdown || "",
+    status: source.status || "draft",
+    archivedAt: source.archivedAt || null,
+    hasDraft: source.hasDraft === true,
+    hasPublished: source.hasPublished === true
+  };
+}
+function getProductBookEditorPayload(draft) {
+  const year = Number(draft && draft.year);
+  const month = Number(draft && draft.month);
+  return {
+    patchCode: String(draft && draft.patchCode || "").trim().toUpperCase(),
+    title: String(draft && draft.title || "").trim(),
+    product: String(draft && draft.product || "FC Online").trim(),
+    milestone: String(draft && draft.milestone || "MS").trim().toUpperCase(),
+    year,
+    month,
+    monthLabel: String(draft && draft.monthLabel || "").trim() || getProductBookMonthLabel(year, month),
+    audience: normalizeProductBookArrayInput(draft && draft.audienceText),
+    sourceType: String(draft && draft.sourceType || "manual-markdown").trim(),
+    sourcePdfUrl: String(draft && draft.sourcePdfUrl || "").trim(),
+    summaryLanguage: String(draft && draft.summaryLanguage || "th").trim(),
+    tags: normalizeProductBookArrayInput(draft && draft.tagsText),
+    topUpdatesMarkdown: String(draft && draft.topUpdatesMarkdown || ""),
+    contentMarkdown: String(draft && draft.contentMarkdown || "")
+  };
+}
+function validateProductBookEditorPayload(payload, options = {}) {
+  if (!/^[A-Z0-9][A-Z0-9._-]{2,31}$/.test(payload.patchCode || "")) return "Patch ID must use 3-32 letters, numbers, dot, dash, or underscore.";
+  if (!Number.isInteger(payload.year) || payload.year < 2020 || payload.year > 2100) return "Release year must be between 2020 and 2100.";
+  if (!Number.isInteger(payload.month) || payload.month < 1 || payload.month > 12) return "Release month must be between 1 and 12.";
+  if (payload.sourcePdfUrl && !/^https?:\/\//i.test(payload.sourcePdfUrl)) return "PDF URL must start with http:// or https://.";
+  if (options.forPublish) {
+    if (!payload.title) return "Title is required before publishing.";
+    if (!String(payload.topUpdatesMarkdown + payload.contentMarkdown).trim()) return "Markdown content is required before publishing.";
+    if (productBookHasMojibake(payload.title) || productBookHasMojibake(payload.topUpdatesMarkdown) || productBookHasMojibake(payload.contentMarkdown)) return "Publishing blocked: broken Thai encoding was detected.";
+  }
+  return "";
+}
+function ProductBookStatusBadge({
+  status,
+  archivedAt
+}) {
+  const label = archivedAt ? "Archived" : status === "draft" ? "Draft" : "Published";
+  return React.createElement("span", {
+    className: `product-book-status product-book-status--${label.toLowerCase()}`
+  }, label);
+}
 function ProductBookShell({
+  user,
   currentUserName,
   currentUserEmail,
   avatarMemberId,
@@ -1253,9 +1343,71 @@ function ProductBookShell({
   onSwitchProductBook,
   onSignOut
 }) {
-  const patches = Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : [];
-  const [activePatchId, setActivePatchId] = useStateApp(() => patches[0] && patches[0].id ? patches[0].id : "MS26.07");
+  const staticPatches = useMemoApp(() => getProductBookStaticPublishedPatches(), []);
+  const canManageProductBook = isProductBookOpsUser(user);
+  const [patches, setPatches] = useStateApp(staticPatches);
+  const [managePatches, setManagePatches] = useStateApp([]);
+  const [activePatchId, setActivePatchId] = useStateApp(() => staticPatches[0] && staticPatches[0].id ? staticPatches[0].id : "");
+  const [mode, setMode] = useStateApp("view");
+  const [loadState, setLoadState] = useStateApp({
+    status: "loading",
+    message: "Loading Product Book from Supabase..."
+  });
   const activePatch = patches.find(patch => patch.id === activePatchId) || patches[0] || null;
+  async function refreshProductBookData(options = {}) {
+    const showLoading = options.showLoading !== false;
+    if (showLoading) setLoadState({
+      status: "loading",
+      message: "Loading Product Book from Supabase..."
+    });
+    if (!window.loadProductBookPatches) {
+      setPatches(staticPatches);
+      setLoadState({
+        status: "fallback",
+        message: "Supabase CMS is not ready. Showing the static published fallback."
+      });
+      return;
+    }
+    try {
+      const publishedRows = await window.loadProductBookPatches({
+        includeDrafts: false,
+        includeArchived: false
+      });
+      const nextPublished = publishedRows.length ? publishedRows : staticPatches;
+      setPatches(nextPublished);
+      if (canManageProductBook) {
+        const managementRows = await window.loadProductBookPatches({
+          includeDrafts: true,
+          includeArchived: true
+        });
+        setManagePatches(managementRows);
+      }
+      setLoadState(publishedRows.length ? {
+        status: "ready",
+        message: "Live Supabase Product Book"
+      } : {
+        status: "fallback",
+        message: "No published CMS entries yet. Showing the static published fallback."
+      });
+    } catch (error) {
+      console.error("[Product Book] CMS load failed:", error);
+      setPatches(staticPatches);
+      setLoadState({
+        status: "fallback",
+        message: "Product Book CMS could not be loaded. Showing the static published fallback."
+      });
+    }
+  }
+  useEffectApp(() => {
+    refreshProductBookData();
+  }, []);
+  useEffectApp(() => {
+    if (!patches.length) {
+      setActivePatchId("");
+      return;
+    }
+    if (!patches.some(patch => patch.id === activePatchId)) setActivePatchId(patches[0].id);
+  }, [patches, activePatchId]);
   return React.createElement("div", {
     className: "app"
   }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
@@ -1293,25 +1445,391 @@ function ProductBookShell({
     className: "app__sidebar"
   }, React.createElement("div", null, React.createElement("div", {
     className: "nav-section"
-  }, "Product Book"), patches.length === 0 && React.createElement("div", {
+  }, "Product Book"), canManageProductBook && React.createElement("button", {
+    type: "button",
+    className: `nav-item product-book-manage-nav ${mode === "manage" ? "is-active" : ""}`,
+    onClick: () => setMode("manage")
+  }, React.createElement(Icon, {
+    name: "settings",
+    size: 15
+  }), React.createElement("span", null, "Manage Product Book")), React.createElement("div", {
+    className: "product-book-nav-divider"
+  }), patches.length === 0 && React.createElement("div", {
     className: "reason-box",
     style: {
       margin: 12
     }
-  }, "No patch notes found."), patches.map(patch => React.createElement("div", {
+  }, "No patch notes found."), patches.map(patch => React.createElement("button", {
+    type: "button",
     key: patch.id,
-    className: `nav-item ${activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
-    onClick: () => setActivePatchId(patch.id)
+    className: `nav-item ${mode === "view" && activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
+    onClick: () => {
+      setMode("view");
+      setActivePatchId(patch.id);
+    }
   }, React.createElement(Icon, {
     name: "book",
     size: 15
   }), React.createElement("span", null, patch.name || patch.id))))), React.createElement("main", {
     className: "app__main app__main--product-book"
-  }, activePatch ? React.createElement(ProductBookPatchView, {
+  }, mode === "manage" && canManageProductBook ? React.createElement(ProductBookManagementScreen, {
+    patches: managePatches,
+    publishedPatches: patches,
+    loadState: loadState,
+    onRefresh: refreshProductBookData,
+    onViewPatch: patchId => {
+      setActivePatchId(patchId);
+      setMode("view");
+    }
+  }) : activePatch ? React.createElement(React.Fragment, null, loadState.status === "fallback" && React.createElement("div", {
+    className: "product-book-fallback-note",
+    role: "status"
+  }, loadState.message), React.createElement(ProductBookPatchView, {
     patch: activePatch
-  }) : React.createElement("div", {
+  })) : React.createElement("div", {
     className: "reason-box"
-  }, "Upload product-book-data.js with at least one patch note entry.")));
+  }, "No published Product Book patch is available.")));
+}
+function ProductBookManagementScreen({
+  patches,
+  publishedPatches,
+  loadState,
+  onRefresh,
+  onViewPatch
+}) {
+  const [selectedPatchCode, setSelectedPatchCode] = useStateApp("");
+  const [draft, setDraft] = useStateApp(() => createProductBookEditorDraft(null));
+  const [isDirty, setIsDirty] = useStateApp(false);
+  const [isPreview, setIsPreview] = useStateApp(false);
+  const [isPending, setIsPending] = useStateApp(false);
+  const [message, setMessage] = useStateApp({
+    tone: "",
+    text: ""
+  });
+  const selectedPatch = patches.find(patch => patch.id === selectedPatchCode) || null;
+  function selectPatch(patch) {
+    setSelectedPatchCode(patch && patch.id || "");
+    setDraft(createProductBookEditorDraft(patch));
+    setIsDirty(false);
+    setIsPreview(false);
+    setMessage({
+      tone: "",
+      text: ""
+    });
+  }
+  function startNewPatch(sourcePatch) {
+    const next = createProductBookEditorDraft(sourcePatch || null);
+    next.patchCode = "";
+    next.title = sourcePatch ? `${sourcePatch.title || sourcePatch.id} - Copy` : "";
+    next.status = "draft";
+    next.archivedAt = null;
+    next.hasDraft = false;
+    next.hasPublished = false;
+    setSelectedPatchCode("");
+    setDraft(next);
+    setIsDirty(true);
+    setIsPreview(false);
+    setMessage({
+      tone: "",
+      text: ""
+    });
+  }
+  function updateDraft(field, value) {
+    setDraft(current => ({
+      ...current,
+      [field]: value
+    }));
+    setIsDirty(true);
+    setMessage({
+      tone: "",
+      text: ""
+    });
+  }
+  async function handleSaveDraft() {
+    const payload = getProductBookEditorPayload(draft);
+    const validationMessage = validateProductBookEditorPayload(payload);
+    if (validationMessage) {
+      setMessage({
+        tone: "error",
+        text: validationMessage
+      });
+      return;
+    }
+    setIsPending(true);
+    try {
+      await window.saveProductBookDraft(payload);
+      await onRefresh({
+        showLoading: false
+      });
+      setSelectedPatchCode(payload.patchCode);
+      setDraft(current => ({
+        ...current,
+        patchCode: payload.patchCode,
+        status: "draft",
+        hasDraft: true
+      }));
+      setIsDirty(false);
+      setMessage({
+        tone: "success",
+        text: `Draft ${payload.patchCode} saved. The current Published page is unchanged.`
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: window.flowmateUserError ? window.flowmateUserError(error, "Save draft failed.") : error.message
+      });
+    } finally {
+      setIsPending(false);
+    }
+  }
+  async function handlePublish() {
+    const payload = getProductBookEditorPayload(draft);
+    const validationMessage = validateProductBookEditorPayload(payload, {
+      forPublish: true
+    });
+    if (validationMessage) {
+      setMessage({
+        tone: "error",
+        text: validationMessage
+      });
+      return;
+    }
+    if (isDirty || !draft.hasDraft && draft.status !== "draft") {
+      setMessage({
+        tone: "warn",
+        text: "Save the latest changes as Draft before publishing."
+      });
+      return;
+    }
+    if (!window.confirm(`Publish ${payload.patchCode} now? This replaces its current Published revision.`)) return;
+    setIsPending(true);
+    try {
+      await window.publishProductBookPatch(payload.patchCode);
+      await onRefresh({
+        showLoading: false
+      });
+      setDraft(current => ({
+        ...current,
+        status: "published",
+        hasDraft: false,
+        hasPublished: true
+      }));
+      setMessage({
+        tone: "success",
+        text: `${payload.patchCode} is now Published.`
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: window.flowmateUserError ? window.flowmateUserError(error, "Publish failed.") : error.message
+      });
+    } finally {
+      setIsPending(false);
+    }
+  }
+  async function handleArchiveToggle() {
+    const patchCode = String(draft.patchCode || "").trim();
+    if (!patchCode || !selectedPatch) return;
+    const restoring = Boolean(draft.archivedAt);
+    if (!restoring && !window.confirm(`Archive ${patchCode}? Historical revisions will be preserved.`)) return;
+    setIsPending(true);
+    try {
+      if (restoring) await window.restoreProductBookPatch(patchCode);else await window.archiveProductBookPatch(patchCode);
+      await onRefresh({
+        showLoading: false
+      });
+      setDraft(current => ({
+        ...current,
+        archivedAt: restoring ? null : new Date().toISOString()
+      }));
+      setMessage({
+        tone: "success",
+        text: restoring ? `${patchCode} restored.` : `${patchCode} archived. Historical revisions were preserved.`
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: window.flowmateUserError ? window.flowmateUserError(error, "Archive action failed.") : error.message
+      });
+    } finally {
+      setIsPending(false);
+    }
+  }
+  const previewPatch = {
+    ...getProductBookEditorPayload(draft),
+    id: String(draft.patchCode || "New patch").trim() || "New patch",
+    name: String(draft.patchCode || "New patch").trim() || "New patch",
+    monthLabel: getProductBookEditorPayload(draft).monthLabel,
+    status: draft.status
+  };
+  return React.createElement("div", {
+    className: "product-book-cms"
+  }, React.createElement("div", {
+    className: "page-head product-book-cms__head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "eyebrow"
+  }, "Product Book / Mini CMS"), React.createElement("h1", null, "Manage Product Book"), React.createElement("p", {
+    className: "muted"
+  }, "Team Ops can save drafts and publish immediately. Published content stays live until Publish is clicked.")), React.createElement("div", {
+    className: "row"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => startNewPatch(null)
+  }, "New patch"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    disabled: !publishedPatches.length,
+    onClick: () => startNewPatch(publishedPatches[0])
+  }, "Duplicate latest"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    onClick: () => onRefresh()
+  }, "Refresh"))), loadState.status === "fallback" && React.createElement("div", {
+    className: "product-book-fallback-note",
+    role: "status"
+  }, loadState.message), React.createElement("div", {
+    className: "product-book-cms__layout"
+  }, React.createElement("aside", {
+    className: "product-book-cms__patch-list"
+  }, React.createElement("div", {
+    className: "product-book-cms__list-title"
+  }, "CMS entries"), patches.length === 0 ? React.createElement("div", {
+    className: "muted product-book-cms__empty"
+  }, "No CMS entries yet. Create the first patch or duplicate the latest static patch.") : patches.map(patch => React.createElement("button", {
+    key: patch.id,
+    type: "button",
+    className: `product-book-cms__patch ${selectedPatchCode === patch.id ? "is-active" : ""}`,
+    onClick: () => selectPatch(patch)
+  }, React.createElement("strong", null, patch.id), React.createElement(ProductBookStatusBadge, {
+    status: patch.status,
+    archivedAt: patch.archivedAt
+  }), React.createElement("span", null, patch.title || "Untitled")))), React.createElement("section", {
+    className: "section product-book-cms__editor"
+  }, React.createElement("div", {
+    className: "product-book-cms__editor-toolbar"
+  }, React.createElement("div", null, React.createElement("strong", null, draft.patchCode || "New Product Book patch"), React.createElement("span", {
+    className: "muted"
+  }, isDirty ? "Unsaved changes" : "Draft is saved")), React.createElement("div", {
+    className: "row"
+  }, React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${isPreview ? "btn--secondary" : "btn--ghost"}`,
+    onClick: () => setIsPreview(false)
+  }, "Edit"), React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${isPreview ? "btn--ghost" : "btn--secondary"}`,
+    onClick: () => setIsPreview(true)
+  }, "Preview"))), isPreview ? React.createElement("div", {
+    className: "product-book-cms__preview"
+  }, React.createElement("h2", null, previewPatch.title || previewPatch.id), React.createElement(ProductBookMarkdown, {
+    markdown: getProductBookPatchMarkdown(previewPatch)
+  })) : React.createElement(ProductBookEditorFields, {
+    draft: draft,
+    onChange: updateDraft,
+    disabled: isPending || Boolean(draft.archivedAt)
+  }), message.text && React.createElement("div", {
+    className: `product-book-cms__message product-book-cms__message--${message.tone}`,
+    role: "status"
+  }, message.text), React.createElement("div", {
+    className: "product-book-cms__actions"
+  }, selectedPatch && React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    disabled: isPending,
+    onClick: () => onViewPatch(selectedPatch.id)
+  }, "View Published"), selectedPatch && React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    disabled: isPending,
+    onClick: handleArchiveToggle
+  }, draft.archivedAt ? "Restore" : "Archive"), React.createElement("span", {
+    className: "spacer"
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    disabled: isPending || Boolean(draft.archivedAt),
+    onClick: handleSaveDraft
+  }, isPending ? "Saving..." : "Save draft"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    disabled: isPending || Boolean(draft.archivedAt) || !draft.patchCode,
+    onClick: handlePublish
+  }, "Publish")))));
+}
+function ProductBookEditorFields({
+  draft,
+  onChange,
+  disabled
+}) {
+  return React.createElement("div", {
+    className: "product-book-cms__fields"
+  }, React.createElement("label", null, React.createElement("span", null, "Patch ID *"), React.createElement("input", {
+    value: draft.patchCode,
+    disabled: disabled,
+    placeholder: "MS26.08",
+    onChange: event => onChange("patchCode", event.target.value.toUpperCase())
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Title *"), React.createElement("input", {
+    value: draft.title,
+    disabled: disabled,
+    placeholder: "FC Online MS26.08 Patch Note Product Book",
+    onChange: event => onChange("title", event.target.value)
+  })), React.createElement("label", null, React.createElement("span", null, "Year *"), React.createElement("input", {
+    type: "number",
+    min: "2020",
+    max: "2100",
+    value: draft.year,
+    disabled: disabled,
+    onChange: event => onChange("year", event.target.value)
+  })), React.createElement("label", null, React.createElement("span", null, "Month *"), React.createElement("select", {
+    value: draft.month,
+    disabled: disabled,
+    onChange: event => onChange("month", event.target.value)
+  }, Array.from({
+    length: 12
+  }, (_, index) => React.createElement("option", {
+    key: index + 1,
+    value: index + 1
+  }, new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    timeZone: "UTC"
+  }).format(new Date(Date.UTC(2026, index, 1))))))), React.createElement("label", null, React.createElement("span", null, "Audience"), React.createElement("input", {
+    value: draft.audienceText,
+    disabled: disabled,
+    placeholder: "Ops, Marketing, Esport",
+    onChange: event => onChange("audienceText", event.target.value)
+  })), React.createElement("label", null, React.createElement("span", null, "Tags"), React.createElement("input", {
+    value: draft.tagsText,
+    disabled: disabled,
+    placeholder: "Gameplay, QoL, Bug Fix",
+    onChange: event => onChange("tagsText", event.target.value)
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Source PDF URL"), React.createElement("input", {
+    type: "url",
+    value: draft.sourcePdfUrl,
+    disabled: disabled,
+    placeholder: "https://drive.google.com/...",
+    onChange: event => onChange("sourcePdfUrl", event.target.value)
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Top updates (Markdown)"), React.createElement("textarea", {
+    rows: "10",
+    value: draft.topUpdatesMarkdown,
+    disabled: disabled,
+    placeholder: "# Top Updates\n\n## Highlight\n\n- Detail",
+    onChange: event => onChange("topUpdatesMarkdown", event.target.value)
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Full content (Markdown)"), React.createElement("textarea", {
+    rows: "22",
+    value: draft.contentMarkdown,
+    disabled: disabled,
+    placeholder: "# Product Book\n\n## Executive Summary\n\nWrite the full content here...",
+    onChange: event => onChange("contentMarkdown", event.target.value)
+  })));
 }
 function ProductBookPatchView({
   patch
@@ -1323,7 +1841,15 @@ function ProductBookPatchView({
     className: "page-head"
   }, React.createElement("div", null, React.createElement("div", {
     className: "eyebrow"
-  }, "Product Book / ", patch.monthLabel || patch.id))), React.createElement("div", {
+  }, "Product Book / ", patch.monthLabel || patch.id), React.createElement("h1", null, patch.title || patch.id), React.createElement("div", {
+    className: "product-book-meta"
+  }, React.createElement(ProductBookStatusBadge, {
+    status: patch.status
+  }), patch.sourcePdfUrl && React.createElement("a", {
+    href: patch.sourcePdfUrl,
+    target: "_blank",
+    rel: "noreferrer"
+  }, "Open source PDF")))), React.createElement("div", {
     className: "product-book-sticky-zone"
   }, React.createElement("div", {
     className: "product-book-tag-nav",
