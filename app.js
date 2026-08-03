@@ -1548,13 +1548,6 @@ function ProductBookManagementScreen({
   }
   async function handleSaveDraft() {
     const payload = getProductBookEditorPayload(draft);
-    if (draft.hasPublished) {
-      setMessage({
-        tone: "error",
-        text: "Published Patch ID cannot be reused. Create a new Patch and use a new Patch ID."
-      });
-      return;
-    }
     const validationMessage = validateProductBookEditorPayload(payload);
     if (validationMessage) {
       setMessage({
@@ -1592,13 +1585,6 @@ function ProductBookManagementScreen({
   }
   async function handlePublish() {
     const payload = getProductBookEditorPayload(draft);
-    if (draft.hasPublished) {
-      setMessage({
-        tone: "error",
-        text: "Published Patch ID cannot be reused. Create a new Patch and use a new Patch ID."
-      });
-      return;
-    }
     const validationMessage = validateProductBookEditorPayload(payload, {
       forPublish: true
     });
@@ -1616,7 +1602,7 @@ function ProductBookManagementScreen({
       });
       return;
     }
-    if (!window.confirm(`Publish ${payload.patchCode} now? This adds a new Patch to Product Book.`)) return;
+    if (!window.confirm(`Publish revision for ${payload.patchCode} now? The current version remains available in Version History.`)) return;
     setIsPending(true);
     try {
       await window.publishProductBookPatch(payload.patchCode);
@@ -1631,7 +1617,7 @@ function ProductBookManagementScreen({
       }));
       setMessage({
         tone: "success",
-        text: `${payload.patchCode} is now Published and added to Product Book.`
+        text: `${payload.patchCode} revision ${draft.revisionNumber || "new"} is now Published. The previous version is in Version History.`
       });
     } catch (error) {
       setMessage({
@@ -1752,6 +1738,17 @@ function ProductBookManagementScreen({
     type: "button",
     className: "btn btn--ghost",
     disabled: isPending,
+    onClick: () => {
+      setIsPreview(false);
+      setMessage({
+        tone: "warn",
+        text: "Edit the fields, then Save draft and Publish. The current Published version stays available in Version History."
+      });
+    }
+  }, "Edit"), selectedPatch && React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    disabled: isPending,
     onClick: () => onViewPatch(selectedPatch.id)
   }, "View Published"), selectedPatch && React.createElement("button", {
     type: "button",
@@ -1849,19 +1846,42 @@ function ProductBookEditorFields({
 function ProductBookPatchView({
   patch
 }) {
-  const tags = Array.isArray(patch.tags) ? patch.tags : [];
-  const tagAnchors = buildProductBookAnchorMap(patch);
-  const markdown = getProductBookPatchMarkdown(patch);
+  const [revisions, setRevisions] = useStateApp([]);
+  const [selectedRevisionNumber, setSelectedRevisionNumber] = useStateApp(null);
+  useEffectApp(() => {
+    let alive = true;
+    setRevisions([]);
+    setSelectedRevisionNumber(null);
+    if (!window.loadProductBookPatchRevisions || !patch || !patch.id) return () => {
+      alive = false;
+    };
+    window.loadProductBookPatchRevisions(patch.id).then(rows => {
+      if (alive) setRevisions(rows);
+    }).catch(error => console.warn("[Product Book] revision history load failed:", error));
+    return () => {
+      alive = false;
+    };
+  }, [patch && patch.id]);
+  const displayedPatch = revisions.find(revision => Number(revision.revisionNumber) === Number(selectedRevisionNumber)) || patch;
+  const tags = Array.isArray(displayedPatch.tags) ? displayedPatch.tags : [];
+  const tagAnchors = buildProductBookAnchorMap(displayedPatch);
+  const markdown = getProductBookPatchMarkdown(displayedPatch);
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("div", {
     className: "eyebrow"
-  }, "Product Book / ", patch.monthLabel || patch.id), React.createElement("h1", null, patch.title || patch.id), React.createElement("div", {
+  }, "Product Book / ", displayedPatch.monthLabel || displayedPatch.id), React.createElement("h1", null, displayedPatch.title || displayedPatch.id), React.createElement("div", {
     className: "product-book-meta"
   }, React.createElement(ProductBookStatusBadge, {
-    status: patch.status
-  }), patch.sourcePdfUrl && React.createElement("a", {
-    href: patch.sourcePdfUrl,
+    status: displayedPatch.status
+  }), revisions.length > 1 && React.createElement("label", null, "Version History ", React.createElement("select", {
+    value: selectedRevisionNumber || displayedPatch.revisionNumber || "",
+    onChange: event => setSelectedRevisionNumber(Number(event.target.value))
+  }, revisions.map(revision => React.createElement("option", {
+    key: revision.revisionNumber,
+    value: revision.revisionNumber
+  }, `Revision ${revision.revisionNumber}${revision.status === "published" ? " (Current)" : ""}`)))), displayedPatch.sourcePdfUrl && React.createElement("a", {
+    href: displayedPatch.sourcePdfUrl,
     target: "_blank",
     rel: "noreferrer"
   }, "Open source PDF")))), React.createElement("div", {
