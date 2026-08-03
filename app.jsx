@@ -5,7 +5,7 @@ const {
   useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260803-6";
+  const fallbackVersion = "v20260803-8";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -106,10 +106,10 @@ const NAV = [{
     key: "calendar",
     label: "Calendar",
     icon: "calendar"
-  }, {
-    key: "gantt",
-    label: "Gantt Chart",
-    icon: "chart"
+    }, {
+      key: "gantt",
+      label: "Team Schedule",
+      icon: "chart"
   }, {
     key: "attention",
     label: "Attention Needed",
@@ -147,7 +147,7 @@ const TITLE_MAP = {
   "list": "All work",
   "board": "Board",
   "calendar": "Team calendar",
-  "gantt": "Team Gantt chart",
+  "gantt": "Team Schedule",
   "attention": "Attention Needed",
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
@@ -1547,6 +1547,13 @@ function ProductBookManagementScreen({
   }
   async function handleSaveDraft() {
     const payload = getProductBookEditorPayload(draft);
+    if (draft.hasPublished) {
+      setMessage({
+        tone: "error",
+        text: "Published Patch ID cannot be reused. Create a new Patch and use a new Patch ID."
+      });
+      return;
+    }
     const validationMessage = validateProductBookEditorPayload(payload);
     if (validationMessage) {
       setMessage({
@@ -1584,6 +1591,13 @@ function ProductBookManagementScreen({
   }
   async function handlePublish() {
     const payload = getProductBookEditorPayload(draft);
+    if (draft.hasPublished) {
+      setMessage({
+        tone: "error",
+        text: "Published Patch ID cannot be reused. Create a new Patch and use a new Patch ID."
+      });
+      return;
+    }
     const validationMessage = validateProductBookEditorPayload(payload, {
       forPublish: true
     });
@@ -1601,7 +1615,7 @@ function ProductBookManagementScreen({
       });
       return;
     }
-    if (!window.confirm(`Publish ${payload.patchCode} now? This replaces its current Published revision.`)) return;
+    if (!window.confirm(`Publish ${payload.patchCode} now? This adds a new Patch to Product Book.`)) return;
     setIsPending(true);
     try {
       await window.publishProductBookPatch(payload.patchCode);
@@ -1616,7 +1630,7 @@ function ProductBookManagementScreen({
       }));
       setMessage({
         tone: "success",
-        text: `${payload.patchCode} is now Published.`
+        text: `${payload.patchCode} is now Published and added to Product Book.`
       });
     } catch (error) {
       setMessage({
