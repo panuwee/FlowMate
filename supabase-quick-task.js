@@ -704,6 +704,41 @@ async function rerunFlowMateAssignment(displayId) {
 }
 window.rerunFlowMateAssignment = rerunFlowMateAssignment;
 
+async function changeFlowMateCreativeAssignee(displayId, targetMemberId, reason) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!displayId) throw new Error("Work item ID is required.");
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_change_creative_assignee", {
+    p_display_id: displayId,
+    p_target_member_id: targetMemberId || null,
+    p_reason: String(reason || "").trim() || null,
+  });
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "creative_assignee_changed" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
+  return data;
+}
+
+async function rescheduleFlowMateCapacityAllocation(displayId, allocations) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!displayId) throw new Error("Work item ID is required.");
+  if (!Array.isArray(allocations) || allocations.length === 0) throw new Error("At least one allocation is required.");
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_reschedule_capacity_allocation", {
+    p_display_id: displayId,
+    p_allocations: allocations,
+  });
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "capacity_allocation_rescheduled" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
+  return data;
+}
+
+window.changeFlowMateCreativeAssignee = changeFlowMateCreativeAssignee;
+window.rescheduleFlowMateCapacityAllocation = rescheduleFlowMateCapacityAllocation;
+
 async function recheckFlowMateBrief(displayId) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   if (!displayId) throw new Error("Work item ID is required.");

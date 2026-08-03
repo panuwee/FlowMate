@@ -60,12 +60,12 @@ const WORK_BY_ID = Object.fromEntries(WORK.map(w => [w.id, w]));
 
 /* ---------- Status / label maps ---------- */
 const STATUS_LABEL = {
-  new: "New", need_brief: "Need Brief", queued: "Queued", assigned: "Assigned",
+  new: "New", need_brief: "Need Brief", unassigned: "Unassigned", queued: "Queued (historical)", assigned: "Assigned",
   in_progress: "In Progress", review: "Review", delivered: "Delivered",
   blocked: "Blocked", cancelled: "Cancelled",
 };
 const STATUS_CLASS = {
-  new: "badge--new", need_brief: "badge--need", queued: "badge--queued",
+  new: "badge--new", need_brief: "badge--need", unassigned: "badge--unassigned", queued: "badge--queued",
   assigned: "badge--assigned", in_progress: "badge--progress", review: "badge--review",
   delivered: "badge--delivered", blocked: "badge--blocked", cancelled: "badge--cancelled",
 };
@@ -101,6 +101,43 @@ function StatusBadge({ status }) {
   const label = STATUS_LABEL[status] || flowmatePrettifyToken(status) || "—";
   const cls = STATUS_CLASS[status] || "badge--new";
   return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+const FLOWMATE_WARNING_LABEL = {
+  over_capacity: "Over capacity",
+  wip_exceeded: "WIP exceeded",
+  skill_mismatch: "Skill mismatch",
+  backup_skill: "Backup skill",
+  member_partial: "Partial availability",
+  member_on_leave: "Member on leave",
+  deadline_capacity_gap: "Deadline capacity gap",
+  review_buffer_risk: "Review buffer risk",
+  review_delay: "Review delay",
+  blocked: "Blocked",
+  needs_split: "Needs split",
+};
+
+function AssignmentWarningBadges({ work, limit = 3 }) {
+  const warnings = window.getFlowMateAssignmentWarnings
+    ? window.getFlowMateAssignmentWarnings(work)
+    : (Array.isArray(work && work.assignmentWarnings) ? work.assignmentWarnings : []);
+  const categoryCodes = window.getFlowMateAttentionCategoryCodes
+    ? window.getFlowMateAttentionCategoryCodes(work)
+    : [];
+  const warningByCode = new Map(warnings.map((warning) => [warning.code, warning]));
+  const codes = categoryCodes.filter((code) => code !== "unassigned");
+  const visibleCodes = codes.slice(0, limit);
+  if (!visibleCodes.length) return null;
+  return (
+    <span className="assignment-warnings" aria-label="Assignment warnings">
+      {visibleCodes.map((code) => {
+        const warning = warningByCode.get(code);
+        const label = FLOWMATE_WARNING_LABEL[code] || flowmatePrettifyToken(code);
+        return <span key={code} className={`warning-badge warning-badge--${warning?.severity || "warning"}`} title={warning?.message || label}>{label}</span>;
+      })}
+      {codes.length > visibleCodes.length && <span className="warning-badge">+{codes.length - visibleCodes.length}</span>}
+    </span>
+  );
 }
 
 function PriorityBadge({ level }) {
@@ -429,7 +466,7 @@ Object.assign(window, {
   Icon, ICONS,
   MEMBERS, MEMBERS_BY_ID, TEAMS, TODAY,
   WORK, WORK_BY_ID,
-  STATUS_LABEL, STATUS_CLASS, ASSET_LABEL,
-  Avatar, StatusBadge, PriorityBadge, DueBadge, Effort, TypePill, Progress, Source,
+  STATUS_LABEL, STATUS_CLASS, ASSET_LABEL, FLOWMATE_WARNING_LABEL,
+  Avatar, StatusBadge, AssignmentWarningBadges, PriorityBadge, DueBadge, Effort, TypePill, Progress, Source,
   flowmatePrettifyToken, flowmateCsvCell, flowmateDownloadCsv, flowmateDownloadWorkbook,
 });

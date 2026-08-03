@@ -6,7 +6,7 @@ const {
   useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260727-1";
+  const fallbackVersion = "v20260803-3";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -112,8 +112,8 @@ const NAV = [{
     label: "Gantt Chart",
     icon: "chart"
   }, {
-    key: "queue",
-    label: "Central queue",
+    key: "attention",
+    label: "Attention Needed",
     icon: "queue"
   }]
 }, {
@@ -149,7 +149,7 @@ const TITLE_MAP = {
   "board": "Board",
   "calendar": "Team calendar",
   "gantt": "Team Gantt chart",
-  "queue": "Central queue",
+  "attention": "Attention Needed",
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
@@ -163,7 +163,8 @@ const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "facebook-esport-
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
-  return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+  const routeKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+  return routeKey === "queue" ? "attention" : routeKey;
 }
 function isProductChoicePath() {
   return /\/home\/?$/.test(String(window.location.pathname || ""));
@@ -397,6 +398,9 @@ function App() {
       const h = window.location.hash.replace("#", "");
       const r = getFlowMateHashRouteKey(h);
       const id = h.split("/")[1];
+      if (h.split("/")[0] === "queue") {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#attention`);
+      }
       if (MARKETING_PLAN_HASH_KEYS.has(r)) {
         setActiveProduct("marketing-plan");
         try {
@@ -420,6 +424,7 @@ function App() {
       }
       if (TITLE_MAP[r]) setRoute(r);
     }
+    onHash();
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -958,7 +963,7 @@ function App() {
     onOpen: open
   }), allowedRoute && route === "gantt" && React.createElement(TeamGanttScreen, {
     onOpen: open
-  }), allowedRoute && route === "queue" && React.createElement(QueueScreen, {
+  }), allowedRoute && route === "attention" && React.createElement(QueueScreen, {
     onOpen: open,
     searchQuery: searchQuery
   }), allowedRoute && route === "planning-channel" && React.createElement(PlanningChannelViewScreen, {
@@ -5754,6 +5759,9 @@ function GlobalSearchResultsPanel({
     type: row.type
   }), React.createElement(StatusBadge, {
     status: row.status
+  }), React.createElement(AssignmentWarningBadges, {
+    work: row,
+    limit: 2
   }), React.createElement("span", {
     className: "searchbar__result-meta-item"
   }, React.createElement("strong", null, "Assignee"), getAssigneeName(row)), React.createElement("span", {

@@ -56,7 +56,7 @@ function ListScreen({
   onOpen,
   searchQuery = ""
 }) {
-  const LIST_STATUS_FILTER_KEYS = ["queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
+  const LIST_STATUS_FILTER_KEYS = ["need_brief", "unassigned", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled", "queued"];
   const savedListState = readFlowMateListViewState();
   const [filterStatus, setFilterStatus] = useStateB(savedListState.filterStatus || "all");
   const [filterFlag, setFilterFlag] = useStateB(savedListState.filterFlag || "all");
@@ -307,7 +307,10 @@ function ListScreen({
     className: "col-id mono"
   }, w.id), React.createElement("td", {
     className: "col-title"
-  }, w.title), React.createElement("td", null, React.createElement(TypePill, {
+  }, React.createElement("div", null, w.title), React.createElement(AssignmentWarningBadges, {
+    work: w,
+    limit: 2
+  })), React.createElement("td", null, React.createElement(TypePill, {
     type: w.type
   })), React.createElement("td", null, React.createElement(StatusBadge, {
     status: w.status
@@ -368,7 +371,10 @@ function ListScreen({
       background: "#FDEFE0",
       color: "#8A4A12"
     }
-  }, "Needs split"), w.reviewRound > 0 && React.createElement("span", {
+  }, "Needs split"), React.createElement(AssignmentWarningBadges, {
+    work: w,
+    limit: 3
+  }), w.reviewRound > 0 && React.createElement("span", {
     className: "tag"
   }, "R", w.reviewRound), w.blockReason && React.createElement("span", {
     className: "tag",
@@ -382,6 +388,9 @@ function BoardScreen({
   onOpen
 }) {
   const columns = [{
+    key: "unassigned",
+    label: "Unassigned"
+  }, {
     key: "assigned",
     label: "Assigned"
   }, {
@@ -483,6 +492,13 @@ function BoardScreen({
     const row = sourceRows.find(r => r.id === id);
     if (!row) return;
     if (row.status === targetStatus) return;
+    if (targetStatus === "unassigned") {
+      setFlash({
+        tone: "warn",
+        text: "Open the work item detail to clear or change its assignee."
+      });
+      return;
+    }
     if (!row.isSupabaseRow) {
       setFlash({
         tone: "warn",
@@ -659,7 +675,7 @@ function BoardScreen({
       className: "kcol__body"
     }, byCol[c.key].map(w => {
       const isDragging = draggingId === w.id;
-      const draggable = Boolean(w.isSupabaseRow) && !busy;
+      const draggable = Boolean(w.isSupabaseRow) && !busy && w.status !== "unassigned";
       return React.createElement("div", {
         key: w.id,
         className: "kcard",
@@ -677,7 +693,7 @@ function BoardScreen({
           transition: "opacity 120ms, transform 120ms",
           transform: isDragging ? "scale(0.98)" : "none"
         },
-        title: draggable ? "Drag to a column to change status" : "Live data only — connect to Supabase to drag"
+        title: draggable ? "Drag to a column to change status" : w.status === "unassigned" ? "Open detail to assign this work" : "Live data only - connect to Supabase to drag"
       }, React.createElement("div", {
         className: "row",
         style: {
@@ -689,7 +705,10 @@ function BoardScreen({
         level: w.priority
       })), React.createElement("div", {
         className: "kcard__title"
-      }, w.title), React.createElement("div", {
+      }, w.title), React.createElement(AssignmentWarningBadges, {
+        work: w,
+        limit: 2
+      }), React.createElement("div", {
         className: "kcard__row"
       }, React.createElement(Avatar, {
         memberId: w.assignee
@@ -723,6 +742,64 @@ function BoardScreen({
     }, isHover ? "Drop to move here" : c.key === "blocked" ? "No blocked items." : "Empty.")));
   })));
 }
+const FLOWMATE_ATTENTION_CATEGORIES_B = [{
+  code: "unassigned",
+  label: "Unassigned",
+  hint: "Choose an active GD/VE owner from the work item detail."
+}, {
+  code: "over_capacity",
+  label: "Over capacity",
+  hint: "Owner load exceeds nominal capacity; review the AM/PM allocation."
+}, {
+  code: "wip_exceeded",
+  label: "WIP exceeded",
+  hint: "Owner has more active production work than their WIP limit."
+}, {
+  code: "skill_mismatch",
+  label: "Skill mismatch",
+  hint: "Assigned owner does not have the requested primary skill."
+}, {
+  code: "backup_skill",
+  label: "Backup skill",
+  hint: "Assignment used a configured backup skill."
+}, {
+  code: "member_partial",
+  label: "Partial availability",
+  hint: "Assigned owner has partial availability."
+}, {
+  code: "member_on_leave",
+  label: "Member on leave",
+  hint: "Assigned owner has leave during the production window."
+}, {
+  code: "deadline_capacity_gap",
+  label: "Deadline capacity gap",
+  hint: "Available capacity does not fully cover work before 1st Draft."
+}, {
+  code: "review_buffer_risk",
+  label: "Review buffer risk",
+  hint: "The review window before Launch is compressed."
+}, {
+  code: "review_delay",
+  label: "Review delay",
+  hint: "Requester review is past the at-risk date."
+}, {
+  code: "blocked",
+  label: "Blocked",
+  hint: "Resolve the recorded blocker before production can continue."
+}, {
+  code: "needs_split",
+  label: "Needs split",
+  hint: "Split the combined deliverables while retaining the assigned owner."
+}];
+function flowMateAttentionContextB(work, categoryCode) {
+  const warning = (window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(work) : []).find(item => item.code === categoryCode);
+  if (warning && warning.message) return warning.message;
+  if (categoryCode === "unassigned") return work.assignmentReason || "Task is ready but needs manual assignment.";
+  if (categoryCode === "review_delay") return `Review is delayed${work.dueFullLabel || work.dueLabel ? ` past ${work.dueFullLabel || work.dueLabel}` : ""}.`;
+  if (categoryCode === "blocked") return work.blockReason || "Production is blocked.";
+  if (categoryCode === "needs_split") return "Combined deliverables need to be split for production tracking.";
+  return work.assignmentReason || "Open the detail view for assignment context.";
+}
 function QueueScreen({
   onOpen,
   searchQuery = ""
@@ -739,7 +816,7 @@ function QueueScreen({
         setSourceRows([]);
         setLoadState({
           status: "error",
-          message: "Live data unavailable: Supabase queue loader is not ready."
+          message: "Live data unavailable: Supabase list loader is not ready."
         });
         return;
       }
@@ -753,7 +830,7 @@ function QueueScreen({
         });
       } catch (error) {
         if (!alive) return;
-        console.error("[FlowMate Queue] Supabase load failed:", error);
+        console.error("[FlowMate Attention] Supabase load failed:", error);
         setSourceRows([]);
         setLoadState({
           status: "error",
@@ -768,84 +845,79 @@ function QueueScreen({
       cleanup();
     };
   }, []);
-  const queued = sourceRows.filter(w => {
-    if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
-    return w.status === "queued" && !w.needsSplit;
-  });
-  const byReason = {
-    capacity: queued
-  };
+  const attentionRows = window.getFlowMateAttentionRows ? window.getFlowMateAttentionRows(sourceRows, searchQuery) : [];
+  const attentionGroups = window.getFlowMateAttentionGroups ? window.getFlowMateAttentionGroups(sourceRows, searchQuery) : {};
+  function openAttentionItem(work) {
+    window.flowmateSelectedWorkItem = work;
+    onOpen(work.id);
+  }
   return React.createElement("div", {
     className: "page"
   }, React.createElement("div", {
     className: "page__header"
   }, React.createElement("div", null, React.createElement("h1", {
     className: "page__title"
-  }, "Central queue"), React.createElement("div", {
+  }, "Attention Needed"), React.createElement("div", {
     className: "page__sub"
-  }, "Requests the engine could not assign - ", loadState.message)), React.createElement("div", {
-    className: "page__actions"
-  }, React.createElement("button", {
-    className: "btn btn--secondary",
-    onClick: async () => {
-      const targets = queued.filter(w => w.isSupabaseRow && w.status === "queued" && !w.needsSplit);
-      if (!targets.length) {
-        window.alert("Nothing to rerun.");
-        return;
-      }
-      let failed = 0;
-      for (const w of targets) {
-        try {
-          await window.rerunFlowMateAssignment(w.id);
-        } catch (error) {
-          failed += 1;
-          console.error("[FlowMate Queue] rerun failed for", w.id, error);
-        }
-      }
-      if (failed > 0) window.alert(`${failed} of ${targets.length} reruns failed. Check the console.`);
-    }
-  }, React.createElement(Icon, {
-    name: "rerun"
-  }), " Rerun all"))), React.createElement("div", {
+  }, "Advisory assignment and delivery risks that need a human decision - ", loadState.message))), React.createElement("div", {
     className: "stat-strip",
     style: {
-      gridTemplateColumns: "repeat(2, 1fr)"
+      gridTemplateColumns: "repeat(4, minmax(0, 1fr))"
     }
   }, React.createElement("div", {
     className: "stat stat--accent"
   }, React.createElement("div", {
     className: "stat__num"
-  }, queued.length), React.createElement("div", {
+  }, attentionRows.length), React.createElement("div", {
     className: "stat__lbl"
-  }, "Queued total")), React.createElement("div", {
+  }, "Unique tasks"), React.createElement("div", {
+    className: "stat__delta"
+  }, "counted once")), React.createElement("div", {
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num"
-  }, byReason.capacity.length), React.createElement("div", {
+  }, (attentionGroups.unassigned || []).length), React.createElement("div", {
     className: "stat__lbl"
-  }, "Capacity"))), React.createElement(QueueGroup, {
-    title: "Capacity-blocked",
-    tone: "warn",
-    items: byReason.capacity,
-    onOpen: onOpen,
-    hint: "No eligible owner with remaining capacity before the due date."
-  }));
+  }, "Unassigned")), React.createElement("div", {
+    className: "stat stat--warn"
+  }, React.createElement("div", {
+    className: "stat__num"
+  }, (attentionGroups.over_capacity || []).length + (attentionGroups.deadline_capacity_gap || []).length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Capacity risk")), React.createElement("div", {
+    className: "stat stat--accent"
+  }, React.createElement("div", {
+    className: "stat__num"
+  }, (attentionGroups.blocked || []).length + (attentionGroups.review_delay || []).length), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Delivery risk signals"))), FLOWMATE_ATTENTION_CATEGORIES_B.map(category => React.createElement(AttentionGroup, {
+    key: category.code,
+    category: category,
+    items: attentionGroups[category.code] || [],
+    onOpen: openAttentionItem
+  })), attentionRows.length === 0 && loadState.status !== "loading" && React.createElement("div", {
+    className: "card"
+  }, React.createElement("div", {
+    className: "card__body"
+  }, React.createElement("span", {
+    className: "muted"
+  }, "No tasks currently need attention."))));
 }
-function QueueGroup({
-  title,
+function AttentionGroup({
+  category,
   items,
-  hint,
-  onOpen,
-  tone
+  onOpen
 }) {
-  if (items.length === 0) return null;
-  return React.createElement("div", {
-    className: "section"
+  if (!items.length) return null;
+  return React.createElement("section", {
+    className: "section",
+    "aria-labelledby": `attention-${category.code}`
   }, React.createElement("div", {
     className: "section__head"
   }, React.createElement("span", {
-    className: "section__title"
-  }, title), React.createElement("span", {
+    className: "section__title",
+    id: `attention-${category.code}`
+  }, category.label), React.createElement("span", {
     className: "section__count"
   }, items.length), React.createElement("span", {
     className: "spacer"
@@ -854,66 +926,48 @@ function QueueGroup({
     style: {
       fontSize: 12
     }
-  }, hint)), React.createElement("table", {
+  }, category.hint)), React.createElement("table", {
     className: "tbl"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
     className: "col-id"
-  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Requester team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Due"), React.createElement("th", {
+  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Status"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Due"), React.createElement("th", {
     style: {
-      width: "32%"
+      width: "36%"
     }
-  }, "Queue reason"), React.createElement("th", null, "Last run"), React.createElement("th", {
+  }, "Actionable context"), React.createElement("th", {
     className: "col-right"
-  }, "Action"))), React.createElement("tbody", null, items.map(w => React.createElement("tr", {
-    key: w.id,
-    onClick: () => {
-      window.flowmateSelectedWorkItem = w;
-      onOpen(w.id);
-    }
+  }, "Action"))), React.createElement("tbody", null, items.map(work => React.createElement("tr", {
+    key: `${category.code}:${work.id}`,
+    onClick: () => onOpen(work)
   }, React.createElement("td", {
     className: "col-id mono"
-  }, w.id), React.createElement("td", {
+  }, work.id), React.createElement("td", {
     className: "col-title"
-  }, React.createElement("div", null, w.title)), React.createElement("td", null, React.createElement("span", {
-    className: "muted"
-  }, w.requesterTeam)), React.createElement("td", null, ASSET_LABEL[w.assetType]), React.createElement("td", null, React.createElement(Effort, {
-    value: w.effort
-  })), React.createElement("td", null, React.createElement(DueBadge, {
-    delta: w.dueDelta,
-    label: w.dueLabel,
-    status: w.status
+  }, React.createElement("div", null, work.title), React.createElement(AssignmentWarningBadges, {
+    work: work,
+    limit: 2
+  })), React.createElement("td", null, React.createElement(StatusBadge, {
+    status: work.status
+  })), React.createElement("td", null, work.assignee && MEMBERS_BY_ID[work.assignee] ? MEMBERS_BY_ID[work.assignee].name : "Unassigned"), React.createElement("td", null, React.createElement(DueBadge, {
+    delta: work.dueDelta,
+    label: work.dueLabel,
+    status: work.status
   })), React.createElement("td", null, React.createElement("div", {
     className: "reason-box reason-box--queued",
     style: {
       padding: "6px 10px",
       fontSize: 12
     }
-  }, w.queueReason)), React.createElement("td", {
-    className: "mono muted",
-    style: {
-      fontSize: 11
-    }
-  }, w.lastRunLabel || "-"), React.createElement("td", {
-    className: "col-right",
-    onClick: e => e.stopPropagation()
-  }, React.createElement("div", {
-    style: {
-      display: "inline-flex",
-      gap: 4
-    }
-  }, w.status === "queued" && !w.needsSplit && w.isSupabaseRow && React.createElement("button", {
+  }, flowMateAttentionContextB(work, category.code))), React.createElement("td", {
+    className: "col-right"
+  }, React.createElement("button", {
+    type: "button",
     className: "btn btn--xs btn--secondary",
-    onClick: async () => {
-      try {
-        await window.rerunFlowMateAssignment(w.id);
-      } catch (error) {
-        window.alert(window.flowmateUserError(error, "Rerun failed."));
-      }
+    onClick: event => {
+      event.stopPropagation();
+      onOpen(work);
     }
-  }, React.createElement(Icon, {
-    name: "rerun",
-    size: 11
-  }), " Rerun"))))))));
+  }, "Open detail")))))));
 }
 function AdminWhitelistScreen() {
   const currentUser = window.FLOWMATE_CURRENT_USER || {};

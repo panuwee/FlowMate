@@ -589,6 +589,7 @@ button:disabled {
 .badge--new      { background: #EFEFEF; color: var(--garena-iron); }
 .badge--need     { background: #FDEFE0; color: #8A4A12; }
 .badge--queued   { background: #EFEFEF; color: var(--garena-iron); }
+.badge--unassigned { background: #FFF1E8; color: #9A3412; border-color: #FDBA74; }
 .badge--assigned { background: #E4ECF2; color: var(--garena-deep-blue); }
 .badge--progress { background: var(--garena-deep-blue); color: var(--garena-white); }
 .badge--review   { background: #FDEFE0; color: #8A4A12; }
@@ -597,6 +598,38 @@ button:disabled {
 .badge--cancelled{ background: #F2F2F2; color: var(--garena-grey); text-decoration: line-through; }
 .badge--overdue  { background: var(--garena-red-light-2); color: var(--garena-red); border-color: var(--garena-red); }
 .badge--soon     { background: #FDEFE0; color: #8A4A12; }
+
+.assignment-warnings {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.warning-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid #F59E0B;
+  border-radius: 999px;
+  background: #FFF7ED;
+  color: #92400E;
+  font-size: 10px;
+  font-weight: var(--weight-bold);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.warning-badge--info { border-color: #7DD3FC; background: #F0F9FF; color: #075985; }
+.warning-badge--error,
+.warning-badge--critical { border-color: #FCA5A5; background: #FEF2F2; color: #991B1B; }
+
+section[aria-labelledby^="attention-"] {
+  min-width: 0;
+}
+section[aria-labelledby="detail-assignment-attention"] {
+  border-left: 3px solid var(--garena-orange);
+}
 
 .marketing-timeline-badge {
   display: inline-flex;
@@ -1555,6 +1588,28 @@ button:disabled {
   height: 14px;
   background: var(--garena-red);
 }
+.gantt__legend-capacity {
+  width: 18px;
+  height: 12px;
+  border: 1px solid var(--garena-light-grey);
+  border-radius: 2px;
+}
+.gantt__legend-capacity--available {
+  background: var(--garena-badge-bg);
+}
+.gantt__legend-capacity--used {
+  border-color: var(--garena-deep-blue);
+  background: var(--garena-deep-blue);
+}
+.gantt__legend-capacity--over {
+  border-color: #991B1B;
+  background: repeating-linear-gradient(135deg, #B91C1C 0 4px, #FDE68A 4px 7px);
+}
+.gantt__capacity-toggle.is-active {
+  border-color: var(--garena-deep-blue);
+  background: var(--garena-deep-blue);
+  color: var(--garena-white);
+}
 .gantt {
   border: var(--border-hairline);
   border-radius: var(--radius-lg);
@@ -1593,6 +1648,105 @@ button:disabled {
   width: calc(var(--gantt-days, 62) * 30px);
   min-width: calc(var(--gantt-days, 62) * 30px);
   box-sizing: border-box;
+}
+.gantt__tracks,
+.gantt__capacity-lane {
+  width: calc(var(--gantt-days, 62) * 30px);
+  min-width: calc(var(--gantt-days, 62) * 30px);
+  box-sizing: border-box;
+}
+.gantt__tracks {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--garena-white);
+}
+.gantt__capacity-lane {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: 38px;
+  border-bottom: var(--border-hairline);
+  background-color: var(--garena-white);
+}
+.gantt__capacity-day {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: repeat(2, 18px);
+  gap: 1px;
+  padding: 1px;
+  border-right: var(--border-hairline);
+  box-sizing: border-box;
+}
+.gantt__capacity-day.is-weekend {
+  background: var(--garena-badge-bg);
+}
+.gantt__capacity-half {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1px;
+  padding: 0 2px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: var(--garena-badge-bg);
+  color: var(--garena-grey);
+  font: inherit;
+  font-size: 8px;
+  line-height: 1;
+  overflow: hidden;
+  white-space: nowrap;
+}
+button.gantt__capacity-half {
+  cursor: pointer;
+}
+.gantt__capacity-half strong {
+  font-size: 9px;
+  font-weight: var(--weight-bold);
+}
+.gantt__capacity-half.is-empty {
+  border-color: var(--garena-light-grey);
+}
+.gantt__capacity-half.is-partial {
+  border-color: #B45309;
+  background: #FFF7ED;
+  color: #92400E;
+}
+.gantt__capacity-half.is-full {
+  border-color: var(--garena-deep-blue);
+  background: var(--garena-deep-blue);
+  color: var(--garena-white);
+}
+.gantt__capacity-half.is-over-capacity {
+  border-color: #7F1D1D;
+  background: #B91C1C;
+  color: #FFFFFF;
+}
+.gantt__capacity-half.is-over-capacity strong {
+  font-size: 8px;
+  letter-spacing: -0.02em;
+}
+.gantt__capacity-half.is-leave,
+.gantt__capacity-half.is-unavailable {
+  border-color: var(--garena-red-light-1);
+  background: var(--garena-red-light-2);
+  color: var(--garena-red);
+}
+button.gantt__capacity-half:hover,
+button.gantt__capacity-half:focus-visible {
+  outline: 2px solid var(--garena-orange);
+  outline-offset: 1px;
+}
+.gantt__capacity-error {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: var(--border-hairline);
+  color: var(--garena-red);
+  font-size: 11px;
 }
 .gantt__timeline-head {
   position: relative;
@@ -1667,6 +1821,9 @@ button:disabled {
 .gantt__row {
   min-height: 56px;
   border-bottom: var(--border-hairline);
+}
+.gantt__row.has-capacity {
+  min-height: 94px;
 }
 .gantt__row:last-child {
   border-bottom: 0;
@@ -1861,6 +2018,21 @@ button:disabled {
 }
 .reason-box--queued { border-left-color: var(--garena-orange); }
 .reason-box--need { border-left-color: var(--garena-red); background: #FDF6F6; }
+
+form[aria-label="Change creative assignee"] .select {
+  width: 100%;
+  max-width: 420px;
+}
+form[aria-label="Edit AM PM capacity allocation"] {
+  overflow-x: auto;
+}
+form[aria-label="Edit AM PM capacity allocation"] .tbl {
+  min-width: 620px;
+}
+form[aria-label="Edit AM PM capacity allocation"] input,
+form[aria-label="Edit AM PM capacity allocation"] select {
+  min-height: 32px;
+}
 
 /* ---------- Checklist ---------- */
 .checklist { display: flex; flex-direction: column; }
@@ -2696,6 +2868,27 @@ html[data-theme="dark"] .badge--soon {
   background: #4A3525;
   color: #FFD2A5;
 }
+html[data-theme="dark"] .badge--unassigned {
+  border-color: #C56A32;
+  background: #4A2C20;
+  color: #FFD0B5;
+}
+html[data-theme="dark"] .warning-badge {
+  border-color: #B7791F;
+  background: #4A3525;
+  color: #FFE0A3;
+}
+html[data-theme="dark"] .warning-badge--info {
+  border-color: #367CA5;
+  background: #203846;
+  color: #B9E6FE;
+}
+html[data-theme="dark"] .warning-badge--error,
+html[data-theme="dark"] .warning-badge--critical {
+  border-color: #B85C5C;
+  background: #482527;
+  color: #FFC2C2;
+}
 html[data-theme="dark"] .badge--assigned {
   background: #243B4A;
   color: #B9DDF4;
@@ -2714,6 +2907,18 @@ html[data-theme="dark"] .table tbody tr:hover {
 }
 html[data-theme="dark"] .choice-card.is-active {
   background: #2C2023;
+}
+html[data-theme="dark"] .gantt__capacity-half.is-partial {
+  background: #4A3525;
+  color: #FFD2A5;
+}
+html[data-theme="dark"] .gantt__capacity-half.is-over-capacity {
+  border-color: #FF9B9B;
+  background: #7F1D1D;
+  color: #FFFFFF;
+}
+html[data-theme="dark"] section[aria-labelledby="detail-assignment-attention"] {
+  background: #211D1A;
 }
 
 @media (max-width: 1180px) {
@@ -2784,6 +2989,37 @@ html[data-theme="dark"] .choice-card.is-active {
   }
   .campaign-colour-action .select {
     width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  section[aria-labelledby^="attention-"] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  section[aria-labelledby^="attention-"] .tbl {
+    min-width: 780px;
+  }
+  section[aria-labelledby="detail-assignment-attention"] .card__body {
+    padding: 12px;
+  }
+  form[aria-label="Change creative assignee"] {
+    width: 100%;
+  }
+  form[aria-label="Change creative assignee"] .select,
+  form[aria-label="Change creative assignee"] .btn {
+    width: 100%;
+    max-width: none;
+  }
+  form[aria-label="Edit AM PM capacity allocation"] {
+    margin-inline: -12px;
+    padding-inline: 12px;
+  }
+  .assignment-warnings {
+    align-items: flex-start;
+  }
+  .warning-badge {
+    white-space: normal;
   }
 }
 

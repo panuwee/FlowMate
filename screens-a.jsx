@@ -167,18 +167,25 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const mine = window.sortFlowMateMyWorkRows
     ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(rawMine, filterStatus))
     : rawMine;
-  const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0)));
-  const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned","in_progress","review"].includes(w.status)));
-  const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)));
-  // O-6: membership via id-Sets instead of Array.includes(object) inside a
-  // filter (which was O(n²) over the grouped lists).
+  const overdue = mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0));
+  const overdueIds = new Set(overdue.map(w => w.id));
+  const blocked = mine.filter(w => w.status === "blocked" && !overdueIds.has(w.id));
+  const blockedIds = new Set(blocked.map(w => w.id));
+  const capacityRisk = mine.filter(w => {
+    if (overdueIds.has(w.id) || blockedIds.has(w.id)) return false;
+    const codes = new Set((window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : []).map(warning => warning.code));
+    return codes.has("over_capacity") || codes.has("deadline_capacity_gap") || codes.has("review_buffer_risk");
+  });
+  const capacityRiskIds = new Set(capacityRisk.map(w => w.id));
+  const dueToday = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && w.dueDelta === 0);
   const dueTodayIds = new Set(dueToday.map(w => w.id));
+  const dueSoon = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && !dueTodayIds.has(w.id) && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2);
   const dueSoonIds = new Set(dueSoon.map(w => w.id));
-  const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
-  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
-  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
-  const blocked = mine.filter(w => w.status === "blocked" && !w.overdue);
-  const activeGroupIds = new Set([...overdue, ...dueToday, ...dueSoon, ...inProgress, ...assigned, ...review, ...blocked].map(w => w.id));
+  const riskGroupIds = new Set([...overdueIds, ...blockedIds, ...capacityRiskIds, ...dueTodayIds, ...dueSoonIds]);
+  const inProgress = mine.filter(w => w.status === "in_progress" && !riskGroupIds.has(w.id));
+  const assigned = mine.filter(w => w.status === "assigned" && !riskGroupIds.has(w.id));
+  const review = mine.filter(w => w.status === "review" && !riskGroupIds.has(w.id));
+  const activeGroupIds = new Set([...riskGroupIds, ...inProgress.map(w => w.id), ...assigned.map(w => w.id), ...review.map(w => w.id)]);
   const quick = mine.filter(w => w.type === "quick" && !activeGroupIds.has(w.id));
   function scrollToOverdue() {
     document.getElementById("my-work-overdue")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -206,7 +213,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       <div className="stat-strip">
         <div className="stat stat--accent"><div className="stat__num">{overdue.length}</div><div className="stat__lbl">Overdue</div></div>
         <div className="stat stat--warn"><div className="stat__num">{dueToday.length}</div><div className="stat__lbl">Due today</div></div>
-        <div className="stat stat--info"><div className="stat__num">{inProgress.length + dueSoon.filter(d=>d.status==="in_progress").length + dueToday.filter(d=>d.status==="in_progress").length}</div><div className="stat__lbl">In progress</div></div>
+        <div className="stat stat--info"><div className="stat__num">{capacityRisk.length}</div><div className="stat__lbl">Capacity / deadline risk</div></div>
         <div className="stat"><div className="stat__num">{review.length + dueSoon.filter(d=>d.status==="review").length + dueToday.filter(d=>d.status==="review").length}</div><div className="stat__lbl">Review</div></div>
         <div className="stat"><div className="stat__num">{blocked.length}</div><div className="stat__lbl">Blocked</div></div>
       </div>
@@ -227,6 +234,8 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       </div>
 
       <MyWorkGroup title="Overdue" tone="overdue" items={overdue} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Blocked" items={blocked} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Capacity / deadline risk" items={capacityRisk} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="Due today" items={dueToday} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="In progress" items={inProgress} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
@@ -267,7 +276,7 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                 onOpen(w.id);
               }}>
                 <td className="col-id mono">{w.id}</td>
-                <td className="col-title">{w.title}</td>
+                <td className="col-title"><div>{w.title}</div><AssignmentWarningBadges work={w} limit={2} /></td>
                 <td><TypePill type={w.type} /></td>
                 <td><StatusBadge status={w.status} /></td>
                 <td><PriorityBadge level={w.priority} /></td>
@@ -1248,13 +1257,18 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           marketingPlanSyncWarning = "Creative Request was created, but FlowMate could not link it back to Marketing Plan. Refresh Working Sheet before creating another brief for this row.";
         }
         const assignment = created.assignment || {};
-        const result = assignment.result || "queued";
+        const result = assignment.result || "unassigned";
+        const assignmentWarnings = window.parseFlowMateAssignmentWarnings
+          ? window.parseFlowMateAssignmentWarnings({ warnings: assignment.warnings || assignment.capacity_snapshot?.warnings || [] })
+          : (Array.isArray(assignment.warnings) ? assignment.warnings : []);
         nextResult = {
-          kind: result === "assigned" ? "assigned" : result === "need_brief" ? "need_brief" : "queued",
+          kind: result === "assigned" ? "assigned" : result === "need_brief" ? "need_brief" : "unassigned",
           id: window.getFlowMateCreatedDisplayId(created),
-          owner: assignment.owner_code ? `m-${assignment.owner_code}` : null,
+          owner: assignment.owner_member_id || assignment.final_owner_member_id || (assignment.owner_code ? `m-${assignment.owner_code}` : null),
+          ownerName: assignment.owner_name || assignment.owner_display_name || assignment.owner_code || "",
           effort: assignment.effort || null,
           reason: assignment.reason || "",
+          warnings: assignmentWarnings,
           warning: marketingPlanSyncWarning,
         };
       }
@@ -1761,13 +1775,14 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
 
 function CreateResultScreen({ result, onAgain, onNav }) {
   const m = result.kind === "assigned" && result.owner ? MEMBERS_BY_ID[result.owner] : null;
+  const resultWarningWork = { assignmentWarnings: result.warnings || [] };
   return (
     <div className="page" style={{ maxWidth: 760 }}>
       <div className="card">
         <div className="card__head">
           <span className="card__title">
             {result.kind === "assigned" && "Request submitted - assigned"}
-            {result.kind === "queued" && "Request submitted - queued"}
+            {result.kind === "unassigned" && "Request submitted - unassigned"}
             {result.kind === "need_brief" && "Request submitted - needs brief"}
             {result.kind === "quick_created" && "Quick task created"}
             {result.kind === "open_failed" && "Saved - detail did not open"}
@@ -1777,31 +1792,33 @@ function CreateResultScreen({ result, onAgain, onNav }) {
           <span className="card__sub mono">{result.id}</span>
         </div>
         <div className="card__body">
-          {result.kind === "assigned" && m && (
+          {result.kind === "assigned" && (
             <div className="col" style={{ gap: 12 }}>
               <div className="row" style={{ gap: 12 }}>
                 <Avatar memberId={result.owner} size="avatar--xl" />
                 <div>
-                  <div className="strong" style={{ fontSize: 16 }}>{m.name}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{m.discipline} - capacity {m.capacityPerDay} pt/day</div>
+                  <div className="strong" style={{ fontSize: 16 }}>{m?.name || result.ownerName || "Assigned owner"}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{m ? `${m.discipline} - capacity ${m.capacityPerDay} pt/day` : "Owner selected by the assignment engine"}</div>
                 </div>
                 <div className="spacer"></div>
                 <Effort value={result.effort} lg />
                 <span className="muted" style={{ fontSize: 12 }}>effort points</span>
               </div>
-              <div className="reason-box">{result.reason}</div>
+              {result.reason && <div className="reason-box">{result.reason}</div>}
+              <AssignmentWarningBadges work={resultWarningWork} limit={8} />
             </div>
           )}
-          {result.kind === "queued" && (
+          {result.kind === "unassigned" && (
             <div className="col" style={{ gap: 12 }}>
-              <div className="muted">No eligible owner right now — request sits in the Central queue until capacity opens.</div>
+              <div className="muted">Task created but needs manual assignment.</div>
               {result.effort != null && (
                 <div className="row" style={{ gap: 6, alignItems: "center" }}>
                   <Effort value={result.effort} lg />
                   <span className="muted" style={{ fontSize: 12 }}>effort points</span>
                 </div>
               )}
-              <div className="reason-box reason-box--queued">{result.reason}</div>
+              {result.reason && <div className="reason-box reason-box--queued">{result.reason}</div>}
+              <button type="button" className="btn btn--secondary" onClick={() => onNav("attention")}><Icon name="alert" /> Open Attention Needed</button>
             </div>
           )}
           {result.kind === "need_brief" && (
@@ -1878,6 +1895,11 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const [detailComments, setDetailComments] = useState((w && w.comments) || []);
   const [detailWatchers, setDetailWatchers] = useState((w && w.watchers) || []);
   const [detailAiTags, setDetailAiTags] = useState((w && w.aiTags) || []);
+  const [activeCreativeMembers, setActiveCreativeMembers] = useState([]);
+  const [assigneeTargetMemberId, setAssigneeTargetMemberId] = useState((w && w.assignee) || "");
+  const [assigneeReason, setAssigneeReason] = useState("");
+  const [capacityAllocations, setCapacityAllocations] = useState([]);
+  const [capacityEditorState, setCapacityEditorState] = useState({ status: "idle", message: "" });
 
   useEffect(() => {
     if (!w) return;
@@ -1886,6 +1908,37 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     setDetailWatchers(w.watchers || []);
     setDetailAiTags(w.aiTags || []);
   }, [w && w.id, w && w.links, w && w.comments, w && w.watchers, w && w.aiTags]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!w || !w.isSupabaseRow || w.type === "quick") return () => { alive = false; };
+    setAssigneeTargetMemberId(w.assignee || "");
+    setCapacityEditorState({ status: "loading", message: "Loading assignment controls..." });
+    const membersPromise = window.loadFlowMateActiveCreativeMembers
+      ? window.loadFlowMateActiveCreativeMembers()
+      : Promise.resolve((window.MEMBERS || []).filter(member => member.active !== false && window.isFlowMateGdVeMember?.(member)));
+    const allocationsPromise = window.loadFlowMateCapacityAllocationsForWorkItem && w.workItemId
+      ? window.loadFlowMateCapacityAllocationsForWorkItem(w.workItemId)
+      : Promise.resolve([]);
+    Promise.all([membersPromise, allocationsPromise])
+      .then(([members, allocations]) => {
+        if (!alive) return;
+        setActiveCreativeMembers(members || []);
+        const editorRows = (allocations || []).map(allocation => ({
+          bucketDate: allocation.bucketDate,
+          bucketHalf: allocation.bucketHalf === "pm" ? "pm" : "am",
+          capacityPoint: String(allocation.capacityPoint || ""),
+        }));
+        setCapacityAllocations(editorRows.length ? editorRows : (Number(w.effort) > 0 && w.dueDate ? [{ bucketDate: w.dueDate, bucketHalf: "am", capacityPoint: String(w.effort) }] : []));
+        setCapacityEditorState({ status: "ready", message: "" });
+      })
+      .catch((error) => {
+        if (!alive) return;
+        console.warn("[FlowMate Detail] Assignment controls load failed:", error && error.message);
+        setCapacityEditorState({ status: "error", message: window.flowmateUserError(error, "Assignment controls could not be loaded.") });
+      });
+    return () => { alive = false; };
+  }, [w && w.id, w && w.workItemId, w && w.assignee, w && w.effort, w && w.dueDate, w && w.isSupabaseRow, w && w.type]);
 
   useEffect(() => {
     let alive = true;
@@ -1974,7 +2027,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             ) : (
               <>
                 <div className="reason-box reason-box--need">
-                  We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Central queue</strong> so the full row is fetched from Supabase.
+                  We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Attention Needed</strong> so the full row is fetched from Supabase.
                 </div>
                 <div style={{ marginTop: 12 }}>
                   <button className="btn btn--secondary" onClick={() => onNav("list")}><Icon name="list" /> Open list view</button>
@@ -1994,7 +2047,17 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.channel || w.size || w.campaign || w.publishLabel || w.launchLabel);
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
+  const currentTeamMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const isRequesterUser = currentUserId === w.requesterUserId;
+  const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
+  const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
+  const canManageAssignee = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
+  const canSelfAssignUnassigned = Boolean(w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
+  const canEditCapacityAllocation = Boolean(w.isSupabaseRow && w.type !== "quick" && w.assignee && (isAdminUser || isRequesterUser || isOwnerUser));
+  const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : (w.assignmentWarnings || []);
+  const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
+  const capacityAllocationTotal = Number(capacityAllocations.reduce((sum, allocation) => sum + (Number(allocation.capacityPoint) || 0), 0).toFixed(4));
   const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (
     isAdminUser ||
     currentUserId === w.requesterUserId ||
@@ -2337,19 +2400,94 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
   }
 
-  async function runRerunAssignment() {
-    if (!w.isSupabaseRow) {
-      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so assignment rerun is disabled." });
+  async function submitAssigneeChange(event) {
+    event.preventDefault();
+    if (!canManageAssignee || !window.changeFlowMateCreativeAssignee) return;
+    const reason = assigneeReason.trim();
+    if (!reason) {
+      setActionMsg({ tone: "bad", text: "Reason is required when changing or clearing an assignee." });
       return;
     }
     setPending(true);
     try {
-      const data = await window.rerunFlowMateAssignment(w.id);
-      const r = data && data.result;
+      await window.changeFlowMateCreativeAssignee(w.id, assigneeTargetMemberId || null, reason);
       await refreshDetailItem();
-      setActionMsg({ tone: "ok", text: `Rerun result: ${r || "ok"}.` });
+      setAssigneeReason("");
+      setActionMsg({ tone: "ok", text: assigneeTargetMemberId ? "Assignee updated." : "Task is now Unassigned." });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Rerun failed.") });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Assignee change was rejected by the backend.") });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function selfAssignUnassigned() {
+    if (!canSelfAssignUnassigned || !window.changeFlowMateCreativeAssignee) return;
+    setPending(true);
+    try {
+      await window.changeFlowMateCreativeAssignee(w.id, currentTeamMemberId, "Self-assigned from Unassigned");
+      await refreshDetailItem();
+      setActionMsg({ tone: "ok", text: "Task assigned to you." });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Self-assignment was rejected by the backend.") });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function updateCapacityAllocation(index, field, value) {
+    setCapacityAllocations(current => current.map((allocation, rowIndex) => rowIndex === index ? { ...allocation, [field]: value } : allocation));
+  }
+
+  function addCapacityAllocation() {
+    setCapacityAllocations(current => [...current, { bucketDate: w.dueDate || "", bucketHalf: "am", capacityPoint: "" }]);
+  }
+
+  function removeCapacityAllocation(index) {
+    setCapacityAllocations(current => current.filter((allocation, rowIndex) => rowIndex !== index));
+  }
+
+  function validateCapacityAllocations() {
+    if (!capacityAllocations.length) return { error: "At least one allocation row is required." };
+    const seenBuckets = new Set();
+    const payload = [];
+    for (const allocation of capacityAllocations) {
+      const bucketDate = String(allocation.bucketDate || "");
+      const dateValue = /^\d{4}-\d{2}-\d{2}$/.test(bucketDate) ? new Date(`${bucketDate}T00:00:00Z`) : null;
+      if (!dateValue || Number.isNaN(dateValue.getTime()) || dateValue.toISOString().slice(0, 10) !== bucketDate) {
+        return { error: "Every allocation needs a valid date." };
+      }
+      if (!["am", "pm"].includes(allocation.bucketHalf)) return { error: "Every allocation must use AM or PM." };
+      const capacityPoint = Number(allocation.capacityPoint);
+      if (!Number.isFinite(capacityPoint) || capacityPoint <= 0) return { error: "Allocation points must be greater than zero." };
+      const bucketKey = `${bucketDate}:${allocation.bucketHalf}`;
+      if (seenBuckets.has(bucketKey)) return { error: "Each date and AM/PM pair must be unique." };
+      seenBuckets.add(bucketKey);
+      payload.push({ bucket_date: bucketDate, bucket_half: allocation.bucketHalf, capacity_point: capacityPoint });
+    }
+    const total = Number(payload.reduce((sum, allocation) => sum + allocation.capacity_point, 0).toFixed(4));
+    const expected = Number(Number(w.effort || 0).toFixed(4));
+    if (total !== expected) return { error: `Allocation total must equal exactly ${expected} pt. Current total is ${total} pt.` };
+    return { payload, total };
+  }
+
+  async function submitCapacityAllocations(event) {
+    event.preventDefault();
+    if (!canEditCapacityAllocation || !window.rescheduleFlowMateCapacityAllocation) return;
+    const validation = validateCapacityAllocations();
+    if (validation.error) {
+      setCapacityEditorState({ status: "error", message: validation.error });
+      return;
+    }
+    setPending(true);
+    setCapacityEditorState({ status: "saving", message: "Saving allocation..." });
+    try {
+      await window.rescheduleFlowMateCapacityAllocation(w.id, validation.payload);
+      await refreshDetailItem();
+      setCapacityEditorState({ status: "ready", message: `Saved ${validation.total} pt.` });
+      setActionMsg({ tone: "ok", text: "AM/PM capacity allocation updated." });
+    } catch (error) {
+      setCapacityEditorState({ status: "error", message: window.flowmateUserError(error, "Capacity allocation was rejected by the backend.") });
     } finally {
       setPending(false);
     }
@@ -2459,9 +2597,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           {canStatusTransition && w.status === "blocked" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Resume</button>
           )}
-          {canStatusTransition && w.status === "queued" && (
-            <button className="btn btn--primary" onClick={runRerunAssignment} disabled={pending}><Icon name="rerun" /> Rerun assignment</button>
-          )}
           {canStatusTransition && w.status === "need_brief" && (
             <button className="btn btn--primary" onClick={async () => {
               setPending(true);
@@ -2481,6 +2616,19 @@ function DetailScreen({ onNav, onOpen, focusId }) {
         <div className={`reason-box ${actionMsg.tone === "bad" ? "reason-box--need" : actionMsg.tone === "warn" ? "reason-box--queued" : ""}`} style={{ marginBottom: 12 }}>
           {actionMsg.text}
         </div>
+      )}
+
+      {detailAttentionCodes.length > 0 && (
+        <section className="card" aria-labelledby="detail-assignment-attention" style={{ marginBottom: 16 }}>
+          <div className="card__head"><span className="card__title" id="detail-assignment-attention">Assignment attention</span></div>
+          <div className="card__body" style={{ display: "grid", gap: 10 }}>
+            <AssignmentWarningBadges work={w} limit={12} />
+            {detailAssignmentWarnings.map((warning) => <div className="reason-box reason-box--queued" key={warning.code}><strong>{FLOWMATE_WARNING_LABEL[warning.code] || flowmatePrettifyToken(warning.code)}:</strong> {warning.message}</div>)}
+            {w.status === "unassigned" && <div className="reason-box reason-box--need">Task is ready but needs manual assignment.</div>}
+            {w.status === "blocked" && <div className="reason-box reason-box--need">{w.blockReason || "Production is blocked."}</div>}
+            {w.needsSplit && <div className="reason-box reason-box--queued">Combined deliverables need to be split for production tracking.</div>}
+          </div>
+        </section>
       )}
 
       <div className="detail">
@@ -2649,6 +2797,29 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
                 </div>
               </div>
+              {canManageAssignee && (
+                <form className="reason-box" onSubmit={submitAssigneeChange} style={{ display: "grid", gap: 8, marginBottom: 12 }} aria-label="Change creative assignee">
+                  <label className="field">
+                    <span className="field__label">Change assignee</span>
+                    <select className="select" value={assigneeTargetMemberId} onChange={event => setAssigneeTargetMemberId(event.target.value)} disabled={pending || capacityEditorState.status === "loading"}>
+                      <option value="">Unassigned</option>
+                      {activeCreativeMembers.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span className="field__label">Reason <span className="req">*</span></span>
+                    <input className="input" value={assigneeReason} onChange={event => setAssigneeReason(event.target.value)} placeholder="Why is the owner changing?" required disabled={pending} />
+                  </label>
+                  <button type="submit" className="btn btn--secondary" disabled={pending || !assigneeReason.trim()}>Save assignee</button>
+                  <span className="field__hint">Active GD/VE members only. Backend permissions remain authoritative.</span>
+                </form>
+              )}
+              {!canManageAssignee && canSelfAssignUnassigned && (
+                <div className="reason-box" style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  <span>This task is Unassigned. You may assign only yourself.</span>
+                  <button type="button" className="btn btn--secondary" onClick={selfAssignUnassigned} disabled={pending}>Assign to me</button>
+                </div>
+              )}
               <div className="meta-row">
                 <div className="meta-row__lbl">Watchers</div>
                 <div className="meta-row__val" style={{ display: "grid", gap: 8 }}>
@@ -2712,6 +2883,44 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               </div>
             </div>
           </div>
+
+          {canEditCapacityAllocation && (
+            <div className="card">
+              <div className="card__head">
+                <span className="card__title">AM/PM capacity allocation</span>
+                <span className="card__sub">{capacityAllocationTotal} / {Number(w.effort || 0)} pt</span>
+              </div>
+              <form className="card__body" onSubmit={submitCapacityAllocations} aria-label="Edit AM PM capacity allocation">
+                <div className="reason-box" style={{ marginBottom: 12 }}>Edit allocation buckets only. 1st Draft and Launch dates are not changed here.</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="tbl">
+                    <thead><tr><th>Date</th><th>Period</th><th>Points</th><th className="col-right">Action</th></tr></thead>
+                    <tbody>
+                      {capacityAllocations.map((allocation, index) => (
+                        <tr key={`${allocation.bucketDate}:${allocation.bucketHalf}:${index}`}>
+                          <td><input className="input" type="date" value={allocation.bucketDate} onChange={event => updateCapacityAllocation(index, "bucketDate", event.target.value)} aria-label={`Allocation ${index + 1} date`} required disabled={pending} /></td>
+                          <td>
+                            <select className="select" value={allocation.bucketHalf} onChange={event => updateCapacityAllocation(index, "bucketHalf", event.target.value)} aria-label={`Allocation ${index + 1} period`} disabled={pending}>
+                              <option value="am">AM</option><option value="pm">PM</option>
+                            </select>
+                          </td>
+                          <td><input className="input" type="number" min="0.01" step="0.01" value={allocation.capacityPoint} onChange={event => updateCapacityAllocation(index, "capacityPoint", event.target.value)} aria-label={`Allocation ${index + 1} points`} required disabled={pending} /></td>
+                          <td className="col-right"><button type="button" className="btn btn--xs btn--ghost" onClick={() => removeCapacityAllocation(index)} aria-label={`Remove allocation ${index + 1}`} disabled={pending}>Remove</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  <button type="button" className="btn btn--secondary" onClick={addCapacityAllocation} disabled={pending}><Icon name="plus" /> Add allocation</button>
+                  <span className="muted">Exact required total: {Number(w.effort || 0)} pt</span>
+                  <span className="spacer"></span>
+                  <button type="submit" className="btn btn--primary" disabled={pending || capacityEditorState.status === "loading"}>Save allocation</button>
+                </div>
+                {capacityEditorState.message && <div className={`reason-box ${capacityEditorState.status === "error" ? "reason-box--need" : ""}`} style={{ marginTop: 10 }}>{capacityEditorState.message}</div>}
+              </form>
+            </div>
+          )}
 
           <div className="card">
             <div className="card__head"><span className="card__title">Activity log</span></div>
