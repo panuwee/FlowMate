@@ -1545,6 +1545,25 @@ function ProductBookManagementScreen({
       text: ""
     });
   }
+  function generateTagsFromKeyHighlights() {
+    const tags = getProductBookKeyHighlightTags(draft.contentMarkdown);
+    if (!tags.length) {
+      setMessage({
+        tone: "warn",
+        text: "No Key Highlight headings were found in Full content. Use headings such as '# 3. Key Highlight 1: Topic'."
+      });
+      return;
+    }
+    setDraft(current => ({
+      ...current,
+      tagsText: tags.join(", ")
+    }));
+    setIsDirty(true);
+    setMessage({
+      tone: "success",
+      text: `${tags.length} Tags generated from Key Highlight headings.`
+    });
+  }
   async function handleSaveDraft() {
     const payload = getProductBookEditorPayload(draft);
     const validationMessage = validateProductBookEditorPayload(payload);
@@ -1724,11 +1743,18 @@ function ProductBookManagementScreen({
     className: "product-book-cms__preview"
   }, React.createElement("h2", null, previewPatch.title || previewPatch.id), React.createElement(ProductBookMarkdown, {
     markdown: getProductBookPatchMarkdown(previewPatch)
-  })) : React.createElement(ProductBookEditorFields, {
+  })) : React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "product-book-cms__tag-generator"
+  }, React.createElement("span", null, "Tags can be generated directly from Key Highlight headings in Full content."), React.createElement("button", {
+    type: "button",
+    className: "btn btn--xs btn--ghost",
+    disabled: isPending || Boolean(draft.archivedAt),
+    onClick: generateTagsFromKeyHighlights
+  }, "Generate Tags")), React.createElement(ProductBookEditorFields, {
     draft: draft,
     onChange: updateDraft,
     disabled: isPending || Boolean(draft.archivedAt)
-  }), message.text && React.createElement("div", {
+  })), message.text && React.createElement("div", {
     className: `product-book-cms__message product-book-cms__message--${message.tone}`,
     role: "status"
   }, message.text), React.createElement("div", {
@@ -1924,6 +1950,25 @@ const PRODUCT_BOOK_TAG_ALIASES = {
   "bug fix": ["แก้ไขบั๊ก"],
   "mobile match result": ["แก้ไขบั๊ก"]
 };
+const PRODUCT_BOOK_PATCH_TAG_ALIASES = {
+  "MS26.07": {
+    enhancement: ["key highlight 1"],
+    "ranked mode 4.5": ["key highlight 2"],
+    "transfer market": ["key highlight 3"],
+    "team color": ["key highlight 3"],
+    gameplay: ["key highlight 4"],
+    qol: ["key highlight 5"]
+  },
+  "MS26.08": {
+    "currency redenomination": ["key highlight 1"],
+    bp: ["key highlight 1"],
+    "transfer market": ["key highlight 2"],
+    qol: ["key highlight 3"],
+    "class grouping": ["key highlight 4"],
+    "roster update": ["key highlight 4"],
+    "bug fix": ["key highlight 5"]
+  }
+};
 function normalizeProductBookLabel(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -1947,6 +1992,9 @@ function getProductBookHeadings(markdown) {
     };
   }).filter(item => item.anchor);
 }
+function getProductBookKeyHighlightTags(markdown) {
+  return Array.from(new Set(getProductBookHeadings(markdown).filter(item => /^\d+\.\s*key\s+highlight\s+\d+\s*:/i.test(item.title)).map(item => item.title.replace(/^\d+\.\s*key\s+highlight\s+\d+\s*:\s*/i, "").trim()).filter(Boolean)));
+}
 function buildProductBookAnchorMap(patch) {
   const headings = getProductBookHeadings(getProductBookPatchMarkdown(patch));
   const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
@@ -1957,11 +2005,9 @@ function buildProductBookAnchorMap(patch) {
   const result = {};
   (Array.isArray(patch && patch.tags) ? patch.tags : []).forEach(tag => {
     const key = normalizeProductBookLabel(tag);
-    const searchTerms = [key].concat(PRODUCT_BOOK_TAG_ALIASES[key] || []).map(normalizeProductBookLabel).filter(Boolean);
-    const match = candidates.find(item => {
-      const title = normalizeProductBookLabel(item.title);
-      return searchTerms.some(term => title.includes(term));
-    });
+    const patchAliases = PRODUCT_BOOK_PATCH_TAG_ALIASES[patch && patch.id] || {};
+    const searchTerms = (patchAliases[key] || []).concat(key, PRODUCT_BOOK_TAG_ALIASES[key] || []).map(normalizeProductBookLabel).filter(Boolean);
+    const match = searchTerms.map(term => candidates.find(item => normalizeProductBookLabel(item.title).includes(term))).find(Boolean);
     result[tag] = match ? match.anchor : "";
   });
   return result;
