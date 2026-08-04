@@ -74,7 +74,7 @@ function exportRowsCsv(rows) {
    LIST VIEW
    ============================================================ */
 function ListScreen({ onOpen, searchQuery = "" }) {
-  const LIST_STATUS_FILTER_KEYS = ["queued", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled"];
+  const LIST_STATUS_FILTER_KEYS = ["need_brief", "unassigned", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled", "queued"];
   const savedListState = readFlowMateListViewState();
   const [filterStatus, setFilterStatus] = useStateB(savedListState.filterStatus || "all");
   const [filterFlag, setFilterFlag] = useStateB(savedListState.filterFlag || "all");
@@ -295,7 +295,10 @@ function ListScreen({ onOpen, searchQuery = "" }) {
             {rows.map(w => (
               <tr key={w.id} className={w.overdue ? "is-overdue" : ""} onClick={() => openListWorkItem(w)}>
                 <td className="col-id mono">{w.id}</td>
-                <td className="col-title">{w.title}</td>
+                <td className="col-title">
+                  <div>{w.title}</div>
+                  <AssignmentWarningBadges work={w} limit={2} />
+                </td>
                 <td><TypePill type={w.type} /></td>
                 <td><StatusBadge status={w.status} /></td>
                 <td><span className="muted" style={{ fontSize: 12 }}>{w.campaign || "-"}</span></td>
@@ -314,6 +317,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
                 <td>
                   <span className="row" style={{ gap: 4 }}>
                     {w.needsSplit && <span className="tag" style={{ background: "#FDEFE0", color: "#8A4A12" }}>Needs split</span>}
+                    <AssignmentWarningBadges work={w} limit={3} />
                     {w.reviewRound > 0 && <span className="tag">R{w.reviewRound}</span>}
                     {w.blockReason && <span className="tag" style={{ background: "var(--garena-red-light-2)", color: "var(--garena-red)" }}>Blocked</span>}
                   </span>
@@ -334,6 +338,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
    ============================================================ */
 function BoardScreen({ onOpen }) {
   const columns = [
+    { key: "unassigned",  label: "Unassigned" },
     { key: "assigned",    label: "Assigned" },
     { key: "in_progress", label: "In Progress" },
     { key: "review",      label: "Review" },
@@ -418,6 +423,10 @@ function BoardScreen({ onOpen }) {
     const row = sourceRows.find(r => r.id === id);
     if (!row) return;
     if (row.status === targetStatus) return;
+    if (targetStatus === "unassigned") {
+      setFlash({ tone: "warn", text: "Open the work item detail to clear or change its assignee." });
+      return;
+    }
     if (!row.isSupabaseRow) {
       setFlash({ tone: "warn", text: "Drag-drop only works on live Supabase data." });
       return;
@@ -562,7 +571,7 @@ function BoardScreen({ onOpen }) {
               <div className="kcol__body">
                 {byCol[c.key].map(w => {
                   const isDragging = draggingId === w.id;
-                  const draggable = Boolean(w.isSupabaseRow) && !busy;
+                  const draggable = Boolean(w.isSupabaseRow) && !busy && w.status !== "unassigned";
                   return (
                     <div
                       key={w.id}
@@ -584,13 +593,14 @@ function BoardScreen({ onOpen }) {
                         transition: "opacity 120ms, transform 120ms",
                         transform: isDragging ? "scale(0.98)" : "none",
                       }}
-                      title={draggable ? "Drag to a column to change status" : "Live data only — connect to Supabase to drag"}
+                      title={draggable ? "Drag to a column to change status" : (w.status === "unassigned" ? "Open detail to assign this work" : "Live data only - connect to Supabase to drag")}
                     >
                       <div className="row" style={{ justifyContent: "space-between" }}>
                         <span className="kcard__id mono">{w.id}</span>
                         <PriorityBadge level={w.priority} />
                       </div>
                       <div className="kcard__title">{w.title}</div>
+                      <AssignmentWarningBadges work={w} limit={2} />
                       <div className="kcard__row">
                         <Avatar memberId={w.assignee} />
                         <Effort value={w.effort} />
@@ -621,22 +631,46 @@ function BoardScreen({ onOpen }) {
 }
 
 /* ============================================================
-   CENTRAL QUEUE
+   ATTENTION NEEDED
    ============================================================ */
+const FLOWMATE_ATTENTION_CATEGORIES_B = [
+  { code: "unassigned", label: "Unassigned", hint: "Choose an active GD/VE owner from the work item detail." },
+  { code: "over_capacity", label: "Over capacity", hint: "Owner load exceeds nominal capacity; review the AM/PM allocation." },
+  { code: "wip_exceeded", label: "WIP exceeded", hint: "Owner has more active production work than their WIP limit." },
+  { code: "skill_mismatch", label: "Skill mismatch", hint: "Assigned owner does not have the requested primary skill." },
+  { code: "backup_skill", label: "Backup skill", hint: "Assignment used a configured backup skill." },
+  { code: "member_partial", label: "Partial availability", hint: "Assigned owner has partial availability." },
+  { code: "member_on_leave", label: "Member on leave", hint: "Assigned owner has leave during the production window." },
+  { code: "deadline_capacity_gap", label: "Deadline capacity gap", hint: "Available capacity does not fully cover work before 1st Draft." },
+  { code: "review_buffer_risk", label: "Review buffer risk", hint: "The review window before Launch is compressed." },
+  { code: "review_delay", label: "Review delay", hint: "Requester review is past the at-risk date." },
+  { code: "blocked", label: "Blocked", hint: "Resolve the recorded blocker before production can continue." },
+  { code: "needs_split", label: "Needs split", hint: "Split the combined deliverables while retaining the assigned owner." },
+];
+
+function flowMateAttentionContextB(work, categoryCode) {
+  const warning = (window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(work) : [])
+    .find((item) => item.code === categoryCode);
+  if (warning && warning.message) return warning.message;
+  if (categoryCode === "unassigned") return work.assignmentReason || "Task is ready but needs manual assignment.";
+  if (categoryCode === "review_delay") return `Review is delayed${work.dueFullLabel || work.dueLabel ? ` past ${work.dueFullLabel || work.dueLabel}` : ""}.`;
+  if (categoryCode === "blocked") return work.blockReason || "Production is blocked.";
+  if (categoryCode === "needs_split") return "Combined deliverables need to be split for production tracking.";
+  return work.assignmentReason || "Open the detail view for assignment context.";
+}
+
 function QueueScreen({ onOpen, searchQuery = "" }) {
   const [sourceRows, setSourceRows] = useStateB(WORK);
   const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
 
   useEffectB(() => {
     let alive = true;
-
     async function loadRows() {
       if (!window.loadFlowMateListRows) {
         setSourceRows([]);
-        setLoadState({ status: "error", message: "Live data unavailable: Supabase queue loader is not ready." });
+        setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
         return;
       }
-
       try {
         const rows = await window.loadFlowMateListRows();
         if (!alive) return;
@@ -644,125 +678,86 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
         setLoadState({ status: "live", message: "Live Supabase data" });
       } catch (error) {
         if (!alive) return;
-        console.error("[FlowMate Queue] Supabase load failed:", error);
+        console.error("[FlowMate Attention] Supabase load failed:", error);
         setSourceRows([]);
         setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
-
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh
-      ? window.attachFlowMateLiveRefresh(loadRows)
-      : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
     return () => { alive = false; cleanup(); };
   }, []);
 
-  const queued = sourceRows.filter(w => {
-    if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
-    return w.status === "queued" && !w.needsSplit;
-  });
-  const byReason = {
-    capacity: queued,
-  };
+  const attentionRows = window.getFlowMateAttentionRows
+    ? window.getFlowMateAttentionRows(sourceRows, searchQuery)
+    : [];
+  const attentionGroups = window.getFlowMateAttentionGroups
+    ? window.getFlowMateAttentionGroups(sourceRows, searchQuery)
+    : {};
+
+  function openAttentionItem(work) {
+    window.flowmateSelectedWorkItem = work;
+    onOpen(work.id);
+  }
 
   return (
     <div className="page">
       <div className="page__header">
         <div>
-          <h1 className="page__title">Central queue</h1>
-          <div className="page__sub">Requests the engine could not assign - {loadState.message}</div>
-        </div>
-        <div className="page__actions">
-          <button className="btn btn--secondary" onClick={async () => {
-            const targets = queued.filter(w => w.isSupabaseRow && w.status === "queued" && !w.needsSplit);
-            if (!targets.length) { window.alert("Nothing to rerun."); return; }
-            let failed = 0;
-            for (const w of targets) {
-              try {
-                await window.rerunFlowMateAssignment(w.id);
-              } catch (error) { failed += 1; console.error("[FlowMate Queue] rerun failed for", w.id, error); }
-            }
-            // O-4: rerunFlowMateAssignment dispatches a live refresh per call;
-            // no full-page reload needed. Surface any failures.
-            if (failed > 0) window.alert(`${failed} of ${targets.length} reruns failed. Check the console.`);
-          }}>
-            <Icon name="rerun" /> Rerun all
-          </button>
+          <h1 className="page__title">Attention Needed</h1>
+          <div className="page__sub">Advisory assignment and delivery risks that need a human decision - {loadState.message}</div>
         </div>
       </div>
 
-      <div className="stat-strip" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
-        <div className="stat stat--accent"><div className="stat__num">{queued.length}</div><div className="stat__lbl">Queued total</div></div>
-        <div className="stat stat--warn"><div className="stat__num">{byReason.capacity.length}</div><div className="stat__lbl">Capacity</div></div>
+      <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+        <div className="stat stat--accent"><div className="stat__num">{attentionRows.length}</div><div className="stat__lbl">Unique tasks</div><div className="stat__delta">counted once</div></div>
+        <div className="stat stat--warn"><div className="stat__num">{(attentionGroups.unassigned || []).length}</div><div className="stat__lbl">Unassigned</div></div>
+        <div className="stat stat--warn"><div className="stat__num">{(attentionGroups.over_capacity || []).length + (attentionGroups.deadline_capacity_gap || []).length}</div><div className="stat__lbl">Capacity risk</div></div>
+        <div className="stat stat--accent"><div className="stat__num">{(attentionGroups.blocked || []).length + (attentionGroups.review_delay || []).length}</div><div className="stat__lbl">Delivery risk signals</div></div>
       </div>
 
-      <QueueGroup title="Capacity-blocked" tone="warn" items={byReason.capacity} onOpen={onOpen}
-                  hint="No eligible owner with remaining capacity before the due date." />
+      {FLOWMATE_ATTENTION_CATEGORIES_B.map((category) => (
+        <AttentionGroup
+          key={category.code}
+          category={category}
+          items={attentionGroups[category.code] || []}
+          onOpen={openAttentionItem}
+        />
+      ))}
+      {attentionRows.length === 0 && loadState.status !== "loading" && (
+        <div className="card"><div className="card__body"><span className="muted">No tasks currently need attention.</span></div></div>
+      )}
     </div>
   );
 }
 
-function QueueGroup({ title, items, hint, onOpen, tone }) {
-  if (items.length === 0) return null;
+function AttentionGroup({ category, items, onOpen }) {
+  if (!items.length) return null;
   return (
-    <div className="section">
+    <section className="section" aria-labelledby={`attention-${category.code}`}>
       <div className="section__head">
-        <span className="section__title">{title}</span>
+        <span className="section__title" id={`attention-${category.code}`}>{category.label}</span>
         <span className="section__count">{items.length}</span>
         <span className="spacer"></span>
-        <span className="muted" style={{ fontSize: 12 }}>{hint}</span>
+        <span className="muted" style={{ fontSize: 12 }}>{category.hint}</span>
       </div>
       <table className="tbl">
-        <thead>
-          <tr>
-            <th className="col-id">ID</th>
-            <th>Title</th>
-            <th>Requester team</th>
-            <th>Asset</th>
-            <th>Effort</th>
-            <th>Due</th>
-            <th style={{ width: "32%" }}>Queue reason</th>
-            <th>Last run</th>
-            <th className="col-right">Action</th>
-          </tr>
-        </thead>
+        <thead><tr><th className="col-id">ID</th><th>Title</th><th>Status</th><th>Owner</th><th>Due</th><th style={{ width: "36%" }}>Actionable context</th><th className="col-right">Action</th></tr></thead>
         <tbody>
-          {items.map(w => (
-            <tr key={w.id} onClick={() => {
-              window.flowmateSelectedWorkItem = w;
-              onOpen(w.id);
-            }}>
-              <td className="col-id mono">{w.id}</td>
-              <td className="col-title">
-                <div>{w.title}</div>
-              </td>
-              <td><span className="muted">{w.requesterTeam}</span></td>
-              <td>{ASSET_LABEL[w.assetType]}</td>
-              <td><Effort value={w.effort} /></td>
-              <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
-              <td>
-                <div className="reason-box reason-box--queued" style={{ padding: "6px 10px", fontSize: 12 }}>
-                  {w.queueReason}
-                </div>
-              </td>
-              <td className="mono muted" style={{ fontSize: 11 }}>{w.lastRunLabel || "-"}</td>
-              <td className="col-right" onClick={(e) => e.stopPropagation()}>
-                <div style={{ display: "inline-flex", gap: 4 }}>
-                  {w.status === "queued" && !w.needsSplit && w.isSupabaseRow && (
-                    <button className="btn btn--xs btn--secondary" onClick={async () => {
-                      try { await window.rerunFlowMateAssignment(w.id); }
-                      catch (error) { window.alert(window.flowmateUserError(error, "Rerun failed.")); }
-                    }}>
-                      <Icon name="rerun" size={11} /> Rerun
-                    </button>
-                  )}
-                </div>
-              </td>
+          {items.map((work) => (
+            <tr key={`${category.code}:${work.id}`} onClick={() => onOpen(work)}>
+              <td className="col-id mono">{work.id}</td>
+              <td className="col-title"><div>{work.title}</div><AssignmentWarningBadges work={work} limit={2} /></td>
+              <td><StatusBadge status={work.status} /></td>
+              <td>{work.assignee && MEMBERS_BY_ID[work.assignee] ? MEMBERS_BY_ID[work.assignee].name : "Unassigned"}</td>
+              <td><DueBadge delta={work.dueDelta} label={work.dueLabel} status={work.status} /></td>
+              <td><div className="reason-box reason-box--queued" style={{ padding: "6px 10px", fontSize: 12 }}>{flowMateAttentionContextB(work, category.code)}</div></td>
+              <td className="col-right"><button type="button" className="btn btn--xs btn--secondary" onClick={(event) => { event.stopPropagation(); onOpen(work); }}>Open detail</button></td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
+    </section>
   );
 }
 

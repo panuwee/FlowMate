@@ -2,10 +2,11 @@
 const {
   useState: useStateApp,
   useEffect: useEffectApp,
-  useRef: useRefApp
+  useRef: useRefApp,
+  useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260715-4";
+  const fallbackVersion = "v20260803-8";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -20,6 +21,67 @@ function getFlowMateAppVersion() {
 }
 const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
+const FLOWMATE_APPEARANCE_KEY = "flowmate:appearance:v1";
+const FLOWMATE_ACTIVE_TEAM_KEY = "flowmate:activeTeam:v1";
+const FLOWMATE_TEAM_WORKSPACES = [{
+  key: "gdve",
+  label: "Team GD/VE"
+}, {
+  key: "ops",
+  label: "Team Ops"
+}, {
+  key: "mkt",
+  label: "Team MKT"
+}, {
+  key: "esport",
+  label: "Team eSport"
+}];
+function normalizeFlowMateAppearance(value) {
+  return String(value || "").toLowerCase() === "dark" ? "dark" : "light";
+}
+function getStoredFlowMateAppearance() {
+  try {
+    return normalizeFlowMateAppearance(window.localStorage && window.localStorage.getItem(FLOWMATE_APPEARANCE_KEY));
+  } catch (error) {
+    return "light";
+  }
+}
+function applyFlowMateAppearance(value) {
+  const appearance = normalizeFlowMateAppearance(value);
+  if (document && document.documentElement) {
+    document.documentElement.setAttribute("data-theme", appearance);
+  }
+  return appearance;
+}
+applyFlowMateAppearance(getStoredFlowMateAppearance());
+function normalizeFlowMateTeamKey(value) {
+  const raw = value && typeof value === "object" ? value.team_key || value.key || value.slug || value.name || value.label : value;
+  const normalized = String(raw || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  if (["gdve", "gd/ve", "gd", "ve", "creative"].includes(normalized)) return "gdve";
+  if (["ops", "operation", "operations"].includes(normalized)) return "ops";
+  if (["mkt", "marketing"].includes(normalized)) return "mkt";
+  if (["esport", "esports", "e-sport"].includes(normalized)) return "esport";
+  return "";
+}
+function getFlowMateAccessibleTeams(user) {
+  const currentUser = user || {};
+  if (currentUser.can_access_all_teams === true || currentUser.canAccessAllTeams === true) {
+    return FLOWMATE_TEAM_WORKSPACES;
+  }
+  const source = Array.isArray(currentUser.accessible_teams) ? currentUser.accessible_teams : Array.isArray(currentUser.accessibleTeams) ? currentUser.accessibleTeams : [];
+  const keys = source.map(normalizeFlowMateTeamKey).filter(Boolean);
+  const requesterTeamKey = normalizeFlowMateTeamKey(currentUser.requester_team || currentUser.requesterTeam || currentUser.team);
+  if (requesterTeamKey) keys.push(requesterTeamKey);
+  const allowed = new Set(keys);
+  return FLOWMATE_TEAM_WORKSPACES.filter(team => allowed.has(team.key));
+}
+function getStoredFlowMateActiveTeam() {
+  try {
+    return normalizeFlowMateTeamKey(window.sessionStorage && window.sessionStorage.getItem(FLOWMATE_ACTIVE_TEAM_KEY));
+  } catch (error) {
+    return "";
+  }
+}
 const NAV = [{
   group: "Personal",
   items: [{
@@ -47,11 +109,11 @@ const NAV = [{
     icon: "calendar"
   }, {
     key: "gantt",
-    label: "Gantt Chart",
+    label: "Team Schedule",
     icon: "chart"
   }, {
-    key: "queue",
-    label: "Central queue",
+    key: "attention",
+    label: "Attention Needed",
     icon: "queue"
   }]
 }, {
@@ -86,8 +148,8 @@ const TITLE_MAP = {
   "list": "All work",
   "board": "Board",
   "calendar": "Team calendar",
-  "gantt": "Team Gantt chart",
-  "queue": "Central queue",
+  "gantt": "Team Schedule",
+  "attention": "Attention Needed",
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
@@ -97,11 +159,12 @@ const TITLE_MAP = {
   "admin-whitelist": "Whitelist"
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
-const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
-  return String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+  const routeKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+  return routeKey === "queue" ? "attention" : routeKey;
 }
 function isProductChoicePath() {
   return /\/home\/?$/.test(String(window.location.pathname || ""));
@@ -168,6 +231,7 @@ function App() {
     } catch (e) {}
     return null;
   });
+  const [activeTeamKey, setActiveTeamKey] = useStateApp(getStoredFlowMateActiveTeam);
   const [authState, setAuthState] = useStateApp({
     status: "loading",
     user: null
@@ -334,6 +398,9 @@ function App() {
       const h = window.location.hash.replace("#", "");
       const r = getFlowMateHashRouteKey(h);
       const id = h.split("/")[1];
+      if (h.split("/")[0] === "queue") {
+        window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#attention`);
+      }
       if (MARKETING_PLAN_HASH_KEYS.has(r)) {
         setActiveProduct("marketing-plan");
         try {
@@ -357,6 +424,7 @@ function App() {
       }
       if (TITLE_MAP[r]) setRoute(r);
     }
+    onHash();
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -523,6 +591,30 @@ function App() {
     return () => window.removeEventListener("flowmate:realtime-state", onRealtimeState);
   }, []);
   useEffectApp(() => {
+    if (authState.status !== "signed-in") return;
+    const accessibleTeams = getFlowMateAccessibleTeams(authState.user);
+    if (accessibleTeams.length === 0) return;
+    const accessibleKeys = new Set(accessibleTeams.map(team => team.key));
+    const nextTeamKey = accessibleKeys.has(activeTeamKey) ? activeTeamKey : accessibleTeams[0].key;
+    if (nextTeamKey !== activeTeamKey) setActiveTeamKey(nextTeamKey);
+    try {
+      window.sessionStorage.setItem(FLOWMATE_ACTIVE_TEAM_KEY, nextTeamKey);
+    } catch (error) {}
+    window.FLOWMATE_ACTIVE_TEAM = nextTeamKey;
+    if (typeof window.setFlowMateActiveTeam === "function") {
+      Promise.resolve(window.setFlowMateActiveTeam(nextTeamKey)).then(() => {
+        window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+          detail: {
+            reason: "active_team_changed",
+            teamKey: nextTeamKey
+          }
+        }));
+      }).catch(error => {
+        console.warn("[FlowMate Team] Active workspace update failed:", error && error.message);
+      });
+    }
+  }, [authState.status, authState.user && authState.user.id, activeTeamKey]);
+  useEffectApp(() => {
     if (authState.status !== "signed-in") {
       if (window.stopFlowMateRealtime) window.stopFlowMateRealtime();
       return;
@@ -642,6 +734,12 @@ function App() {
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
   const normalizedGlobalSearch = searchInput.trim();
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
+  const accessibleTeams = getFlowMateAccessibleTeams(user);
+  function handleActiveTeamChange(teamKey) {
+    const normalizedTeamKey = normalizeFlowMateTeamKey(teamKey);
+    if (!accessibleTeams.some(team => team.key === normalizedTeamKey)) return;
+    setActiveTeamKey(normalizedTeamKey);
+  }
   function openGlobalSearchResult(row) {
     if (!row || !row.id) return;
     window.flowmateSelectedWorkItem = row;
@@ -677,6 +775,7 @@ function App() {
   }
   if (activeProduct === PRODUCT_BOOK_PRODUCT_KEY) {
     return React.createElement(ProductBookShell, {
+      user: user,
       currentUserName: currentUserName,
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
@@ -688,7 +787,8 @@ function App() {
     });
   }
   return React.createElement("div", {
-    className: "app"
+    className: "app",
+    "data-active-team": activeTeamKey || undefined
   }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
     className: "app__brand"
   }, React.createElement("img", {
@@ -707,6 +807,10 @@ function App() {
     onSwitchFlowMate: chooseFlowMateProduct,
     onSwitchMarketingPlan: chooseMarketingPlanProduct,
     onSwitchProductBook: chooseProductBookProduct
+  }), React.createElement(TeamWorkspaceSelector, {
+    teams: accessibleTeams,
+    activeTeamKey: activeTeamKey,
+    onChange: handleActiveTeamChange
   }), React.createElement("div", {
     className: "searchbar-wrap",
     ref: searchWrapRef
@@ -741,7 +845,7 @@ function App() {
     onOpen: openGlobalSearchResult
   })), React.createElement("span", {
     className: "topbar__spacer"
-  }), React.createElement("div", {
+  }), React.createElement(ThemeToggle, null), React.createElement("div", {
     className: "topbar__menu-wrap"
   }, React.createElement("button", {
     className: "topbar__btn",
@@ -860,7 +964,7 @@ function App() {
     onOpen: open
   }), allowedRoute && route === "gantt" && React.createElement(TeamGanttScreen, {
     onOpen: open
-  }), allowedRoute && route === "queue" && React.createElement(QueueScreen, {
+  }), allowedRoute && route === "attention" && React.createElement(QueueScreen, {
     onOpen: open,
     searchQuery: searchQuery
   }), allowedRoute && route === "planning-channel" && React.createElement(PlanningChannelViewScreen, {
@@ -889,19 +993,23 @@ function ProductSwitch({
       gap: 6,
       marginRight: 14
     },
-    "aria-label": "Product switch"
+    "aria-label": "Product switch",
+    "data-testid": "product-switch"
   }, React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === "flowmate" ? "btn--primary" : "btn--ghost"}`,
-    onClick: onSwitchFlowMate
+    onClick: onSwitchFlowMate,
+    "data-testid": "product-switch-flowmate"
   }, "FlowMate"), React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === "marketing-plan" ? "btn--primary" : "btn--ghost"}`,
-    onClick: onSwitchMarketingPlan
+    onClick: onSwitchMarketingPlan,
+    "data-testid": "product-switch-marketing-plan"
   }, "Marketing Plan"), React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === PRODUCT_BOOK_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
-    onClick: onSwitchProductBook
+    onClick: onSwitchProductBook,
+    "data-testid": "product-switch-product-book"
   }, "Product Book"));
 }
 function HomeButton({
@@ -911,10 +1019,61 @@ function HomeButton({
     type: "button",
     className: "topbar__btn",
     onClick: onHome,
-    title: "Back to product home"
+    title: "Back to product home",
+    "data-testid": "global-home"
   }, React.createElement(Icon, {
     name: "home"
   }), " Home");
+}
+function ThemeToggle() {
+  const [appearance, setAppearance] = useStateApp(getStoredFlowMateAppearance);
+  useEffectApp(() => {
+    const nextAppearance = applyFlowMateAppearance(appearance);
+    try {
+      window.localStorage.setItem(FLOWMATE_APPEARANCE_KEY, nextAppearance);
+    } catch (error) {}
+  }, [appearance]);
+  return React.createElement("div", {
+    className: "theme-toggle",
+    role: "group",
+    "aria-label": "Appearance",
+    "data-testid": "appearance-toggle"
+  }, React.createElement("button", {
+    type: "button",
+    className: `theme-toggle__option ${appearance === "light" ? "is-active" : ""}`,
+    onClick: () => setAppearance("light"),
+    "aria-pressed": appearance === "light",
+    "data-testid": "appearance-light"
+  }, "Light"), React.createElement("button", {
+    type: "button",
+    className: `theme-toggle__option ${appearance === "dark" ? "is-active" : ""}`,
+    onClick: () => setAppearance("dark"),
+    "aria-pressed": appearance === "dark",
+    "data-testid": "appearance-dark"
+  }, "Dark"));
+}
+function TeamWorkspaceSelector({
+  teams,
+  activeTeamKey,
+  onChange
+}) {
+  const options = Array.isArray(teams) ? teams : [];
+  if (options.length === 0) return null;
+  return React.createElement("label", {
+    className: "team-workspace-selector"
+  }, React.createElement("span", {
+    className: "sr-only"
+  }, "Team workspace"), React.createElement("select", {
+    className: "select team-workspace-selector__control",
+    value: activeTeamKey || options[0].key,
+    onChange: event => onChange(event.target.value),
+    "aria-label": "Team workspace",
+    "data-testid": "team-workspace-switcher"
+  }, options.map(team => React.createElement("option", {
+    key: team.key,
+    value: team.key,
+    "data-testid": `team-workspace-option-${team.key}`
+  }, team.label))));
 }
 function ProductChoiceScreen({
   currentUserName,
@@ -931,12 +1090,13 @@ function ProductChoiceScreen({
     color: "var(--garena-iron)"
   };
   const headerStyle = {
-    height: 58,
+    minHeight: 58,
     borderBottom: "1px solid var(--garena-light-grey)",
     display: "flex",
     alignItems: "center",
     gap: 16,
-    padding: "0 24px",
+    padding: "10px 24px",
+    flexWrap: "wrap",
     background: "var(--garena-white)",
     boxSizing: "border-box"
   };
@@ -947,7 +1107,7 @@ function ProductChoiceScreen({
   };
   const gridStyle = {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(280px, 100%), 1fr))",
     gap: 16,
     marginTop: 22
   };
@@ -979,7 +1139,7 @@ function ProductChoiceScreen({
     }
   }, "Choose workspace"), React.createElement("span", {
     className: "topbar__spacer"
-  }), React.createElement("div", {
+  }), React.createElement(ThemeToggle, null), React.createElement("div", {
     className: "topbar__user",
     title: `Signed in as ${currentUserEmail}`
   }, React.createElement(Avatar, {
@@ -1084,7 +1244,97 @@ function ProductChoiceScreen({
     }
   }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")))));
 }
+function normalizeProductBookArrayInput(value) {
+  return Array.from(new Set(String(value || "").split(/[\n,]/).map(item => item.trim()).filter(Boolean)));
+}
+function getProductBookStaticPublishedPatches() {
+  return (Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : []).filter(patch => String(patch && patch.status || "published").toLowerCase() === "published");
+}
+function isProductBookOpsUser(user) {
+  const currentUser = user || {};
+  if (currentUser.role === "admin") return true;
+  const teamValues = [currentUser.requester_team, currentUser.requesterTeam, currentUser.team].concat(Array.isArray(currentUser.accessible_teams) ? currentUser.accessible_teams : []).concat(Array.isArray(currentUser.accessibleTeams) ? currentUser.accessibleTeams : []);
+  return teamValues.some(value => normalizeFlowMateTeamKey(value) === "ops");
+}
+function productBookHasMojibake(value) {
+  return /\uFFFD|เน€|[\u0080-\u009f]/.test(String(value || ""));
+}
+function getProductBookMonthLabel(year, month) {
+  const safeYear = Number(year);
+  const safeMonth = Number(month);
+  if (!Number.isInteger(safeYear) || !Number.isInteger(safeMonth) || safeMonth < 1 || safeMonth > 12) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC"
+  }).format(new Date(Date.UTC(safeYear, safeMonth - 1, 1)));
+}
+function createProductBookEditorDraft(patch) {
+  const source = patch || {};
+  return {
+    patchCode: source.id || source.name || "",
+    title: source.title || "",
+    product: source.product || "FC Online",
+    milestone: source.milestone || "MS",
+    year: Number(source.year || new Date().getFullYear()),
+    month: Number(source.month || new Date().getMonth() + 1),
+    monthLabel: source.monthLabel || "",
+    audienceText: (Array.isArray(source.audience) ? source.audience : ["Ops", "Marketing", "Esport"]).join(", "),
+    sourceType: source.sourceType || "manual-markdown",
+    sourcePdfUrl: source.sourcePdfUrl || "",
+    summaryLanguage: source.summaryLanguage || "th",
+    tagsText: (Array.isArray(source.tags) ? source.tags : []).join(", "),
+    topUpdatesMarkdown: source.topUpdatesMarkdown || "",
+    contentMarkdown: source.contentMarkdown || "",
+    status: source.status || "draft",
+    archivedAt: source.archivedAt || null,
+    hasDraft: source.hasDraft === true,
+    hasPublished: source.hasPublished === true
+  };
+}
+function getProductBookEditorPayload(draft) {
+  const year = Number(draft && draft.year);
+  const month = Number(draft && draft.month);
+  return {
+    patchCode: String(draft && draft.patchCode || "").trim().toUpperCase(),
+    title: String(draft && draft.title || "").trim(),
+    product: String(draft && draft.product || "FC Online").trim(),
+    milestone: String(draft && draft.milestone || "MS").trim().toUpperCase(),
+    year,
+    month,
+    monthLabel: String(draft && draft.monthLabel || "").trim() || getProductBookMonthLabel(year, month),
+    audience: normalizeProductBookArrayInput(draft && draft.audienceText),
+    sourceType: String(draft && draft.sourceType || "manual-markdown").trim(),
+    sourcePdfUrl: String(draft && draft.sourcePdfUrl || "").trim(),
+    summaryLanguage: String(draft && draft.summaryLanguage || "th").trim(),
+    tags: normalizeProductBookArrayInput(draft && draft.tagsText),
+    topUpdatesMarkdown: String(draft && draft.topUpdatesMarkdown || ""),
+    contentMarkdown: String(draft && draft.contentMarkdown || "")
+  };
+}
+function validateProductBookEditorPayload(payload, options = {}) {
+  if (!/^[A-Z0-9][A-Z0-9._-]{2,31}$/.test(payload.patchCode || "")) return "Patch ID must use 3-32 letters, numbers, dot, dash, or underscore.";
+  if (!Number.isInteger(payload.year) || payload.year < 2020 || payload.year > 2100) return "Release year must be between 2020 and 2100.";
+  if (!Number.isInteger(payload.month) || payload.month < 1 || payload.month > 12) return "Release month must be between 1 and 12.";
+  if (payload.sourcePdfUrl && !/^https?:\/\//i.test(payload.sourcePdfUrl)) return "PDF URL must start with http:// or https://.";
+  if (options.forPublish) {
+    if (!payload.title) return "Title is required before publishing.";
+    if (!String(payload.topUpdatesMarkdown + payload.contentMarkdown).trim()) return "Markdown content is required before publishing.";
+    if (productBookHasMojibake(payload.title) || productBookHasMojibake(payload.topUpdatesMarkdown) || productBookHasMojibake(payload.contentMarkdown)) return "Publishing blocked: broken Thai encoding was detected.";
+  }
+  return "";
+}
+function ProductBookStatusBadge({
+  status,
+  archivedAt
+}) {
+  const label = archivedAt ? "Archived" : status === "draft" ? "Draft" : "Published";
+  return React.createElement("span", {
+    className: `product-book-status product-book-status--${label.toLowerCase()}`
+  }, label);
+}
 function ProductBookShell({
+  user,
   currentUserName,
   currentUserEmail,
   avatarMemberId,
@@ -1094,9 +1344,71 @@ function ProductBookShell({
   onSwitchProductBook,
   onSignOut
 }) {
-  const patches = Array.isArray(window.PRODUCT_BOOK_PATCHES) ? window.PRODUCT_BOOK_PATCHES : [];
-  const [activePatchId, setActivePatchId] = useStateApp(() => patches[0] && patches[0].id ? patches[0].id : "MS26.07");
+  const staticPatches = useMemoApp(() => getProductBookStaticPublishedPatches(), []);
+  const canManageProductBook = isProductBookOpsUser(user);
+  const [patches, setPatches] = useStateApp(staticPatches);
+  const [managePatches, setManagePatches] = useStateApp([]);
+  const [activePatchId, setActivePatchId] = useStateApp(() => staticPatches[0] && staticPatches[0].id ? staticPatches[0].id : "");
+  const [mode, setMode] = useStateApp("view");
+  const [loadState, setLoadState] = useStateApp({
+    status: "loading",
+    message: "Loading Product Book from Supabase..."
+  });
   const activePatch = patches.find(patch => patch.id === activePatchId) || patches[0] || null;
+  async function refreshProductBookData(options = {}) {
+    const showLoading = options.showLoading !== false;
+    if (showLoading) setLoadState({
+      status: "loading",
+      message: "Loading Product Book from Supabase..."
+    });
+    if (!window.loadProductBookPatches) {
+      setPatches(staticPatches);
+      setLoadState({
+        status: "fallback",
+        message: "Supabase CMS is not ready. Showing the static published fallback."
+      });
+      return;
+    }
+    try {
+      const publishedRows = await window.loadProductBookPatches({
+        includeDrafts: false,
+        includeArchived: false
+      });
+      const nextPublished = publishedRows.length ? publishedRows : staticPatches;
+      setPatches(nextPublished);
+      if (canManageProductBook) {
+        const managementRows = await window.loadProductBookPatches({
+          includeDrafts: true,
+          includeArchived: true
+        });
+        setManagePatches(managementRows);
+      }
+      setLoadState(publishedRows.length ? {
+        status: "ready",
+        message: "Live Supabase Product Book"
+      } : {
+        status: "fallback",
+        message: "No published CMS entries yet. Showing the static published fallback."
+      });
+    } catch (error) {
+      console.error("[Product Book] CMS load failed:", error);
+      setPatches(staticPatches);
+      setLoadState({
+        status: "fallback",
+        message: "Product Book CMS could not be loaded. Showing the static published fallback."
+      });
+    }
+  }
+  useEffectApp(() => {
+    refreshProductBookData();
+  }, []);
+  useEffectApp(() => {
+    if (!patches.length) {
+      setActivePatchId("");
+      return;
+    }
+    if (!patches.some(patch => patch.id === activePatchId)) setActivePatchId(patches[0].id);
+  }, [patches, activePatchId]);
   return React.createElement("div", {
     className: "app"
   }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
@@ -1119,7 +1431,7 @@ function ProductBookShell({
     onSwitchProductBook: onSwitchProductBook
   }), React.createElement("span", {
     className: "topbar__spacer"
-  }), React.createElement("div", {
+  }), React.createElement(ThemeToggle, null), React.createElement("div", {
     className: "topbar__user",
     title: `Signed in as ${currentUserEmail}`
   }, React.createElement(Avatar, {
@@ -1134,37 +1446,471 @@ function ProductBookShell({
     className: "app__sidebar"
   }, React.createElement("div", null, React.createElement("div", {
     className: "nav-section"
-  }, "Product Book"), patches.length === 0 && React.createElement("div", {
+  }, "Product Book"), canManageProductBook && React.createElement("button", {
+    type: "button",
+    className: `nav-item product-book-manage-nav ${mode === "manage" ? "is-active" : ""}`,
+    onClick: () => setMode("manage")
+  }, React.createElement(Icon, {
+    name: "settings",
+    size: 15
+  }), React.createElement("span", null, "Manage Product Book")), React.createElement("div", {
+    className: "product-book-nav-divider"
+  }), patches.length === 0 && React.createElement("div", {
     className: "reason-box",
     style: {
       margin: 12
     }
-  }, "No patch notes found."), patches.map(patch => React.createElement("div", {
+  }, "No patch notes found."), patches.map(patch => React.createElement("button", {
+    type: "button",
     key: patch.id,
-    className: `nav-item ${activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
-    onClick: () => setActivePatchId(patch.id)
+    className: `nav-item ${mode === "view" && activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
+    onClick: () => {
+      setMode("view");
+      setActivePatchId(patch.id);
+    }
   }, React.createElement(Icon, {
     name: "book",
     size: 15
   }), React.createElement("span", null, patch.name || patch.id))))), React.createElement("main", {
     className: "app__main app__main--product-book"
-  }, activePatch ? React.createElement(ProductBookPatchView, {
+  }, mode === "manage" && canManageProductBook ? React.createElement(ProductBookManagementScreen, {
+    patches: managePatches,
+    publishedPatches: patches,
+    loadState: loadState,
+    onRefresh: refreshProductBookData,
+    onViewPatch: patchId => {
+      setActivePatchId(patchId);
+      setMode("view");
+    }
+  }) : activePatch ? React.createElement(React.Fragment, null, loadState.status === "fallback" && React.createElement("div", {
+    className: "product-book-fallback-note",
+    role: "status"
+  }, loadState.message), React.createElement(ProductBookPatchView, {
     patch: activePatch
-  }) : React.createElement("div", {
+  })) : React.createElement("div", {
     className: "reason-box"
-  }, "Upload product-book-data.js with at least one patch note entry.")));
+  }, "No published Product Book patch is available.")));
+}
+function ProductBookManagementScreen({
+  patches,
+  publishedPatches,
+  loadState,
+  onRefresh,
+  onViewPatch
+}) {
+  const [selectedPatchCode, setSelectedPatchCode] = useStateApp("");
+  const [draft, setDraft] = useStateApp(() => createProductBookEditorDraft(null));
+  const [isDirty, setIsDirty] = useStateApp(false);
+  const [isPreview, setIsPreview] = useStateApp(false);
+  const [isPending, setIsPending] = useStateApp(false);
+  const [message, setMessage] = useStateApp({
+    tone: "",
+    text: ""
+  });
+  const selectedPatch = patches.find(patch => patch.id === selectedPatchCode) || null;
+  function selectPatch(patch) {
+    setSelectedPatchCode(patch && patch.id || "");
+    setDraft(createProductBookEditorDraft(patch));
+    setIsDirty(false);
+    setIsPreview(false);
+    setMessage({
+      tone: "",
+      text: ""
+    });
+  }
+  function startNewPatch(sourcePatch) {
+    const next = createProductBookEditorDraft(sourcePatch || null);
+    next.patchCode = "";
+    next.title = sourcePatch ? `${sourcePatch.title || sourcePatch.id} - Copy` : "";
+    next.status = "draft";
+    next.archivedAt = null;
+    next.hasDraft = false;
+    next.hasPublished = false;
+    setSelectedPatchCode("");
+    setDraft(next);
+    setIsDirty(true);
+    setIsPreview(false);
+    setMessage({
+      tone: "",
+      text: ""
+    });
+  }
+  function updateDraft(field, value) {
+    setDraft(current => ({
+      ...current,
+      [field]: value
+    }));
+    setIsDirty(true);
+    setMessage({
+      tone: "",
+      text: ""
+    });
+  }
+  function generateTagsFromKeyHighlights() {
+    const tags = getProductBookKeyHighlightTags(draft.contentMarkdown);
+    if (!tags.length) {
+      setMessage({
+        tone: "warn",
+        text: "No Key Highlight headings were found in Full content. Use headings such as '# 3. Key Highlight 1: Topic'."
+      });
+      return;
+    }
+    setDraft(current => ({
+      ...current,
+      tagsText: tags.join(", ")
+    }));
+    setIsDirty(true);
+    setMessage({
+      tone: "success",
+      text: `${tags.length} Tags generated from Key Highlight headings.`
+    });
+  }
+  async function handleSaveDraft() {
+    const payload = getProductBookEditorPayload(draft);
+    const validationMessage = validateProductBookEditorPayload(payload);
+    if (validationMessage) {
+      setMessage({
+        tone: "error",
+        text: validationMessage
+      });
+      return;
+    }
+    setIsPending(true);
+    try {
+      await window.saveProductBookDraft(payload);
+      await onRefresh({
+        showLoading: false
+      });
+      setSelectedPatchCode(payload.patchCode);
+      setDraft(current => ({
+        ...current,
+        patchCode: payload.patchCode,
+        status: "draft",
+        hasDraft: true
+      }));
+      setIsDirty(false);
+      setMessage({
+        tone: "success",
+        text: `Draft ${payload.patchCode} saved. The current Published page is unchanged.`
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: window.flowmateUserError ? window.flowmateUserError(error, "Save draft failed.") : error.message
+      });
+    } finally {
+      setIsPending(false);
+    }
+  }
+  async function handlePublish() {
+    const payload = getProductBookEditorPayload(draft);
+    const validationMessage = validateProductBookEditorPayload(payload, {
+      forPublish: true
+    });
+    if (validationMessage) {
+      setMessage({
+        tone: "error",
+        text: validationMessage
+      });
+      return;
+    }
+    if (isDirty || !draft.hasDraft && draft.status !== "draft") {
+      setMessage({
+        tone: "warn",
+        text: "Save the latest changes as Draft before publishing."
+      });
+      return;
+    }
+    if (!window.confirm(`Publish revision for ${payload.patchCode} now? The current version remains available in Version History.`)) return;
+    setIsPending(true);
+    try {
+      await window.publishProductBookPatch(payload.patchCode);
+      await onRefresh({
+        showLoading: false
+      });
+      setDraft(current => ({
+        ...current,
+        status: "published",
+        hasDraft: false,
+        hasPublished: true
+      }));
+      setMessage({
+        tone: "success",
+        text: `${payload.patchCode} revision ${draft.revisionNumber || "new"} is now Published. The previous version is in Version History.`
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: window.flowmateUserError ? window.flowmateUserError(error, "Publish failed.") : error.message
+      });
+    } finally {
+      setIsPending(false);
+    }
+  }
+  async function handleArchiveToggle() {
+    const patchCode = String(draft.patchCode || "").trim();
+    if (!patchCode || !selectedPatch) return;
+    const restoring = Boolean(draft.archivedAt);
+    if (!restoring && !window.confirm(`Archive ${patchCode}? Historical revisions will be preserved.`)) return;
+    setIsPending(true);
+    try {
+      if (restoring) await window.restoreProductBookPatch(patchCode);else await window.archiveProductBookPatch(patchCode);
+      await onRefresh({
+        showLoading: false
+      });
+      setDraft(current => ({
+        ...current,
+        archivedAt: restoring ? null : new Date().toISOString()
+      }));
+      setMessage({
+        tone: "success",
+        text: restoring ? `${patchCode} restored.` : `${patchCode} archived. Historical revisions were preserved.`
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: window.flowmateUserError ? window.flowmateUserError(error, "Archive action failed.") : error.message
+      });
+    } finally {
+      setIsPending(false);
+    }
+  }
+  const previewPatch = {
+    ...getProductBookEditorPayload(draft),
+    id: String(draft.patchCode || "New patch").trim() || "New patch",
+    name: String(draft.patchCode || "New patch").trim() || "New patch",
+    monthLabel: getProductBookEditorPayload(draft).monthLabel,
+    status: draft.status
+  };
+  return React.createElement("div", {
+    className: "product-book-cms"
+  }, React.createElement("div", {
+    className: "page-head product-book-cms__head"
+  }, React.createElement("div", null, React.createElement("div", {
+    className: "eyebrow"
+  }, "Product Book / Mini CMS"), React.createElement("h1", null, "Manage Product Book"), React.createElement("p", {
+    className: "muted"
+  }, "Team Ops can save drafts and publish immediately. Published content stays live until Publish is clicked.")), React.createElement("div", {
+    className: "row"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => startNewPatch(null)
+  }, "New patch"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    disabled: !publishedPatches.length,
+    onClick: () => startNewPatch(publishedPatches[0])
+  }, "Duplicate latest"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    onClick: () => onRefresh()
+  }, "Refresh"))), loadState.status === "fallback" && React.createElement("div", {
+    className: "product-book-fallback-note",
+    role: "status"
+  }, loadState.message), React.createElement("div", {
+    className: "product-book-cms__layout"
+  }, React.createElement("aside", {
+    className: "product-book-cms__patch-list"
+  }, React.createElement("div", {
+    className: "product-book-cms__list-title"
+  }, "CMS entries"), patches.length === 0 ? React.createElement("div", {
+    className: "muted product-book-cms__empty"
+  }, "No CMS entries yet. Create the first patch or duplicate the latest static patch.") : patches.map(patch => React.createElement("button", {
+    key: patch.id,
+    type: "button",
+    className: `product-book-cms__patch ${selectedPatchCode === patch.id ? "is-active" : ""}`,
+    onClick: () => selectPatch(patch)
+  }, React.createElement("strong", null, patch.id), React.createElement(ProductBookStatusBadge, {
+    status: patch.status,
+    archivedAt: patch.archivedAt
+  }), React.createElement("span", null, patch.title || "Untitled")))), React.createElement("section", {
+    className: "section product-book-cms__editor"
+  }, React.createElement("div", {
+    className: "product-book-cms__editor-toolbar"
+  }, React.createElement("div", null, React.createElement("strong", null, draft.patchCode || "New Product Book patch"), React.createElement("span", {
+    className: "muted"
+  }, isDirty ? "Unsaved changes" : "Draft is saved")), React.createElement("div", {
+    className: "row"
+  }, React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${isPreview ? "btn--secondary" : "btn--ghost"}`,
+    onClick: () => setIsPreview(false)
+  }, "Edit"), React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${isPreview ? "btn--ghost" : "btn--secondary"}`,
+    onClick: () => setIsPreview(true)
+  }, "Preview"))), isPreview ? React.createElement("div", {
+    className: "product-book-cms__preview"
+  }, React.createElement("h2", null, previewPatch.title || previewPatch.id), React.createElement(ProductBookMarkdown, {
+    markdown: getProductBookPatchMarkdown(previewPatch)
+  })) : React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "product-book-cms__tag-generator"
+  }, React.createElement("span", null, "Tags can be generated directly from Key Highlight headings in Full content."), React.createElement("button", {
+    type: "button",
+    className: "btn btn--xs btn--ghost",
+    disabled: isPending || Boolean(draft.archivedAt),
+    onClick: generateTagsFromKeyHighlights
+  }, "Generate Tags")), React.createElement(ProductBookEditorFields, {
+    draft: draft,
+    onChange: updateDraft,
+    disabled: isPending || Boolean(draft.archivedAt)
+  })), message.text && React.createElement("div", {
+    className: `product-book-cms__message product-book-cms__message--${message.tone}`,
+    role: "status"
+  }, message.text), React.createElement("div", {
+    className: "product-book-cms__actions"
+  }, selectedPatch && React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    disabled: isPending,
+    onClick: () => {
+      setIsPreview(false);
+      setMessage({
+        tone: "warn",
+        text: "Edit the fields, then Save draft and Publish. The current Published version stays available in Version History."
+      });
+    }
+  }, "Edit"), selectedPatch && React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    disabled: isPending,
+    onClick: () => onViewPatch(selectedPatch.id)
+  }, "View Published"), selectedPatch && React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    disabled: isPending,
+    onClick: handleArchiveToggle
+  }, draft.archivedAt ? "Restore" : "Archive"), React.createElement("span", {
+    className: "spacer"
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    disabled: isPending || Boolean(draft.archivedAt),
+    onClick: handleSaveDraft
+  }, isPending ? "Saving..." : "Save draft"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    disabled: isPending || Boolean(draft.archivedAt) || !draft.patchCode,
+    onClick: handlePublish
+  }, "Publish")))));
+}
+function ProductBookEditorFields({
+  draft,
+  onChange,
+  disabled
+}) {
+  return React.createElement("div", {
+    className: "product-book-cms__fields"
+  }, React.createElement("label", null, React.createElement("span", null, "Patch ID *"), React.createElement("input", {
+    value: draft.patchCode,
+    disabled: disabled,
+    placeholder: "MS26.08",
+    onChange: event => onChange("patchCode", event.target.value.toUpperCase())
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Title *"), React.createElement("input", {
+    value: draft.title,
+    disabled: disabled,
+    placeholder: "FC Online MS26.08 Patch Note Product Book",
+    onChange: event => onChange("title", event.target.value)
+  })), React.createElement("label", null, React.createElement("span", null, "Year *"), React.createElement("input", {
+    type: "number",
+    min: "2020",
+    max: "2100",
+    value: draft.year,
+    disabled: disabled,
+    onChange: event => onChange("year", event.target.value)
+  })), React.createElement("label", null, React.createElement("span", null, "Month *"), React.createElement("select", {
+    value: draft.month,
+    disabled: disabled,
+    onChange: event => onChange("month", event.target.value)
+  }, Array.from({
+    length: 12
+  }, (_, index) => React.createElement("option", {
+    key: index + 1,
+    value: index + 1
+  }, new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    timeZone: "UTC"
+  }).format(new Date(Date.UTC(2026, index, 1))))))), React.createElement("label", null, React.createElement("span", null, "Audience"), React.createElement("input", {
+    value: draft.audienceText,
+    disabled: disabled,
+    placeholder: "Ops, Marketing, Esport",
+    onChange: event => onChange("audienceText", event.target.value)
+  })), React.createElement("label", null, React.createElement("span", null, "Tags"), React.createElement("input", {
+    value: draft.tagsText,
+    disabled: disabled,
+    placeholder: "Gameplay, QoL, Bug Fix",
+    onChange: event => onChange("tagsText", event.target.value)
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Source PDF URL"), React.createElement("input", {
+    type: "url",
+    value: draft.sourcePdfUrl,
+    disabled: disabled,
+    placeholder: "https://drive.google.com/...",
+    onChange: event => onChange("sourcePdfUrl", event.target.value)
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Top updates (Markdown)"), React.createElement("textarea", {
+    rows: "10",
+    value: draft.topUpdatesMarkdown,
+    disabled: disabled,
+    placeholder: "# Top Updates\n\n## Highlight\n\n- Detail",
+    onChange: event => onChange("topUpdatesMarkdown", event.target.value)
+  })), React.createElement("label", {
+    className: "product-book-cms__field-wide"
+  }, React.createElement("span", null, "Full content (Markdown)"), React.createElement("textarea", {
+    rows: "22",
+    value: draft.contentMarkdown,
+    disabled: disabled,
+    placeholder: "# Product Book\n\n## Executive Summary\n\nWrite the full content here...",
+    onChange: event => onChange("contentMarkdown", event.target.value)
+  })));
 }
 function ProductBookPatchView({
   patch
 }) {
-  const tags = Array.isArray(patch.tags) ? patch.tags : [];
-  const tagAnchors = buildProductBookAnchorMap(patch);
-  const markdown = getProductBookPatchMarkdown(patch);
+  const [revisions, setRevisions] = useStateApp([]);
+  const [selectedRevisionNumber, setSelectedRevisionNumber] = useStateApp(null);
+  useEffectApp(() => {
+    let alive = true;
+    setRevisions([]);
+    setSelectedRevisionNumber(null);
+    if (!window.loadProductBookPatchRevisions || !patch || !patch.id) return () => {
+      alive = false;
+    };
+    window.loadProductBookPatchRevisions(patch.id).then(rows => {
+      if (alive) setRevisions(rows);
+    }).catch(error => console.warn("[Product Book] revision history load failed:", error));
+    return () => {
+      alive = false;
+    };
+  }, [patch && patch.id]);
+  const displayedPatch = revisions.find(revision => Number(revision.revisionNumber) === Number(selectedRevisionNumber)) || patch;
+  const tags = Array.isArray(displayedPatch.tags) ? displayedPatch.tags : [];
+  const tagAnchors = buildProductBookAnchorMap(displayedPatch);
+  const markdown = getProductBookPatchMarkdown(displayedPatch);
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("div", {
     className: "eyebrow"
-  }, "Product Book / ", patch.monthLabel || patch.id))), React.createElement("div", {
+  }, "Product Book / ", displayedPatch.monthLabel || displayedPatch.id), React.createElement("h1", null, displayedPatch.title || displayedPatch.id), React.createElement("div", {
+    className: "product-book-meta"
+  }, React.createElement(ProductBookStatusBadge, {
+    status: displayedPatch.status
+  }), revisions.length > 1 && React.createElement("label", null, "Version History ", React.createElement("select", {
+    value: selectedRevisionNumber || displayedPatch.revisionNumber || "",
+    onChange: event => setSelectedRevisionNumber(Number(event.target.value))
+  }, revisions.map(revision => React.createElement("option", {
+    key: revision.revisionNumber,
+    value: revision.revisionNumber
+  }, `Revision ${revision.revisionNumber}${revision.status === "published" ? " (Current)" : ""}`)))), displayedPatch.sourcePdfUrl && React.createElement("a", {
+    href: displayedPatch.sourcePdfUrl,
+    target: "_blank",
+    rel: "noreferrer"
+  }, "Open source PDF")))), React.createElement("div", {
     className: "product-book-sticky-zone"
   }, React.createElement("div", {
     className: "product-book-tag-nav",
@@ -1180,16 +1926,49 @@ function ProductBookPatchView({
     markdown: markdown
   })));
 }
-const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
-  "fp+10": "ms26.07-top-updates-fp-10-and-trait-update",
-  "trait update": "ms26.07-top-updates-fp-10-and-trait-update",
-  enhancement: "3.-key-highlight-1",
-  "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
-  "transfer market": "5.-key-highlight-3-transfer-market-team-color",
-  "team color": "5.-key-highlight-3-transfer-market-team-color",
-  gameplay: "6.-key-highlight-4-gameplay-improvement-match-fairness",
-  qol: "7.-key-highlight-5-qol",
-  performance: "8.-performance-system-stability"
+const PRODUCT_BOOK_TAG_ALIASES = {
+  enhancement: ["ระบบตีบวก"],
+  "ระบบตีบวก": ["enhancement"],
+  "fp+10 และ trait update": ["fp+10"],
+  "trait update": ["fp+10"],
+  "master tier และรางวัล bp": ["ranked mode 4.5"],
+  "ranked mode 4.5": ["master", "ranked mode"],
+  "transfer market": ["ตลาดซื้อขาย"],
+  "team color": ["transfer market", "team color"],
+  gameplay: ["gameplay"],
+  qol: ["quality of life", "ui/ux"],
+  performance: ["performance", "system stability"],
+  "currency redenomination": ["ปรับหน่วยเงิน bp", "currency redenomination"],
+  "ระบบเงิน bp": ["ปรับหน่วยเงิน bp", "currency redenomination"],
+  bp: ["ปรับหน่วยเงิน bp", "currency redenomination"],
+  "bulk item opening": ["ui/ux", "เปิดไอเทม"],
+  "เปิดไอเทมหลายชิ้น": ["ui/ux", "เปิดไอเทม"],
+  cheers: ["ui/ux", "quality of life"],
+  "player class": ["นักเตะและระบบจัดทีม"],
+  "คลาสนักเตะ": ["นักเตะและระบบจัดทีม"],
+  "roster update": ["นักเตะและระบบจัดทีม"],
+  "roster และ squad update": ["นักเตะและระบบจัดทีม"],
+  "bug fix": ["แก้ไขบั๊ก"],
+  "mobile match result": ["แก้ไขบั๊ก"]
+};
+const PRODUCT_BOOK_PATCH_TAG_ALIASES = {
+  "MS26.07": {
+    enhancement: ["key highlight 1"],
+    "ranked mode 4.5": ["key highlight 2"],
+    "transfer market": ["key highlight 3"],
+    "team color": ["key highlight 3"],
+    gameplay: ["key highlight 4"],
+    qol: ["key highlight 5"]
+  },
+  "MS26.08": {
+    "currency redenomination": ["key highlight 1"],
+    bp: ["key highlight 1"],
+    "transfer market": ["key highlight 2"],
+    qol: ["key highlight 3"],
+    "class grouping": ["key highlight 4"],
+    "roster update": ["key highlight 4"],
+    "bug fix": ["key highlight 5"]
+  }
 };
 function normalizeProductBookLabel(value) {
   return String(value || "").trim().toLowerCase();
@@ -1214,6 +1993,9 @@ function getProductBookHeadings(markdown) {
     };
   }).filter(item => item.anchor);
 }
+function getProductBookKeyHighlightTags(markdown) {
+  return Array.from(new Set(getProductBookHeadings(markdown).filter(item => /^\d+\.\s*key\s+highlight\s+\d+\s*:/i.test(item.title)).map(item => item.title.replace(/^\d+\.\s*key\s+highlight\s+\d+\s*:\s*/i, "").trim()).filter(Boolean)));
+}
 function buildProductBookAnchorMap(patch) {
   const headings = getProductBookHeadings(getProductBookPatchMarkdown(patch));
   const toc = Array.isArray(patch && patch.tableOfContents) ? patch.tableOfContents : [];
@@ -1224,18 +2006,9 @@ function buildProductBookAnchorMap(patch) {
   const result = {};
   (Array.isArray(patch && patch.tags) ? patch.tags : []).forEach(tag => {
     const key = normalizeProductBookLabel(tag);
-    const preferred = PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES[key];
-    const preferredExists = preferred && candidates.some(item => item.anchor === preferred);
-    if (preferredExists || preferred) {
-      result[tag] = preferred;
-      return;
-    }
-    const tagSlug = productBookSlug(tag);
-    const match = candidates.find(item => {
-      const title = normalizeProductBookLabel(item.title);
-      const anchor = normalizeProductBookLabel(item.anchor);
-      return title.includes(key) || anchor.includes(tagSlug);
-    });
+    const patchAliases = PRODUCT_BOOK_PATCH_TAG_ALIASES[patch && patch.id] || {};
+    const searchTerms = (patchAliases[key] || []).concat(key, PRODUCT_BOOK_TAG_ALIASES[key] || []).map(normalizeProductBookLabel).filter(Boolean);
+    const match = searchTerms.map(term => candidates.find(item => normalizeProductBookLabel(item.title).includes(term))).find(Boolean);
     result[tag] = match ? match.anchor : "";
   });
   return result;
@@ -1367,7 +2140,8 @@ function getMarketingPlanTimelineWindow(monthKey) {
       days: []
     };
   }
-  const monthKeys = [monthKey, getNextMarketingPlanMonthKey(monthKey)].filter(Boolean);
+  const nextMonthKey = getNextMarketingPlanMonthKey(monthKey);
+  const monthKeys = [monthKey, nextMonthKey, getNextMarketingPlanMonthKey(nextMonthKey)].filter(Boolean);
   const monthGroups = monthKeys.map(key => {
     const days = getMarketingPlanDays(key).map(day => ({
       ...day,
@@ -1404,6 +2178,8 @@ function normalizeMarketingPlanTimelineRow(row) {
     contentTier: row.content_tier || "",
     picUserId: row.pic_user_id || "",
     picName: row.pic_name || "",
+    subPicUserId: row.sub_pic_user_id || "",
+    subPicName: row.sub_pic_name || "",
     briefLink: row.brief_link || "",
     flowmateWorkItemId: row.flowmate_work_item_id || "",
     flowmateDisplayId: row.flowmate_display_id || "",
@@ -1419,12 +2195,20 @@ function normalizeMarketingPlanTimelineRow(row) {
   };
 }
 function getMarketingPlanMonthOptions(rows) {
-  const months = new Set();
+  const months = new Set([getMarketingPlanCurrentMonthKey()]);
   (rows || []).forEach(row => {
     const monthKey = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
     if (monthKey) months.add(monthKey);
   });
   return Array.from(months).sort();
+}
+function getMarketingPlanCurrentMonthKey() {
+  return flowMateTodayDateKey().slice(0, 7);
+}
+function getDefaultMarketingPlanMonth(monthOptions) {
+  const currentMonth = getMarketingPlanCurrentMonthKey();
+  if ((monthOptions || []).includes(currentMonth)) return currentMonth;
+  return (monthOptions || [])[monthOptions.length - 1] || currentMonth;
 }
 function normalizeMarketingPlanCampaignOption(row, plan) {
   return {
@@ -1544,10 +2328,15 @@ function getMarketingPlanCalendarViewDays(selectedMonth, viewMode) {
       length: 7
     }, (_, index) => addMarketingPlanDays(start, index));
   }
-  return getMarketingPlanDays(selectedMonth).map(day => day.key);
+  return getMarketingPlanTimelineWindow(selectedMonth).days.map(day => day.key);
 }
 function getMarketingPlanCalendarRangeLabel(days, viewMode, selectedMonth) {
-  if (viewMode === "month") return `${getMarketingPlanMonthLabel(selectedMonth)} publishing calendar`;
+  if (viewMode === "month" || viewMode === "schedule" && (!days || days.length > 1)) {
+    const window = getMarketingPlanTimelineWindow(selectedMonth);
+    const first = window.monthGroups[0];
+    const last = window.monthGroups[window.monthGroups.length - 1];
+    return first && last ? `${first.label} - ${last.label} publishing calendar` : "Publishing calendar";
+  }
   if (!days || days.length === 0) return "Publishing calendar";
   if (days.length === 1) return formatMarketingPlanDate(days[0]);
   return `${formatMarketingPlanDate(days[0])} - ${formatMarketingPlanDate(days[days.length - 1])}`;
@@ -1567,7 +2356,7 @@ function getMarketingPlanAssetFirstPublishDate(asset) {
   return dates[0] || "9999-12-31";
 }
 function getMarketingPlanTimelineAssetMeta(asset) {
-  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" · ") || "No details";
+  return [asset.format, asset.contentTier, asset.picName].filter(Boolean).join(" - ");
 }
 const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [{
   key: "facebook",
@@ -1579,9 +2368,13 @@ const MARKETING_PLAN_TIMELINE_COUNT_CHANNELS = [{
   key: "instagram",
   label: "IG"
 }];
-function getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth) {
+const MARKETING_PLAN_ESPORT_TIMELINE_COUNT_CHANNELS = [{
+  key: "facebook_esport",
+  label: "FB ESP"
+}];
+function getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth, channels = MARKETING_PLAN_TIMELINE_COUNT_CHANNELS) {
   const windowMonths = new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys);
-  const countChannels = new Set(MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => channel.key));
+  const countChannels = new Set(channels.map(channel => channel.key));
   const countsByDay = {};
   (rows || []).forEach(row => {
     const publishDate = String(row.publishDate || "");
@@ -1658,6 +2451,9 @@ const MARKETING_PLAN_CHANNELS = [{
   key: "facebook",
   label: "Facebook"
 }, {
+  key: "facebook_esport",
+  label: "FB eSport"
+}, {
   key: "tiktok",
   label: "TikTok"
 }, {
@@ -1672,6 +2468,19 @@ const MARKETING_PLAN_CHANNELS = [{
 }, {
   key: "other",
   label: "Other"
+}, {
+  key: "no_tag",
+  label: "No Tag"
+}];
+const MARKETING_PLAN_FUNCTION_FILTER_OPTIONS = [{
+  code: "ops",
+  label: "Ops"
+}, {
+  code: "mkt",
+  label: "MKT"
+}, {
+  code: "esport",
+  label: "eSport"
 }];
 const MARKETING_PLAN_ASSET_TYPES = ["Banner", "Video", "Shorts/Reels", "Story", "Album", "Cover/Profile", "PR", "GIF", "Live"];
 const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
@@ -1723,10 +2532,22 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     details: "",
     contentTier: "B",
     picName: "",
+    subPicUserId: "",
+    subPicName: "",
     briefLink: "",
     channels: ["facebook"],
     note: ""
   };
+}
+function getMarketingPlanExclusiveChannels(currentChannels, channelKey) {
+  const current = Array.isArray(currentChannels) ? currentChannels : [];
+  if (channelKey === "no_tag") return ["no_tag"];
+  const withoutNoTag = current.filter(channel => channel !== "no_tag");
+  const nextChannels = withoutNoTag.includes(channelKey) ? withoutNoTag.filter(channel => channel !== channelKey) : [...withoutNoTag, channelKey];
+  return nextChannels.length ? nextChannels : [channelKey];
+}
+function isMarketingPlanPublishableChannel(channel) {
+  return Boolean(channel) && channel !== "no_tag";
 }
 function marketingPlanMonthKeyFromDate(dateKey) {
   return dateKey && /^\d{4}-\d{2}-\d{2}/.test(String(dateKey)) ? String(dateKey).slice(0, 7) : flowMateTodayDateKey().slice(0, 7);
@@ -1768,6 +2589,7 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
   const requesterTeam = currentUserDefaults.team || "Operations";
   const campaignName = row.campaignName || "";
   const assetSubtype = getFlowMateCreativeSubtypeFromMarketingAssetType(row.format);
+  const formatOptions = window.FlowMateWorkflowMvp && window.FlowMateWorkflowMvp.getFormatOptionsForChannels ? window.FlowMateWorkflowMvp.getFormatOptionsForChannels(channels.split(",").map(channel => channel.trim())).map(option => option.key).filter(Boolean) : ["1200x1200"];
   return {
     title: window.buildFlowMateTemplateTitle ? window.buildFlowMateTemplateTitle({
       launchDate,
@@ -1782,7 +2604,8 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     assetSubtype,
     assetCount: "1",
     platforms: channels,
-    sizeFormat: "1080x1080",
+    sizeFormats: formatOptions,
+    sizeFormat: formatOptions[0] || "1200x1200",
     briefLink: row.briefLink || "",
     briefNote: row.contentDetails || row.placementNote || "",
     referenceLink: "",
@@ -1818,23 +2641,20 @@ function openFlowMateCreativeBriefFromMarketingRow(row) {
   }));
 }
 function getMarketingPlanChannelOptions(rows, selectedMonth) {
-  const channels = new Set();
-  (rows || []).forEach(row => {
-    const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth === selectedMonth && row.channel) channels.add(row.channel);
-  });
-  return Array.from(channels).sort((a, b) => getMarketingPlanChannelLabel(a).localeCompare(getMarketingPlanChannelLabel(b)));
+  return MARKETING_PLAN_CHANNELS.map(channel => channel.key);
 }
-function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all") {
+function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all", assignedUserId = "", includeTimelineWindow = false) {
+  const allowedMonths = includeTimelineWindow ? new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys) : null;
   return (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth !== selectedMonth) return false;
+    if (allowedMonths ? !allowedMonths.has(rowMonth) : rowMonth !== selectedMonth) return false;
+    if (assignedUserId && row.picUserId !== assignedUserId && row.subPicUserId !== assignedUserId) return false;
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
 }
 function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel = "all") {
   const groups = new Map();
-  filterMarketingPlanRows(rows, selectedMonth, selectedChannel).forEach(row => {
+  filterMarketingPlanRows(rows, selectedMonth, selectedChannel, "", true).forEach(row => {
     const key = row.contentItemId || `${row.campaignName}-${row.contentTitle}`;
     if (!groups.has(key)) {
       groups.set(key, {
@@ -1865,6 +2685,59 @@ function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel
     };
   }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
 }
+function getMarketingPlanWorkingRowTeam(row) {
+  return String(row && (row.contentTeam || row.campaignTeam || row.market) || "").trim();
+}
+function getMarketingPlanWorkingOwnerEntries(row) {
+  const entries = [{
+    id: row && row.picUserId || "",
+    name: row && row.picName || ""
+  }, {
+    id: row && row.subPicUserId || "",
+    name: row && row.subPicName || ""
+  }];
+  const seen = new Set();
+  return entries.map(owner => {
+    const name = String(owner.name || "").trim();
+    const key = owner.id ? `id:${owner.id}` : name ? `name:${name.toLowerCase()}` : "";
+    return {
+      key,
+      name
+    };
+  }).filter(owner => owner.key && !seen.has(owner.key) && seen.add(owner.key));
+}
+function getMarketingPlanWorkingFilterOptions(rows) {
+  const teamsByKey = new Map();
+  const ownersByKey = new Map();
+  (rows || []).forEach(row => {
+    const team = getMarketingPlanWorkingRowTeam(row);
+    if (team && !teamsByKey.has(team.toLowerCase())) teamsByKey.set(team.toLowerCase(), team);
+    getMarketingPlanWorkingOwnerEntries(row).forEach(owner => {
+      if (!ownersByKey.has(owner.key)) ownersByKey.set(owner.key, owner.name);
+    });
+  });
+  return {
+    teams: Array.from(teamsByKey.values()).sort((a, b) => a.localeCompare(b)),
+    owners: Array.from(ownersByKey.entries()).map(([key, name]) => ({
+      key,
+      name
+    })).sort((a, b) => a.name.localeCompare(b.name))
+  };
+}
+function filterMarketingPlanWorkingRows(rows, filters = {}) {
+  const status = filters.status || "all";
+  const team = filters.team || "all";
+  const owner = filters.owner || "all";
+  const search = String(filters.search || "").trim().toLowerCase();
+  return (rows || []).filter(row => {
+    if (status !== "all" && getMarketingPlanViewStatus(row) !== status) return false;
+    if (team !== "all" && getMarketingPlanWorkingRowTeam(row).toLowerCase() !== team.toLowerCase()) return false;
+    if (owner !== "all" && !getMarketingPlanWorkingOwnerEntries(row).some(entry => entry.key === owner)) return false;
+    if (!search) return true;
+    const searchable = [row.campaignName, row.contentTitle, row.format, row.contentTier, row.picName, row.subPicName, row.briefLink, getMarketingPlanWorkingRowTeam(row), ...(row.channels || []).map(getMarketingPlanChannelLabel)].filter(Boolean).join(" ").toLowerCase();
+    return searchable.includes(search);
+  });
+}
 function getMarketingPlanChannelLabel(channel) {
   const normalized = channel || "other";
   const match = MARKETING_PLAN_CHANNELS.find(item => item.key === normalized);
@@ -1874,11 +2747,13 @@ function getMarketingPlanChannelAbbrev(channel) {
   const normalized = channel || "other";
   const labels = {
     facebook: "FB",
+    facebook_esport: "FB ESP",
     tiktok: "TT",
     instagram: "IG",
     in_game: "Game",
     youtube: "YT",
-    other: "Other"
+    other: "Other",
+    no_tag: "No Tag"
   };
   return labels[normalized] || getMarketingPlanChannelLabel(normalized).slice(0, 6);
 }
@@ -1930,53 +2805,144 @@ function openNativeTimePicker(event) {
     input.showPicker();
   } catch (error) {}
 }
-function getMarketingPlanPlacementStatusOptions(rows, selectedMonth) {
+function getMarketingPlanPlacementStatusOptions(rows, selectedMonth, includeTimelineWindow = false) {
   const statuses = new Set();
+  const allowedMonths = includeTimelineWindow ? new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys) : null;
   (rows || []).forEach(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth === selectedMonth) statuses.add(getMarketingPlanViewStatus(row));
+    if (allowedMonths ? allowedMonths.has(rowMonth) : rowMonth === selectedMonth) statuses.add(getMarketingPlanViewStatus(row));
   });
   return Array.from(statuses).sort();
 }
-async function loadMarketingPlanTimelineRows(orderBy = "publish_date") {
+function filterMarketingPlanRowsByFunctions(rows, selectedCodes, campaignCatalogRows) {
+  const selected = new Set(selectedCodes || []);
+  if (selected.size === MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.length) return rows || [];
+  if (selected.size === 0) return [];
+  const campaignByName = new Map((campaignCatalogRows || []).map(campaign => [getMarketingPlanCampaignKey(campaign.name), String(campaign.functionCode || "").toLowerCase()]));
+  return (rows || []).filter(row => selected.has(campaignByName.get(getMarketingPlanCampaignKey(row.campaignName))));
+}
+function MarketingPlanFunctionFilter({
+  selectedCodes,
+  onChange
+}) {
+  function toggleFunction(code) {
+    const current = new Set(selectedCodes || []);
+    if (current.has(code)) current.delete(code);else current.add(code);
+    onChange(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code).filter(optionCode => current.has(optionCode)));
+  }
+  return React.createElement("div", {
+    className: "check-row",
+    "data-testid": "marketing-function-filter",
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("span", {
+    className: "muted",
+    style: {
+      alignSelf: "center",
+      marginRight: 4
+    }
+  }, "Filter by Function:"), MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => React.createElement("label", {
+    key: option.code,
+    className: "check-pill"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: (selectedCodes || []).includes(option.code),
+    onChange: () => toggleFunction(option.code)
+  }), React.createElement("span", null, option.label))));
+}
+const MARKETING_PLAN_TIMELINE_SELECT_COLUMNS = ["plan_id", "month_key", "plan_title", "market", "audience_scope", "campaign_id", "campaign_name", "campaign_team", "campaign_sort_order", "content_item_id", "content_title", "content_team", "format", "content_tier", "pic_user_id", "pic_name", "sub_pic_user_id", "sub_pic_name", "brief_link", "flowmate_work_item_id", "flowmate_display_id", "flowmate_status", "content_status", "content_sort_order", "placement_id", "channel", "publish_date", "publish_time", "placement_status", "placement_note"].join(",");
+const MARKETING_PLAN_TIMELINE_CACHE_TTL_MS = 60000;
+const marketingPlanTimelineCache = new Map();
+const marketingPlanTimelineRequests = new Map();
+let marketingPlanMonthOptionsCache = null;
+let marketingPlanMonthOptionsRequest = null;
+function getMarketingPlanTimelineCacheKey(monthKey) {
+  return getMarketingPlanTimelineWindow(monthKey).monthKeys.join("|");
+}
+function sortMarketingPlanTimelineRows(rows, orderBy = "publish_date") {
+  const sortedRows = [...(rows || [])];
+  return sortedRows.sort((a, b) => {
+    const monthOrder = String(a.monthKey || "").localeCompare(String(b.monthKey || ""));
+    if (monthOrder) return monthOrder;
+    if (orderBy === "channel") {
+      return String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || ""));
+    }
+    if (orderBy === "campaign") {
+      return Number(a.campaignSortOrder || 0) - Number(b.campaignSortOrder || 0) || Number(a.contentSortOrder || 0) - Number(b.contentSortOrder || 0) || String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || ""));
+    }
+    return String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || Number(a.campaignSortOrder || 0) - Number(b.campaignSortOrder || 0) || Number(a.contentSortOrder || 0) - Number(b.contentSortOrder || 0);
+  });
+}
+function invalidateMarketingPlanDataCache() {
+  marketingPlanTimelineCache.clear();
+  marketingPlanMonthOptionsCache = null;
+}
+async function loadMarketingPlanAvailableMonths(options = {}) {
+  const force = options.force === true;
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
-  let query = window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
+  if (!force && marketingPlanMonthOptionsCache) return marketingPlanMonthOptionsCache;
+  if (marketingPlanMonthOptionsRequest) return marketingPlanMonthOptionsRequest;
+  marketingPlanMonthOptionsRequest = (async () => {
+    const result = await window.flowmateSupabase.from("marketing_plans").select("month_key").neq("status", "archived").order("month_key", {
+      ascending: true
+    });
+    if (result.error) throw result.error;
+    const monthOptions = getMarketingPlanMonthOptions((result.data || []).map(row => ({
+      monthKey: row.month_key
+    })));
+    marketingPlanMonthOptionsCache = monthOptions;
+    return monthOptions;
+  })().finally(() => {
+    marketingPlanMonthOptionsRequest = null;
+  });
+  return marketingPlanMonthOptionsRequest;
+}
+async function loadMarketingPlanTimelineRows(orderBy = "publish_date", monthKey = getMarketingPlanCurrentMonthKey(), options = {}) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const targetMonthKey = /^\d{4}-\d{2}$/.test(String(monthKey || "")) ? monthKey : getMarketingPlanCurrentMonthKey();
+  const windowMonths = getMarketingPlanTimelineWindow(targetMonthKey).monthKeys;
+  const cacheKey = getMarketingPlanTimelineCacheKey(targetMonthKey);
+  const cached = marketingPlanTimelineCache.get(cacheKey);
+  const force = options.force === true;
+  const cacheAge = cached ? Date.now() - cached.loadedAt : Number.POSITIVE_INFINITY;
+  if (!force && cached && cacheAge < MARKETING_PLAN_TIMELINE_CACHE_TTL_MS) {
+    return sortMarketingPlanTimelineRows(cached.rows, orderBy);
+  }
+  if (marketingPlanTimelineRequests.has(cacheKey)) {
+    const rows = await marketingPlanTimelineRequests.get(cacheKey);
+    return sortMarketingPlanTimelineRows(rows, orderBy);
+  }
+  let query = window.flowmateSupabase.from("marketing_plan_timeline_v").select(MARKETING_PLAN_TIMELINE_SELECT_COLUMNS).in("month_key", windowMonths).order("month_key", {
+    ascending: true
+  }).order("publish_date", {
+    ascending: true
+  }).order("publish_time", {
+    ascending: true
+  }).order("campaign_sort_order", {
+    ascending: true
+  }).order("content_sort_order", {
     ascending: true
   });
-  if (orderBy === "channel") {
-    query = query.order("channel", {
-      ascending: true
-    }).order("publish_date", {
-      ascending: true
-    }).order("publish_time", {
-      ascending: true
+  const request = (async () => {
+    const result = await query;
+    if (result.error) throw result.error;
+    const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
+    marketingPlanTimelineCache.set(cacheKey, {
+      rows: normalizedRows,
+      loadedAt: Date.now()
     });
-  } else if (orderBy === "campaign") {
-    query = query.order("campaign_sort_order", {
-      ascending: true
-    }).order("content_sort_order", {
-      ascending: true
-    }).order("publish_date", {
-      ascending: true
-    }).order("publish_time", {
-      ascending: true
-    });
-  } else {
-    query = query.order("publish_date", {
-      ascending: true
-    }).order("publish_time", {
-      ascending: true
-    }).order("campaign_sort_order", {
-      ascending: true
-    }).order("content_sort_order", {
-      ascending: true
-    });
-  }
-  const result = await query;
-  if (result.error) throw result.error;
-  return (result.data || []).map(normalizeMarketingPlanTimelineRow);
+    return normalizedRows;
+  })().finally(() => {
+    marketingPlanTimelineRequests.delete(cacheKey);
+  });
+  marketingPlanTimelineRequests.set(cacheKey, request);
+  const rows = await request;
+  return sortMarketingPlanTimelineRows(rows, orderBy);
 }
 async function findOrCreateMarketingPlan(monthKey) {
   const title = `Marketing Plan - ${getMarketingPlanMonthLabel(monthKey)}`;
@@ -1996,8 +2962,92 @@ async function findOrCreateMarketingPlan(monthKey) {
   if (inserted.error) throw inserted.error;
   return inserted.data.id;
 }
+function isWorkflowMvpCatalogUnavailable(error) {
+  const code = String(error && error.code || "");
+  const message = String(error && error.message || "").toLowerCase();
+  return ["42P01", "PGRST202", "PGRST204", "PGRST205"].includes(code) || message.includes("marketing_campaign_tag_management_v") && (message.includes("not find") || message.includes("does not exist"));
+}
+function normalizeMarketingPlanCampaignTagOption(row) {
+  return {
+    id: row.campaign_tag_id || row.id,
+    name: row.name || "",
+    normalizedName: row.normalized_name || getMarketingPlanCampaignKey(row.name),
+    functionCode: row.function_code || "",
+    functionLabel: row.function_label || row.function_code || "Unassigned",
+    lightBackground: row.light_background || "#F6F6F6",
+    lightForeground: row.light_foreground || "#4D4D4D",
+    darkBackground: row.dark_background || "#30343B",
+    darkForeground: row.dark_foreground || "#F7F7F7",
+    isArchived: row.is_archived === true || Boolean(row.archived_at),
+    archivedAt: row.archived_at || "",
+    usageCount: Number(row.usage_count || 0),
+    lastUsedAt: row.last_used_at || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+    team: row.team || "",
+    planId: row.plan_id || "",
+    monthKey: row.month_key || "",
+    sortOrder: Number(row.sort_order || 0)
+  };
+}
+async function loadMarketingPlanCampaignFunctions() {
+  if (!window.flowmateSupabase) return [];
+  const result = await window.flowmateSupabase.from("marketing_campaign_functions").select("code,label,light_background,light_foreground,dark_background,dark_foreground,sort_order").eq("active", true).order("sort_order", {
+    ascending: true
+  });
+  if (result.error) {
+    if (isWorkflowMvpCatalogUnavailable(result.error)) {
+      return [{
+        code: "mkt",
+        label: "MKT"
+      }, {
+        code: "ops",
+        label: "Ops"
+      }, {
+        code: "esport",
+        label: "eSport"
+      }];
+    }
+    throw result.error;
+  }
+  return result.data || [];
+}
+async function loadLegacyMarketingPlanCampaignOptions(options = {}) {
+  const result = await window.flowmateSupabase.from("marketing_plans").select("id,month_key,marketing_campaigns(id,name,team,plan_id,sort_order)").neq("status", "archived").order("month_key", {
+    ascending: true
+  });
+  if (result.error) throw result.error;
+  const byName = new Map();
+  (result.data || []).forEach(plan => {
+    (plan.marketing_campaigns || []).forEach(campaign => {
+      const option = normalizeMarketingPlanCampaignOption(campaign, plan);
+      if (!option.name) return;
+      const key = option.name.trim().toLowerCase();
+      if (!byName.has(key)) byName.set(key, option);
+    });
+  });
+  const allCampaigns = Array.from(byName.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  return applyMarketingPlanCampaignVisibility(allCampaigns, options.includeArchived === true || options.includeHidden === true);
+}
 async function findOrCreateMarketingCampaign(planId, name, team) {
   const campaignName = String(name || "").trim();
+  const planResult = await window.flowmateSupabase.from("marketing_plans").select("month_key").eq("id", planId).single();
+  if (planResult.error) throw planResult.error;
+  const tagResult = await window.flowmateSupabase.from("marketing_campaign_tag_management_v").select("*").ilike("normalized_name", getMarketingPlanCampaignKey(campaignName)).eq("is_archived", false).limit(1);
+  if (!tagResult.error) {
+    const tag = tagResult.data && tagResult.data[0];
+    if (!tag) {
+      throw new Error(`Campaign tag "${campaignName}" is not active. Create it in Manage Campaign and assign a Function Colour Tag first.`);
+    }
+    const ensured = await window.flowmateSupabase.rpc("marketing_ensure_campaign_instance", {
+      p_month_key: planResult.data.month_key,
+      p_campaign_tag_id: tag.campaign_tag_id,
+      p_team: team || null
+    });
+    if (ensured.error) throw ensured.error;
+    return ensured.data.campaign_id;
+  }
+  if (!isWorkflowMvpCatalogUnavailable(tagResult.error)) throw tagResult.error;
   const existing = await window.flowmateSupabase.from("marketing_campaigns").select("id").eq("plan_id", planId).eq("name", campaignName).limit(1);
   if (existing.error) throw existing.error;
   if (existing.data && existing.data[0]) return existing.data[0].id;
@@ -2017,21 +3067,28 @@ async function loadMarketingPlanCampaignOptions(options = {}) {
     window.FLOWMATE_MARKETING_CAMPAIGNS = [];
     return [];
   }
-  const result = await window.flowmateSupabase.from("marketing_plans").select("id,month_key,marketing_campaigns(id,name,team,plan_id,sort_order)").neq("status", "archived").order("month_key", {
-    ascending: true
-  });
-  if (result.error) throw result.error;
-  const byName = new Map();
-  (result.data || []).forEach(plan => {
-    (plan.marketing_campaigns || []).forEach(campaign => {
-      const option = normalizeMarketingPlanCampaignOption(campaign, plan);
-      if (!option.name) return;
-      const key = option.name.trim().toLowerCase();
-      if (!byName.has(key)) byName.set(key, option);
+  const result = await window.flowmateSupabase.from("marketing_campaign_tag_management_v").select("*");
+  let campaigns;
+  if (result.error) {
+    if (!isWorkflowMvpCatalogUnavailable(result.error)) throw result.error;
+    campaigns = await loadLegacyMarketingPlanCampaignOptions(options);
+  } else {
+    campaigns = (result.data || []).map(normalizeMarketingPlanCampaignTagOption);
+    if (options.includeArchived !== true && options.includeHidden !== true) {
+      campaigns = campaigns.filter(campaign => !campaign.isArchived);
+    }
+    const search = String(options.search || "").trim().toLowerCase();
+    if (search) campaigns = campaigns.filter(campaign => campaign.name.toLowerCase().includes(search));
+    if (options.functionCode && options.functionCode !== "all") {
+      campaigns = campaigns.filter(campaign => campaign.functionCode === options.functionCode);
+    }
+    const sort = options.sort || "newest";
+    campaigns.sort((a, b) => {
+      if (sort === "oldest") return String(a.createdAt).localeCompare(String(b.createdAt));
+      if (sort === "recently-used") return String(b.lastUsedAt || "").localeCompare(String(a.lastUsedAt || ""));
+      return String(b.createdAt).localeCompare(String(a.createdAt));
     });
-  });
-  const allCampaigns = Array.from(byName.values()).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  const campaigns = applyMarketingPlanCampaignVisibility(allCampaigns, options.includeHidden === true);
+  }
   window.FLOWMATE_MARKETING_CAMPAIGNS = campaigns;
   if (options.announce !== false) {
     window.dispatchEvent(new CustomEvent("flowmate:marketing-campaigns-updated", {
@@ -2042,62 +3099,69 @@ async function loadMarketingPlanCampaignOptions(options = {}) {
   }
   return campaigns;
 }
-async function addMarketingPlanCampaignTag(name, monthKey) {
+async function addMarketingPlanCampaignTag(name, monthKey, functionCode) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
   const campaignName = String(name || "").trim();
   if (!campaignName) throw new Error("Campaign name is required.");
+  if (!String(functionCode || "").trim()) throw new Error("Campaign Function Colour Tag is required.");
   const targetMonthKey = monthKey && /^\d{4}-\d{2}$/.test(monthKey) ? monthKey : flowMateTodayDateKey().slice(0, 7);
-  const planId = await findOrCreateMarketingPlan(targetMonthKey);
-  const campaignId = await findOrCreateMarketingCampaign(planId, campaignName, null);
-  const hiddenKeys = getHiddenMarketingPlanCampaignKeys().filter(key => key !== getMarketingPlanCampaignKey(campaignName));
-  setHiddenMarketingPlanCampaignKeys(hiddenKeys);
+  const tagResult = await window.flowmateSupabase.rpc("marketing_upsert_campaign_tag", {
+    p_campaign_tag_id: null,
+    p_name: campaignName,
+    p_function_code: functionCode
+  });
+  if (tagResult.error) throw tagResult.error;
+  const ensured = await window.flowmateSupabase.rpc("marketing_ensure_campaign_instance", {
+    p_month_key: targetMonthKey,
+    p_campaign_tag_id: tagResult.data.id,
+    p_team: null
+  });
+  if (ensured.error) throw ensured.error;
   const campaigns = await loadMarketingPlanCampaignOptions();
   return {
-    campaignId,
+    campaignId: ensured.data.campaign_id,
+    campaignTagId: tagResult.data.id,
     campaignName,
     monthKey: targetMonthKey,
     campaigns
   };
 }
-async function hideMarketingPlanCampaignTag(name) {
-  const key = getMarketingPlanCampaignKey(name);
-  if (!key) throw new Error("Campaign name is required.");
-  const hiddenKeys = getHiddenMarketingPlanCampaignKeys();
-  setHiddenMarketingPlanCampaignKeys([...hiddenKeys, key]);
-  const campaigns = await loadMarketingPlanCampaignOptions();
-  return campaigns;
-}
-async function showMarketingPlanCampaignTag(name) {
-  const key = getMarketingPlanCampaignKey(name);
-  const hiddenKeys = getHiddenMarketingPlanCampaignKeys().filter(item => item !== key);
-  setHiddenMarketingPlanCampaignKeys(hiddenKeys);
-  const campaigns = await loadMarketingPlanCampaignOptions();
-  return campaigns;
-}
-async function deleteMarketingPlanCampaignTag(campaign) {
-  if (!window.flowmateSupabase) {
-    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
-  }
-  if (!campaign || !campaign.id) throw new Error("Campaign is missing.");
-  const linkedContent = await window.flowmateSupabase.from("marketing_content_items").select("id").eq("campaign_id", campaign.id).limit(1);
-  if (linkedContent.error) throw linkedContent.error;
-  if (linkedContent.data && linkedContent.data.length > 0) {
-    throw new Error("This campaign has content rows. Hide it instead of deleting it.");
-  }
-  const deleted = await window.flowmateSupabase.from("marketing_campaigns").delete().eq("id", campaign.id);
-  if (deleted.error) throw deleted.error;
-  await showMarketingPlanCampaignTag(campaign.name);
+async function archiveMarketingPlanCampaignTag(campaignTagId) {
+  const result = await window.flowmateSupabase.rpc("marketing_archive_campaign_tag", {
+    p_campaign_tag_id: campaignTagId
+  });
+  if (result.error) throw result.error;
   return loadMarketingPlanCampaignOptions({
-    includeHidden: true
+    includeArchived: true
+  });
+}
+async function restoreMarketingPlanCampaignTag(campaignTagId) {
+  const result = await window.flowmateSupabase.rpc("marketing_restore_campaign_tag", {
+    p_campaign_tag_id: campaignTagId
+  });
+  if (result.error) throw result.error;
+  return loadMarketingPlanCampaignOptions({
+    includeArchived: true
+  });
+}
+async function updateMarketingPlanCampaignTagFunction(campaignTagId, functionCode) {
+  const result = await window.flowmateSupabase.rpc("marketing_update_campaign_tag_function", {
+    p_campaign_tag_id: campaignTagId,
+    p_function_code: functionCode
+  });
+  if (result.error) throw result.error;
+  return loadMarketingPlanCampaignOptions({
+    includeArchived: true
   });
 }
 window.loadFlowMateMarketingCampaignOptions = loadMarketingPlanCampaignOptions;
+window.loadFlowMateMarketingCampaignFunctions = loadMarketingPlanCampaignFunctions;
 window.addFlowMateMarketingCampaignTag = addMarketingPlanCampaignTag;
-window.hideFlowMateMarketingCampaignTag = hideMarketingPlanCampaignTag;
-window.showFlowMateMarketingCampaignTag = showMarketingPlanCampaignTag;
-window.deleteFlowMateMarketingCampaignTag = deleteMarketingPlanCampaignTag;
+window.archiveFlowMateMarketingCampaignTag = archiveMarketingPlanCampaignTag;
+window.restoreFlowMateMarketingCampaignTag = restoreMarketingPlanCampaignTag;
+window.updateFlowMateMarketingCampaignTagFunction = updateMarketingPlanCampaignTagFunction;
 async function createMarketingPlanWorkingSheetRow(form) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
@@ -2116,6 +3180,8 @@ async function createMarketingPlanWorkingSheetRow(form) {
     content_tier: form.contentTier || null,
     pic_name: getMarketingPlanCurrentUserDefaults().picName || null,
     pic_user_id: getMarketingPlanCurrentUserDefaults().picUserId || null,
+    sub_pic_user_id: form.subPicUserId || null,
+    sub_pic_name: form.subPicUserId ? String(form.subPicName || "").trim() || null : null,
     brief_link: String(form.briefLink || "").trim() || null,
     source_start_date: form.launchDate || null,
     source_start_time: form.publishTime || null,
@@ -2251,6 +3317,13 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!contentPayload.title) throw new Error("Content is required.");
   const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
   if (contentResult.error) throw contentResult.error;
+  if ((row.subPicUserId || "") !== (form.subPicUserId || "")) {
+    const subPicResult = await window.flowmateSupabase.rpc("marketing_plan_assign_sub_pic", {
+      p_content_item_id: row.contentItemId,
+      p_sub_pic_user_id: form.subPicUserId || null
+    });
+    if (subPicResult.error) throw subPicResult.error;
+  }
   await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
   await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime);
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
@@ -2276,10 +3349,11 @@ async function deleteMarketingPlanWorkingSheetRow(row) {
   }));
   return true;
 }
-function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all") {
-  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
-  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
-  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
+function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all", matchingGroupedRows = null) {
+  const matchingContentIds = Array.isArray(matchingGroupedRows) ? new Set(matchingGroupedRows.map(row => row.contentItemId).filter(Boolean)) : null;
+  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel).filter(row => !matchingContentIds || matchingContentIds.has(row.contentItemId));
+  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
+  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, row.subPicName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
   const channelSuffix = selectedChannel === "all" ? "all-channels" : selectedChannel;
   const filename = `marketing-plan-${selectedMonth || "no-month"}-${channelSuffix}.csv`;
   if (window.flowmateDownloadCsv) {
@@ -2299,6 +3373,87 @@ function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all"
   link.remove();
   URL.revokeObjectURL(url);
   return visibleRows.length;
+}
+function MarketingPlanSubPicSearch({
+  inputId,
+  users,
+  userId,
+  value,
+  disabled = false,
+  onChange
+}) {
+  const [isOpen, setIsOpen] = useStateApp(false);
+  const normalizedQuery = String(value || "").trim().toLowerCase();
+  const matchingUsers = (users || []).filter(user => {
+    if (!user || !user.id || !normalizedQuery) return false;
+    return `${user.name || ""} ${user.email || ""}`.toLowerCase().includes(normalizedQuery);
+  }).slice(0, 8);
+  function chooseUser(user) {
+    onChange({
+      userId: user.id,
+      name: user.name || user.email || ""
+    });
+    setIsOpen(false);
+  }
+  return React.createElement("div", {
+    className: "marketing-sub-pic-search"
+  }, React.createElement("div", {
+    className: "marketing-sub-pic-search__control"
+  }, React.createElement("input", {
+    id: inputId,
+    className: "input",
+    type: "search",
+    autoComplete: "off",
+    value: value || "",
+    disabled,
+    placeholder: "Search active user, e.g. Aof",
+    "aria-label": "Sub PIC",
+    "aria-autocomplete": "list",
+    "aria-expanded": isOpen && !userId && Boolean(normalizedQuery),
+    "aria-controls": `${inputId}-results`,
+    onFocus: () => setIsOpen(true),
+    onBlur: () => window.setTimeout(() => setIsOpen(false), 120),
+    onChange: event => {
+      onChange({
+        userId: "",
+        name: event.target.value
+      });
+      setIsOpen(true);
+    }
+  }), userId && React.createElement("button", {
+    type: "button",
+    className: "marketing-sub-pic-search__clear",
+    disabled,
+    "aria-label": "Clear Sub PIC",
+    onMouseDown: event => event.preventDefault(),
+    onClick: () => {
+      onChange({
+        userId: "",
+        name: ""
+      });
+      setIsOpen(false);
+    }
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), isOpen && !userId && normalizedQuery && React.createElement("div", {
+    id: `${inputId}-results`,
+    className: "marketing-sub-pic-search__results",
+    role: "listbox",
+    "aria-label": "Sub PIC suggestions"
+  }, matchingUsers.length ? matchingUsers.map(user => React.createElement("button", {
+    key: user.id,
+    type: "button",
+    className: "marketing-sub-pic-search__option",
+    role: "option",
+    onMouseDown: event => event.preventDefault(),
+    onClick: () => chooseUser(user)
+  }, React.createElement("span", {
+    className: "strong"
+  }, user.name), user.email && user.email !== user.name && React.createElement("span", {
+    className: "muted"
+  }, user.email))) : React.createElement("div", {
+    className: "marketing-sub-pic-search__empty"
+  }, "No matching active user.")));
 }
 function normalizeMarketingPlanSupervisorRow(row) {
   return {
@@ -2509,15 +3664,16 @@ function exportMarketingPlanSupervisorCsv(rows, filters) {
   URL.revokeObjectURL(url);
   return visibleRows.length;
 }
-function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel = "all") {
+function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel = "all", includeTimelineWindow = false) {
   const groups = MARKETING_PLAN_CHANNELS.map(channel => ({
     ...channel,
     placements: []
   }));
   const groupMap = new Map(groups.map(group => [group.key, group]));
+  const allowedMonths = includeTimelineWindow ? new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys) : null;
   (rows || []).filter(row => {
     const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
-    if (rowMonth !== selectedMonth) return false;
+    if (allowedMonths ? !allowedMonths.has(rowMonth) : rowMonth !== selectedMonth) return false;
     if (selectedStatus !== "all" && getMarketingPlanViewStatus(row) !== selectedStatus) return false;
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).forEach(row => {
@@ -2529,13 +3685,45 @@ function groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, se
   });
   return groups.filter(group => group.placements.length > 0);
 }
-function MarketingPlanTimelineScreen() {
+const MARKETING_TIMELINE_COLLAPSE_KEY = "flowmate:marketing-plan:collapsed-campaigns";
+const MARKETING_ESPORT_TIMELINE_COLLAPSE_KEY = "flowmate:marketing-plan:facebook-esport:collapsed-campaigns";
+function getStoredMarketingTimelineCollapsedCampaigns(storageKey = MARKETING_TIMELINE_COLLAPSE_KEY) {
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+function getMarketingCampaignFunctionStyle(campaign) {
+  return {
+    "--campaign-function-bg-light": campaign && campaign.lightBackground || "#F6F6F6",
+    "--campaign-function-fg-light": campaign && campaign.lightForeground || "#4D4D4D",
+    "--campaign-function-bg-dark": campaign && campaign.darkBackground || "#30343B",
+    "--campaign-function-fg-dark": campaign && campaign.darkForeground || "#F7F7F7"
+  };
+}
+function MarketingPlanTimelineScreen({
+  channelMode = "official"
+} = {}) {
+  const isFacebookEsportTimeline = channelMode === "facebook_esport";
+  const collapseStorageKey = isFacebookEsportTimeline ? MARKETING_ESPORT_TIMELINE_COLLAPSE_KEY : MARKETING_TIMELINE_COLLAPSE_KEY;
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
+  const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
   const [campaignMessage, setCampaignMessage] = useStateApp("");
   const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useStateApp(false);
   const [campaignManagerRows, setCampaignManagerRows] = useStateApp([]);
   const [campaignManagerName, setCampaignManagerName] = useStateApp("");
+  const [campaignManagerFunction, setCampaignManagerFunction] = useStateApp("mkt");
+  const [campaignManagerSearch, setCampaignManagerSearch] = useStateApp("");
+  const [campaignManagerFunctionFilter, setCampaignManagerFunctionFilter] = useStateApp("all");
+  const [campaignManagerSort, setCampaignManagerSort] = useStateApp("newest");
+  const [campaignManagerIncludeArchived, setCampaignManagerIncludeArchived] = useStateApp(false);
+  const [campaignFunctionOptions, setCampaignFunctionOptions] = useStateApp([]);
+  const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
+  const [collapsedCampaignKeys, setCollapsedCampaignKeys] = useStateApp(() => getStoredMarketingTimelineCollapsedCampaigns(collapseStorageKey));
   const [campaignManagerState, setCampaignManagerState] = useStateApp({
     status: "idle",
     message: ""
@@ -2544,7 +3732,7 @@ function MarketingPlanTimelineScreen() {
     status: "loading",
     message: "Loading Marketing Plan timeline..."
   });
-  async function loadTimelineRows(isAlive = () => true) {
+  async function loadTimelineRows(isAlive = () => true, options = {}) {
     if (!window.flowmateSupabase) {
       setLoadState({
         status: "error",
@@ -2552,28 +3740,10 @@ function MarketingPlanTimelineScreen() {
       });
       return;
     }
-    if (isAlive()) setLoadState({
-      status: "loading",
-      message: "Loading Marketing Plan timeline..."
-    });
     try {
-      const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
-        ascending: true
-      }).order("campaign_sort_order", {
-        ascending: true
-      }).order("content_sort_order", {
-        ascending: true
-      }).order("publish_date", {
-        ascending: true
-      }).order("publish_time", {
-        ascending: true
-      });
-      if (result.error) throw result.error;
-      const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
-      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      const normalizedRows = await loadMarketingPlanTimelineRows("campaign", selectedMonth, options);
       if (!isAlive()) return;
       setRows(normalizedRows);
-      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || flowMateTodayDateKey().slice(0, 7));
       setLoadState({
         status: normalizedRows.length ? "live" : "empty",
         message: normalizedRows.length ? "Live Marketing Plan data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
@@ -2582,7 +3752,6 @@ function MarketingPlanTimelineScreen() {
       if (!isAlive()) return;
       console.error("[Marketing Plan] Timeline load failed:", error);
       setRows([]);
-      setSelectedMonth("");
       setLoadState({
         status: "error",
         message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan timeline load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan timeline load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
@@ -2591,36 +3760,70 @@ function MarketingPlanTimelineScreen() {
   }
   useEffectApp(() => {
     let alive = true;
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
     const isAlive = () => alive;
     loadTimelineRows(isAlive);
-    if (window.loadFlowMateMarketingCampaignOptions) {
-      window.loadFlowMateMarketingCampaignOptions({
-        announce: false
-      }).catch(error => {
-        console.warn("[Marketing Plan] Campaign options load failed:", error && error.message);
-      });
-    }
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows(isAlive)) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows(isAlive, {
+      force: true
+    })) : () => {};
     return () => {
       alive = false;
       cleanup();
     };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
+    if (window.loadFlowMateMarketingCampaignOptions) {
+      window.loadFlowMateMarketingCampaignOptions({
+        includeArchived: true,
+        announce: false
+      }).then(campaigns => {
+        if (alive) setCampaignCatalogRows(campaigns || []);
+      }).catch(error => {
+        console.warn("[Marketing Plan] Campaign options load failed:", error && error.message);
+      });
+    }
+    return () => {
+      alive = false;
+    };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
-  const groupedCampaigns = groupMarketingPlanTimelineRows(rows, selectedMonth);
-  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth);
+  const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
+  const timelineRows = isFacebookEsportTimeline ? functionFilteredRows.filter(row => row.channel === "facebook_esport") : functionFilteredRows.filter(row => row.channel !== "facebook_esport" && isMarketingPlanPublishableChannel(row.channel));
+  const groupedCampaigns = groupMarketingPlanTimelineRows(timelineRows, selectedMonth);
+  const campaignCatalogByName = new Map(campaignCatalogRows.map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
+  const canArchiveCampaignTags = Boolean(window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin");
+  const timelineCountChannels = isFacebookEsportTimeline ? MARKETING_PLAN_ESPORT_TIMELINE_COUNT_CHANNELS : MARKETING_PLAN_TIMELINE_COUNT_CHANNELS;
+  const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(timelineRows, selectedMonth, timelineCountChannels);
   const columnWidth = 38;
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
   async function loadCampaignManagerRows() {
     if (!window.loadFlowMateMarketingCampaignOptions) return;
     const campaigns = await window.loadFlowMateMarketingCampaignOptions({
-      includeHidden: true,
+      includeArchived: true,
       announce: false
     });
     setCampaignManagerRows(campaigns || []);
+    setCampaignCatalogRows(campaigns || []);
+    if (window.loadFlowMateMarketingCampaignFunctions) {
+      const functions = await window.loadFlowMateMarketingCampaignFunctions();
+      setCampaignFunctionOptions(functions || []);
+      if (functions && functions.length && !functions.some(option => option.code === campaignManagerFunction)) {
+        setCampaignManagerFunction(functions[0].code);
+      }
+    }
   }
   async function openCampaignManager() {
     setCampaignManagerState({
@@ -2648,14 +3851,16 @@ function MarketingPlanTimelineScreen() {
       return;
     }
     try {
-      const result = await window.addFlowMateMarketingCampaignTag(campaignName, selectedMonth || flowMateTodayDateKey().slice(0, 7));
+      const result = await window.addFlowMateMarketingCampaignTag(campaignName, selectedMonth || flowMateTodayDateKey().slice(0, 7), campaignManagerFunction);
       setCampaignManagerName("");
       setCampaignManagerState({
         status: "saved",
         message: `Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}.`
       });
       await loadCampaignManagerRows();
-      await loadTimelineRows(() => true);
+      await loadTimelineRows(() => true, {
+        force: true
+      });
     } catch (error) {
       console.error("[Marketing Plan] Add campaign failed:", error);
       setCampaignManagerState({
@@ -2664,48 +3869,115 @@ function MarketingPlanTimelineScreen() {
       });
     }
   }
-  async function handleCampaignVisibility(campaign, mode) {
+  async function handleCampaignArchiveRestore(campaign) {
     setCampaignManagerState({
       status: "saving",
       message: "Updating campaign tag..."
     });
     try {
-      if (mode === "hide") {
-        await window.hideFlowMateMarketingCampaignTag(campaign.name);
+      if (campaign.isArchived) {
+        await window.restoreFlowMateMarketingCampaignTag(campaign.id);
       } else {
-        await window.showFlowMateMarketingCampaignTag(campaign.name);
+        const usageMessage = campaign.usageCount > 0 ? ` It remains attached to ${campaign.usageCount} historical request${campaign.usageCount === 1 ? "" : "s"}.` : "";
+        if (!window.confirm(`Archive "${campaign.name}"?${usageMessage}`)) {
+          setCampaignManagerState({
+            status: "idle",
+            message: ""
+          });
+          return;
+        }
+        await window.archiveFlowMateMarketingCampaignTag(campaign.id);
       }
       await loadCampaignManagerRows();
       setCampaignManagerState({
         status: "saved",
-        message: mode === "hide" ? "Campaign tag hidden from selectors." : "Campaign tag shown in selectors."
+        message: campaign.isArchived ? "Campaign tag restored." : "Campaign tag archived and removed from new campaign selectors."
       });
     } catch (error) {
       setCampaignManagerState({
         status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Campaign visibility update failed.") : "Campaign visibility update failed."
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Campaign archive update failed.") : "Campaign archive update failed."
       });
     }
   }
-  async function handleDeleteCampaignTag(campaign) {
+  async function handleCampaignFunctionUpdate(campaign, functionCode) {
     setCampaignManagerState({
       status: "saving",
-      message: "Deleting campaign tag..."
+      message: "Updating Colour Tag..."
     });
     try {
-      await window.deleteFlowMateMarketingCampaignTag(campaign);
+      await window.updateFlowMateMarketingCampaignTagFunction(campaign.id, functionCode);
       await loadCampaignManagerRows();
       setCampaignManagerState({
         status: "saved",
-        message: `Deleted "${campaign.name}".`
+        message: `Updated Colour Tag for "${campaign.name}".`
       });
-      await loadTimelineRows(() => true);
+      await loadTimelineRows(() => true, {
+        force: true
+      });
     } catch (error) {
       setCampaignManagerState({
         status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Delete Campaign failed.") : error && error.message || "Delete Campaign failed."
+        message: window.flowmateUserError ? window.flowmateUserError(error, "Colour Tag update failed.") : error && error.message || "Colour Tag update failed."
       });
     }
+  }
+  function toggleCampaignCollapsed(campaignKey) {
+    setCollapsedCampaignKeys(current => {
+      const next = current.includes(campaignKey) ? current.filter(key => key !== campaignKey) : [...current, campaignKey];
+      window.sessionStorage.setItem(collapseStorageKey, JSON.stringify(next));
+      return next;
+    });
+  }
+  const filteredCampaignManagerRows = campaignManagerRows.filter(campaign => {
+    if (!campaignManagerIncludeArchived && campaign.isArchived) return false;
+    if (campaignManagerFunctionFilter !== "all" && campaign.functionCode !== campaignManagerFunctionFilter) return false;
+    return !campaignManagerSearch.trim() || campaign.name.toLowerCase().includes(campaignManagerSearch.trim().toLowerCase());
+  }).sort((a, b) => {
+    if (campaignManagerSort === "oldest") return String(a.createdAt).localeCompare(String(b.createdAt));
+    if (campaignManagerSort === "recently-used") return String(b.lastUsedAt || "").localeCompare(String(a.lastUsedAt || ""));
+    return String(b.createdAt).localeCompare(String(a.createdAt));
+  });
+  function renderCampaignManagerRow(campaign) {
+    return React.createElement("div", {
+      key: campaign.id || campaign.name,
+      className: `marketing-campaign-manager__row${campaign.isArchived ? " is-archived" : ""}`
+    }, React.createElement("div", {
+      className: "marketing-campaign-manager__identity"
+    }, React.createElement("div", {
+      className: "strong"
+    }, campaign.name), React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 12
+      }
+    }, campaign.usageCount, " historical request", campaign.usageCount === 1 ? "" : "s", campaign.lastUsedAt ? ` · Last used ${formatMarketingPlanDate(String(campaign.lastUsedAt).slice(0, 10))}` : ""), React.createElement("span", {
+      className: "campaign-function-tag",
+      style: getMarketingCampaignFunctionStyle(campaign)
+    }, campaign.functionLabel || "Unassigned")), React.createElement("div", {
+      className: "marketing-campaign-manager__actions"
+    }, React.createElement("label", {
+      className: "campaign-colour-action"
+    }, React.createElement("span", null, "Colour Tag"), React.createElement("select", {
+      className: "select",
+      value: campaign.functionCode || "",
+      disabled: campaign.isArchived || campaignManagerState.status === "saving",
+      onChange: event => handleCampaignFunctionUpdate(campaign, event.target.value),
+      "aria-label": `Colour Tag for ${campaign.name}`
+    }, React.createElement("option", {
+      value: "",
+      disabled: true
+    }, "Select function"), campaignFunctionOptions.map(option => React.createElement("option", {
+      key: option.code,
+      value: option.code
+    }, option.label)))), React.createElement("span", {
+      className: `badge ${campaign.isArchived ? "badge--neutral" : "badge--delivered"}`
+    }, campaign.isArchived ? "Archived" : "Active"), canArchiveCampaignTags && React.createElement("button", {
+      type: "button",
+      className: "btn btn--secondary",
+      onClick: () => handleCampaignArchiveRestore(campaign),
+      disabled: campaignManagerState.status === "saving"
+    }, campaign.isArchived ? "Restore" : "Archive")));
   }
   function renderPlacementBadge(placement) {
     const statusClass = getMarketingPlanStatusClass(placement.status);
@@ -2726,9 +3998,16 @@ function MarketingPlanTimelineScreen() {
       className: "marketing-timeline-badge__time"
     }, badgeTimeLabel || "-"));
   }
+  function renderCampaignFunctionTag(campaign) {
+    const catalog = campaignCatalogByName.get(getMarketingPlanCampaignKey(campaign.name));
+    return React.createElement("span", {
+      className: "campaign-function-tag",
+      style: getMarketingCampaignFunctionStyle(catalog)
+    }, catalog && catalog.functionLabel || "Unassigned");
+  }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
-  }, React.createElement("div", null, React.createElement("h1", null, "Campaign Timeline"), React.createElement("p", null, "Campaign rows, Product / Event sub-rows, and channel placements by publish date.")), React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("h1", null, isFacebookEsportTimeline ? "FB eSport Timeline" : "Campaign Timeline"), React.createElement("p", null, isFacebookEsportTimeline ? "Gantt view for Working Sheet rows tagged FB eSport only." : "Campaign rows, Product / Event sub-rows, and Official channel placements by publish date.")), React.createElement("div", {
     className: "row",
     style: {
       gap: 8
@@ -2755,10 +4034,13 @@ function MarketingPlanTimelineScreen() {
   }), " Manage Campaign"), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
-    onClick: () => loadTimelineRows(() => true)
+    onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), campaignMessage && React.createElement("div", {
+  }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
+    selectedCodes: selectedFunctionCodes,
+    onChange: setSelectedFunctionCodes
+  }), campaignMessage && React.createElement("div", {
     className: "reason-box",
     style: {
       marginBottom: 16
@@ -2774,7 +4056,7 @@ function MarketingPlanTimelineScreen() {
     onMouseDown: event => event.stopPropagation()
   }, React.createElement("div", {
     className: "modal__head"
-  }, React.createElement("div", null, React.createElement("h2", null, "Manage Campaign"), React.createElement("p", null, "Choose which Campaign tags are shown in Marketing Plan selectors. Delete is allowed only for unused tags.")), React.createElement("button", {
+  }, React.createElement("div", null, React.createElement("h2", null, "Manage Campaign"), React.createElement("p", null, "Search, colour, archive, and restore Campaign tags without removing historical records.")), React.createElement("button", {
     type: "button",
     className: "iconbtn",
     onClick: () => setIsCampaignManagerOpen(false)
@@ -2793,52 +4075,72 @@ function MarketingPlanTimelineScreen() {
     value: campaignManagerName,
     onChange: event => setCampaignManagerName(event.target.value),
     placeholder: "New campaign tag"
-  }), React.createElement("button", {
+  }), React.createElement("select", {
+    className: "select",
+    value: campaignManagerFunction,
+    onChange: event => setCampaignManagerFunction(event.target.value),
+    "aria-label": "Campaign Function Colour Tag",
+    required: true
+  }, campaignFunctionOptions.map(option => React.createElement("option", {
+    key: option.code,
+    value: option.code
+  }, option.label))), React.createElement("span", {
+    className: "muted",
+    style: {
+      fontSize: 12
+    }
+  }, "Function Colour Tag"), React.createElement("button", {
     type: "submit",
     className: "btn btn--primary",
     disabled: campaignManagerState.status === "saving"
   }, React.createElement(Icon, {
     name: "plus"
-  }), " Add")), campaignManagerState.message && React.createElement("div", {
+  }), " Add")), React.createElement("div", {
+    className: "marketing-campaign-manager__filters"
+  }, React.createElement("input", {
+    className: "input",
+    type: "search",
+    value: campaignManagerSearch,
+    onChange: event => setCampaignManagerSearch(event.target.value),
+    placeholder: "Search campaign tags",
+    "aria-label": "Search campaign tags"
+  }), React.createElement("select", {
+    className: "select",
+    value: campaignManagerFunctionFilter,
+    onChange: event => setCampaignManagerFunctionFilter(event.target.value),
+    "aria-label": "Filter campaign function"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All functions"), campaignFunctionOptions.map(option => React.createElement("option", {
+    key: option.code,
+    value: option.code
+  }, option.label))), React.createElement("select", {
+    className: "select",
+    value: campaignManagerSort,
+    onChange: event => setCampaignManagerSort(event.target.value),
+    "aria-label": "Sort campaign tags"
+  }, React.createElement("option", {
+    value: "newest"
+  }, "Newest"), React.createElement("option", {
+    value: "oldest"
+  }, "Oldest"), React.createElement("option", {
+    value: "recently-used"
+  }, "Most recently used")), React.createElement("label", {
+    className: "check-pill"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: campaignManagerIncludeArchived,
+    onChange: event => setCampaignManagerIncludeArchived(event.target.checked)
+  }), React.createElement("span", null, "Include archived"))), campaignManagerState.message && React.createElement("div", {
     className: `reason-box ${campaignManagerState.status === "error" ? "reason-box--need" : ""}`,
     style: {
       margin: "12px 16px 0"
     }
   }, campaignManagerState.message), React.createElement("div", {
     className: "marketing-campaign-manager"
-  }, campaignManagerRows.map(campaign => {
-    const hidden = isMarketingPlanCampaignHidden(campaign.name);
-    return React.createElement("div", {
-      key: campaign.id || campaign.name,
-      className: "marketing-campaign-manager__row"
-    }, React.createElement("div", null, React.createElement("div", {
-      className: "strong"
-    }, campaign.name), React.createElement("div", {
-      className: "muted",
-      style: {
-        fontSize: 12
-      }
-    }, [campaign.team || "No team", campaign.monthKey ? getMarketingPlanMonthLabel(campaign.monthKey) : ""].filter(Boolean).join(" · "))), React.createElement("div", {
-      className: "row",
-      style: {
-        gap: 6
-      }
-    }, React.createElement("span", {
-      className: `badge ${hidden ? "badge--neutral" : "badge--delivered"}`
-    }, hidden ? "Hidden" : "Shown"), React.createElement("button", {
-      type: "button",
-      className: "btn btn--secondary",
-      onClick: () => handleCampaignVisibility(campaign, hidden ? "show" : "hide"),
-      disabled: campaignManagerState.status === "saving"
-    }, hidden ? "Show" : "Hide"), React.createElement("button", {
-      type: "button",
-      className: "btn btn--secondary",
-      onClick: () => handleDeleteCampaignTag(campaign),
-      disabled: campaignManagerState.status === "saving"
-    }, "Delete")));
-  }), campaignManagerRows.length === 0 && React.createElement("div", {
+  }, filteredCampaignManagerRows.map(renderCampaignManagerRow), filteredCampaignManagerRows.length === 0 && React.createElement("div", {
     className: "muted"
-  }, "No campaign tags yet.")), React.createElement("div", {
+  }, "No campaign tags match these filters.")), React.createElement("div", {
     className: "modal__actions"
   }, React.createElement("button", {
     type: "button",
@@ -2871,13 +4173,13 @@ function MarketingPlanTimelineScreen() {
     }
   }, "Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();")), loadState.status === "live" && groupedCampaigns.length === 0 && React.createElement("div", {
     className: "reason-box"
-  }, "No placements in ", getMarketingPlanMonthLabel(selectedMonth), ". The month dropdown only shows months found in Marketing Plan data."), loadState.status === "live" && groupedCampaigns.length > 0 && React.createElement("div", {
+  }, isFacebookEsportTimeline ? "No FB eSport placements in " : "No Official channel placements in ", timelineWindow.monthGroups.map(group => group.label).join(" + "), ". Check the Function filters or month selection."), loadState.status === "live" && groupedCampaigns.length > 0 && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
   }, React.createElement("div", null, React.createElement("span", {
     className: "card__title"
-  }, getMarketingPlanMonthLabel(selectedMonth), " + ", getMarketingPlanMonthLabel(getNextMarketingPlanMonthKey(selectedMonth)), " campaign timeline"), React.createElement("div", {
+  }, timelineWindow.monthGroups.map(group => group.label).join(" + "), isFacebookEsportTimeline ? " FB eSport timeline" : " campaign timeline"), React.createElement("div", {
     className: "card__sub"
   }, "Main row = Campaign, sub-row = Product / Event, columns = publish date")), React.createElement("div", {
     className: "row",
@@ -2976,7 +4278,7 @@ function MarketingPlanTimelineScreen() {
         background: day.isWeekend ? "var(--garena-badge-bg)" : "var(--garena-white)",
         textAlign: "center"
       }
-    }, MARKETING_PLAN_TIMELINE_COUNT_CHANNELS.map(channel => {
+    }, timelineCountChannels.map(channel => {
       const count = dayCounts[channel.key] || 0;
       return count > 0 ? React.createElement("div", {
         key: channel.key,
@@ -2984,34 +4286,49 @@ function MarketingPlanTimelineScreen() {
       }, channel.label, " ", count) : null;
     }));
   }))), groupedCampaigns.map(campaign => React.createElement("div", {
-    key: campaign.id
+    key: campaign.id,
+    id: `campaign-group-${campaign.id}`
   }, React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: `${leftWidth}px ${timelineWidth}px`,
       borderBottom: "1px solid var(--garena-light-grey)",
-      background: "#F7F7F7"
+      background: "var(--garena-badge-bg)"
     }
-  }, React.createElement("div", {
+  }, React.createElement("button", {
+    type: "button",
+    className: "campaign-group-toggle",
+    onClick: () => toggleCampaignCollapsed(campaign.id),
+    "aria-expanded": !collapsedCampaignKeys.includes(campaign.id),
+    "aria-controls": `campaign-group-${campaign.id}`,
     style: {
       padding: "10px 14px",
       borderRight: "1px solid var(--garena-light-grey)",
+      borderTop: 0,
+      borderBottom: 0,
+      borderLeft: 0,
+      width: "100%",
+      textAlign: "left",
       position: "sticky",
       left: 0,
       zIndex: 3,
-      background: "#F7F7F7"
+      background: "var(--garena-badge-bg)",
+      color: "inherit"
     }
-  }, React.createElement("div", {
+  }, React.createElement("span", {
+    className: "campaign-group-toggle__icon",
+    "aria-hidden": "true"
+  }, collapsedCampaignKeys.includes(campaign.id) ? "▸" : "▾"), React.createElement("div", {
     className: "strong"
   }, campaign.name), React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12
     }
-  }, campaign.team || "No team", " · ", campaign.assets.length, " assets")), React.createElement("div", null)), campaign.assets.map(asset => React.createElement("div", {
+  }, campaign.team || "No team", " · ", campaign.assets.length, " rows"), renderCampaignFunctionTag(campaign)), React.createElement("div", null)), campaign.assets.map(asset => React.createElement("div", {
     key: asset.id,
     style: {
-      display: "grid",
+      display: collapsedCampaignKeys.includes(campaign.id) ? "none" : "grid",
       gridTemplateColumns: `${leftWidth}px ${timelineWidth}px`,
       minHeight: 58,
       borderBottom: "1px solid var(--garena-light-grey)",
@@ -3067,74 +4384,88 @@ function MarketingPlanTimelineScreen() {
 }
 function MarketingPlanChannelPlanScreen() {
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedStatus, setSelectedStatus] = useStateApp("all");
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
+  const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
+  const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan channel placements..."
   });
-  async function loadChannelPlanRows(isAlive = () => true) {
-    if (!window.flowmateSupabase) {
-      setLoadState({
-        status: "error",
-        message: "Supabase client is not ready. Please refresh after the app loads."
-      });
-      return;
-    }
-    if (isAlive()) setLoadState({
-      status: "loading",
-      message: "Loading Marketing Plan channel placements..."
-    });
-    try {
-      const result = await window.flowmateSupabase.from("marketing_plan_timeline_v").select("*").order("month_key", {
-        ascending: true
-      }).order("channel", {
-        ascending: true
-      }).order("publish_date", {
-        ascending: true
-      }).order("publish_time", {
-        ascending: true
-      });
-      if (result.error) throw result.error;
-      const normalizedRows = (result.data || []).map(normalizeMarketingPlanTimelineRow);
-      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
-      if (!isAlive()) return;
-      setRows(normalizedRows);
-      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
-      setSelectedStatus(current => current || "all");
-      setSelectedChannel(current => current || "all");
-      setLoadState({
-        status: normalizedRows.length ? "live" : "empty",
-        message: normalizedRows.length ? "Live Marketing Plan channel data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-      });
-    } catch (error) {
-      if (!isAlive()) return;
-      console.error("[Marketing Plan] Channel Plan load failed:", error);
-      setRows([]);
-      setSelectedMonth("");
-      setSelectedStatus("all");
-      setSelectedChannel("all");
-      setLoadState({
-        status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-      });
-    }
-  }
   useEffectApp(() => {
     let alive = true;
-    const isAlive = () => alive;
-    loadChannelPlanRows(isAlive);
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadChannelPlanRows(isAlive)) : () => {};
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
+    async function loadTimelineRows(options = {}) {
+      if (!window.flowmateSupabase) {
+        setLoadState({
+          status: "error",
+          message: "Supabase client is not ready. Please refresh after the app loads."
+        });
+        return;
+      }
+      try {
+        const normalizedRows = await loadMarketingPlanTimelineRows("channel", selectedMonth, options);
+        if (!alive) return;
+        setRows(normalizedRows);
+        setSelectedStatus(current => current || "all");
+        setSelectedChannel(current => current || "all");
+        setLoadState({
+          status: normalizedRows.length ? "live" : "empty",
+          message: normalizedRows.length ? "Live Marketing Plan channel data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+        });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[Marketing Plan] Channel Plan load failed:", error);
+        setRows([]);
+        setSelectedStatus("all");
+        setSelectedChannel("all");
+        setLoadState({
+          status: "error",
+          message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan channel plan load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+        });
+      }
+    }
+    loadTimelineRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows({
+      force: true
+    })) : () => {};
     return () => {
       alive = false;
       cleanup();
     };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
+    if (window.loadFlowMateMarketingCampaignOptions) {
+      window.loadFlowMateMarketingCampaignOptions({
+        includeArchived: true,
+        announce: false
+      }).then(campaigns => {
+        if (alive) setCampaignCatalogRows(campaigns || []);
+      }).catch(error => console.warn("[Marketing Plan] Channel function options load failed:", error && error.message));
+    }
+    return () => {
+      alive = false;
+    };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
-  const statusOptions = getMarketingPlanPlacementStatusOptions(rows, selectedMonth);
-  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const groupedChannels = groupMarketingPlanRowsByChannel(rows, selectedMonth, selectedStatus, selectedChannel);
+  const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
+  const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
+  const statusOptions = getMarketingPlanPlacementStatusOptions(publishableRows, selectedMonth, true);
+  const channelOptions = getMarketingPlanChannelOptions(publishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
+  const groupedChannels = groupMarketingPlanRowsByChannel(publishableRows, selectedMonth, selectedStatus, selectedChannel, true);
+  const channelPlanWindow = getMarketingPlanTimelineWindow(selectedMonth);
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
     return React.createElement("span", {
@@ -3195,10 +4526,13 @@ function MarketingPlanChannelPlanScreen() {
   }, getMarketingPlanStatusLabel(status)))), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
-    onClick: () => loadChannelPlanRows(() => true)
+    onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
+  }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
+    selectedCodes: selectedFunctionCodes,
+    onChange: setSelectedFunctionCodes
+  }), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan channel placements..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -3231,7 +4565,7 @@ function MarketingPlanChannelPlanScreen() {
     className: "card__head"
   }, React.createElement("div", null, React.createElement("span", {
     className: "card__title"
-  }, getMarketingPlanMonthLabel(selectedMonth), " channel plan"), React.createElement("div", {
+  }, channelPlanWindow.monthGroups.map(group => group.label).join(" + "), " channel plan"), React.createElement("div", {
     className: "card__sub"
   }, "Grouped by channel first. Schedule uses publish date and publish time from Marketing Plan placements.")), React.createElement("div", {
     className: "row",
@@ -3239,7 +4573,7 @@ function MarketingPlanChannelPlanScreen() {
       gap: 6,
       flexWrap: "wrap"
     }
-  }, MARKETING_PLAN_CHANNELS.map(channel => React.createElement("span", {
+  }, MARKETING_PLAN_CHANNELS.filter(channel => isMarketingPlanPublishableChannel(channel.key)).map(channel => React.createElement("span", {
     key: channel.key,
     className: "badge badge--neutral"
   }, channel.label)))), React.createElement("div", {
@@ -3319,56 +4653,79 @@ function MarketingPlanChannelPlanScreen() {
 }
 function MarketingPlanCalendarScreen() {
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
+  const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
+  const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
   const [calendarViewMode, setCalendarViewMode] = useStateApp("schedule");
   const [selectedScheduleDate, setSelectedScheduleDate] = useStateApp("");
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan calendar..."
   });
-  async function loadCalendarRows(isAlive = () => true) {
-    if (isAlive()) setLoadState({
-      status: "loading",
-      message: "Loading Marketing Plan calendar..."
-    });
-    try {
-      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
-      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
-      if (!isAlive()) return;
-      setRows(normalizedRows);
-      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || "");
-      setSelectedChannel("all");
-      setSelectedScheduleDate("");
-      setLoadState({
-        status: normalizedRows.length ? "live" : "empty",
-        message: normalizedRows.length ? "Live Marketing Plan calendar data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-      });
-    } catch (error) {
-      if (!isAlive()) return;
-      console.error("[Marketing Plan] Calendar load failed:", error);
-      setRows([]);
-      setSelectedMonth("");
-      setSelectedChannel("all");
-      setLoadState({
-        status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
-      });
-    }
-  }
   useEffectApp(() => {
     let alive = true;
-    const isAlive = () => alive;
-    loadCalendarRows(isAlive);
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadCalendarRows(isAlive)) : () => {};
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
+    let alive = true;
+    async function loadCalendarRows(options = {}) {
+      try {
+        const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, options);
+        if (!alive) return;
+        setRows(normalizedRows);
+        setSelectedChannel("all");
+        setSelectedScheduleDate("");
+        setLoadState({
+          status: normalizedRows.length ? "live" : "empty",
+          message: normalizedRows.length ? "Live Marketing Plan calendar data" : "No Marketing Plan data found. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+        });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[Marketing Plan] Calendar load failed:", error);
+        setRows([]);
+        setSelectedChannel("all");
+        setLoadState({
+          status: "error",
+          message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();") : "Marketing Plan calendar load failed. Run supabase/marketing_plan.sql, then optionally run select public.marketing_plan_june_2026_sample();"
+        });
+      }
+    }
+    loadCalendarRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadCalendarRows({
+      force: true
+    })) : () => {};
     return () => {
       alive = false;
       cleanup();
     };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
+    if (window.loadFlowMateMarketingCampaignOptions) {
+      window.loadFlowMateMarketingCampaignOptions({
+        includeArchived: true,
+        announce: false
+      }).then(campaigns => {
+        if (alive) setCampaignCatalogRows(campaigns || []);
+      }).catch(error => console.warn("[Marketing Plan] Calendar function options load failed:", error && error.message));
+    }
+    return () => {
+      alive = false;
+    };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
-  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const monthDays = getMarketingPlanDays(selectedMonth);
+  const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
+  const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
+  const channelOptions = getMarketingPlanChannelOptions(publishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
+  const monthDays = getMarketingPlanTimelineWindow(selectedMonth).days;
   const viewDays = getMarketingPlanCalendarViewDays(selectedMonth, calendarViewMode);
   const scheduleDayKeys = calendarViewMode === "schedule" && selectedScheduleDate ? [selectedScheduleDate] : viewDays;
   const calendarHours = Array.from({
@@ -3381,7 +4738,7 @@ function MarketingPlanCalendarScreen() {
     key: `blank-${index}`,
     isBlank: true
   })), ...monthDays];
-  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
+  const visibleRows = filterMarketingPlanRows(publishableRows, selectedMonth, selectedChannel, "", true);
   const rowsByDate = visibleRows.reduce((map, row) => {
     if (!map.has(row.publishDate)) map.set(row.publishDate, []);
     map.get(row.publishDate).push(row);
@@ -3477,10 +4834,13 @@ function MarketingPlanCalendarScreen() {
   }, option.label))), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
-    onClick: () => loadCalendarRows(() => true)
+    onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
     name: "refresh"
-  }), " Refresh"))), loadState.status === "loading" && React.createElement("div", {
+  }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
+    selectedCodes: selectedFunctionCodes,
+    onChange: setSelectedFunctionCodes
+  }), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan calendar..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -3507,7 +4867,7 @@ function MarketingPlanCalendarScreen() {
     }
   }, "Run supabase/marketing_plan.sql first. For demo data, run select public.marketing_plan_june_2026_sample();")), loadState.status === "live" && visibleRows.length === 0 && React.createElement("div", {
     className: "reason-box"
-  }, "No placements match ", getMarketingPlanMonthLabel(selectedMonth), " and ", selectedChannel === "all" ? "all channels" : getMarketingPlanChannelLabel(selectedChannel), "."), loadState.status === "live" && visibleRows.length > 0 && React.createElement("div", {
+  }, "No placements match ", getMarketingPlanTimelineWindow(selectedMonth).monthGroups.map(group => group.label).join(" + "), " and ", selectedChannel === "all" ? "all channels" : getMarketingPlanChannelLabel(selectedChannel), "."), loadState.status === "live" && visibleRows.length > 0 && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
@@ -3626,9 +4986,15 @@ function MarketingPlanCalendarScreen() {
 }
 function MarketingPlanWorkingSheetScreen() {
   const [rows, setRows] = useStateApp([]);
-  const [selectedMonth, setSelectedMonth] = useStateApp("");
+  const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedChannel, setSelectedChannel] = useStateApp("all");
+  const [selectedWorkingStatus, setSelectedWorkingStatus] = useStateApp("all");
+  const [selectedWorkingTeam, setSelectedWorkingTeam] = useStateApp("all");
+  const [selectedWorkingOwner, setSelectedWorkingOwner] = useStateApp("all");
+  const [workingSearch, setWorkingSearch] = useStateApp("");
   const [campaignOptions, setCampaignOptions] = useStateApp(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+  const [subPicUsers, setSubPicUsers] = useStateApp(() => window.FLOWMATE_MENTION_USERS || []);
   const [exportMessage, setExportMessage] = useStateApp("");
   const [sheetForm, setSheetForm] = useStateApp(getDefaultMarketingPlanWorkingSheetForm);
   const [saveState, setSaveState] = useStateApp({
@@ -3642,13 +5008,11 @@ function MarketingPlanWorkingSheetScreen() {
     status: "loading",
     message: "Loading Marketing Plan working sheet..."
   });
-  async function loadWorkingSheetRows(aliveRef) {
+  async function loadWorkingSheetRows(aliveRef, options = {}) {
     try {
-      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date");
-      const monthOptions = getMarketingPlanMonthOptions(normalizedRows);
+      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, options);
       if (aliveRef && !aliveRef.alive) return;
       setRows(normalizedRows);
-      setSelectedMonth(current => current && monthOptions.includes(current) ? current : monthOptions[0] || marketingPlanMonthKeyFromDate(sheetForm.launchDate));
       setSelectedChannel("all");
       setLoadState({
         status: normalizedRows.length ? "live" : "empty",
@@ -3658,7 +5022,6 @@ function MarketingPlanWorkingSheetScreen() {
       if (aliveRef && !aliveRef.alive) return;
       console.error("[Marketing Plan] Working Sheet load failed:", error);
       setRows([]);
-      setSelectedMonth("");
       setSelectedChannel("all");
       setLoadState({
         status: "error",
@@ -3667,15 +5030,40 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
   useEffectApp(() => {
+    let alive = true;
+    loadMarketingPlanAvailableMonths().then(monthOptions => {
+      if (!alive) return;
+      setMonthOptions(monthOptions);
+      setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanMonth(monthOptions));
+    }).catch(error => console.warn("[Marketing Plan] Month options load failed:", error && error.message));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffectApp(() => {
     const aliveRef = {
       alive: true
     };
-    const loadRows = () => loadWorkingSheetRows(aliveRef);
+    const loadRows = options => loadWorkingSheetRows(aliveRef, options);
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadRows({
+      force: true
+    })) : () => {};
     return () => {
       aliveRef.alive = false;
       cleanup();
+    };
+  }, [selectedMonth]);
+  useEffectApp(() => {
+    let alive = true;
+    if (!window.loadFlowMateMentionUsers) return () => {
+      alive = false;
+    };
+    window.loadFlowMateMentionUsers().then(users => {
+      if (alive) setSubPicUsers(users || []);
+    }).catch(error => console.warn("[Marketing Plan] Sub PIC users load failed:", error && error.message));
+    return () => {
+      alive = false;
     };
   }, []);
   useEffectApp(() => {
@@ -3695,14 +5083,23 @@ function MarketingPlanWorkingSheetScreen() {
       window.removeEventListener("flowmate:marketing-campaigns-updated", syncCampaignOptions);
     };
   }, []);
-  const monthOptions = getMarketingPlanMonthOptions(rows);
-  const channelOptions = getMarketingPlanChannelOptions(rows, selectedMonth);
-  const visiblePlacementRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel);
-  const visibleRows = groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel);
+  const channelOptions = useMemoApp(() => getMarketingPlanChannelOptions(rows, selectedMonth), [rows, selectedMonth]);
+  const groupedWorkingRows = useMemoApp(() => groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel), [rows, selectedMonth, selectedChannel]);
+  const workingFilterOptions = useMemoApp(() => getMarketingPlanWorkingFilterOptions(groupedWorkingRows), [groupedWorkingRows]);
+  const visibleRows = useMemoApp(() => filterMarketingPlanWorkingRows(groupedWorkingRows, {
+    status: selectedWorkingStatus,
+    team: selectedWorkingTeam,
+    owner: selectedWorkingOwner,
+    search: workingSearch
+  }), [groupedWorkingRows, selectedWorkingStatus, selectedWorkingTeam, selectedWorkingOwner, workingSearch]);
+  const visibleContentIds = useMemoApp(() => new Set(visibleRows.map(row => row.contentItemId).filter(Boolean)), [visibleRows]);
+  const visiblePlacementRows = useMemoApp(() => filterMarketingPlanRows(rows, selectedMonth, selectedChannel).filter(row => visibleContentIds.has(row.contentItemId)), [rows, selectedMonth, selectedChannel, visibleContentIds]);
+  const activeWorkingFilters = [selectedMonth ? getMarketingPlanMonthLabel(selectedMonth) : "", selectedChannel !== "all" ? getMarketingPlanChannelLabel(selectedChannel) : "", selectedWorkingStatus !== "all" ? getMarketingPlanStatusLabel(selectedWorkingStatus) : "", selectedWorkingTeam !== "all" ? selectedWorkingTeam : "", selectedWorkingOwner !== "all" ? (workingFilterOptions.owners.find(owner => owner.key === selectedWorkingOwner) || {}).name : "", workingSearch.trim() ? `Search: ${workingSearch.trim()}` : ""].filter(Boolean);
+  const hasClearableWorkingFilters = selectedChannel !== "all" || selectedWorkingStatus !== "all" || selectedWorkingTeam !== "all" || selectedWorkingOwner !== "all" || Boolean(workingSearch.trim());
   function canManageMarketingPlanWorkingRow(row) {
     const currentUser = window.FLOWMATE_CURRENT_USER || {};
     if (currentUser.role === "admin") return true;
-    return Boolean(row && row.picUserId && currentUser.id && row.picUserId === currentUser.id);
+    return Boolean(row && currentUser.id && (row.picUserId === currentUser.id || row.subPicUserId === currentUser.id));
   }
   function updateSheetForm(key, value) {
     setSheetForm(current => ({
@@ -3712,11 +5109,9 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function toggleSheetChannel(channelKey) {
     setSheetForm(current => {
-      const currentChannels = Array.isArray(current.channels) ? current.channels : [];
-      const nextChannels = currentChannels.includes(channelKey) ? currentChannels.filter(channel => channel !== channelKey) : [...currentChannels, channelKey];
       return {
         ...current,
-        channels: nextChannels.length ? nextChannels : [channelKey]
+        channels: getMarketingPlanExclusiveChannels(current.channels, channelKey)
       };
     });
   }
@@ -3726,7 +5121,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function startEditWorkingRow(row) {
     if (!canManageMarketingPlanWorkingRow(row)) {
-      setExportMessage("Only PIC or Admin can edit this row.");
+      setExportMessage("Only PIC, Sub PIC, or Admin can edit this row.");
       return;
     }
     const selectedChannels = Array.isArray(row.channels) && row.channels.length ? row.channels : row.channel ? [row.channel] : ["facebook"];
@@ -3737,6 +5132,8 @@ function MarketingPlanWorkingSheetScreen() {
       publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || "",
       assetType: row.format || "Banner",
       contentTier: row.contentTier || "B",
+      subPicUserId: row.subPicUserId || "",
+      subPicName: row.subPicName || "",
       briefLink: row.briefLink || "",
       channels: selectedChannels
     });
@@ -3750,11 +5147,9 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function toggleEditChannel(channelKey) {
     setEditForm(current => {
-      const currentChannels = Array.isArray(current && current.channels) ? current.channels : [];
-      const nextChannels = currentChannels.includes(channelKey) ? currentChannels.filter(channel => channel !== channelKey) : [...currentChannels, channelKey];
       return {
         ...(current || {}),
-        channels: nextChannels.length ? nextChannels : [channelKey]
+        channels: getMarketingPlanExclusiveChannels(current && current.channels, channelKey)
       };
     });
   }
@@ -3778,6 +5173,10 @@ function MarketingPlanWorkingSheetScreen() {
       setExportMessage("Select at least one Channel Tag.");
       return;
     }
+    if (String(editForm.subPicName || "").trim() && !editForm.subPicUserId) {
+      setExportMessage("Select Sub PIC from the suggested active users.");
+      return;
+    }
     setUpdatingRowId(editingWorkingRow.contentItemId);
     setExportMessage("");
     try {
@@ -3789,6 +5188,8 @@ function MarketingPlanWorkingSheetScreen() {
       setEditForm(null);
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet row edit failed:", error);
@@ -3799,7 +5200,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   async function handleDeleteWorkingRow(row) {
     if (!canManageMarketingPlanWorkingRow(row)) {
-      setExportMessage("Only PIC or Admin can delete this row.");
+      setExportMessage("Only PIC, Sub PIC, or Admin can delete this row.");
       return;
     }
     const linkedFlowMateTask = hasMarketingPlanLinkedCreativeRequest(row);
@@ -3829,6 +5230,8 @@ function MarketingPlanWorkingSheetScreen() {
       }
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet row delete failed:", error);
@@ -3845,6 +5248,13 @@ function MarketingPlanWorkingSheetScreen() {
       setSaveState({
         status: "error",
         message: missing[1]
+      });
+      return;
+    }
+    if (String(sheetForm.subPicName || "").trim() && !sheetForm.subPicUserId) {
+      setSaveState({
+        status: "error",
+        message: "Select Sub PIC from the suggested active users."
       });
       return;
     }
@@ -3882,14 +5292,17 @@ function MarketingPlanWorkingSheetScreen() {
         publishTime: normalizedTime,
         campaignName: current.campaignName
       }));
-      await loadWorkingSheetRows({
+      const reloadPromise = loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
         detail: {
           reason: "marketing_plan_working_sheet_saved"
         }
       }));
+      await reloadPromise;
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet save failed:", error);
       setSaveState({
@@ -3899,12 +5312,19 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
   function handleExportCsv() {
-    const exportedCount = exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel);
+    const exportedCount = exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel, visibleRows);
     setExportMessage(`Exported ${exportedCount} visible Marketing Plan rows.`);
+  }
+  function clearWorkingFilters() {
+    setSelectedChannel("all");
+    setSelectedWorkingStatus("all");
+    setSelectedWorkingTeam("all");
+    setSelectedWorkingOwner("all");
+    setWorkingSearch("");
   }
   async function handleWorkingRowStatusChange(row, nextStatus) {
     if (!canManageMarketingPlanWorkingRow(row)) {
-      setExportMessage("Only PIC or Admin can update this row.");
+      setExportMessage("Only PIC, Sub PIC, or Admin can update this row.");
       return;
     }
     setUpdatingRowId(row.contentItemId);
@@ -3915,6 +5335,8 @@ function MarketingPlanWorkingSheetScreen() {
       });
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
     } catch (error) {
       console.error("[Marketing Plan] Working Sheet status update failed:", error);
@@ -3925,7 +5347,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   async function handleRepairWorkingRowBriefLink(row) {
     if (!canManageMarketingPlanWorkingRow(row)) {
-      setExportMessage("Only PIC or Admin can repair this row.");
+      setExportMessage("Only PIC, Sub PIC, or Admin can repair this row.");
       return;
     }
     const detailUrl = getMarketingPlanFlowMateDetailUrl(row && row.flowmateDisplayId);
@@ -3939,6 +5361,8 @@ function MarketingPlanWorkingSheetScreen() {
       await updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest(row.contentItemId, detailUrl, row.flowmateWorkItemId || "");
       await loadWorkingSheetRows({
         alive: true
+      }, {
+        force: true
       });
       setExportMessage(`Restored Brief Link for ${row.contentTitle || row.flowmateDisplayId}.`);
     } catch (error) {
@@ -4049,6 +5473,20 @@ function MarketingPlanWorkingSheetScreen() {
     key: tier,
     value: tier
   }, tier)))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Sub PIC"), React.createElement(MarketingPlanSubPicSearch, {
+    inputId: "marketing-plan-sub-pic",
+    users: subPicUsers,
+    userId: sheetForm.subPicUserId,
+    value: sheetForm.subPicName,
+    onChange: selection => setSheetForm(current => ({
+      ...current,
+      subPicUserId: selection.userId,
+      subPicName: selection.name
+    }))
+  })), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
@@ -4107,26 +5545,23 @@ function MarketingPlanWorkingSheetScreen() {
     className: "card__title"
   }, "Current working rows"), React.createElement("div", {
     className: "card__sub"
-  }, "These rows feed Campaign Timeline, Channel Plan, Calendar, and CSV export."))), React.createElement("div", {
+  }, "Rows with publishing Channel Tags feed Timeline, Channel Plan, and Calendar. All rows remain available in Working Sheet and CSV export."))), React.createElement("div", {
     className: "card__body"
   }, React.createElement("div", {
-    className: "row",
-    style: {
-      gap: 8,
-      flexWrap: "wrap",
-      marginBottom: 14
-    }
+    className: "marketing-working-filters",
+    "data-testid": "working-filters"
   }, React.createElement("select", {
     className: "input",
-    style: {
-      width: 150
-    },
     value: selectedMonth,
     onChange: event => {
       setSelectedMonth(event.target.value);
       setSelectedChannel("all");
+      setSelectedWorkingTeam("all");
+      setSelectedWorkingOwner("all");
     },
-    disabled: monthOptions.length === 0
+    disabled: monthOptions.length === 0,
+    "aria-label": "Month",
+    "data-testid": "working-month-filter"
   }, monthOptions.length === 0 && React.createElement("option", {
     value: ""
   }, "No data"), monthOptions.map(monthKey => React.createElement("option", {
@@ -4134,27 +5569,81 @@ function MarketingPlanWorkingSheetScreen() {
     value: monthKey
   }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("select", {
     className: "input",
-    style: {
-      width: 150
-    },
     value: selectedChannel,
     onChange: event => setSelectedChannel(event.target.value),
-    disabled: monthOptions.length === 0
+    disabled: monthOptions.length === 0,
+    "aria-label": "Channel",
+    "data-testid": "working-channel-filter"
   }, React.createElement("option", {
     value: "all"
   }, "All channels"), channelOptions.map(channel => React.createElement("option", {
     key: channel,
     value: channel
-  }, getMarketingPlanChannelLabel(channel)))), React.createElement("button", {
+  }, getMarketingPlanChannelLabel(channel)))), React.createElement("select", {
+    className: "input",
+    value: selectedWorkingStatus,
+    onChange: event => setSelectedWorkingStatus(event.target.value),
+    "aria-label": "Status",
+    "data-testid": "working-status-filter"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All statuses"), MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("select", {
+    className: "input",
+    value: selectedWorkingTeam,
+    onChange: event => setSelectedWorkingTeam(event.target.value),
+    "aria-label": "Team",
+    "data-testid": "working-team-filter"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All teams"), workingFilterOptions.teams.map(team => React.createElement("option", {
+    key: team,
+    value: team
+  }, team))), React.createElement("select", {
+    className: "input",
+    value: selectedWorkingOwner,
+    onChange: event => setSelectedWorkingOwner(event.target.value),
+    "aria-label": "PIC or Sub PIC",
+    "data-testid": "working-owner-filter"
+  }, React.createElement("option", {
+    value: "all"
+  }, "All owners"), workingFilterOptions.owners.map(owner => React.createElement("option", {
+    key: owner.key,
+    value: owner.key
+  }, owner.name))), React.createElement("input", {
+    className: "input marketing-working-filters__search",
+    type: "search",
+    value: workingSearch,
+    onChange: event => setWorkingSearch(event.target.value),
+    placeholder: "Search campaign, asset, PIC...",
+    "aria-label": "Search working rows",
+    "data-testid": "working-search"
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: clearWorkingFilters,
+    disabled: !hasClearableWorkingFilters,
+    "data-testid": "working-filter-reset"
+  }, "Clear filters"), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
     onClick: handleExportCsv,
-    disabled: visiblePlacementRows.length === 0
+    disabled: visiblePlacementRows.length === 0,
+    "data-testid": "working-export"
   }, React.createElement(Icon, {
     name: "download"
   }), " Export CSV"), React.createElement("span", {
-    className: "muted"
-  }, visibleRows.length, " visible rows")), exportMessage && React.createElement("div", {
+    className: "marketing-working-count",
+    "aria-live": "polite",
+    "data-testid": "working-row-count"
+  }, visibleRows.length, visibleRows.length === 1 ? " request" : " requests")), React.createElement("div", {
+    className: "marketing-working-active-filters",
+    "data-testid": "working-active-filters"
+  }, React.createElement("span", {
+    className: "strong"
+  }, "Active filters:"), " ", activeWorkingFilters.length ? activeWorkingFilters.join(" · ") : "None"), exportMessage && React.createElement("div", {
     className: "reason-box",
     style: {
       marginBottom: 14
@@ -4186,16 +5675,20 @@ function MarketingPlanWorkingSheetScreen() {
   }, "Brief Link"), React.createElement("th", {
     className: "col-pic"
   }, "PIC"), React.createElement("th", {
+    className: "col-sub-pic"
+  }, "Sub PIC"), React.createElement("th", {
     className: "col-status"
   }, "Status"), React.createElement("th", {
     className: "col-actions"
-  }, "Actions"))), React.createElement("tbody", null, visibleRows.slice(0, 12).map(row => {
+  }, "Actions"))), React.createElement("tbody", null, visibleRows.map(row => {
     const rowStatusValue = getMarketingPlanViewStatus(row);
     const rowHasLinkedCreativeRequest = hasMarketingPlanLinkedCreativeRequest(row);
     const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
     const canManageRow = canManageMarketingPlanWorkingRow(row);
     return React.createElement("tr", {
-      key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`
+      key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`,
+      "data-testid": "working-row",
+      "data-status": rowStatusValue
     }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, row.contentTier || "-"), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
       className: "marketing-channel-tags"
     }, (row.channels || []).map(channel => React.createElement("span", {
@@ -4211,11 +5704,11 @@ function MarketingPlanWorkingSheetScreen() {
       rel: "noreferrer"
     }, "Open") : React.createElement("span", {
       className: "muted"
-    }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, React.createElement("select", {
+    }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, row.subPicName || "-"), React.createElement("td", null, React.createElement("select", {
       className: "select marketing-working-status",
       value: rowStatusValue,
       disabled: !canManageRow || updatingRowId === row.contentItemId,
-      title: canManageRow ? "" : "Only PIC or Admin can edit this row.",
+      title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
       onChange: event => handleWorkingRowStatusChange(row, event.target.value)
     }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
       key: option.value,
@@ -4226,23 +5719,23 @@ function MarketingPlanWorkingSheetScreen() {
       type: "button",
       className: "btn btn--secondary btn--xs",
       disabled: !canManageRow || updatingRowId === row.contentItemId,
-      title: canManageRow ? "" : "Only PIC or Admin can edit this row.",
+      title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
       onClick: () => startEditWorkingRow(row)
     }, "Edit"), rowNeedsBriefLinkRepair ? React.createElement("button", {
       type: "button",
       className: "btn btn--secondary btn--xs",
       disabled: !canManageRow || updatingRowId === row.contentItemId,
-      title: canManageRow ? "" : "Only PIC or Admin can edit this row.",
+      title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
       onClick: () => handleRepairWorkingRowBriefLink(row)
     }, "Repair Link") : rowHasLinkedCreativeRequest ? null : React.createElement("button", {
       type: "button",
       className: "btn btn--primary btn--xs",
       disabled: !canManageRow || updatingRowId === row.contentItemId,
-      title: canManageRow ? "" : "Only PIC or Admin can edit this row.",
+      title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
       onClick: () => openFlowMateCreativeBriefFromMarketingRow(row)
     }, "Create Brief"))));
   }), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "12",
+    colSpan: "13",
     className: "muted"
   }, "No rows match the selected filters."))))))), editingWorkingRow && editForm && React.createElement("div", {
     className: "modal-backdrop",
@@ -4261,7 +5754,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "modal__head"
   }, React.createElement("div", null, React.createElement("h2", null, "Edit Working Sheet row"), React.createElement("div", {
     className: "muted"
-  }, "Changes update Timeline, Channel Plan, Calendar, and CSV export.")), React.createElement("button", {
+  }, "Publishing Channel Tags update Timeline, Channel Plan, and Calendar. No Tag stays in Working Sheet and CSV only.")), React.createElement("button", {
     type: "button",
     className: "iconbtn",
     onClick: () => {
@@ -4327,6 +5820,21 @@ function MarketingPlanWorkingSheetScreen() {
     key: tier,
     value: tier
   }, tier)))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Sub PIC"), React.createElement(MarketingPlanSubPicSearch, {
+    inputId: "marketing-plan-edit-sub-pic",
+    users: subPicUsers,
+    userId: editForm.subPicUserId,
+    value: editForm.subPicName,
+    disabled: !((window.FLOWMATE_CURRENT_USER || {}).role === "admin" || editingWorkingRow.picUserId === (window.FLOWMATE_CURRENT_USER || {}).id),
+    onChange: selection => setEditForm(current => ({
+      ...(current || {}),
+      subPicUserId: selection.userId,
+      subPicName: selection.name
+    }))
+  })), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
@@ -4697,6 +6205,11 @@ function MarketingPlanShell({
     detail: "Campaign rows with Product / Event sub-rows and publish dates.",
     icon: "chart"
   }, {
+    key: "facebook-esport-timeline",
+    label: "FB eSport Timeline",
+    detail: "Gantt timeline for Working Sheet rows tagged FB eSport.",
+    icon: "chart"
+  }, {
     key: "channel-plan",
     label: "Channel Plan",
     detail: "View content by Facebook, TikTok, Instagram, LINE, YouTube, and in-game.",
@@ -4757,7 +6270,7 @@ function MarketingPlanShell({
     onSwitchProductBook: onSwitchProductBook
   }), React.createElement("span", {
     className: "topbar__spacer"
-  }), React.createElement("div", {
+  }), React.createElement(ThemeToggle, null), React.createElement("div", {
     className: "topbar__user",
     title: `Signed in as ${currentUserEmail}`
   }, React.createElement(Avatar, {
@@ -4781,7 +6294,11 @@ function MarketingPlanShell({
     size: 15
   }), React.createElement("span", null, section.label))))), React.createElement("main", {
     className: "app__main app__main--marketing"
-  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, null), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null), activeSection.key === "supervisor" && !isAdminUser && React.createElement("div", {
+  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, {
+    channelMode: "official"
+  }), activeSection.key === "facebook-esport-timeline" && React.createElement(MarketingPlanTimelineScreen, {
+    channelMode: "facebook_esport"
+  }), activeSection.key === "channel-plan" && React.createElement(MarketingPlanChannelPlanScreen, null), activeSection.key === "marketing-calendar" && React.createElement(MarketingPlanCalendarScreen, null), activeSection.key === "working-sheet" && React.createElement(MarketingPlanWorkingSheetScreen, null), activeSection.key === "supervisor" && !isAdminUser && React.createElement("div", {
     className: "card",
     style: {
       maxWidth: 720
@@ -4805,6 +6322,16 @@ function GlobalSearchResultsPanel({
   onOpen
 }) {
   const safeResults = results || [];
+  function getAssigneeName(row) {
+    if (row.assignee && MEMBERS_BY_ID[row.assignee]) {
+      return MEMBERS_BY_ID[row.assignee].name;
+    }
+    return row.assigneeOtherName || "Unassigned";
+  }
+  function getContextValue(value, fallback) {
+    const normalized = String(value || "").trim();
+    return normalized || fallback;
+  }
   return React.createElement("div", {
     className: "searchbar-results",
     role: "listbox",
@@ -4833,12 +6360,27 @@ function GlobalSearchResultsPanel({
   }, row.id), React.createElement("span", {
     className: "searchbar__result-title"
   }, row.title)), React.createElement("span", {
+    className: "searchbar__result-context"
+  }, React.createElement("span", {
+    className: "searchbar__result-context-item"
+  }, React.createElement("strong", null, "Campaign"), getContextValue(row.campaign, "No campaign")), React.createElement("span", {
+    className: "searchbar__result-context-item"
+  }, React.createElement("strong", null, "Team"), getContextValue(row.requesterTeam || row.owningTeamKey, "No team")), React.createElement("span", {
+    className: "searchbar__result-context-item"
+  }, React.createElement("strong", null, "Requester"), getContextValue(row.requester, "Unknown"))), React.createElement("span", {
     className: "searchbar__result-meta"
   }, React.createElement(TypePill, {
     type: row.type
   }), React.createElement(StatusBadge, {
     status: row.status
-  }), React.createElement("span", null, row.assignee && MEMBERS_BY_ID[row.assignee] ? MEMBERS_BY_ID[row.assignee].name : row.assigneeOtherName || "Unassigned")))));
+  }), React.createElement(AssignmentWarningBadges, {
+    work: row,
+    limit: 2
+  }), React.createElement("span", {
+    className: "searchbar__result-meta-item"
+  }, React.createElement("strong", null, "Assignee"), getAssigneeName(row)), React.createElement("span", {
+    className: "searchbar__result-meta-item"
+  }, React.createElement("strong", null, "Due"), getContextValue(row.dueFullLabel || row.dueLabel, "No due date"))))));
 }
 function NotificationCenterPanel({
   notifications,
@@ -5392,7 +6934,7 @@ function LoadingScreen() {
     style: {
       fontSize: 13
     }
-  }, "Checking session…"), React.createElement("style", null, `@keyframes flowmate-spin { to { transform: rotate(360deg); } }`));
+  }, "Checking session..."), React.createElement("style", null, `@keyframes flowmate-spin { to { transform: rotate(360deg); } }`));
 }
 function GoogleLogo() {
   return React.createElement("svg", {
@@ -5671,10 +7213,10 @@ function LoginScreen({
     fill: "var(--ink)"
   })))), React.createElement("p", {
     className: "wha-runes wha-runes--hero"
-  }, "· Garena · FCO · Thailand ·"), authError && React.createElement("div", {
+  }, "Garena · FCO · Thailand"), authError && React.createElement("div", {
     className: "wha-error wha-reveal",
     role: "alert"
-  }, React.createElement("strong", null, "⚠"), " ", authError), React.createElement("button", {
+  }, React.createElement("strong", null, "!"), " ", authError), React.createElement("button", {
     type: "button",
     onClick: onSignIn,
     disabled: isSigningIn,
@@ -5684,9 +7226,9 @@ function LoginScreen({
     "aria-hidden": "true"
   }, React.createElement(GoogleLogo, null)), React.createElement("span", {
     className: "wha-cta__label"
-  }, isSigningIn ? "Crossing the threshold…" : "Sign in with Google")), React.createElement("p", {
+  }, isSigningIn ? "Crossing the threshold..." : "Sign in with Google")), React.createElement("p", {
     className: "wha-runes wha-runes--small"
-  }, "⚝ Garena Workspace only ⚝")));
+  }, "Garena Workspace only")));
 }
 function SigilGlyph({
   kind
@@ -6343,7 +7885,7 @@ const WHA_STYLES = `
   perspective: 1200px;
 }
 
-/* Innermost amber diamond — flips clockwise around the vertical axis. */
+/* Innermost amber diamond - flips clockwise around the vertical axis. */
 .wha-glass__amber {
   transform-box: fill-box;
   transform-origin: 50% 50%;
@@ -6378,7 +7920,7 @@ const WHA_STYLES = `
 }
 .wha-sigil:hover { filter: drop-shadow(0 0 10px rgba(196,114,42,0.65)); }
 /* Rotation is driven by SMIL <animateTransform> inside the SVG (see the
-   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS —
+   .wha-sigil__outer / .wha-sigil__penta groups in LoginScreen), NOT CSS -
    desktop Chrome/Edge here would not animate these <g> groups via CSS
    transform (both transform-box: view-box and fill-box stayed frozen on PC
    while mobile rotated). No CSS animation here on purpose. */
@@ -6388,7 +7930,7 @@ const WHA_STYLES = `
   animation: wha-fade 1.4s ease-out 1.4s both;
 }
 .wha-sigil__glyphs g g {
-  /* Subtle individual glyph staggered breath — pulse opacity to mimic
+  /* Subtle individual glyph staggered breath - pulse opacity to mimic
      candle-lit ink that brightens unevenly. */
   animation: wha-glyph-breath 6s ease-in-out infinite;
   transform-box: fill-box;
@@ -6456,7 +7998,7 @@ const WHA_STYLES = `
   animation: wha-fade-up 0.7s cubic-bezier(0.16,1,0.3,1) 1.9s both;
 }
 .wha-cta::before, .wha-cta::after {
-  content: "✦"; position: absolute; top: 50%; transform: translateY(-50%);
+  content: "*"; position: absolute; top: 50%; transform: translateY(-50%);
   color: var(--sienna); font-size: 10px; font-family: serif;
 }
 .wha-cta::before { left: 14px; }

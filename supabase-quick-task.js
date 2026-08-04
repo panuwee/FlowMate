@@ -1,4 +1,111 @@
 window.FLOWMATE_CURRENT_USER = window.FLOWMATE_CURRENT_USER || null;
+window.FLOWMATE_ACTIVE_TEAM = window.FLOWMATE_ACTIVE_TEAM || "";
+
+function normalizeFlowMateWorkspaceTeam(value) {
+  if (window.FlowMateWorkflowMvp && window.FlowMateWorkflowMvp.normalizeTeamKey) {
+    return window.FlowMateWorkflowMvp.normalizeTeamKey(value);
+  }
+  const compact = String(value || "").trim().toLowerCase().replace(/[\s_/-]+/g, "");
+  if (["gdve", "gd", "ve", "creative", "design", "video"].includes(compact)) return "gdve";
+  if (["ops", "operation", "operations"].includes(compact)) return "ops";
+  if (["mkt", "marketing"].includes(compact)) return "mkt";
+  if (["esport", "esports"].includes(compact)) return "esport";
+  return "";
+}
+
+function getFlowMateAccessibleTeamKeys(user = window.FLOWMATE_CURRENT_USER) {
+  if (!user) return [];
+  if (user.can_access_all_teams || user.role === "admin") return ["gdve", "ops", "mkt", "esport"];
+  const source = Array.isArray(user.accessible_teams) ? user.accessible_teams : [user.requester_team];
+  return Array.from(new Set(source.map(normalizeFlowMateWorkspaceTeam).filter(Boolean)));
+}
+
+function getFlowMateActiveTeam() {
+  return normalizeFlowMateWorkspaceTeam(window.FLOWMATE_ACTIVE_TEAM);
+}
+
+function setFlowMateActiveTeam(teamKey, options = {}) {
+  const normalized = normalizeFlowMateWorkspaceTeam(teamKey);
+  const allowed = getFlowMateAccessibleTeamKeys();
+  if (!normalized || !allowed.includes(normalized)) {
+    throw new Error("You do not have access to that team workspace.");
+  }
+  window.FLOWMATE_ACTIVE_TEAM = normalized;
+  try {
+    window.sessionStorage.setItem("flowmate:activeTeam:v1", normalized);
+  } catch (error) {}
+  if (options.announce !== false) {
+    window.dispatchEvent(new CustomEvent("flowmate:team-workspace-changed", {
+      detail: { teamKey: normalized },
+    }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+      detail: { reason: "team_workspace_changed", teamKey: normalized },
+    }));
+  }
+  return normalized;
+}
+
+function initializeFlowMateActiveTeam(user) {
+  const allowed = getFlowMateAccessibleTeamKeys(user);
+  let saved = "";
+  try {
+    saved = normalizeFlowMateWorkspaceTeam(window.sessionStorage.getItem("flowmate:activeTeam:v1"));
+  } catch (error) {}
+  const next = saved && allowed.includes(saved) ? saved : allowed[0] || "";
+  window.FLOWMATE_ACTIVE_TEAM = next;
+  if (next) {
+    try {
+      window.sessionStorage.setItem("flowmate:activeTeam:v1", next);
+    } catch (error) {}
+  }
+  return next;
+}
+
+async function loadFlowMateCreativeFormatCatalog() {
+  if (!window.flowmateSupabase || !window.FlowMateWorkflowMvp?.setCreativeFormatCatalog) return [];
+  const [mappingResult, formatResult] = await Promise.all([
+    window.flowmateSupabase
+      .from("creative_channel_formats")
+      .select("channel_code,format_code"),
+    window.flowmateSupabase
+      .from("creative_formats")
+      .select("code,width_px,height_px,aspect_ratio,display_label,active")
+      .eq("active", true),
+  ]);
+  if (mappingResult.error || formatResult.error) {
+    const message = mappingResult.error?.message || formatResult.error?.message || "";
+    if (!/does not exist|schema cache|relation/i.test(message)) {
+      console.warn("[FlowMate Create] format catalog load failed:", message);
+    }
+    return [];
+  }
+  const formatsByCode = Object.fromEntries((formatResult.data || []).map(row => [row.code, row]));
+  const rows = (mappingResult.data || []).flatMap(mapping => {
+    const format = formatsByCode[mapping.format_code];
+    if (!format) return [];
+    return [{
+      channel_code: mapping.channel_code,
+      format_code: mapping.format_code,
+      width_px: format.width_px,
+      height_px: format.height_px,
+      aspect_ratio: format.aspect_ratio,
+      display_label: format.display_label,
+    }];
+  });
+  window.FlowMateWorkflowMvp.setCreativeFormatCatalog(rows);
+  window.dispatchEvent(new CustomEvent("flowmate:creative-format-catalog-updated", {
+    detail: { rows },
+  }));
+  return rows;
+}
+
+Object.assign(window, {
+  normalizeFlowMateWorkspaceTeam,
+  getFlowMateAccessibleTeamKeys,
+  getFlowMateActiveTeam,
+  setFlowMateActiveTeam,
+  loadFlowMateCreativeFormatCatalog,
+});
 
 function flowmateActorId() {
   return (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id) || null;
@@ -547,6 +654,11 @@ async function createFlowMateCreativeRequest(input) {
     ? input.platforms
     : (input.platforms || "").split(",").map((p) => p.trim()).filter(Boolean);
 
+  const assetSubtype2 = String(input.assetSubtype2 || "").trim();
+  const selectedFormats = Array.isArray(input.sizeFormats)
+    ? input.sizeFormats.map((format) => String(format || "").trim()).filter(Boolean)
+    : String(input.sizeFormat || "").split(",").map((format) => format.trim()).filter(Boolean);
+
   const { data, error } = await window.flowmateSupabase.rpc("create_creative_request", {
     p_actor_user_id:    flowmateActorId(),
     p_title:            input.title.trim(),
@@ -555,8 +667,11 @@ async function createFlowMateCreativeRequest(input) {
     p_asset_type:       input.assetType,
     p_asset_subtype:    input.assetSubtype || "",
     p_asset_count:      Number(input.assetCount || 1),
+    p_asset_type_2:     assetSubtype2 ? input.assetType2 : null,
+    p_asset_subtype_2:  assetSubtype2 || null,
+    p_asset_count_2:    assetSubtype2 ? Number(input.assetCount2 || 0) : null,
     p_platforms:        platforms,
-    p_size_format:      input.sizeFormat || "",
+    p_size_format:      Array.from(new Set(selectedFormats)).join(","),
     p_brief_link:       input.briefLink || "",
     p_brief_note:       input.briefNote || null,
     p_reference_link:   input.referenceLink || null,
@@ -588,6 +703,41 @@ async function rerunFlowMateAssignment(displayId) {
   return data;
 }
 window.rerunFlowMateAssignment = rerunFlowMateAssignment;
+
+async function changeFlowMateCreativeAssignee(displayId, targetMemberId, reason) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!displayId) throw new Error("Work item ID is required.");
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_change_creative_assignee", {
+    p_display_id: displayId,
+    p_target_member_id: targetMemberId || null,
+    p_reason: String(reason || "").trim() || null,
+  });
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "creative_assignee_changed" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
+  return data;
+}
+
+async function rescheduleFlowMateCapacityAllocation(displayId, allocations) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!displayId) throw new Error("Work item ID is required.");
+  if (!Array.isArray(allocations) || allocations.length === 0) throw new Error("At least one allocation is required.");
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_reschedule_capacity_allocation", {
+    p_display_id: displayId,
+    p_allocations: allocations,
+  });
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "capacity_allocation_rescheduled" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
+  return data;
+}
+
+window.changeFlowMateCreativeAssignee = changeFlowMateCreativeAssignee;
+window.rescheduleFlowMateCapacityAllocation = rescheduleFlowMateCapacityAllocation;
 
 async function recheckFlowMateBrief(displayId) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
@@ -759,11 +909,22 @@ async function flowmateInitAuth() {
     return null;
   }
 
-  const { data: profile, error: profileError } = await window.flowmateSupabase
+  let { data: profile, error: profileError } = await window.flowmateSupabase
     .from("users")
-    .select("id, email, display_name, requester_team, is_active, role")
+    .select("id, email, display_name, requester_team, is_active, role, can_access_all_teams")
     .eq("id", session.user.id)
     .maybeSingle();
+
+  // Backward-compatible while workflow_team_workspaces.sql is waiting to run.
+  if (profileError && /can_access_all_teams|column/i.test(profileError.message || "")) {
+    const fallbackProfile = await window.flowmateSupabase
+      .from("users")
+      .select("id, email, display_name, requester_team, is_active, role")
+      .eq("id", session.user.id)
+      .maybeSingle();
+    profile = fallbackProfile.data;
+    profileError = fallbackProfile.error;
+  }
 
   if (profileError) {
     console.warn("[FlowMate Auth] profile lookup failed:", profileError.message);
@@ -802,6 +963,26 @@ async function flowmateInitAuth() {
     .eq("user_id", profile.id)
     .maybeSingle();
 
+  let accessibleTeams = [];
+  if (profile.can_access_all_teams || profile.role === "admin") {
+    accessibleTeams = ["gdve", "ops", "mkt", "esport"];
+  } else {
+    const membershipResult = await window.flowmateSupabase
+      .from("user_team_memberships")
+      .select("team_code,is_primary")
+      .eq("user_id", profile.id)
+      .order("is_primary", { ascending: false });
+    if (!membershipResult.error) {
+      accessibleTeams = (membershipResult.data || []).map(row => normalizeFlowMateWorkspaceTeam(row.team_code)).filter(Boolean);
+    } else if (!/does not exist|schema cache|relation/i.test(membershipResult.error.message || "")) {
+      console.warn("[FlowMate Auth] team memberships lookup failed:", membershipResult.error.message);
+    }
+    if (accessibleTeams.length === 0) {
+      const legacyTeam = normalizeFlowMateWorkspaceTeam(profile.requester_team);
+      if (legacyTeam) accessibleTeams = [legacyTeam];
+    }
+  }
+
   window.FLOWMATE_CURRENT_USER = {
     id: profile.id,
     name: profile.display_name,
@@ -809,8 +990,12 @@ async function flowmateInitAuth() {
     team_member_id: member ? member.id : null,
     requester_team: profile.requester_team || null,
     role: profile.role || "member",
+    can_access_all_teams: Boolean(profile.can_access_all_teams || profile.role === "admin"),
+    accessible_teams: Array.from(new Set(accessibleTeams)),
     is_authenticated: true,
   };
+  initializeFlowMateActiveTeam(window.FLOWMATE_CURRENT_USER);
+  await loadFlowMateCreativeFormatCatalog();
   return window.FLOWMATE_CURRENT_USER;
 }
 
@@ -894,9 +1079,14 @@ async function flowmateSignInWithGoogle() {
   // IMPORTANT: redirectTo MUST NOT contain a hash. Supabase appends
   // `#access_token=...` to the URL, and our own `#board` route fragment
   // would collide ("#board#access_token=...") and break token parsing.
-  // We stash the post-login route in sessionStorage and the App component
-  // restores it after auth init completes.
-  try { sessionStorage.setItem("flowmate:postLoginHash", "my-work"); } catch (e) {}
+  // New interactive sign-ins should land on the workspace chooser. Direct
+  // deep links still work for already-signed-in sessions because this marker
+  // is only written when the user actively clicks the Google login button.
+  try {
+    sessionStorage.removeItem("flowmate:postLoginHash");
+    sessionStorage.removeItem("flowmate:activeProduct");
+    sessionStorage.setItem("flowmate:showProductChoiceAfterLogin", "1");
+  } catch (e) {}
 
   const redirectTo = window.location.origin + window.location.pathname;
   const { error } = await window.flowmateSupabase.auth.signInWithOAuth({
