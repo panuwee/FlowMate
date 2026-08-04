@@ -1899,16 +1899,30 @@ function ProductBookPatchView({
     markdown: markdown
   })));
 }
-const PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES = {
-  "fp+10": "ms26.07-top-updates-fp-10-and-trait-update",
-  "trait update": "ms26.07-top-updates-fp-10-and-trait-update",
-  enhancement: "3.-key-highlight-1",
-  "ranked mode 4.5": "4.-key-highlight-2-ranked-mode-4.5-master",
-  "transfer market": "5.-key-highlight-3-transfer-market-team-color",
-  "team color": "5.-key-highlight-3-transfer-market-team-color",
-  gameplay: "6.-key-highlight-4-gameplay-improvement-match-fairness",
-  qol: "7.-key-highlight-5-qol",
-  performance: "8.-performance-system-stability"
+const PRODUCT_BOOK_TAG_ALIASES = {
+  enhancement: ["ระบบตีบวก"],
+  "ระบบตีบวก": ["enhancement"],
+  "fp+10 และ trait update": ["fp+10"],
+  "trait update": ["fp+10"],
+  "master tier และรางวัล bp": ["ranked mode 4.5"],
+  "ranked mode 4.5": ["master", "ranked mode"],
+  "transfer market": ["ตลาดซื้อขาย"],
+  "team color": ["transfer market", "team color"],
+  gameplay: ["gameplay"],
+  qol: ["quality of life", "ui/ux"],
+  performance: ["performance", "system stability"],
+  "currency redenomination": ["ปรับหน่วยเงิน bp", "currency redenomination"],
+  "ระบบเงิน bp": ["ปรับหน่วยเงิน bp", "currency redenomination"],
+  bp: ["ปรับหน่วยเงิน bp", "currency redenomination"],
+  "bulk item opening": ["ui/ux", "เปิดไอเทม"],
+  "เปิดไอเทมหลายชิ้น": ["ui/ux", "เปิดไอเทม"],
+  cheers: ["ui/ux", "quality of life"],
+  "player class": ["นักเตะและระบบจัดทีม"],
+  "คลาสนักเตะ": ["นักเตะและระบบจัดทีม"],
+  "roster update": ["นักเตะและระบบจัดทีม"],
+  "roster และ squad update": ["นักเตะและระบบจัดทีม"],
+  "bug fix": ["แก้ไขบั๊ก"],
+  "mobile match result": ["แก้ไขบั๊ก"]
 };
 function normalizeProductBookLabel(value) {
   return String(value || "").trim().toLowerCase();
@@ -1943,17 +1957,10 @@ function buildProductBookAnchorMap(patch) {
   const result = {};
   (Array.isArray(patch && patch.tags) ? patch.tags : []).forEach(tag => {
     const key = normalizeProductBookLabel(tag);
-    const preferred = PRODUCT_BOOK_TAG_ANCHOR_OVERRIDES[key];
-    const preferredExists = preferred && candidates.some(item => item.anchor === preferred);
-    if (preferredExists || preferred) {
-      result[tag] = preferred;
-      return;
-    }
-    const tagSlug = productBookSlug(tag);
+    const searchTerms = [key].concat(PRODUCT_BOOK_TAG_ALIASES[key] || []).map(normalizeProductBookLabel).filter(Boolean);
     const match = candidates.find(item => {
       const title = normalizeProductBookLabel(item.title);
-      const anchor = normalizeProductBookLabel(item.anchor);
-      return title.includes(key) || anchor.includes(tagSlug);
+      return searchTerms.some(term => title.includes(term));
     });
     result[tag] = match ? match.anchor : "";
   });
