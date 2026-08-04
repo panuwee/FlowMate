@@ -30,6 +30,11 @@ function flowmateSearchText(row) {
     row.requesterTeam,
     row.campaign,
     owner,
+    row.assignmentResult,
+    row.assignmentReason,
+    ...(Array.isArray(row.assignmentWarnings)
+      ? row.assignmentWarnings.flatMap((warning) => [warning && warning.code, warning && warning.message])
+      : []),
   ]
     .filter(Boolean)
     .join(" ")
@@ -92,6 +97,74 @@ function filterFlowMateAssigneeOptions(options, query) {
 }
 
 const FLOWMATE_DONE_STATUSES = ["delivered", "cancelled", "done"];
+const FLOWMATE_ASSIGNMENT_WARNING_CODES = [
+  "over_capacity",
+  "wip_exceeded",
+  "skill_mismatch",
+  "backup_skill",
+  "member_partial",
+  "member_on_leave",
+  "deadline_capacity_gap",
+  "review_buffer_risk",
+];
+const FLOWMATE_ATTENTION_CATEGORY_CODES = [
+  "unassigned",
+  ...FLOWMATE_ASSIGNMENT_WARNING_CODES,
+  "review_delay",
+  "blocked",
+  "needs_split",
+];
+
+function getFlowMateAssignmentWarnings(row) {
+  return (Array.isArray(row && row.assignmentWarnings) ? row.assignmentWarnings : [])
+    .flatMap((warning) => {
+      if (typeof warning === "string") {
+        const code = warning.trim().toLowerCase();
+        return code ? [{ code, severity: "warning", message: code.replace(/_/g, " ") }] : [];
+      }
+      if (!warning || typeof warning !== "object") return [];
+      const code = String(warning.code || "").trim().toLowerCase();
+      if (!code) return [];
+      return [{
+        code,
+        severity: String(warning.severity || "warning").trim().toLowerCase(),
+        message: String(warning.message || code.replace(/_/g, " ")).trim(),
+      }];
+    });
+}
+
+function getFlowMateAttentionCategoryCodes(row) {
+  if (!row) return [];
+  const codes = new Set();
+  if (row.status === "unassigned") codes.add("unassigned");
+  getFlowMateAssignmentWarnings(row).forEach((warning) => {
+    if (FLOWMATE_ASSIGNMENT_WARNING_CODES.includes(warning.code)) codes.add(warning.code);
+  });
+  if (row.status === "review" && (row.overdue || (row.dueDelta != null && row.dueDelta < 0))) {
+    codes.add("review_delay");
+  }
+  if (row.status === "blocked") codes.add("blocked");
+  if (row.needsSplit) codes.add("needs_split");
+  return FLOWMATE_ATTENTION_CATEGORY_CODES.filter((code) => codes.has(code));
+}
+
+function getFlowMateAttentionRows(rows, query) {
+  const seen = new Set();
+  return (rows || []).filter((row) => {
+    if (!row || seen.has(row.id) || !matchesFlowMateSearch(row, query)) return false;
+    if (getFlowMateAttentionCategoryCodes(row).length === 0) return false;
+    seen.add(row.id);
+    return true;
+  });
+}
+
+function getFlowMateAttentionGroups(rows, query) {
+  const attentionRows = getFlowMateAttentionRows(rows, query);
+  return Object.fromEntries(FLOWMATE_ATTENTION_CATEGORY_CODES.map((code) => [
+    code,
+    attentionRows.filter((row) => getFlowMateAttentionCategoryCodes(row).includes(code)),
+  ]));
+}
 
 function isFlowMateActiveStatus(status) {
   return !FLOWMATE_DONE_STATUSES.includes((status || "").toLowerCase());
@@ -118,9 +191,11 @@ function getFlowMateMyWorkRows(rows, currentUser, members, query) {
 
 function getFlowMateMyWorkSortRank(row) {
   if (row && (row.overdue || (row.dueDelta != null && row.dueDelta < 0))) return 0;
-  if (row && row.dueDelta === 0) return 1;
-  if (row && row.dueDelta != null && row.dueDelta > 0) return 2;
-  return 3;
+  if (row && row.status === "blocked") return 1;
+  const warningCodes = new Set(getFlowMateAssignmentWarnings(row).map((warning) => warning.code));
+  if (warningCodes.has("over_capacity") || warningCodes.has("deadline_capacity_gap") || warningCodes.has("review_buffer_risk")) return 2;
+  if (row && row.dueDelta != null && row.dueDelta >= 0 && row.dueDelta <= 2) return 3;
+  return 4;
 }
 
 function sortFlowMateMyWorkRows(rows) {
@@ -277,7 +352,7 @@ function getFlowMateQueueRows(rows, query) {
 function getFlowMateNavCounts(rows, currentUser, members) {
   return {
     "my-work": getFlowMateMyWorkRows(rows, currentUser, members).length,
-    queue: getFlowMateQueueRows(rows).length,
+    attention: getFlowMateAttentionRows(rows).length,
   };
 }
 
@@ -287,7 +362,15 @@ function isFlowMateGdVeMember(member) {
   const name = String((member && member.name) || (member && member.display_name) || "").toLowerCase();
   const code = String((member && member.member_code) || "").toLowerCase();
   const id = String((member && member.id) || "").toLowerCase();
-  return FLOWMATE_GD_VE_NAMES.includes(name)
+  const discipline = String(
+    (member && member.discipline)
+      || (member && member.discipline_short)
+      || (member && member.team)
+      || ""
+  ).toLowerCase().replace(/[^a-z0-9]/g, "");
+  return discipline === "gdve"
+    || discipline === "graphicdesignvideo"
+    || FLOWMATE_GD_VE_NAMES.includes(name)
     || FLOWMATE_GD_VE_NAMES.includes(code)
     || FLOWMATE_GD_VE_NAMES.some((owner) => id.includes(owner));
 }
@@ -314,6 +397,12 @@ window.sortFlowMateMyWorkRows = sortFlowMateMyWorkRows;
 window.getFlowMateCalendarDateKey = getFlowMateCalendarDateKey;
 window.getFlowMateCalendarAgendaRows = getFlowMateCalendarAgendaRows;
 window.getFlowMateQueueRows = getFlowMateQueueRows;
+window.FLOWMATE_ASSIGNMENT_WARNING_CODES = FLOWMATE_ASSIGNMENT_WARNING_CODES;
+window.FLOWMATE_ATTENTION_CATEGORY_CODES = FLOWMATE_ATTENTION_CATEGORY_CODES;
+window.getFlowMateAssignmentWarnings = getFlowMateAssignmentWarnings;
+window.getFlowMateAttentionCategoryCodes = getFlowMateAttentionCategoryCodes;
+window.getFlowMateAttentionRows = getFlowMateAttentionRows;
+window.getFlowMateAttentionGroups = getFlowMateAttentionGroups;
 window.getFlowMateNavCounts = getFlowMateNavCounts;
 window.isFlowMateGdVeMember = isFlowMateGdVeMember;
 window.getFlowMateWorkloadStatusCounts = getFlowMateWorkloadStatusCounts;

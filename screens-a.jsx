@@ -1,4 +1,4 @@
-﻿// FlowMate - Screens part A: My Work, Create, Detail
+// FlowMate - Screens part A: My Work, Create, Detail
 const { useState, useEffect } = React;
 
 /* ============================================================
@@ -167,18 +167,25 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const mine = window.sortFlowMateMyWorkRows
     ? window.sortFlowMateMyWorkRows(window.filterFlowMateMyWorkByStatus(rawMine, filterStatus))
     : rawMine;
-  const overdue = window.sortFlowMateMyWorkRows(mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0)));
-  const dueToday = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta === 0 && ["assigned","in_progress","review"].includes(w.status)));
-  const dueSoon = window.sortFlowMateMyWorkRows(mine.filter(w => !w.overdue && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)));
-  // O-6: membership via id-Sets instead of Array.includes(object) inside a
-  // filter (which was O(n²) over the grouped lists).
+  const overdue = mine.filter(w => w.overdue || (w.dueDelta != null && w.dueDelta < 0));
+  const overdueIds = new Set(overdue.map(w => w.id));
+  const blocked = mine.filter(w => w.status === "blocked" && !overdueIds.has(w.id));
+  const blockedIds = new Set(blocked.map(w => w.id));
+  const capacityRisk = mine.filter(w => {
+    if (overdueIds.has(w.id) || blockedIds.has(w.id)) return false;
+    const codes = new Set((window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : []).map(warning => warning.code));
+    return codes.has("over_capacity") || codes.has("deadline_capacity_gap") || codes.has("review_buffer_risk");
+  });
+  const capacityRiskIds = new Set(capacityRisk.map(w => w.id));
+  const dueToday = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && w.dueDelta === 0);
   const dueTodayIds = new Set(dueToday.map(w => w.id));
+  const dueSoon = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && !dueTodayIds.has(w.id) && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2);
   const dueSoonIds = new Set(dueSoon.map(w => w.id));
-  const inProgress = mine.filter(w => w.status === "in_progress" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
-  const assigned = mine.filter(w => w.status === "assigned" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
-  const review = mine.filter(w => w.status === "review" && !w.overdue && !dueTodayIds.has(w.id) && !dueSoonIds.has(w.id));
-  const blocked = mine.filter(w => w.status === "blocked" && !w.overdue);
-  const activeGroupIds = new Set([...overdue, ...dueToday, ...dueSoon, ...inProgress, ...assigned, ...review, ...blocked].map(w => w.id));
+  const riskGroupIds = new Set([...overdueIds, ...blockedIds, ...capacityRiskIds, ...dueTodayIds, ...dueSoonIds]);
+  const inProgress = mine.filter(w => w.status === "in_progress" && !riskGroupIds.has(w.id));
+  const assigned = mine.filter(w => w.status === "assigned" && !riskGroupIds.has(w.id));
+  const review = mine.filter(w => w.status === "review" && !riskGroupIds.has(w.id));
+  const activeGroupIds = new Set([...riskGroupIds, ...inProgress.map(w => w.id), ...assigned.map(w => w.id), ...review.map(w => w.id)]);
   const quick = mine.filter(w => w.type === "quick" && !activeGroupIds.has(w.id));
   function scrollToOverdue() {
     document.getElementById("my-work-overdue")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -206,7 +213,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       <div className="stat-strip">
         <div className="stat stat--accent"><div className="stat__num">{overdue.length}</div><div className="stat__lbl">Overdue</div></div>
         <div className="stat stat--warn"><div className="stat__num">{dueToday.length}</div><div className="stat__lbl">Due today</div></div>
-        <div className="stat stat--info"><div className="stat__num">{inProgress.length + dueSoon.filter(d=>d.status==="in_progress").length + dueToday.filter(d=>d.status==="in_progress").length}</div><div className="stat__lbl">In progress</div></div>
+        <div className="stat stat--info"><div className="stat__num">{capacityRisk.length}</div><div className="stat__lbl">Capacity / deadline risk</div></div>
         <div className="stat"><div className="stat__num">{review.length + dueSoon.filter(d=>d.status==="review").length + dueToday.filter(d=>d.status==="review").length}</div><div className="stat__lbl">Review</div></div>
         <div className="stat"><div className="stat__num">{blocked.length}</div><div className="stat__lbl">Blocked</div></div>
       </div>
@@ -227,6 +234,8 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       </div>
 
       <MyWorkGroup title="Overdue" tone="overdue" items={overdue} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Blocked" items={blocked} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Capacity / deadline risk" items={capacityRisk} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="Due today" items={dueToday} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
       <MyWorkGroup title="In progress" items={inProgress} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
@@ -267,7 +276,7 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                 onOpen(w.id);
               }}>
                 <td className="col-id mono">{w.id}</td>
-                <td className="col-title">{w.title}</td>
+                <td className="col-title"><div>{w.title}</div><AssignmentWarningBadges work={w} limit={2} /></td>
                 <td><TypePill type={w.type} /></td>
                 <td><StatusBadge status={w.status} /></td>
                 <td><PriorityBadge level={w.priority} /></td>
@@ -453,12 +462,34 @@ const FLOWMATE_CREATIVE_TYPE_OPTIONS = [
 
 const FLOWMATE_CREATIVE_CHANNEL_OPTIONS = [
   { key: "facebook", label: "Facebook" },
+  { key: "facebook_esport", label: "FB eSport" },
   { key: "tiktok", label: "TikTok" },
   { key: "instagram", label: "Instagram" },
   { key: "in_game", label: "In-game" },
   { key: "youtube", label: "YouTube" },
   { key: "other", label: "Other" },
+  { key: "no_tag", label: "No Tag" },
 ];
+
+const FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL = {
+  Facebook: ["1200x1200", "1200x1500"],
+  "FB eSport": ["1200x1200", "1200x1500"],
+  TikTok: ["1080x1920", "1200x1500"],
+  Instagram: ["1200x1200", "1200x1500"],
+  YouTube: ["1920x1080"],
+  "In-game": ["custom"],
+  Other: ["custom"],
+  "No Tag": ["custom"],
+};
+
+const FLOWMATE_CREATIVE_FORMAT_LABELS = {
+  "1200x1200": "1200×1200 (1:1)",
+  "1200x1500": "1200×1500 (4:5)",
+  "1080x1920": "1080×1920 (9:16)",
+  "1920x1080": "1920×1080 (16:9)",
+  custom: "Custom",
+};
+const FLOWMATE_CREATIVE_FORMAT_DISPLAY_ORDER = ["1200x1200", "1200x1500", "1080x1920", "1920x1080", "custom"];
 
 const FLOWMATE_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
 
@@ -489,6 +520,60 @@ function normalizeFlowMateCreativeChannels(value) {
 
 function formatFlowMateCreativeChannels(value) {
   return normalizeFlowMateCreativeChannels(value).join(", ");
+}
+
+function normalizeFlowMateCreativeFormatKey(option) {
+  if (typeof option === "string") return option.trim();
+  if (!option || typeof option !== "object") return "";
+  return String(option.key || option.value || option.formatKey || "").trim();
+}
+
+function getFlowMateCreativeFormatOptions(channelLabels) {
+  const normalizedChannels = normalizeFlowMateCreativeChannels(channelLabels);
+  const workflowMvp = typeof window !== "undefined" ? window.FlowMateWorkflowMvp : null;
+  if (workflowMvp && typeof workflowMvp.getFormatOptionsForChannels === "function") {
+    const workflowOptions = workflowMvp.getFormatOptionsForChannels(normalizedChannels);
+    if (Array.isArray(workflowOptions)) {
+      return Array.from(new Set(workflowOptions.map(normalizeFlowMateCreativeFormatKey).filter(Boolean)));
+    }
+  }
+  return Array.from(new Set(normalizedChannels.flatMap(
+    (channelLabel) => FLOWMATE_CREATIVE_FORMATS_BY_CHANNEL[channelLabel] || ["custom"],
+  )));
+}
+
+function isFlowMateCreativeFormatValid(formatKey, channelLabels) {
+  const normalizedFormatKey = String(formatKey || "").trim();
+  if (!normalizedFormatKey) return false;
+  const normalizedChannels = normalizeFlowMateCreativeChannels(channelLabels);
+  const workflowMvp = typeof window !== "undefined" ? window.FlowMateWorkflowMvp : null;
+  if (workflowMvp && typeof workflowMvp.isFormatValidForChannels === "function") {
+    return Boolean(workflowMvp.isFormatValidForChannels(normalizedFormatKey, normalizedChannels));
+  }
+  return getFlowMateCreativeFormatOptions(normalizedChannels).includes(normalizedFormatKey);
+}
+
+function getFlowMateCreativeFormatLabel(formatKey) {
+  const normalizedFormatKey = String(formatKey || "").trim();
+  const workflowMvp = typeof window !== "undefined" ? window.FlowMateWorkflowMvp : null;
+  if (workflowMvp && typeof workflowMvp.formatLabel === "function") {
+    const workflowLabel = workflowMvp.formatLabel(normalizedFormatKey);
+    if (workflowLabel) return workflowLabel;
+  }
+  return FLOWMATE_CREATIVE_FORMAT_LABELS[normalizedFormatKey] || normalizedFormatKey;
+}
+
+function normalizeFlowMateCreativeFormatKeys(value) {
+  const rawValues = Array.isArray(value)
+    ? value
+    : String(value || "").split(",").map((item) => item.trim()).filter(Boolean);
+  return Array.from(new Set(rawValues.map(normalizeFlowMateCreativeFormatKey).filter(Boolean)));
+}
+
+function getFlowMateSelectedCreativeFormatKeys(draft) {
+  const structured = normalizeFlowMateCreativeFormatKeys(draft && draft.sizeFormats);
+  if (structured.length) return structured;
+  return normalizeFlowMateCreativeFormatKeys(draft && draft.sizeFormat);
 }
 
 const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
@@ -561,6 +646,31 @@ function getFlowMateDraftDateForLaunchDate(launchDate) {
   return clampFlowMateDateToToday(draftDate);
 }
 
+function getFlowMateEarliestCreativeDraftDate(draft, now = new Date()) {
+  const productionStart = getFlowMateProductionStartBucket(now);
+  let remainingBuckets = Math.max(
+    1,
+    Math.ceil(getFlowMateCreativeEffortEstimate(draft) / FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET),
+  );
+  let cursorDate = productionStart.date;
+
+  remainingBuckets -= productionStart.half === "pm" ? 1 : 2;
+  while (remainingBuckets > 0) {
+    cursorDate = getFlowMateNextWorkingDay(addFlowMateCalendarDays(cursorDate, 1));
+    remainingBuckets -= 2;
+  }
+
+  return cursorDate;
+}
+
+function getFlowMateAutoCreativeDraftDate(draft, now = new Date()) {
+  const launchDate = clampFlowMateDateToToday(draft?.launchDate);
+  const reviewTargetDate = getFlowMateDraftDateForLaunchDate(launchDate);
+  const earliestProductionDate = getFlowMateEarliestCreativeDraftDate(draft, now);
+  const effortAwareDate = reviewTargetDate > earliestProductionDate ? reviewTargetDate : earliestProductionDate;
+  return effortAwareDate > launchDate ? launchDate : effortAwareDate;
+}
+
 function getFlowMateNextWorkingDay(dateValue) {
   const parts = String(dateValue || "").slice(0, 10).split("-").map((part) => Number(part));
   if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return getFlowMateTodayDateKey();
@@ -610,38 +720,56 @@ function countFlowMateCapacityBucketsInclusive(startDate, startHalf, endDate) {
   return bucketCount;
 }
 
-function getFlowMateCreativeEffortEstimate(draft) {
-  const typeKey = getFlowMateCreativeTypeOption(draft?.assetSubtype).key;
+function getFlowMateCreativeEffortForItem(assetSubtype, assetCount) {
+  const typeKey = getFlowMateCreativeTypeOption(assetSubtype).key;
   const unitEffort = FLOWMATE_CREATIVE_UNIT_EFFORT[typeKey] || 4;
-  const assetCount = Math.max(1, Number(draft?.assetCount || 1));
-  return Math.max(1, Math.ceil(unitEffort * assetCount));
+  return Math.max(1, Math.ceil(unitEffort * Math.max(1, Number(assetCount || 1))));
+}
+
+function getFlowMateCreativeEffortEstimate(draft) {
+  let effort = getFlowMateCreativeEffortForItem(draft?.assetSubtype, draft?.assetCount);
+  if (String(draft?.assetSubtype2 || "").trim()) {
+    effort += getFlowMateCreativeEffortForItem(draft.assetSubtype2, draft.assetCount2);
+  }
+  return effort;
 }
 
 function getFlowMateCreativeTimePressure(draft) {
   const launchDate = clampFlowMateDateToToday(draft?.launchDate);
-  const dueDate = clampFlowMateDateToToday(draft?.dueDate || getFlowMateDraftDateForLaunchDate(launchDate));
+  const dueDate = clampFlowMateDateToToday(draft?.dueDate || getFlowMateAutoCreativeDraftDate(draft));
   const productionStart = getFlowMateProductionStartBucket();
   const bucketCount = countFlowMateCapacityBucketsInclusive(productionStart.date, productionStart.half, dueDate);
   const workingDays = bucketCount / 2;
   const normalCapacity = bucketCount * FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET;
   const effort = getFlowMateCreativeEffortEstimate(draft);
+  const reviewTargetDate = getFlowMateDraftDateForLaunchDate(launchDate);
+  const earliestProductionDate = getFlowMateEarliestCreativeDraftDate(draft);
   const assetCount = Math.max(1, Number(draft?.assetCount || 1));
-  const skillLabel = getFlowMateCreativeTypeLabel(draft?.assetSubtype);
+  const hasSecondItem = Boolean(String(draft?.assetSubtype2 || "").trim());
+  const skillLabel = [getFlowMateCreativeTypeLabel(draft?.assetSubtype), hasSecondItem ? getFlowMateCreativeTypeLabel(draft.assetSubtype2) : ""].filter(Boolean).join(" + ");
+  const assetCountLabel = hasSecondItem ? `${assetCount} + ${Math.max(1, Number(draft?.assetCount2 || 1))}` : String(assetCount);
   return {
     effort,
     workingDays,
     normalCapacity,
-    assetCount,
+    assetCount: assetCountLabel,
     skillLabel,
     launchDate,
     dueDate,
     productionStart,
     bucketCount,
     isInsufficient: effort > normalCapacity,
+    reviewTargetDate,
+    earliestProductionDate,
+    isReviewBufferAtRisk: dueDate > reviewTargetDate,
+    requiresUrgent: effort > normalCapacity || dueDate > reviewTargetDate,
   };
 }
 
 function getFlowMateAutoUrgentReason(timePressure) {
+  if (timePressure.isReviewBufferAtRisk && !timePressure.isInsufficient) {
+    return `Auto urgent: earliest feasible 1st Draft is ${timePressure.dueDate}, leaving less than ${FLOWMATE_REVIEW_BUFFER_WORKING_DAYS} working days before Launch ${timePressure.launchDate}.`;
+  }
   return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before 1st Draft.`;
 }
 
@@ -657,18 +785,27 @@ function normalizeFlowMateQuickDraft(draft) {
 function normalizeFlowMateCreativeDraft(draft) {
   const nextDraft = { ...getDefaultCreativeDraft(), ...(draft || {}) };
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
+  const creativeType2 = String(nextDraft.assetSubtype2 || "").trim() ? getFlowMateCreativeTypeOption(nextDraft.assetSubtype2) : null;
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
-  return {
+  const assetCount2Number = Number(nextDraft.assetCount2);
+  const assetCount2 = creativeType2 && Number.isInteger(assetCount2Number) && assetCount2Number >= 1 ? String(assetCount2Number) : String(nextDraft.assetCount2 || "");
+  const normalizedDraft = {
     ...nextDraft,
     requesterTeam: getDefaultRequesterTeam(),
     assetType: creativeType.assetType,
     assetSubtype: creativeType.key,
     assetCount,
+    assetType2: creativeType2 ? creativeType2.assetType : "",
+    assetSubtype2: creativeType2 ? creativeType2.key : "",
+    assetCount2,
     publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || FLOWMATE_PUBLISH_TIME_OPTIONS[0],
     launchDate,
-    dueDate: getFlowMateDraftDateForLaunchDate(launchDate),
+  };
+  return {
+    ...normalizedDraft,
+    dueDate: getFlowMateAutoCreativeDraftDate(normalizedDraft),
   };
 }
 
@@ -712,7 +849,11 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "assetType",
     "assetSubtype",
     "assetCount",
+    "assetType2",
+    "assetSubtype2",
+    "assetCount2",
     "platforms",
+    "sizeFormats",
     "sizeFormat",
     "briefLink",
     "briefNote",
@@ -756,8 +897,12 @@ function getDefaultCreativeDraft() {
     assetType: "static-graphic",
     assetSubtype: FLOWMATE_CREATIVE_TYPE_OPTIONS[0].key,
     assetCount: "1",
+    assetType2: "",
+    assetSubtype2: "",
+    assetCount2: "",
     platforms: "Instagram",
-    sizeFormat: "1080x1080",
+    sizeFormats: ["1200x1200", "1200x1500"],
+    sizeFormat: "1200x1200",
     briefLink: "",
     briefNote: "",
     referenceLink: "",
@@ -781,7 +926,7 @@ function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {
   const fields = FLOWMATE_CREATE_DRAFT_FIELDS[kind] || [];
   return fields.reduce((payload, field) => {
     const value = Object.prototype.hasOwnProperty.call(draft || {}, field) ? draft[field] : fallback[field];
-    payload[field] = typeof value === "string" ? value : "";
+    payload[field] = Array.isArray(value) ? value.slice() : typeof value === "string" ? value : "";
     return payload;
   }, {});
 }
@@ -833,8 +978,20 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("productEvent", "Product / Event is required.");
   requireField("assetSubtype", "Type / Skill is required.");
   requirePositiveInteger("assetCount", "Asset Count must be at least 1.");
+  if (String(row.assetSubtype2 || "").trim()) {
+    requirePositiveInteger("assetCount2", "Asset Count 2 must be at least 1 when Type / Skill 2 is selected.");
+  } else if (String(row.assetCount2 || "").trim()) {
+    errors.assetSubtype2 = "Type / Skill 2 is required when Asset Count 2 is provided.";
+  }
   requireField("platforms", "Channel Tag is required.");
-  requireField("sizeFormat", "Size / format is required.");
+  const selectedFormatKeys = getFlowMateSelectedCreativeFormatKeys(row);
+  if (selectedFormatKeys.length === 0) {
+    errors.sizeFormat = "Select at least one Size / format.";
+  } else if (selectedFormatKeys.some(formatKey => (
+    !isFlowMateCreativeFormatValid(formatKey, normalizeFlowMateCreativeChannels(row.platforms))
+  ))) {
+    errors.sizeFormat = "Choose a Size / format that is valid for the selected Channel Tag(s).";
+  }
   requireField("briefLink", "Brief link is required.");
   requireHttpUrl("briefLink", FLOWMATE_INVALID_BRIEF_LINK_MESSAGE);
   requireField("priority", "Priority is required.");
@@ -1054,13 +1211,15 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
     }
 
     const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
-    if (timePressure && timePressure.isInsufficient && submissionDraft.priority !== "urgent") {
+    if (timePressure && timePressure.requiresUrgent && submissionDraft.priority !== "urgent") {
       const autoUrgentReason = getFlowMateAutoUrgentReason(timePressure);
       const confirmed = window.flowmatePrompt
         ? await window.flowmatePrompt({
             title: "เวลาไม่เพียงพอ",
             hideInput: true,
-            note: `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before 1st Draft. Priority will be set to Urgent.`,
+            note: timePressure.isInsufficient
+              ? `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before 1st Draft. Priority will be set to Urgent.`
+              : `The earliest feasible 1st Draft is ${timePressure.dueDate}, leaving less than ${FLOWMATE_REVIEW_BUFFER_WORKING_DAYS} working days before Launch. Priority will be set to Urgent.`,
             confirmText: "Set Urgent and submit",
           })
         : "";
@@ -1098,13 +1257,18 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
           marketingPlanSyncWarning = "Creative Request was created, but FlowMate could not link it back to Marketing Plan. Refresh Working Sheet before creating another brief for this row.";
         }
         const assignment = created.assignment || {};
-        const result = assignment.result || "queued";
+        const result = assignment.result || "unassigned";
+        const assignmentWarnings = window.parseFlowMateAssignmentWarnings
+          ? window.parseFlowMateAssignmentWarnings({ warnings: assignment.warnings || assignment.capacity_snapshot?.warnings || [] })
+          : (Array.isArray(assignment.warnings) ? assignment.warnings : []);
         nextResult = {
-          kind: result === "assigned" ? "assigned" : result === "need_brief" ? "need_brief" : "queued",
+          kind: result === "assigned" ? "assigned" : result === "need_brief" ? "need_brief" : "unassigned",
           id: window.getFlowMateCreatedDisplayId(created),
-          owner: assignment.owner_code ? `m-${assignment.owner_code}` : null,
+          owner: assignment.owner_member_id || assignment.final_owner_member_id || (assignment.owner_code ? `m-${assignment.owner_code}` : null),
+          ownerName: assignment.owner_name || assignment.owner_display_name || assignment.owner_code || "",
           effort: assignment.effort || null,
           reason: assignment.reason || "",
+          warnings: assignmentWarnings,
           warning: marketingPlanSyncWarning,
         };
       }
@@ -1360,9 +1524,23 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
 }
 function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
+  const selectedCreativeType2Key = String(value.assetSubtype2 || "").trim();
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
+  const [formatPrompt, setFormatPrompt] = useState("");
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
+  const formatOptions = getFlowMateCreativeFormatOptions(selectedChannels);
+  const selectedFormatKeys = getFlowMateSelectedCreativeFormatKeys(value);
+  const invalidSelectedFormatKeys = selectedFormatKeys.filter(formatKey => !formatOptions.includes(formatKey));
+  const formatDisplayOptions = Array.from(new Set([
+    ...FLOWMATE_CREATIVE_FORMAT_DISPLAY_ORDER,
+    ...formatOptions,
+    ...selectedFormatKeys,
+  ]));
+  const visibleFormatPrompt = formatPrompt
+    || (invalidSelectedFormatKeys.length
+      ? "The selected Size / format is not valid for the selected Channel Tag(s). Choose a valid option."
+      : "");
 
   useEffect(() => {
     let alive = true;
@@ -1385,29 +1563,66 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
   }, []);
 
   function update(field, next) {
+    const applyAutoDraftDate = (nextValue) => ({
+      ...nextValue,
+      dueDate: getFlowMateAutoCreativeDraftDate(nextValue),
+    });
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
-      onChange({ ...value, assetType: nextType.assetType, assetSubtype: nextType.key });
+      onChange(applyAutoDraftDate({ ...value, assetType: nextType.assetType, assetSubtype: nextType.key }));
+      return;
+    }
+    if (field === "assetSubtype2") {
+      if (!next) {
+        onChange(applyAutoDraftDate({ ...value, assetType2: "", assetSubtype2: "", assetCount2: "" }));
+        return;
+      }
+      const nextType = getFlowMateCreativeTypeOption(next);
+      onChange(applyAutoDraftDate({ ...value, assetType2: nextType.assetType, assetSubtype2: nextType.key, assetCount2: value.assetCount2 || "1" }));
       return;
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
-      onChange({
+      onChange(applyAutoDraftDate({
         ...value,
         launchDate: nextLaunchDate,
-        dueDate: getFlowMateDraftDateForLaunchDate(nextLaunchDate),
-      });
+      }));
       return;
     }
-    onChange({ ...value, [field]: next });
+    const nextValue = { ...value, [field]: next };
+    onChange(["assetCount", "assetCount2"].includes(field) ? applyAutoDraftDate(nextValue) : nextValue);
   }
 
   function toggleChannel(channelLabel) {
     const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
-    const nextChannels = currentChannels.includes(channelLabel)
-      ? currentChannels.filter(channel => channel !== channelLabel)
-      : [...currentChannels, channelLabel];
-    update("platforms", nextChannels.length ? nextChannels.join(", ") : channelLabel);
+    const nextChannels = channelLabel === "No Tag"
+      ? ["No Tag"]
+      : (currentChannels.filter(channel => channel !== "No Tag").includes(channelLabel)
+        ? currentChannels.filter(channel => channel !== "No Tag" && channel !== channelLabel)
+        : [...currentChannels.filter(channel => channel !== "No Tag"), channelLabel]);
+    const normalizedNextChannels = nextChannels.length ? nextChannels : [channelLabel];
+    const nextValue = {
+      ...value,
+      platforms: normalizedNextChannels.join(", "),
+    };
+    const nextFormatKeys = getFlowMateCreativeFormatOptions(normalizedNextChannels);
+    nextValue.sizeFormats = nextFormatKeys;
+    nextValue.sizeFormat = nextFormatKeys[0] || "";
+    setFormatPrompt(nextFormatKeys.length ? "Size / format updated automatically from the selected Channel Tags." : "");
+    onChange(nextValue);
+  }
+
+  function toggleFormat(formatKey) {
+    if (!formatOptions.includes(formatKey)) return;
+    const nextFormatKeys = selectedFormatKeys.includes(formatKey)
+      ? selectedFormatKeys.filter(key => key !== formatKey)
+      : [...selectedFormatKeys, formatKey];
+    setFormatPrompt("");
+    onChange({
+      ...value,
+      sizeFormats: nextFormatKeys,
+      sizeFormat: nextFormatKeys[0] || "",
+    });
   }
 
   return (
@@ -1443,6 +1658,19 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           <input className="input" type="number" min="1" step="1" value={value.assetCount} onChange={e => update("assetCount", e.target.value)} placeholder="1" />
           {errors.assetCount && <div className="field__error">{errors.assetCount}</div>}
         </div>
+        <div className={`field ${errors.assetSubtype2 ? "field--error" : ""}`}>
+          <label className="field__label">Type / Skill 2</label>
+          <select className="select" value={selectedCreativeType2Key} onChange={e => update("assetSubtype2", e.target.value)}>
+            <option value="">No second item</option>
+            {FLOWMATE_CREATIVE_TYPE_OPTIONS.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select>
+          {errors.assetSubtype2 && <div className="field__error">{errors.assetSubtype2}</div>}
+        </div>
+        <div className={`field ${errors.assetCount2 ? "field--error" : ""}`}>
+          <label className="field__label">Asset Count 2 {selectedCreativeType2Key && <span className="req">*</span>}</label>
+          <input className="input" type="number" min="1" step="1" value={value.assetCount2 || ""} onChange={e => update("assetCount2", e.target.value)} placeholder={selectedCreativeType2Key ? "1" : "Optional"} disabled={!selectedCreativeType2Key} />
+          {errors.assetCount2 && <div className="field__error">{errors.assetCount2}</div>}
+        </div>
         <div className={`field ${errors.platforms ? "field--error" : ""}`}>
           <label className="field__label">Channel Tag <span className="req">*</span></label>
           <div className="check-row">
@@ -1450,6 +1678,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
               <label key={channel.key} className="check-pill">
                 <input
                   type="checkbox"
+                  data-testid={`creative-channel-${channel.key.replace("_", "-")}`}
                   checked={selectedChannels.includes(channel.label)}
                   onChange={() => toggleChannel(channel.label)}
                 />
@@ -1459,10 +1688,34 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
           </div>
           {errors.platforms && <div className="field__error">{errors.platforms}</div>}
         </div>
-        <div className={`field ${errors.sizeFormat ? "field--error" : ""}`}>
+        <div className={`field ${errors.sizeFormat || visibleFormatPrompt ? "field--error" : ""}`} data-testid="creative-format-field">
           <label className="field__label">Size / format <span className="req">*</span></label>
-          <input className="input" value={value.sizeFormat} onChange={e => update("sizeFormat", e.target.value)} placeholder="e.g. 1080x1350, 1080x1920" />
-          {errors.sizeFormat && <div className="field__error">{errors.sizeFormat}</div>}
+          <div className="check-row" data-testid="creative-format-checkboxes">
+            {formatDisplayOptions.map(formatKey => {
+              const isAvailable = formatOptions.includes(formatKey);
+              return (
+                <label key={formatKey} className={`check-pill${isAvailable ? "" : " is-disabled"}`}>
+                  <input
+                    type="checkbox"
+                    data-testid={`creative-format-${formatKey}`}
+                    checked={selectedFormatKeys.includes(formatKey)}
+                    disabled={!isAvailable}
+                    onChange={() => toggleFormat(formatKey)}
+                  />
+                  <span>{getFlowMateCreativeFormatLabel(formatKey)}</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            Valid formats are selected automatically from Channel Tags. Uncheck any format that is not required.
+          </div>
+          {visibleFormatPrompt && (
+            <div className="field__error" data-testid="creative-format-prompt">{visibleFormatPrompt}</div>
+          )}
+          {errors.sizeFormat && (
+            <div className="field__error" data-testid="creative-format-error">{errors.sizeFormat}</div>
+          )}
         </div>
         <div className={`field ${errors.briefLink ? "field--error" : ""}`}>
           <label className="field__label">Brief link <span className="req">*</span></label>
@@ -1493,7 +1746,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">1st Draft <span className="req">*</span></label>
           <input className="input" type="date" value={value.dueDate} readOnly disabled min={todayDate} />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Generated from Launch Date minus 2 working days.</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Generated from effort, current production cutoff, and Launch Date review buffer.</div>
           {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
         </div>
         <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
@@ -1522,13 +1775,14 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
 
 function CreateResultScreen({ result, onAgain, onNav }) {
   const m = result.kind === "assigned" && result.owner ? MEMBERS_BY_ID[result.owner] : null;
+  const resultWarningWork = { assignmentWarnings: result.warnings || [] };
   return (
     <div className="page" style={{ maxWidth: 760 }}>
       <div className="card">
         <div className="card__head">
           <span className="card__title">
             {result.kind === "assigned" && "Request submitted - assigned"}
-            {result.kind === "queued" && "Request submitted - queued"}
+            {result.kind === "unassigned" && "Request submitted - unassigned"}
             {result.kind === "need_brief" && "Request submitted - needs brief"}
             {result.kind === "quick_created" && "Quick task created"}
             {result.kind === "open_failed" && "Saved - detail did not open"}
@@ -1538,31 +1792,33 @@ function CreateResultScreen({ result, onAgain, onNav }) {
           <span className="card__sub mono">{result.id}</span>
         </div>
         <div className="card__body">
-          {result.kind === "assigned" && m && (
+          {result.kind === "assigned" && (
             <div className="col" style={{ gap: 12 }}>
               <div className="row" style={{ gap: 12 }}>
                 <Avatar memberId={result.owner} size="avatar--xl" />
                 <div>
-                  <div className="strong" style={{ fontSize: 16 }}>{m.name}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{m.discipline} - capacity {m.capacityPerDay} pt/day</div>
+                  <div className="strong" style={{ fontSize: 16 }}>{m?.name || result.ownerName || "Assigned owner"}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{m ? `${m.discipline} - capacity ${m.capacityPerDay} pt/day` : "Owner selected by the assignment engine"}</div>
                 </div>
                 <div className="spacer"></div>
                 <Effort value={result.effort} lg />
                 <span className="muted" style={{ fontSize: 12 }}>effort points</span>
               </div>
-              <div className="reason-box">{result.reason}</div>
+              {result.reason && <div className="reason-box">{result.reason}</div>}
+              <AssignmentWarningBadges work={resultWarningWork} limit={8} />
             </div>
           )}
-          {result.kind === "queued" && (
+          {result.kind === "unassigned" && (
             <div className="col" style={{ gap: 12 }}>
-              <div className="muted">No eligible owner right now — request sits in the Central queue until capacity opens.</div>
+              <div className="muted">Task created but needs manual assignment.</div>
               {result.effort != null && (
                 <div className="row" style={{ gap: 6, alignItems: "center" }}>
                   <Effort value={result.effort} lg />
                   <span className="muted" style={{ fontSize: 12 }}>effort points</span>
                 </div>
               )}
-              <div className="reason-box reason-box--queued">{result.reason}</div>
+              {result.reason && <div className="reason-box reason-box--queued">{result.reason}</div>}
+              <button type="button" className="btn btn--secondary" onClick={() => onNav("attention")}><Icon name="alert" /> Open Attention Needed</button>
             </div>
           )}
           {result.kind === "need_brief" && (
@@ -1639,6 +1895,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const [detailComments, setDetailComments] = useState((w && w.comments) || []);
   const [detailWatchers, setDetailWatchers] = useState((w && w.watchers) || []);
   const [detailAiTags, setDetailAiTags] = useState((w && w.aiTags) || []);
+  const [activeCreativeMembers, setActiveCreativeMembers] = useState([]);
+  const [assigneeTargetMemberId, setAssigneeTargetMemberId] = useState((w && w.assignee) || "");
+  const [assigneeReason, setAssigneeReason] = useState("");
 
   useEffect(() => {
     if (!w) return;
@@ -1647,6 +1906,25 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     setDetailWatchers(w.watchers || []);
     setDetailAiTags(w.aiTags || []);
   }, [w && w.id, w && w.links, w && w.comments, w && w.watchers, w && w.aiTags]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!w || !w.isSupabaseRow || w.type === "quick") return () => { alive = false; };
+    setAssigneeTargetMemberId(w.assignee || "");
+    const membersPromise = window.loadFlowMateActiveCreativeMembers
+      ? window.loadFlowMateActiveCreativeMembers()
+      : Promise.resolve((window.MEMBERS || []).filter(member => member.active !== false && window.isFlowMateGdVeMember?.(member)));
+    membersPromise
+      .then((members) => {
+        if (!alive) return;
+        setActiveCreativeMembers(members || []);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        console.warn("[FlowMate Detail] Assignment controls load failed:", error && error.message);
+      });
+    return () => { alive = false; };
+  }, [w && w.id, w && w.assignee, w && w.isSupabaseRow, w && w.type]);
 
   useEffect(() => {
     let alive = true;
@@ -1735,7 +2013,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             ) : (
               <>
                 <div className="reason-box reason-box--need">
-                  We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Central queue</strong> so the full row is fetched from Supabase.
+                  We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Attention Needed</strong> so the full row is fetched from Supabase.
                 </div>
                 <div style={{ marginTop: 12 }}>
                   <button className="btn btn--secondary" onClick={() => onNav("list")}><Icon name="list" /> Open list view</button>
@@ -1755,18 +2033,37 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const watcherOptions = (window.MEMBERS || []).filter((member) => member.userId);
   const hasCreativeDetails = w.type !== "quick" && Boolean(w.assetType || w.subtype || w.platform || w.channel || w.size || w.campaign || w.publishLabel || w.launchLabel);
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
+  const currentTeamMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const isRequesterUser = currentUserId === w.requesterUserId;
+  const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
+  const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
+  const canManageAssignee = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
+  const canSelfAssignUnassigned = Boolean(w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
+  const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : (w.assignmentWarnings || []);
+  const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
   const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (
     isAdminUser ||
     currentUserId === w.requesterUserId ||
     currentUserId === w.assigneeUserId ||
-    owner?.userId === currentUserId
+    owner?.userId === currentUserId ||
+    currentUserId === w.marketingPlanSubPicUserId
   ));
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
   const visibleAiTags = detailAiTags;
-  const visibleActivityEvents = w.activityEvents || [];
+  const visibleActivityEvents = (() => {
+    const seenAssignmentResults = new Set();
+    return (w.activityEvents || []).filter((event) => {
+      if (event.event_type !== "assignment_ran") return true;
+      const metadata = getFlowMateActivityMetadata(event);
+      const key = `${metadata.result || event.to_status || ""}|${metadata.reason || ""}`;
+      if (seenAssignmentResults.has(key)) return false;
+      seenAssignmentResults.add(key);
+      return true;
+    });
+  })();
   const mentionQueryMatch = commentBody.match(/(^|\s)@([^\s@]*)$/);
   const mentionQuery = mentionQueryMatch ? mentionQueryMatch[2].toLowerCase() : null;
   const mentionSuggestions = mentionQuery == null ? [] : mentionUsers
@@ -1832,7 +2129,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     if (event.event_type === "created") return `${actor} created this task${suffix}`;
     if (event.event_type === "assignment_ran") {
       const result = metadata.result ? `: ${metadata.result}` : "";
-      return `Assignment engine ran${result}${suffix}`;
+      const reason = String(metadata.reason || "").trim();
+      return `Assignment engine ran${result}${reason ? ` - ${reason}` : ""}${suffix}`;
     }
     if (event.event_type === "status_changed" || event.from_status || event.to_status) {
       return `${actor} moved status from ${event.from_status || "-"} to ${event.to_status || "-"}${suffix}`;
@@ -2086,19 +2384,36 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
   }
 
-  async function runRerunAssignment() {
-    if (!w.isSupabaseRow) {
-      setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so assignment rerun is disabled." });
+  async function submitAssigneeChange(event) {
+    event.preventDefault();
+    if (!canManageAssignee || !window.changeFlowMateCreativeAssignee) return;
+    const reason = assigneeReason.trim();
+    if (!reason) {
+      setActionMsg({ tone: "bad", text: "Reason is required when changing or clearing an assignee." });
       return;
     }
     setPending(true);
     try {
-      const data = await window.rerunFlowMateAssignment(w.id);
-      const r = data && data.result;
+      await window.changeFlowMateCreativeAssignee(w.id, assigneeTargetMemberId || null, reason);
       await refreshDetailItem();
-      setActionMsg({ tone: "ok", text: `Rerun result: ${r || "ok"}.` });
+      setAssigneeReason("");
+      setActionMsg({ tone: "ok", text: assigneeTargetMemberId ? "Assignee updated." : "Task is now Unassigned." });
     } catch (error) {
-      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Rerun failed.") });
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Assignee change was rejected by the backend.") });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function selfAssignUnassigned() {
+    if (!canSelfAssignUnassigned || !window.changeFlowMateCreativeAssignee) return;
+    setPending(true);
+    try {
+      await window.changeFlowMateCreativeAssignee(w.id, currentTeamMemberId, "Self-assigned from Unassigned");
+      await refreshDetailItem();
+      setActionMsg({ tone: "ok", text: "Task assigned to you." });
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Self-assignment was rejected by the backend.") });
     } finally {
       setPending(false);
     }
@@ -2208,9 +2523,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           {canStatusTransition && w.status === "blocked" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Resume</button>
           )}
-          {canStatusTransition && w.status === "queued" && (
-            <button className="btn btn--primary" onClick={runRerunAssignment} disabled={pending}><Icon name="rerun" /> Rerun assignment</button>
-          )}
           {canStatusTransition && w.status === "need_brief" && (
             <button className="btn btn--primary" onClick={async () => {
               setPending(true);
@@ -2230,6 +2542,19 @@ function DetailScreen({ onNav, onOpen, focusId }) {
         <div className={`reason-box ${actionMsg.tone === "bad" ? "reason-box--need" : actionMsg.tone === "warn" ? "reason-box--queued" : ""}`} style={{ marginBottom: 12 }}>
           {actionMsg.text}
         </div>
+      )}
+
+      {detailAttentionCodes.length > 0 && (
+        <section className="card" aria-labelledby="detail-assignment-attention" style={{ marginBottom: 16 }}>
+          <div className="card__head"><span className="card__title" id="detail-assignment-attention">Assignment attention</span></div>
+          <div className="card__body" style={{ display: "grid", gap: 10 }}>
+            <AssignmentWarningBadges work={w} limit={12} />
+            {detailAssignmentWarnings.map((warning) => <div className="reason-box reason-box--queued" key={warning.code}><strong>{FLOWMATE_WARNING_LABEL[warning.code] || flowmatePrettifyToken(warning.code)}:</strong> {warning.message}</div>)}
+            {w.status === "unassigned" && <div className="reason-box reason-box--need">Task is ready but needs manual assignment.</div>}
+            {w.status === "blocked" && <div className="reason-box reason-box--need">{w.blockReason || "Production is blocked."}</div>}
+            {w.needsSplit && <div className="reason-box reason-box--queued">Combined deliverables need to be split for production tracking.</div>}
+          </div>
+        </section>
       )}
 
       <div className="detail">
@@ -2265,6 +2590,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Channel</div><div className="meta-row__val">{w.channel || w.platform || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Type / Skill</div><div className="meta-row__val">{w.subtype ? getFlowMateCreativeTypeLabel(w.subtype) : (ASSET_LABEL[w.assetType] || w.assetType || "-")}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Asset Count</div><div className="meta-row__val">{w.assetCount || 1}</div></div>
+                {w.subtype2 && <div className="meta-row"><div className="meta-row__lbl">Type / Skill 2</div><div className="meta-row__val">{getFlowMateCreativeTypeLabel(w.subtype2)}</div></div>}
+                {w.subtype2 && <div className="meta-row"><div className="meta-row__lbl">Asset Count 2</div><div className="meta-row__val">{w.assetCount2 || 1}</div></div>}
                 <div className="meta-row"><div className="meta-row__lbl">Size / format</div><div className="meta-row__val">{w.size || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Brief link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.briefLink) ? <a href={window.flowmateSafeHttpUrl(w.briefLink)} target="_blank" rel="noopener noreferrer">Open brief</a> : "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Reference link</div><div className="meta-row__val">{window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(w.referenceLink) ? <a href={window.flowmateSafeHttpUrl(w.referenceLink)} target="_blank" rel="noopener noreferrer">Open reference</a> : "-"}</div></div>
@@ -2396,6 +2723,29 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   <Avatar memberId={w.assignee} /> <span className="strong">{owner?.name || "Unassigned"}</span>
                 </div>
               </div>
+              {canManageAssignee && (
+                <form className="reason-box" onSubmit={submitAssigneeChange} style={{ display: "grid", gap: 8, marginBottom: 12 }} aria-label="Change creative assignee">
+                  <label className="field">
+                    <span className="field__label">Change assignee</span>
+                    <select className="select" value={assigneeTargetMemberId} onChange={event => setAssigneeTargetMemberId(event.target.value)} disabled={pending}>
+                      <option value="">Unassigned</option>
+                      {activeCreativeMembers.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span className="field__label">Reason <span className="req">*</span></span>
+                    <input className="input" value={assigneeReason} onChange={event => setAssigneeReason(event.target.value)} placeholder="Why is the owner changing?" required disabled={pending} />
+                  </label>
+                  <button type="submit" className="btn btn--secondary" disabled={pending || !assigneeReason.trim()}>Save assignee</button>
+                  <span className="field__hint">Active GD/VE members only. Backend permissions remain authoritative.</span>
+                </form>
+              )}
+              {!canManageAssignee && canSelfAssignUnassigned && (
+                <div className="reason-box" style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  <span>This task is Unassigned. You may assign only yourself.</span>
+                  <button type="button" className="btn btn--secondary" onClick={selfAssignUnassigned} disabled={pending}>Assign to me</button>
+                </div>
+              )}
               <div className="meta-row">
                 <div className="meta-row__lbl">Watchers</div>
                 <div className="meta-row__val" style={{ display: "grid", gap: 8 }}>

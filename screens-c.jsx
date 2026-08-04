@@ -1,4 +1,4 @@
-﻿// FlowMate - Screens part C: Workload, KPI, Team Settings
+// FlowMate - Screens part C: Workload, KPI, Team Settings
 const { useState: useStateC, useEffect: useEffectC } = React;
 
 function exportFlowMateCsvC(filename, columns, rows) {
@@ -393,7 +393,7 @@ function WorkloadScreen({ onOpen }) {
     };
   });
   const [rows, setRows] = useStateC(localRows);
-  const [queuedEffort, setQueuedEffort] = useStateC(WORK.filter(w => w.status === "queued").reduce((s, w) => s + (w.effort || 0), 0));
+  const [workloadItems, setWorkloadItems] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
   const [workloadTab, setWorkloadTab] = useStateC("standard");
   const [teamFilter, setTeamFilter] = useStateC("All");
@@ -405,22 +405,25 @@ function WorkloadScreen({ onOpen }) {
     async function loadRows() {
       if (!window.loadFlowMateWorkloadRows) {
         setRows([]);
-        setQueuedEffort(0);
+        setWorkloadItems([]);
         setLoadState({ status: "error", message: "Live data unavailable: Supabase workload loader is not ready." });
         return;
       }
 
       try {
-        const liveRows = await window.loadFlowMateWorkloadRows();
+        const [liveRows, liveItems] = await Promise.all([
+          window.loadFlowMateWorkloadRows(),
+          window.loadFlowMateListRows ? window.loadFlowMateListRows() : Promise.resolve([]),
+        ]);
         if (!alive) return;
         setRows(liveRows);
-        setQueuedEffort(liveRows.queuedEffort || 0);
+        setWorkloadItems(liveItems || []);
         setLoadState({ status: "live", message: "Live Supabase data" });
       } catch (error) {
         if (!alive) return;
         console.error("[FlowMate Workload] Supabase load failed:", error);
         setRows([]);
-        setQueuedEffort(0);
+        setWorkloadItems([]);
         setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
       }
     }
@@ -453,6 +456,15 @@ function WorkloadScreen({ onOpen }) {
     ? workloadMonth
     : effectiveWorkloadMonthOptions[0].key;
   const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth);
+  const selectedMonthWorkloadItems = flowMateFilterRowsByMonthC(workloadItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"])
+    .filter(item => item.status !== "queued");
+  const fallbackWorkloadUnassignedRows = selectedMonthWorkloadItems.filter(item => item.status === "unassigned" || item.assignmentResult === "unassigned");
+  const workloadAttentionRows = window.getFlowMateAttentionRows
+    ? window.getFlowMateAttentionRows(selectedMonthWorkloadItems)
+    : fallbackWorkloadUnassignedRows;
+  const workloadUnassignedRows = window.getFlowMateAttentionCategoryCodes
+    ? workloadAttentionRows.filter(item => window.getFlowMateAttentionCategoryCodes(item).includes("unassigned"))
+    : fallbackWorkloadUnassignedRows;
   const monthRows = safeRows.map(r => {
     const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthRequestedItems = flowMateFilterRowsByMonthC(r.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
@@ -501,7 +513,8 @@ function WorkloadScreen({ onOpen }) {
   const totals = {
     capacity: visibleRows.reduce((s, r) => s + r.window, 0),
     assigned: visibleRows.reduce((s, r) => s + r.assignedEffort, 0),
-    queued: queuedEffort,
+    unassigned: workloadUnassignedRows.length,
+    attention: workloadAttentionRows.length,
     overdue: visibleRows.reduce((s, r) => s + r.overdue, 0),
     urgentAssigned: visibleRows.reduce((s, r) => s + (r.urgentAssigned || 0), 0),
     urgentRequested: visibleRows.reduce((s, r) => s + (r.urgentRequested || 0), 0),
@@ -602,7 +615,7 @@ function WorkloadScreen({ onOpen }) {
 
       {workloadTab === "standard" ? (
         <>
-          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
+          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(9, 1fr)" }}>
             <div className="stat"><div className="stat__num mono">{statusTotals.assigned}</div><div className="stat__lbl">Assigned</div></div>
             <div className="stat stat--info"><div className="stat__num mono">{statusTotals.in_progress}</div><div className="stat__lbl">In progress</div></div>
             <div className="stat"><div className="stat__num mono">{statusTotals.review}</div><div className="stat__lbl">Review</div></div>
@@ -610,6 +623,8 @@ function WorkloadScreen({ onOpen }) {
             <div className="stat stat--ok"><div className="stat__num mono">{statusTotals.delivered}</div><div className="stat__lbl">Delivered</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{statusTotals.urgentAssigned}</div><div className="stat__lbl">Urgent assigned</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{statusTotals.urgentRequested}</div><div className="stat__lbl">Urgent requested</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{totals.unassigned}</div><div className="stat__lbl">Unassigned</div></div>
+            <div className="stat stat--accent"><div className="stat__num mono">{totals.attention}</div><div className="stat__lbl">Attention / at risk</div></div>
           </div>
 
           <div className="card card__body--flush">
@@ -652,11 +667,12 @@ function WorkloadScreen({ onOpen }) {
         </>
       ) : (
         <>
-          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
+          <div className="stat-strip" style={{ gridTemplateColumns: "repeat(8, 1fr)" }}>
             <div className="stat"><div className="stat__num mono">{totals.capacity}</div><div className="stat__lbl">Total capacity (pt)</div><div className="stat__delta">across {visibleRows.length} members - {selectedMonthWorkingDays} working days</div></div>
             <div className="stat stat--info"><div className="stat__num mono">{totals.assigned}</div><div className="stat__lbl">Assigned effort</div></div>
             <div className="stat stat--ok"><div className="stat__num mono">{totals.available}</div><div className="stat__lbl">Available</div></div>
-            <div className="stat stat--warn"><div className="stat__num mono">{totals.queued}</div><div className="stat__lbl">Queued effort</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{totals.unassigned}</div><div className="stat__lbl">Unassigned</div></div>
+            <div className="stat stat--accent"><div className="stat__num mono">{totals.attention}</div><div className="stat__lbl">Attention / at risk</div></div>
             <div className="stat stat--accent"><div className="stat__num mono">{totals.overdue}</div><div className="stat__lbl">Overdue</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{totals.urgentAssigned}</div><div className="stat__lbl">Urgent assigned</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{totals.urgentRequested}</div><div className="stat__lbl">Urgent requested</div></div>
@@ -1515,10 +1531,16 @@ function KpiScreen() {
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const cancelledRows = kpiRows.filter(w => w.status === "cancelled");
-  const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled"].includes(w.status));
+  const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled", "queued"].includes(w.status));
   const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
   const blockedRows = activeRows.filter(w => w.status === "blocked");
-  const queuedRows = activeRows.filter(w => w.status === "queued");
+  const fallbackUnassignedRows = activeRows.filter(w => w.status === "unassigned" || w.assignmentResult === "unassigned");
+  const attentionRows = window.getFlowMateAttentionRows
+    ? window.getFlowMateAttentionRows(activeRows)
+    : fallbackUnassignedRows;
+  const unassignedRows = window.getFlowMateAttentionCategoryCodes
+    ? attentionRows.filter(row => window.getFlowMateAttentionCategoryCodes(row).includes("unassigned"))
+    : fallbackUnassignedRows;
   const quickClosedRows = deliveredRows.filter(w => w.type === "quick");
 
   const ownerMap = new Map();
@@ -1660,7 +1682,8 @@ function KpiScreen() {
       ["Delivered items", deliveredRows.length],
       ["Active work", activeRows.length],
       ["Blocked", blockedRows.length],
-      ["Queued", queuedRows.length],
+      ["Unassigned", unassignedRows.length],
+      ["Attention / at risk", attentionRows.length],
       ["Cancelled", cancelledRows.length],
       ["Quick tasks closed", quickClosedRows.length],
       ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length],
@@ -1767,9 +1790,10 @@ function KpiScreen() {
         </div>
       </div>
 
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="kpi"><div className="kpi__lbl">Blocked</div><div className="kpi__num mono">{blockedRows.length}</div><div className="kpi__delta">Active blocked work</div></div>
-        <div className="kpi"><div className="kpi__lbl">Queued</div><div className="kpi__num mono">{queuedRows.length}</div><div className="kpi__delta">{queuedRows.reduce((sum, w) => sum + (w.effort || 0), 0)} pt waiting</div></div>
+        <div className="kpi"><div className="kpi__lbl">Unassigned</div><div className="kpi__num mono">{unassignedRows.length}</div><div className="kpi__delta">Current work without an owner</div></div>
+        <div className="kpi"><div className="kpi__lbl">Attention / at risk</div><div className="kpi__num mono">{attentionRows.length}</div><div className="kpi__delta">Deduplicated current attention items</div></div>
         <div className="kpi"><div className="kpi__lbl">Cancelled</div><div className="kpi__num mono">{cancelledRows.length}</div><div className="kpi__delta">Cancelled work in selected month</div></div>
       </div>
 
@@ -1970,6 +1994,7 @@ function ganttTimelineWindowC(monthKey) {
   const dayCells = Array.from({ length: totalDays }, (_, index) => {
     const date = new Date(startDate.getTime() + index * 86400000);
     return {
+      dateKey: calendarUtcKeyC(date),
       day: date.getUTCDate(),
       label: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }).slice(0, 1),
       monthLabel: date.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }),
@@ -2067,9 +2092,95 @@ function mergeGanttLeaveSegmentsC(leaves) {
   }));
 }
 
+function ganttCapacityBucketsC(rows, sourceRows, monthKey, ganttWindow) {
+  const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
+  const workById = new Map(
+    (sourceRows || [])
+      .filter(row => row && row.workItemId)
+      .map(row => [row.workItemId, row]),
+  );
+  const buckets = new Map();
+
+  (rows || []).forEach(allocation => {
+    const bucketDate = String(allocation?.bucketDate || "").slice(0, 10);
+    const item = workById.get(allocation?.workItemId);
+    if (!item || !allocation?.assignee || !bucketDate) return;
+    if (!["assigned", "in_progress", "blocked"].includes(item.status)) return;
+    if (bucketDate < timeline.startKey || bucketDate > timeline.endKey) return;
+
+    const bucketHalf = allocation.bucketHalf === "pm" ? "pm" : "am";
+    const key = `${allocation.assignee}:${bucketDate}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        key,
+        assigneeId: allocation.assignee,
+        bucketDate,
+        startOffset: Math.floor((calendarParseKeyC(bucketDate).getTime() - timeline.startDate.getTime()) / 86400000),
+        halves: { am: { point: 0, entries: [] }, pm: { point: 0, entries: [] } },
+      });
+    }
+    const bucket = buckets.get(key);
+    const point = Math.max(0, Number(allocation.capacityPoint || 0));
+    bucket.halves[bucketHalf].point += point;
+    bucket.halves[bucketHalf].entries.push({ item, point });
+  });
+
+  return Array.from(buckets.values()).sort((a, b) =>
+    a.bucketDate.localeCompare(b.bucketDate) || a.assigneeId.localeCompare(b.assigneeId));
+}
+
+function ganttLeaveCoversHalfC(leaves, bucketDate, bucketHalf) {
+  return (leaves || []).some(leave => {
+    if (leave.leaveKey !== bucketDate) return false;
+    const startHalf = leave.item?.dayStartHalf || "am";
+    const endHalf = leave.item?.dayEndHalf || "pm";
+    return startHalf === endHalf ? bucketHalf === startHalf : true;
+  });
+}
+
+function ganttMemberBucketCapacityC(member, leaves, bucketDate, bucketHalf) {
+  if (ganttLeaveCoversHalfC(leaves, bucketDate, bucketHalf)) return 0;
+  if (!member) return 4;
+  if (member.availability === "leave") return 0;
+  const dailyCapacity = member.availability === "partial"
+    ? Number(member.capacityOverridePerDay || 0)
+    : Number(member.capacityPerDay || 8);
+  return Math.max(0, dailyCapacity / 2);
+}
+
+function ganttMemberDailyCapacityC(member, leaves, bucketDate) {
+  return Number((
+    ganttMemberBucketCapacityC(member, leaves, bucketDate, "am")
+    + ganttMemberBucketCapacityC(member, leaves, bucketDate, "pm")
+  ).toFixed(2));
+}
+
+function ganttCapacityClassC(usedPoint, bucketCapacity, isLeave) {
+  if (isLeave) return "is-leave";
+  if (usedPoint > bucketCapacity) return "is-over-capacity";
+  if (bucketCapacity <= 0) return "is-unavailable";
+  if (usedPoint <= 0) return "is-empty";
+  if (usedPoint === bucketCapacity) return "is-full";
+  return "is-partial";
+}
+
+function ganttCapacityTitleC(bucketDate, usedPoint, bucketCapacity, entries, isLeave) {
+  const slotLabel = calendarDateLabelC(bucketDate);
+  if (isLeave) return `${slotLabel}: leave / unavailable`;
+  const taskText = (entries || []).map(entry => `${entry.item.id} ${entry.point} pt`).join(", ");
+  if (usedPoint > bucketCapacity) {
+    const amountOver = Number((usedPoint - bucketCapacity).toFixed(2));
+    return `${slotLabel}: OVER CAPACITY by ${amountOver} pt (${usedPoint}/${bucketCapacity} pt used)${taskText ? ` - ${taskText}` : ""}`;
+  }
+  return `${slotLabel}: ${usedPoint}/${bucketCapacity} pt used${taskText ? ` - ${taskText}` : " - available"}`;
+}
+
 function TeamGanttScreen({ onOpen }) {
   const [sourceRows, setSourceRows] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
+  const [capacityRows, setCapacityRows] = useStateC([]);
+  const [capacityLoadState, setCapacityLoadState] = useStateC({ status: "loading", message: "Loading capacity..." });
+  const [showCapacity, setShowCapacity] = useStateC(true);
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
 
   useEffectC(() => {
@@ -2120,6 +2231,37 @@ function TeamGanttScreen({ onOpen }) {
   }, [sourceRows, monthKey]);
 
   const ganttWindow = ganttTimelineWindowC(selectedGanttMonth);
+
+  useEffectC(() => {
+    let alive = true;
+
+    async function loadCapacityIfAlive() {
+      if (!window.loadFlowMateCapacityAllocationRows) {
+        if (!alive) return;
+        setCapacityRows([]);
+        setCapacityLoadState({ status: "error", message: "Capacity unavailable: loader is not ready." });
+        return;
+      }
+      try {
+        const rows = await window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey);
+        if (!alive) return;
+        setCapacityRows(rows);
+        setCapacityLoadState({ status: "live", message: "Live daily workload" });
+      } catch (error) {
+        if (!alive) return;
+        console.error("[FlowMate Gantt Capacity] Supabase load failed:", error);
+        setCapacityRows([]);
+        setCapacityLoadState({ status: "error", message: `Capacity unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
+      }
+    }
+
+    loadCapacityIfAlive();
+    const cleanup = window.attachFlowMateLiveRefresh
+      ? window.attachFlowMateLiveRefresh(loadCapacityIfAlive)
+      : () => {};
+    return () => { alive = false; cleanup(); };
+  }, [selectedGanttMonth]);
+
   const todayKey = calendarUtcKeyC(new Date());
   const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey
     ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000)
@@ -2135,6 +2277,7 @@ function TeamGanttScreen({ onOpen }) {
     .filter(Boolean)
     .sort((a, b) => a.leaveKey.localeCompare(b.leaveKey) || String(a.item.assignee || "").localeCompare(String(b.item.assignee || "")));
   const mergedGanttLeaves = mergeGanttLeaveSegmentsC(ganttLeaves);
+  const ganttCapacityBuckets = ganttCapacityBucketsC(capacityRows, sourceRows, selectedGanttMonth, ganttWindow);
 
   const teamMap = new Map();
   function ensureGanttAssigneeGroup(row) {
@@ -2151,6 +2294,8 @@ function TeamGanttScreen({ onOpen }) {
         member,
         tasks: [],
         leaves: [],
+        capacityLeaves: [],
+        capacityBuckets: [],
       });
     }
     return assigneeMap.get(assigneeId);
@@ -2158,11 +2303,20 @@ function TeamGanttScreen({ onOpen }) {
   ganttTasks.forEach(task => {
     ensureGanttAssigneeGroup(task.item).tasks.push(task);
   });
+  ganttLeaves.forEach(leave => {
+    const assigneeId = leave.item.assignee || "unassigned";
+    const member = MEMBERS_BY_ID[assigneeId];
+    if (member && member.discipline !== "GD/VE") return;
+    ensureGanttAssigneeGroup(leave.item).capacityLeaves.push(leave);
+  });
   mergedGanttLeaves.forEach(leave => {
     const assigneeId = leave.item.assignee || "unassigned";
     const member = MEMBERS_BY_ID[assigneeId];
     if (member && member.discipline !== "GD/VE") return;
     ensureGanttAssigneeGroup(leave.item).leaves.push(leave);
+  });
+  ganttCapacityBuckets.forEach(bucket => {
+    ensureGanttAssigneeGroup({ assignee: bucket.assigneeId, requesterTeam: "GD/VE" }).capacityBuckets.push(bucket);
   });
   const teamGroups = Array.from(teamMap.entries())
     .map(([teamName, assigneeMap]) => ({
@@ -2181,9 +2335,18 @@ function TeamGanttScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Team Gantt Chart</h1>
-          <div className="page__sub">Read-only work timeline grouped by team and assignee - {loadState.message}</div>
+          <div className="page__sub">Work timeline and production capacity grouped by team and assignee - {loadState.message} - {capacityLoadState.message}</div>
         </div>
         <div className="page__actions">
+          <button
+            type="button"
+            className={`btn btn--sm gantt__capacity-toggle ${showCapacity ? "is-active" : ""}`}
+            onClick={() => setShowCapacity(value => !value)}
+            aria-pressed={showCapacity}
+            data-testid="flowmate-gantt-capacity-toggle"
+          >
+            {showCapacity ? "Hide workload" : "Show workload"}
+          </button>
           <select
             className="select"
             value={selectedGanttMonth}
@@ -2198,27 +2361,24 @@ function TeamGanttScreen({ onOpen }) {
       </div>
 
       <div className="gantt__toolbar" aria-label="Gantt read-only controls">
-        <div className="gantt__toolbar-group">
-          <span className="gantt__chip"><Icon name="chart" size={13} /> Trello Power-Up Lite</span>
-          <span className="gantt__chip">Two-month window</span>
-          <span className="gantt__chip">Scroll right to see the second month</span>
-          <span className="gantt__chip">Grouped by team / assignee</span>
-          <span className="gantt__chip">Click bar to open task</span>
-        </div>
         <div className="gantt__legend">
           <span><i className="gantt__legend-dot gantt__legend-dot--normal"></i>Normal</span>
           <span><i className="gantt__legend-dot gantt__legend-dot--urgent"></i>Urgent</span>
           <span><i className="gantt__legend-diamond"></i>Launch</span>
           <span><i className="gantt__legend-leave"></i>Leave / partial leave</span>
+          <span><i className="gantt__legend-capacity gantt__legend-capacity--available"></i>Available</span>
+          <span><i className="gantt__legend-capacity gantt__legend-capacity--used"></i>Daily workload</span>
+          <span><i className="gantt__legend-capacity gantt__legend-capacity--over"></i>Over capacity (advisory)</span>
           <span><i className="gantt__legend-line"></i>Today</span>
         </div>
+        <span className="muted" style={{ fontSize: 12 }}>Daily workload is planned automatically. Over-capacity warnings are advisory; adjust priority or reassign when needed.</span>
       </div>
 
       <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="stat"><div className="stat__num mono">{ganttTasks.length}</div><div className="stat__lbl">Visible tasks</div></div>
         <div className="stat stat--info"><div className="stat__num mono">{teamGroups.length}</div><div className="stat__lbl">Teams</div></div>
         <div className="stat stat--ok"><div className="stat__num mono">{teamGroups.reduce((sum, team) => sum + team.assignees.length, 0)}</div><div className="stat__lbl">Assignees</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{ganttTasks.filter(task => task.launchKey).length}</div><div className="stat__lbl">With launch date</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{ganttCapacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0)}</div><div className="stat__lbl">Planned pt</div></div>
       </div>
 
       <div className="gantt" data-testid="flowmate-team-gantt-chart">
@@ -2253,19 +2413,83 @@ function TeamGanttScreen({ onOpen }) {
           <section key={team.teamName} className="gantt__team">
             <div className="gantt__team-title">
               <span>{team.teamName}</span>
-            <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks</span>
+            <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks - {team.assignees.reduce((sum, assignee) => sum + assignee.capacityBuckets.reduce((bucketSum, bucket) => bucketSum + bucket.halves.am.point + bucket.halves.pm.point, 0), 0)} pt</span>
           </div>
-            {team.assignees.map(assignee => (
-              <div key={assignee.assigneeId} className="gantt__row">
+            {team.assignees.map(assignee => {
+              const capacityByDate = new Map(assignee.capacityBuckets.map(bucket => [bucket.bucketDate, bucket]));
+              const allocatedPoint = assignee.capacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0);
+              return (
+              <div key={assignee.assigneeId} className={`gantt__row ${showCapacity && capacityLoadState.status === "live" ? "has-capacity" : ""}`}>
                 <div className="gantt__owner">
                   <Avatar memberId={assignee.assigneeId} size="avatar--lg" />
                   <span>
                     <span className="gantt__owner-name">{assignee.assigneeName}</span>
-                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}</span>
+                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}{showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt planned` : ""}</span>
                   </span>
                 </div>
-                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`, "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
-                  {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
+                <div className="gantt__tracks" style={{ "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
+                {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
+                {showCapacity && capacityLoadState.status === "live" && (
+                  <div
+                    className="gantt__capacity-lane"
+                    style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}
+                    data-testid="flowmate-gantt-capacity-lane"
+                  >
+                    {ganttWindow.dayCells.map(cell => {
+                      const bucket = capacityByDate.get(cell.dateKey);
+                      return (
+                        <div
+                          key={`${assignee.assigneeId}:${cell.dateKey}`}
+                          className={`gantt__capacity-day ${cell.isWeekend ? "is-weekend" : ""}`}
+                          data-testid="flowmate-gantt-capacity-day"
+                        >
+                          {(() => {
+                            const halves = bucket?.halves || { am: { point: 0, entries: [] }, pm: { point: 0, entries: [] } };
+                            const usedPoint = Number((halves.am.point + halves.pm.point).toFixed(2));
+                            const bucketCapacity = ganttMemberDailyCapacityC(assignee.member, assignee.capacityLeaves, cell.dateKey);
+                            const isLeave = bucketCapacity <= 0 && (
+                              ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, "am")
+                              || ganttLeaveCoversHalfC(assignee.capacityLeaves, cell.dateKey, "pm")
+                              || assignee.member?.availability === "leave"
+                            );
+                            const entryMap = new Map();
+                            [...halves.am.entries, ...halves.pm.entries].forEach(entry => {
+                              const key = entry.item.id;
+                              const current = entryMap.get(key) || { item: entry.item, point: 0 };
+                              current.point = Number((current.point + entry.point).toFixed(2));
+                              entryMap.set(key, current);
+                            });
+                            const entries = Array.from(entryMap.values());
+                            const stateClass = ganttCapacityClassC(usedPoint, bucketCapacity, isLeave);
+                            const title = ganttCapacityTitleC(cell.dateKey, usedPoint, bucketCapacity, entries, isLeave);
+                            const isOverCapacity = stateClass === "is-over-capacity";
+                            const content = <><strong>{isLeave ? "Leave" : isOverCapacity ? `OVER ${usedPoint}` : `${usedPoint} / ${bucketCapacity}`}</strong>{!isLeave && <span>pt</span>}</>;
+                            return entries.length ? (
+                              <button
+                                type="button"
+                                className={`gantt__capacity-summary ${stateClass}`}
+                                onClick={() => openGanttItem(entries[0])}
+                                title={title}
+                                aria-label={title}
+                                data-testid="flowmate-gantt-capacity-allocation"
+                              >{content}</button>
+                            ) : (
+                              <span
+                                className={`gantt__capacity-summary ${stateClass}`}
+                                title={title}
+                                aria-label={title}
+                              >{content}</span>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {showCapacity && capacityLoadState.status === "error" && (
+                  <div className="gantt__capacity-error" role="status">{capacityLoadState.message}</div>
+                )}
+                <div className="gantt__lane" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}>
                   {assignee.leaves.map(leave => (
                     <div
                       key={leave.segmentKey || leave.item.id}
@@ -2300,8 +2524,9 @@ function TeamGanttScreen({ onOpen }) {
                     </button>
                   ))}
                 </div>
+                </div>
               </div>
-            ))}
+            );})}
           </section>
         ))}
 
@@ -2311,9 +2536,9 @@ function TeamGanttScreen({ onOpen }) {
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
-        Gantt rule: due date is the bar end. Launch date is shown as a marker; when launch date is after due date, the bar spans due date to launch date. This view shows two months at a time; scroll right to see the second month.
+        Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity.
       </div>
-      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(selectedGanttMonth)} plus next month</Source>
+      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - {capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable"} - Team Gantt Chart - {flowMateMonthLabelC(selectedGanttMonth)} plus next month</Source>
     </div>
   );
 }
