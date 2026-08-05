@@ -431,6 +431,29 @@ async function adminArchiveFlowMateWorkItem(displayId, reason) {
   return data;
 }
 
+async function restoreFlowMateArchivedWorkItem(displayId, reason) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const normalizedId = String(displayId || "").trim().toUpperCase();
+  const trimmedReason = String(reason || "").trim();
+  if (!normalizedId) throw new Error("Work item ID is required.");
+  if (!trimmedReason) throw new Error("Restore reason is required.");
+
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_restore_work_item", {
+    p_display_id: normalizedId,
+    p_restore_reason: trimmedReason,
+  });
+
+  if (error) throw error;
+  if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "archived_work_item_restored" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  }
+  return data;
+}
+
 async function transitionFlowMateWorkStatus(displayId, nextStatus, options = {}) {
   if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin") {
     return adminTransitionFlowMateWorkStatus(displayId, nextStatus, options);
@@ -440,6 +463,7 @@ async function transitionFlowMateWorkStatus(displayId, nextStatus, options = {})
 
 window.adminTransitionFlowMateWorkStatus = adminTransitionFlowMateWorkStatus;
 window.adminArchiveFlowMateWorkItem = adminArchiveFlowMateWorkItem;
+window.restoreFlowMateArchivedWorkItem = restoreFlowMateArchivedWorkItem;
 window.transitionFlowMateWorkStatus = transitionFlowMateWorkStatus;
 
 // ---------------------------------------------------------------------------
@@ -909,22 +933,39 @@ async function flowmateInitAuth() {
     return null;
   }
 
-  let { data: profile, error: profileError } = await window.flowmateSupabase
-    .from("users")
-    .select("id, email, display_name, requester_team, is_active, role, can_access_all_teams")
-    .eq("id", session.user.id)
-    .maybeSingle();
-
-  // Backward-compatible while workflow_team_workspaces.sql is waiting to run.
-  if (profileError && /can_access_all_teams|column/i.test(profileError.message || "")) {
-    const fallbackProfile = await window.flowmateSupabase
+  async function loadProfile(selectColumns) {
+    return window.flowmateSupabase
       .from("users")
-      .select("id, email, display_name, requester_team, is_active, role")
+      .select(selectColumns)
       .eq("id", session.user.id)
       .maybeSingle();
-    profile = fallbackProfile.data;
-    profileError = fallbackProfile.error;
   }
+
+  let profileResult = await loadProfile(
+    "id, email, display_name, requester_team, is_active, role, can_access_all_teams, can_manage_marketing_schedule",
+  );
+
+  // Backward-compatible while either capability column is waiting to deploy.
+  // Only a missing capability column triggers a fallback; unrelated profile
+  // errors still fail closed below.
+  if (profileResult.error && /can_manage_marketing_schedule/i.test(profileResult.error.message || "")) {
+    profileResult = await loadProfile(
+      "id, email, display_name, requester_team, is_active, role, can_access_all_teams",
+    );
+    if (profileResult.error && /can_access_all_teams/i.test(profileResult.error.message || "")) {
+      profileResult = await loadProfile("id, email, display_name, requester_team, is_active, role");
+    }
+  } else if (profileResult.error && /can_access_all_teams/i.test(profileResult.error.message || "")) {
+    profileResult = await loadProfile(
+      "id, email, display_name, requester_team, is_active, role, can_manage_marketing_schedule",
+    );
+    if (profileResult.error && /can_manage_marketing_schedule/i.test(profileResult.error.message || "")) {
+      profileResult = await loadProfile("id, email, display_name, requester_team, is_active, role");
+    }
+  }
+
+  let profile = profileResult.data;
+  let profileError = profileResult.error;
 
   if (profileError) {
     console.warn("[FlowMate Auth] profile lookup failed:", profileError.message);
@@ -946,6 +987,12 @@ async function flowmateInitAuth() {
     await window.flowmateSupabase.auth.signOut();
     return null;
   }
+
+  profile = {
+    can_access_all_teams: false,
+    can_manage_marketing_schedule: false,
+    ...profile,
+  };
 
   // UAT-002: inactive users must not mutate. We block read access too by
   // signing them out client-side. The DB still re-checks on every RPC.
@@ -991,6 +1038,7 @@ async function flowmateInitAuth() {
     requester_team: profile.requester_team || null,
     role: profile.role || "member",
     can_access_all_teams: Boolean(profile.can_access_all_teams || profile.role === "admin"),
+    can_manage_marketing_schedule: Boolean(profile.can_manage_marketing_schedule),
     accessible_teams: Array.from(new Set(accessibleTeams)),
     is_authenticated: true,
   };

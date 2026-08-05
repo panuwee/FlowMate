@@ -1,4 +1,5 @@
 const isVisibleMemberCode = (memberCode) => String(memberCode || "").toLowerCase() !== "gear";
+const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
 
 function flowmateWorkloadTodayKey() {
   const now = new Date();
@@ -66,7 +67,7 @@ async function loadFlowMateWorkloadRows() {
     const openCreativeItems = memberItems.filter(
       (item) =>
         item.type === "creative" &&
-        ["assigned", "in_progress", "review", "blocked"].includes(item.status),
+        FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status),
     );
     const leaveFractionToday = leaveCapacityByMemberId.get(row.team_member_id) || 0;
     const effectiveCap = Math.max(0, Number(row.effective_capacity_per_day || 0) * (1 - leaveFractionToday));

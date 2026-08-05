@@ -748,6 +748,29 @@ function App() {
     setIsGlobalSearchOpen(false);
     open(row.id);
   }
+  function handleSearchArchived() {
+    const query = normalizedGlobalSearch;
+    if (!query) return;
+    try {
+      sessionStorage.setItem("flowmate:board:archiveSearch", JSON.stringify({
+        query,
+        scope: "archived",
+        requestedAt: Date.now()
+      }));
+    } catch (error) {
+      console.warn("[FlowMate Search] Could not persist archived-search handoff:", error && error.message);
+    }
+    setSearchQuery(query);
+    setIsGlobalSearchOpen(false);
+    nav("board");
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("flowmate:search-archived", {
+        detail: {
+          query
+        }
+      }));
+    }, 0);
+  }
   if (!activeProduct) {
     return React.createElement(ProductChoiceScreen, {
       user: user,
@@ -822,8 +845,12 @@ function App() {
   }), React.createElement("input", {
     value: searchInput,
     onChange: e => {
-      setSearchInput(e.target.value);
+      const nextValue = e.target.value;
+      setSearchInput(nextValue);
       setIsGlobalSearchOpen(true);
+      if (!nextValue.trim()) {
+        window.dispatchEvent(new CustomEvent("flowmate:search-cleared"));
+      }
     },
     onFocus: () => setIsGlobalSearchOpen(true),
     onKeyDown: event => {
@@ -835,6 +862,7 @@ function App() {
         setSearchInput("");
         setSearchQuery("");
         setIsGlobalSearchOpen(false);
+        window.dispatchEvent(new CustomEvent("flowmate:search-cleared"));
       }
     },
     placeholder: "Search by ID, title, campaign, requester, assignee..."
@@ -842,7 +870,8 @@ function App() {
     query: normalizedGlobalSearch,
     results: globalSearchResults,
     loadState: globalSearchLoadState,
-    onOpen: openGlobalSearchResult
+    onOpen: openGlobalSearchResult,
+    onSearchArchived: handleSearchArchived
   })), React.createElement("span", {
     className: "topbar__spacer"
   }), React.createElement(ThemeToggle, null), React.createElement("div", {
@@ -959,7 +988,8 @@ function App() {
     onOpen: open,
     searchQuery: searchQuery
   }), allowedRoute && route === "board" && React.createElement(BoardScreen, {
-    onOpen: open
+    onOpen: open,
+    searchQuery: searchQuery
   }), allowedRoute && route === "calendar" && React.createElement(CalendarScreen, {
     onOpen: open
   }), allowedRoute && route === "gantt" && React.createElement(TeamGanttScreen, {
@@ -1463,7 +1493,7 @@ function ProductBookShell({
   }, "No patch notes found."), patches.map(patch => React.createElement("button", {
     type: "button",
     key: patch.id,
-    className: `nav-item ${mode === "view" && activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
+    className: `nav-item product-book-patch-nav ${mode === "view" && activePatch && activePatch.id === patch.id ? "is-active" : ""}`,
     onClick: () => {
       setMode("view");
       setActivePatchId(patch.id);
@@ -3252,6 +3282,45 @@ async function updateMarketingPlanWorkingSheetPlacementFields(contentItemId, cha
     }
   }));
   return true;
+}
+async function updateMarketingPlanWorkingSheetTime(contentItemId, publishTime) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  const normalizedTime = normalizeMarketingPlanPublishTimeOption(publishTime);
+  if (!normalizedTime) {
+    throw new Error("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
+  }
+  const result = await window.flowmateSupabase.rpc("marketing_plan_update_working_row_time", {
+    p_content_item_id: contentItemId,
+    p_publish_time: normalizedTime
+  });
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_working_sheet_time_updated"
+    }
+  }));
+  return result.data;
+}
+async function updateMarketingPlanWorkingSheetStatus(contentItemId, placementStatus) {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  if (!contentItemId) throw new Error("Content item is missing.");
+  const normalizedStatus = normalizeMarketingPlanWorkingStatus(placementStatus);
+  const result = await window.flowmateSupabase.rpc("marketing_plan_update_working_row_status", {
+    p_content_item_id: contentItemId,
+    p_placement_status: normalizedStatus
+  });
+  if (result.error) throw result.error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+    detail: {
+      reason: "marketing_plan_working_sheet_status_updated"
+    }
+  }));
+  return result.data;
 }
 async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime) {
   const existingPlacements = Array.isArray(row.placements) ? row.placements : [];
@@ -5101,6 +5170,10 @@ function MarketingPlanWorkingSheetScreen() {
     if (currentUser.role === "admin") return true;
     return Boolean(row && currentUser.id && (row.picUserId === currentUser.id || row.subPicUserId === currentUser.id));
   }
+  function canManageMarketingPlanSchedule(row) {
+    const currentUser = window.FLOWMATE_CURRENT_USER || {};
+    return canManageMarketingPlanWorkingRow(row) || currentUser.can_manage_marketing_schedule === true;
+  }
   function updateSheetForm(key, value) {
     setSheetForm(current => ({
       ...current,
@@ -5322,17 +5395,41 @@ function MarketingPlanWorkingSheetScreen() {
     setSelectedWorkingOwner("all");
     setWorkingSearch("");
   }
-  async function handleWorkingRowStatusChange(row, nextStatus) {
-    if (!canManageMarketingPlanWorkingRow(row)) {
-      setExportMessage("Only PIC, Sub PIC, or Admin can update this row.");
+  async function handleWorkingRowTimeChange(row, nextTime) {
+    if (!canManageMarketingPlanSchedule(row)) {
+      setExportMessage("Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.");
+      return;
+    }
+    const normalizedTime = normalizeMarketingPlanPublishTimeOption(nextTime);
+    if (!normalizedTime) {
+      setExportMessage("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
       return;
     }
     setUpdatingRowId(row.contentItemId);
     setExportMessage("");
     try {
-      await updateMarketingPlanWorkingSheetPlacementFields(row.contentItemId, {
-        status: nextStatus
+      await updateMarketingPlanWorkingSheetTime(row.contentItemId, normalizedTime);
+      await loadWorkingSheetRows({
+        alive: true
+      }, {
+        force: true
       });
+    } catch (error) {
+      console.error("[Marketing Plan] Working Sheet time update failed:", error);
+      setExportMessage(window.flowmateUserError ? window.flowmateUserError(error, "Time update failed.") : "Time update failed.");
+    } finally {
+      setUpdatingRowId("");
+    }
+  }
+  async function handleWorkingRowStatusChange(row, nextStatus) {
+    if (!canManageMarketingPlanSchedule(row)) {
+      setExportMessage("Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.");
+      return;
+    }
+    setUpdatingRowId(row.contentItemId);
+    setExportMessage("");
+    try {
+      await updateMarketingPlanWorkingSheetStatus(row.contentItemId, nextStatus);
       await loadWorkingSheetRows({
         alive: true
       }, {
@@ -5374,7 +5471,14 @@ function MarketingPlanWorkingSheetScreen() {
   }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
-  }, React.createElement("div", null, React.createElement("h1", null, "Working Sheet"), React.createElement("p", null, "Recurring monthly plan entry. Views read from these Campaign, Content Item, and Channel Placement records."))), loadState.status === "error" && React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("h1", null, "Working Sheet"), React.createElement("p", null, "Recurring monthly plan entry. Views read from these Campaign, Content Item, and Channel Placement records."))), React.createElement("div", {
+    className: "reason-box",
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("span", {
+    className: "strong"
+  }, "Status note: "), "Linked FlowMate Review or Delivered can override the displayed Status. Changing Marketing Status does not change the linked FlowMate task, so the displayed Status may remain unchanged until its FlowMate status changes."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
   }, React.createElement("div", {
     className: "strong"
@@ -5685,6 +5789,7 @@ function MarketingPlanWorkingSheetScreen() {
     const rowHasLinkedCreativeRequest = hasMarketingPlanLinkedCreativeRequest(row);
     const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
     const canManageRow = canManageMarketingPlanWorkingRow(row);
+    const canManageSchedule = canManageMarketingPlanSchedule(row);
     return React.createElement("tr", {
       key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`,
       "data-testid": "working-row",
@@ -5695,9 +5800,19 @@ function MarketingPlanWorkingSheetScreen() {
       key: channel,
       className: "marketing-channel-tag",
       title: getMarketingPlanChannelLabel(channel)
-    }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("span", {
-      className: "mono marketing-working-time-text"
-    }, formatMarketingPlanTime(row.publishTime) || "-")), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+    }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("select", {
+      className: "select mono marketing-working-time-text",
+      value: normalizeMarketingPlanPublishTimeOption(row.publishTime),
+      disabled: !canManageSchedule || updatingRowId === row.contentItemId,
+      title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.",
+      onChange: event => handleWorkingRowTimeChange(row, event.target.value)
+    }, !normalizeMarketingPlanPublishTimeOption(row.publishTime) && React.createElement("option", {
+      value: "",
+      disabled: true
+    }, formatMarketingPlanTime(row.publishTime) || "Select time"), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time => React.createElement("option", {
+      key: time,
+      value: time
+    }, time)))), React.createElement("td", null, row.briefLink ? React.createElement("a", {
       className: "marketing-working-link",
       href: row.briefLink,
       target: "_blank",
@@ -5707,8 +5822,8 @@ function MarketingPlanWorkingSheetScreen() {
     }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, row.subPicName || "-"), React.createElement("td", null, React.createElement("select", {
       className: "select marketing-working-status",
       value: rowStatusValue,
-      disabled: !canManageRow || updatingRowId === row.contentItemId,
-      title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
+      disabled: !canManageSchedule || updatingRowId === row.contentItemId,
+      title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.",
       onChange: event => handleWorkingRowStatusChange(row, event.target.value)
     }, MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
       key: option.value,
@@ -6319,7 +6434,8 @@ function GlobalSearchResultsPanel({
   query,
   results,
   loadState,
-  onOpen
+  onOpen,
+  onSearchArchived
 }) {
   const safeResults = results || [];
   function getAssigneeName(row) {
@@ -6380,7 +6496,16 @@ function GlobalSearchResultsPanel({
     className: "searchbar__result-meta-item"
   }, React.createElement("strong", null, "Assignee"), getAssigneeName(row)), React.createElement("span", {
     className: "searchbar__result-meta-item"
-  }, React.createElement("strong", null, "Due"), getContextValue(row.dueFullLabel || row.dueLabel, "No due date"))))));
+  }, React.createElement("strong", null, "Due"), getContextValue(row.dueFullLabel || row.dueLabel, "No due date"))))), React.createElement("button", {
+    type: "button",
+    className: "searchbar__archive-action",
+    onClick: () => {
+      onSearchArchived();
+    }
+  }, React.createElement(Icon, {
+    name: "layers",
+    size: 13
+  }), " Search archived for \"", query, "\""));
 }
 function NotificationCenterPanel({
   notifications,

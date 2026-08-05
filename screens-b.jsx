@@ -1,7 +1,8 @@
 ﻿// FlowMate - Screens part B: List, Board, Central Queue
-const { useState: useStateB, useEffect: useEffectB } = React;
+const { useState: useStateB, useEffect: useEffectB, useRef: useRefB } = React;
 const FLOWMATE_LIST_VIEW_STATE_KEY = "flowmate:list:viewState:v1";
 const FLOWMATE_DETAIL_BACK_CONTEXT_KEY = "flowmate:detail:backContext:v1";
+const FLOWMATE_BOARD_VIEW_STATE_KEY = "flowmate:board:viewState:v1";
 
 function readFlowMateListViewState() {
   try {
@@ -39,11 +40,31 @@ function readFlowMateDetailBackContext() {
   }
 }
 
+function readFlowMateBoardViewState() {
+  try {
+    const raw = window.sessionStorage && window.sessionStorage.getItem(FLOWMATE_BOARD_VIEW_STATE_KEY);
+    return raw ? JSON.parse(raw) : (window.flowmateBoardViewState || {});
+  } catch {
+    return window.flowmateBoardViewState || {};
+  }
+}
+
+function saveFlowMateBoardViewState(state) {
+  const next = { ...(state || {}) };
+  window.flowmateBoardViewState = next;
+  try {
+    if (window.sessionStorage) window.sessionStorage.setItem(FLOWMATE_BOARD_VIEW_STATE_KEY, JSON.stringify(next));
+  } catch {}
+  return next;
+}
+
 Object.assign(window, {
   readFlowMateListViewState,
   saveFlowMateListViewState,
   saveFlowMateDetailBackContext,
   readFlowMateDetailBackContext,
+  readFlowMateBoardViewState,
+  saveFlowMateBoardViewState,
 });
 
 function exportRowsCsv(rows) {
@@ -336,65 +357,459 @@ function ListScreen({ onOpen, searchQuery = "" }) {
 /* ============================================================
    KANBAN BOARD
    ============================================================ */
-function BoardScreen({ onOpen }) {
+function BoardScreen({ onOpen, searchQuery = "" }) {
   const columns = [
     { key: "unassigned",  label: "Unassigned" },
-    { key: "assigned",    label: "Assigned" },
+    { key: "assigned", label: "Assigned" },
     { key: "in_progress", label: "In Progress" },
-    { key: "review",      label: "Review" },
-    { key: "blocked",     label: "Blocked" },
-    { key: "delivered",   label: "Delivered" },
+    { key: "review", label: "Review" },
+    { key: "blocked", label: "Blocked" },
   ];
-  const [sourceRows, setSourceRows] = useStateB(WORK);
-  const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Supabase data..." });
+  const emptyLane = { status: "idle", rows: [], total: 0, nextCursor: null, hasMore: false, message: "" };
+  const savedBoardState = readFlowMateBoardViewState();
+  const defaultDeliveredFilters = { scope: "recent", search: "", deliveredMonth: "", campaign: "", ownerId: "" };
+  const [activeTab, setActiveTab] = useStateB(savedBoardState.activeTab === "delivered" ? "delivered" : "active");
+  const [lanes, setLanes] = useStateB(() => Object.fromEntries(columns.map(column => [column.key, { ...emptyLane }])));
+  const [summary, setSummary] = useStateB({ counts: {}, wip: { inProgressByOwner: {}, reviewTeamCount: 0, reviewTeamLimit: 8 } });
   const [draggingId, setDraggingId] = useStateB(null);
   const [hoverCol, setHoverCol] = useStateB(null);
-  const [busy, setBusy] = useStateB(false);
+  const [cardPending, setCardPending] = useStateB({});
+  const [cardErrors, setCardErrors] = useStateB({});
+  const [refreshing, setRefreshing] = useStateB(false);
+  const [loadState, setLoadState] = useStateB({ status: "loading", message: "Loading Active Board..." });
   const [flash, setFlash] = useStateB(null);
+  const [deliveredFilters, setDeliveredFilters] = useStateB({ ...defaultDeliveredFilters, ...(savedBoardState.deliveredFilters || {}) });
+  const [deliveredCursor, setDeliveredCursor] = useStateB(savedBoardState.deliveredCursor || null);
+  const [deliveredCursorStack, setDeliveredCursorStack] = useStateB(Array.isArray(savedBoardState.deliveredCursorStack) ? savedBoardState.deliveredCursorStack : []);
+  const [deliveredState, setDeliveredState] = useStateB({ status: "idle", rows: [], total: 0, nextCursor: null, hasMore: false, filterOptions: {}, message: "" });
+  const deliveredRequestRef = useRefB(0);
+  const summaryRequestRef = useRefB(0);
+  const activeBoardRequestRef = useRefB(0);
+  const laneRequestRef = useRefB(Object.fromEntries(columns.map(column => [column.key, 0])));
+  const laneStateRef = useRefB(lanes);
+  const laneBodyRefs = useRefB({});
+  const laneLoadedCounts = useRefB(savedBoardState.laneLoadedCounts || {});
+  const laneScrollPositions = useRefB(savedBoardState.laneScrollPositions || {});
+  const activeTabRef = useRefB(activeTab);
+  const deliveredFiltersRef = useRefB(deliveredFilters);
+  const deliveredCursorRef = useRefB(deliveredCursor);
+  const deliveredCursorStackRef = useRefB(deliveredCursorStack);
+  laneStateRef.current = lanes;
+  activeTabRef.current = activeTab;
+  deliveredFiltersRef.current = deliveredFilters;
+  deliveredCursorRef.current = deliveredCursor;
+  deliveredCursorStackRef.current = deliveredCursorStack;
 
-  async function loadRows(isAlive = () => true) {
-    if (!window.loadFlowMateListRows) {
-      setSourceRows([]);
-      setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
+  function boardError(error, fallback) {
+    return window.flowmateUserError ? window.flowmateUserError(error, fallback) : (error?.message || fallback);
+  }
+
+  function currentBoardViewState(overrides = {}) {
+    return {
+      activeTab: activeTabRef.current,
+      deliveredFilters: deliveredFiltersRef.current,
+      deliveredCursor: deliveredCursorRef.current,
+      deliveredCursorStack: deliveredCursorStackRef.current,
+      laneLoadedCounts: { ...laneLoadedCounts.current },
+      laneScrollPositions: { ...laneScrollPositions.current },
+      ...overrides,
+    };
+  }
+
+  function persistBoardViewState(overrides = {}) {
+    return saveFlowMateBoardViewState(currentBoardViewState(overrides));
+  }
+
+  function rememberLaneScroll(status, node) {
+    if (!node) return;
+    laneBodyRefs.current[status] = node;
+    laneScrollPositions.current[status] = node.scrollTop || 0;
+  }
+
+  function restoreLaneScroll(status) {
+    const scrollTop = Number(laneScrollPositions.current[status] || 0);
+    window.requestAnimationFrame?.(() => {
+      const node = laneBodyRefs.current[status];
+      if (node) node.scrollTop = scrollTop;
+    });
+  }
+
+  async function loadLane(status, { append = false, isAlive = () => true, preserveScroll = true, targetCount } = {}) {
+    if (!window.loadFlowMateBoardLane) {
+      setLanes(current => ({ ...current, [status]: { ...current[status], status: "error", message: "Active Board loader is not ready." } }));
       return false;
     }
+    const requestId = ++laneRequestRef.current[status];
+    const currentLane = laneStateRef.current[status] || emptyLane;
+    let cursor = append ? currentLane.nextCursor : null;
+    const desiredCount = append ? currentLane.rows.length + 50 : Math.max(50, Number(targetCount || laneLoadedCounts.current[status] || currentLane.rows.length || 0));
+    let accumulatedRows = append ? [...currentLane.rows] : [];
+    let latestResult = null;
+    setLanes(current => ({ ...current, [status]: { ...current[status], status: append ? "loading-more" : "loading", message: "" } }));
     try {
-      const rows = await window.loadFlowMateListRows();
-      if (!isAlive()) return false;
-      setSourceRows(rows);
-      setLoadState({ status: "live", message: "Live Supabase data" });
+      do {
+        const pageSize = Math.min(50, Math.max(1, desiredCount - accumulatedRows.length));
+        latestResult = await window.loadFlowMateBoardLane({ status, cursor, limit: pageSize });
+        if (!isAlive() || requestId !== laneRequestRef.current[status]) return false;
+        accumulatedRows = Array.from(new Map([...accumulatedRows, ...(latestResult.rows || [])].map(row => [row.id, row])).values());
+        cursor = latestResult.nextCursor || null;
+      } while (cursor && accumulatedRows.length < desiredCount);
+      laneLoadedCounts.current[status] = accumulatedRows.length;
+      setLanes(current => {
+        const nextLane = {
+          status: "live",
+          rows: accumulatedRows,
+          total: latestResult?.total || 0,
+          nextCursor: cursor,
+          hasMore: Boolean(cursor),
+          message: "",
+        };
+        laneStateRef.current = { ...laneStateRef.current, [status]: nextLane };
+        return { ...current, [status]: nextLane };
+      });
+      if (preserveScroll) restoreLaneScroll(status);
+      persistBoardViewState();
       return true;
     } catch (error) {
-      if (!isAlive()) return false;
-      console.error("[FlowMate Board] Supabase load failed:", error);
-      setSourceRows([]);
-      setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
+      if (!isAlive() || requestId !== laneRequestRef.current[status]) return false;
+      console.error(`[FlowMate Board] ${status} lane load failed:`, error);
+      setLanes(current => ({ ...current, [status]: { ...current[status], status: "error", message: boardError(error, "Could not load this lane.") } }));
+      return false;
+    }
+  }
+
+  async function loadSummary(isAlive = () => true, activeBoardRequestId = activeBoardRequestRef.current) {
+    if (!window.loadFlowMateBoardSummary) return false;
+    const requestId = ++summaryRequestRef.current;
+    try {
+      const next = await window.loadFlowMateBoardSummary();
+      if (!isAlive() || requestId !== summaryRequestRef.current || activeBoardRequestId !== activeBoardRequestRef.current) return false;
+      setSummary(next);
+      return true;
+    } catch (error) {
+      if (!isAlive() || requestId !== summaryRequestRef.current || activeBoardRequestId !== activeBoardRequestRef.current) return false;
+      console.error("[FlowMate Board] summary load failed:", error);
+      setFlash({ tone: "warn", text: boardError(error, "Board counts could not be refreshed.") });
+      return false;
+    }
+  }
+
+  async function loadActiveBoard(isAlive = () => true, { preserveScroll = true } = {}) {
+    const requestId = ++activeBoardRequestRef.current;
+    const results = await Promise.all([
+      ...columns.map(column => loadLane(column.key, {
+        isAlive,
+        preserveScroll,
+        targetCount: Math.max(50, Number(laneLoadedCounts.current[column.key] || laneStateRef.current[column.key]?.rows.length || 0)),
+      })),
+      loadSummary(isAlive, requestId),
+    ]);
+    if (isAlive() && requestId === activeBoardRequestRef.current) {
+      setLoadState({ status: results.every(Boolean) ? "live" : "error", message: results.every(Boolean) ? "Live Supabase data" : "One or more Board lanes could not be loaded." });
+    }
+  }
+
+  async function refreshActiveBoardPreservingState(isAlive = () => true) {
+    columns.forEach(column => rememberLaneScroll(column.key, laneBodyRefs.current[column.key]));
+    return loadActiveBoard(isAlive, { preserveScroll: true });
+  }
+
+  async function loadDelivered(cursor = deliveredCursorRef.current, isAlive = () => true, filters = deliveredFiltersRef.current) {
+    if (!window.loadFlowMateDeliveredHistory) {
+      setDeliveredState(current => ({ ...current, status: "error", message: "Delivered history loader is not ready." }));
+      return false;
+    }
+    const requestId = ++deliveredRequestRef.current;
+    setDeliveredState(current => ({ ...current, status: "loading", rows: [], hasMore: false, message: "" }));
+    try {
+      const result = await window.loadFlowMateDeliveredHistory({ ...filters, cursor, limit: 50 });
+      if (!isAlive() || requestId !== deliveredRequestRef.current) return false;
+      setDeliveredState({
+        status: "live", rows: result.rows || [], total: result.total || 0, nextCursor: result.nextCursor || null,
+        hasMore: Boolean(result.hasMore), filterOptions: result.filterOptions || {}, message: "",
+      });
+      return true;
+    } catch (error) {
+      if (!isAlive() || requestId !== deliveredRequestRef.current) return false;
+      console.error("[FlowMate Delivered] history load failed:", error);
+      setDeliveredState(current => ({ ...current, status: "error", rows: [], message: boardError(error, "Delivered history could not be loaded.") }));
       return false;
     }
   }
 
   useEffectB(() => {
     let alive = true;
-    loadRows(() => alive);
-    const cleanup = window.attachFlowMateLiveRefresh
-      ? window.attachFlowMateLiveRefresh(() => loadRows(() => alive))
-      : () => {};
-    return () => { alive = false; cleanup(); };
+    if (activeTab === "active") refreshActiveBoardPreservingState(() => alive);
+    return () => { alive = false; };
+  }, [activeTab]);
+
+  useEffectB(() => {
+    if (activeTab !== "delivered") return undefined;
+    let alive = true;
+    const filterSnapshot = { ...deliveredFilters };
+    const timer = setTimeout(() => loadDelivered(deliveredCursor, () => alive, filterSnapshot), 350);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [activeTab, deliveredFilters.scope, deliveredFilters.search, deliveredFilters.deliveredMonth, deliveredFilters.campaign, deliveredFilters.ownerId, deliveredCursor]);
+
+  useEffectB(() => {
+    try {
+      const archivedSearchHandoff = window.sessionStorage?.getItem("flowmate:board:archiveSearch");
+      if (!archivedSearchHandoff) return;
+      window.sessionStorage?.removeItem("flowmate:board:archiveSearch");
+      const handoff = JSON.parse(archivedSearchHandoff);
+      const query = String(handoff?.query || "").trim();
+      selectBoardTab("delivered");
+      setDeliveredFilters(current => {
+        const next = { ...current, scope: "archived", search: query };
+        deliveredFiltersRef.current = next;
+        return next;
+      });
+      deliveredCursorRef.current = null;
+      deliveredCursorStackRef.current = [];
+      setDeliveredCursor(null);
+      setDeliveredCursorStack([]);
+    } catch (error) {
+      try { window.sessionStorage?.removeItem("flowmate:board:archiveSearch"); } catch (cleanupError) {}
+      console.warn("[FlowMate Board] Archived-search handoff could not be read:", error && error.message);
+    }
   }, []);
 
-  const byCol = Object.fromEntries(columns.map(c => [c.key, sourceRows.filter(w => w.status === c.key)]));
-
-  function handleDragStart(e, w) {
-    if (!w.isSupabaseRow) {
-      // Rows without a Supabase backing record cannot be mutated.
-      e.preventDefault();
-      setFlash({ tone: "warn", text: "Drag-drop only works on live Supabase data." });
-      return;
+  useEffectB(() => {
+    function openArchivedSearch(event) {
+      const query = String(event?.detail?.query || event?.detail?.search || searchQuery || "").trim();
+      selectBoardTab("delivered");
+      setDeliveredFilters(current => {
+        const next = { ...current, scope: "archived", search: query };
+        deliveredFiltersRef.current = next;
+        return next;
+      });
+      deliveredCursorRef.current = null;
+      deliveredCursorStackRef.current = [];
+      setDeliveredCursor(null);
+      setDeliveredCursorStack([]);
     }
-    setDraggingId(w.id);
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      try { e.dataTransfer.setData("text/plain", w.id); } catch (err) {}
+    window.addEventListener("flowmate:search-archived", openArchivedSearch);
+    return () => window.removeEventListener("flowmate:search-archived", openArchivedSearch);
+  }, [searchQuery]);
+
+  useEffectB(() => {
+    function resetDeliveredNavigation({ resetTab = true } = {}) {
+      deliveredRequestRef.current += 1;
+      deliveredFiltersRef.current = defaultDeliveredFilters;
+      deliveredCursorRef.current = null;
+      deliveredCursorStackRef.current = [];
+      setDeliveredFilters(defaultDeliveredFilters);
+      setDeliveredCursor(null);
+      setDeliveredCursorStack([]);
+      setDeliveredState({ status: "idle", rows: [], total: 0, nextCursor: null, hasMore: false, filterOptions: {}, message: "" });
+      if (resetTab) selectBoardTab("active");
+    }
+
+    function clearArchivedSearch() {
+      if (deliveredFiltersRef.current.scope !== "archived") return;
+      resetDeliveredNavigation();
+      saveFlowMateBoardViewState(currentBoardViewState({
+        activeTab: "active",
+        deliveredFilters: defaultDeliveredFilters,
+        deliveredCursor: null,
+        deliveredCursorStack: [],
+      }));
+    }
+
+    function resetForWorkspaceChange() {
+      activeBoardRequestRef.current += 1;
+      summaryRequestRef.current += 1;
+      Object.keys(laneRequestRef.current).forEach(status => { laneRequestRef.current[status] += 1; });
+      laneLoadedCounts.current = {};
+      laneScrollPositions.current = {};
+      setLanes(Object.fromEntries(columns.map(column => [column.key, { ...emptyLane }])));
+      setSummary({ counts: {}, wip: { inProgressByOwner: {}, reviewTeamCount: 0, reviewTeamLimit: 8 } });
+      resetDeliveredNavigation();
+      saveFlowMateBoardViewState({ activeTab: "active", deliveredFilters: defaultDeliveredFilters, deliveredCursor: null, deliveredCursorStack: [], laneLoadedCounts: {}, laneScrollPositions: {} });
+    }
+
+    window.addEventListener("flowmate:search-cleared", clearArchivedSearch);
+    window.addEventListener("flowmate:team-workspace-changed", resetForWorkspaceChange);
+    return () => {
+      window.removeEventListener("flowmate:search-cleared", clearArchivedSearch);
+      window.removeEventListener("flowmate:team-workspace-changed", resetForWorkspaceChange);
+    };
+  }, []);
+
+  useEffectB(() => {
+    if (!window.attachFlowMateLiveRefresh) return undefined;
+    const refreshCurrent = () => activeTabRef.current === "active"
+      ? refreshActiveBoardPreservingState()
+      : loadDelivered(deliveredCursorRef.current, () => true, { ...deliveredFiltersRef.current });
+    return window.attachFlowMateLiveRefresh(refreshCurrent);
+  }, []);
+
+  useEffectB(() => {
+    persistBoardViewState();
+  }, [activeTab, deliveredFilters.scope, deliveredFilters.search, deliveredFilters.deliveredMonth, deliveredFilters.campaign, deliveredFilters.ownerId, deliveredCursor, deliveredCursorStack]);
+
+  function allActiveRows() {
+    return columns.flatMap(column => lanes[column.key]?.rows || []);
+  }
+
+  function selectBoardTab(tab) {
+    activeTabRef.current = tab;
+    setActiveTab(tab);
+  }
+
+  function handleBoardTabKeyDown(event) {
+    const orderedTabs = ["active", "delivered"];
+    const currentIndex = orderedTabs.indexOf(activeTabRef.current);
+    let nextTab = null;
+    if (event.key === "ArrowRight") nextTab = orderedTabs[(currentIndex + 1) % orderedTabs.length];
+    if (event.key === "ArrowLeft") nextTab = orderedTabs[(currentIndex - 1 + orderedTabs.length) % orderedTabs.length];
+    if (event.key === "Home") nextTab = orderedTabs[0];
+    if (event.key === "End") nextTab = orderedTabs[orderedTabs.length - 1];
+    if (!nextTab) return;
+    event.preventDefault();
+    selectBoardTab(nextTab);
+    window.requestAnimationFrame?.(() => window.document?.getElementById(`flowmate-board-tab-${nextTab}`)?.focus());
+  }
+
+  function canTransitionBoardWork(row) {
+    if (!row?.isSupabaseRow || row.archivedAt) return false;
+    const currentUser = window.FLOWMATE_CURRENT_USER || {};
+    if (currentUser.role === "admin") return true;
+    const owner = window.MEMBERS_BY_ID?.[row.assignee];
+    return Boolean(
+      currentUser.id && (
+        currentUser.id === row.requesterUserId
+        || currentUser.id === row.assigneeUserId
+        || currentUser.id === owner?.userId
+        || currentUser.id === row.marketingPlanSubPicUserId
+        || currentUser.team_member_id === row.assignee
+      )
+    );
+  }
+
+  function boardTransitionTargets(row) {
+    if (!canTransitionBoardWork(row) || row.type === "quick") return [];
+    const targetsByStatus = {
+      assigned: ["in_progress", "blocked"],
+      in_progress: ["review", "blocked"],
+      review: ["in_progress", "blocked"],
+      blocked: ["in_progress"],
+    };
+    return targetsByStatus[row.status] || [];
+  }
+
+  function setDeliveredFilter(key, value) {
+    setDeliveredState(current => ({ ...current, status: "loading", rows: [], hasMore: false, message: "" }));
+    setDeliveredFilters(current => {
+      const next = { ...current, [key]: value };
+      deliveredFiltersRef.current = next;
+      return next;
+    });
+    deliveredCursorRef.current = null;
+    deliveredCursorStackRef.current = [];
+    setDeliveredCursor(null);
+    setDeliveredCursorStack([]);
+  }
+
+  function resetDeliveredFilters() {
+    setDeliveredState(current => ({ ...current, status: "loading", rows: [], hasMore: false, message: "" }));
+    deliveredFiltersRef.current = defaultDeliveredFilters;
+    deliveredCursorRef.current = null;
+    deliveredCursorStackRef.current = [];
+    setDeliveredFilters(defaultDeliveredFilters);
+    setDeliveredCursor(null);
+    setDeliveredCursorStack([]);
+  }
+
+  function showPreviousDeliveredPage() {
+    const stack = [...deliveredCursorStackRef.current];
+    const previous = stack.pop() || null;
+    deliveredCursorStackRef.current = stack;
+    deliveredCursorRef.current = previous;
+    setDeliveredState(current => ({ ...current, status: "loading", rows: [], hasMore: false, message: "" }));
+    setDeliveredCursorStack(stack);
+    setDeliveredCursor(previous);
+  }
+
+  function showNextDeliveredPage() {
+    if (!deliveredState.hasMore || !deliveredState.nextCursor) return;
+    const stack = [...deliveredCursorStackRef.current, deliveredCursorRef.current];
+    deliveredCursorStackRef.current = stack;
+    deliveredCursorRef.current = deliveredState.nextCursor;
+    setDeliveredState(current => ({ ...current, status: "loading", rows: [], hasMore: false, message: "" }));
+    setDeliveredCursorStack(stack);
+    setDeliveredCursor(deliveredState.nextCursor);
+  }
+
+  function openListForStatus(status) {
+    saveFlowMateListViewState({ ...readFlowMateListViewState(), filterStatus: status });
+    window.location.hash = "list";
+  }
+
+  function openActiveWork(row) {
+    window.flowmateSelectedWorkItem = row;
+    const boardViewState = persistBoardViewState({ activeTab: "active" });
+    saveFlowMateDetailBackContext({ route: "board", label: "Back to Active Board", boardTab: "active", boardViewState });
+    onOpen(row.id);
+  }
+
+  function openDeliveredWork(row) {
+    // History rows are intentionally partial. DetailScreen performs the
+    // RLS-scoped direct read (including archived rows) using the display ID.
+    window.flowmateSelectedWorkItem = null;
+    const boardViewState = persistBoardViewState({ activeTab: "delivered" });
+    saveFlowMateDetailBackContext({ route: "board", label: "Back to Delivered", boardTab: "delivered", deliveredFilters, boardViewState });
+    onOpen(row.id);
+  }
+
+  async function runCardMutation(row, mutation, successText) {
+    setCardPending(current => ({ ...current, [row.id]: true }));
+    setCardErrors(current => ({ ...current, [row.id]: "" }));
+    try {
+      await mutation();
+      setLanes(current => ({ ...current, [row.status]: { ...current[row.status], rows: current[row.status].rows.filter(item => item.id !== row.id) } }));
+      setFlash({ tone: "ok", text: successText });
+      await refreshActiveBoardPreservingState();
+    } catch (error) {
+      console.error("[FlowMate Board] card transition failed:", error);
+      const message = boardError(error, "Transition rejected by backend.");
+      setCardErrors(current => ({ ...current, [row.id]: message }));
+      setFlash({ tone: "bad", text: message });
+      await refreshActiveBoardPreservingState();
+    } finally {
+      setCardPending(current => ({ ...current, [row.id]: false }));
+    }
+  }
+
+  async function completeWork(row) {
+    if (!canTransitionBoardWork(row)) {
+      setCardErrors(current => ({ ...current, [row.id]: "You do not have permission to change this work item." }));
+      return false;
+    }
+    if (row.type === "quick") {
+      const mutation = window.FLOWMATE_CURRENT_USER?.role === "admin"
+        ? () => window.transitionFlowMateWorkStatus(row.id, "delivered", {})
+        : () => window.completeFlowMateQuickTask(row.id);
+      return runCardMutation(row, mutation, `${row.id} marked done.`);
+    }
+    if (row.status !== "review") {
+      setCardErrors(current => ({ ...current, [row.id]: "Creative work can be delivered from Review." }));
+      return false;
+    }
+    const deliveryLink = await window.flowmatePrompt({
+      title: "Mark Delivered", label: "Delivery link", placeholder: "https://drive.google.com/...", required: true,
+      validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link.",
+    });
+    if (!deliveryLink) return false;
+    return runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, "delivered", { deliveryLink }), `${row.id} marked Delivered.`);
+  }
+
+  function handleDragStart(event, row) {
+    if (!canTransitionBoardWork(row) || row.type === "quick" || cardPending[row.id]) return event.preventDefault();
+    setDraggingId(row.id);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", row.id);
     }
   }
 
@@ -403,229 +818,189 @@ function BoardScreen({ onOpen }) {
     setHoverCol(null);
   }
 
-  function handleDragOver(e, colKey) {
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-    if (hoverCol !== colKey) setHoverCol(colKey);
-  }
-
-  function handleDragLeave(colKey) {
-    if (hoverCol === colKey) setHoverCol(null);
-  }
-
-  async function handleDrop(e, targetStatus) {
-    e.preventDefault();
-    setHoverCol(null);
-    const id = draggingId || (e.dataTransfer && e.dataTransfer.getData("text/plain"));
-    setDraggingId(null);
-    if (!id) return;
-
-    const row = sourceRows.find(r => r.id === id);
-    if (!row) return;
-    if (row.status === targetStatus) return;
+  async function moveBoardWork(row, targetStatus) {
+    if (!row || row.status === targetStatus || !canTransitionBoardWork(row)) return false;
     if (targetStatus === "unassigned") {
-      setFlash({ tone: "warn", text: "Open the work item detail to clear or change its assignee." });
-      return;
+      setFlash({ tone: "warn", text: "Open Detail to clear or change an assignee." });
+      return false;
     }
-    if (!row.isSupabaseRow) {
-      setFlash({ tone: "warn", text: "Drag-drop only works on live Supabase data." });
-      return;
-    }
-
-    // Quick tasks: only a couple of board transitions make sense in MVP.
     if (row.type === "quick") {
-      if (targetStatus === "delivered") {
-        const completeQuickTask = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin"
-          ? () => window.transitionFlowMateWorkStatus(row.id, targetStatus, {})
-          : () => window.completeFlowMateQuickTask(row.id);
-        await runMutate(completeQuickTask,
-                        `${row.id} marked done.`);
-      } else if (targetStatus === "cancelled") {
-        const reason = await window.flowmatePrompt({
-          title: "Cancel work", label: "Cancel reason", multiline: true, required: true,
-        });
-        if (!reason) return;
-        await runMutate(() => window.cancelFlowMateWorkItem(row, reason),
-                        `${row.id} cancelled.`);
-      } else {
-        setFlash({ tone: "warn", text: "Quick tasks can only be moved to Delivered or Cancelled on the board." });
-      }
-      return;
+      setFlash({ tone: "warn", text: "Use the card action for Quick Task status changes." });
+      return false;
     }
-
-    // Creative requests — collect required reason / link based on target.
     const options = {};
     if (targetStatus === "review") {
-      const link = await window.flowmatePrompt({
-        title: "Submit for review",
-        label: "Delivery link",
-        placeholder: "https://drive.google.com/…",
-        required: true,
-        validate: (value) => (window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."),
-      });
-      if (!link) return;
-      options.deliveryLink = link;
+      const deliveryLink = await window.flowmatePrompt({ title: "Submit for review", label: "Delivery link", required: true, validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link." });
+      if (!deliveryLink) return;
+      options.deliveryLink = deliveryLink;
     }
     if (targetStatus === "blocked") {
-      const reason = await window.flowmatePrompt({
-        title: "Block work", label: "Blocked reason", multiline: true, required: true,
-      });
-      if (!reason) return;
-      options.blockedReason = reason;
+      const blockedReason = await window.flowmatePrompt({ title: "Block work", label: "Blocked reason", multiline: true, required: true });
+      if (!blockedReason) return;
+      options.blockedReason = blockedReason;
     }
-    if (targetStatus === "cancelled") {
-      const reason = await window.flowmatePrompt({
-        title: "Cancel work", label: "Cancel reason", multiline: true, required: true,
-      });
-      if (!reason) return;
-      options.cancelReason = reason;
-    }
-
-    await runMutate(
-      () => window.transitionFlowMateWorkStatus(row.id, targetStatus, options),
-      `${row.id} → ${STATUS_LABEL[targetStatus] || targetStatus}`,
-    );
+    await runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, targetStatus, options), `${row.id} moved to ${STATUS_LABEL[targetStatus]}.`);
+    await loadLane(targetStatus);
+    return true;
   }
 
-  async function runMutate(fn, successText) {
-    setBusy(true);
-    try {
-      await fn();
-      await loadRows();
-      setFlash({ tone: "ok", text: successText });
-    } catch (error) {
-      console.error("[FlowMate Board] transition failed:", error);
-      setFlash({ tone: "bad", text: window.flowmateUserError(error, "Transition rejected by backend.") });
-    } finally {
-      setBusy(false);
+  async function handleDrop(event, targetStatus) {
+    event.preventDefault();
+    setHoverCol(null);
+    const id = draggingId || event.dataTransfer?.getData("text/plain");
+    setDraggingId(null);
+    const row = allActiveRows().find(item => item.id === id);
+    return moveBoardWork(row, targetStatus);
+  }
+
+  function laneWipSignal(status) {
+    if (status === "review") {
+      const count = Number(summary.wip?.reviewTeamCount || 0);
+      const limit = Number(summary.wip?.reviewTeamLimit || 8);
+      return { text: count > limit ? `${count}/${limit} over by ${count - limit}` : `${count}/${limit} team queue`, isWarning: count > limit };
     }
+    if (status === "in_progress") {
+      const atLimit = Object.values(summary.wip?.inProgressByOwner || {}).filter(owner => owner.limit > 0 && owner.count >= owner.limit);
+      if (!atLimit.length) return { text: "Member WIP within limits", isWarning: false };
+      return { text: atLimit.map(owner => `${owner.name} ${owner.count}/${owner.limit} ${owner.count > owner.limit ? "over limit" : "at limit"}`).join("; "), isWarning: true };
+    }
+    return { text: "", isWarning: false };
   }
 
   async function handleBoardRefresh() {
-    setBusy(true);
+    setRefreshing(true);
     setFlash(null);
     setLoadState({ status: "loading", message: "Refreshing board data..." });
     try {
-      const ok = await loadRows();
-      if (!ok) {
-        setFlash({ tone: "bad", text: "Refresh failed." });
-        return;
-      }
+      if (activeTab === "active") await refreshActiveBoardPreservingState();
+      else await loadDelivered();
       window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
       setFlash({ tone: "ok", text: "Board refreshed." });
-    } catch (error) {
-      console.error("[FlowMate Board] manual refresh failed:", error);
-      setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
-      setFlash({ tone: "bad", text: window.flowmateUserError(error, "Refresh failed.") });
     } finally {
-      setBusy(false);
+      setRefreshing(false);
     }
   }
 
+  const campaigns = deliveredState.filterOptions.campaigns || [];
+  const owners = deliveredState.filterOptions.owners || [];
+  const hasDeliveredFilters = Boolean(deliveredFilters.search || deliveredFilters.deliveredMonth || deliveredFilters.campaign || deliveredFilters.ownerId || deliveredFilters.scope !== "recent");
+
   return (
-    <div className="page">
-      <div className="page__header">
+    <div className="page board-page">
+      <div className="page__header board-page__header">
         <div>
           <h1 className="page__title">Board</h1>
-          <div className="page__sub">
-            Drag a card to a new column to change status — backend validates each transition.
-            <span style={{ marginLeft: 8, opacity: 0.75 }}>{loadState.message}</span>
-          </div>
+          <div className="page__sub">Five active workflow lanes and a separate Delivered history. Backend permissions remain authoritative. <span className="muted">{loadState.message}</span></div>
         </div>
         <div className="page__actions">
-          <button className="btn btn--secondary" onClick={handleBoardRefresh} disabled={busy}>
-            <Icon name="rerun" /> Refresh
+          <button type="button" className="btn btn--secondary" onClick={handleBoardRefresh} disabled={refreshing}>
+            <Icon name="rerun" /> {refreshing ? "Refreshing..." : "Refresh"}
           </button>
         </div>
       </div>
 
-      {flash && (
-        <div className={`reason-box ${flash.tone === "bad" ? "reason-box--need" : flash.tone === "warn" ? "reason-box--queued" : ""}`}
-             style={{ marginBottom: 12 }}>
-          {flash.text}
-          <button className="btn btn--xs btn--ghost" style={{ marginLeft: 8 }} onClick={() => setFlash(null)}>Dismiss</button>
-        </div>
-      )}
-
-      <div className="kanban">
-        {columns.map(c => {
-          const isHover = hoverCol === c.key;
-          return (
-            <div
-              className="kcol"
-              key={c.key}
-              onDragOver={(e) => handleDragOver(e, c.key)}
-              onDragLeave={() => handleDragLeave(c.key)}
-              onDrop={(e) => handleDrop(e, c.key)}
-              style={isHover ? {
-                outline: "2px dashed var(--garena-deep-blue, #2E546D)",
-                outlineOffset: -4,
-                background: "rgba(46, 84, 109, 0.04)",
-                transition: "outline 80ms, background 80ms",
-              } : { transition: "outline 80ms, background 80ms" }}
-            >
-              <div className="kcol__head">
-                <span className="kcol__title">{c.label}</span>
-                <span className="kcol__count">{byCol[c.key].length}</span>
-              </div>
-              <div className="kcol__body">
-                {byCol[c.key].map(w => {
-                  const isDragging = draggingId === w.id;
-                  const draggable = Boolean(w.isSupabaseRow) && !busy && w.status !== "unassigned";
-                  return (
-                    <div
-                      key={w.id}
-                      className="kcard"
-                      draggable={draggable}
-                      onDragStart={(e) => handleDragStart(e, w)}
-                      onDragEnd={handleDragEnd}
-                      onClick={() => {
-                        if (isDragging) return;
-                        // Pass the full row through the global so DetailScreen
-                        // can render Supabase-only items that aren't in the
-                        // static WORK_BY_ID fallback.
-                        window.flowmateSelectedWorkItem = w;
-                        onOpen(w.id);
-                      }}
-                      style={{
-                        cursor: draggable ? (isDragging ? "grabbing" : "grab") : "pointer",
-                        opacity: isDragging ? 0.4 : 1,
-                        transition: "opacity 120ms, transform 120ms",
-                        transform: isDragging ? "scale(0.98)" : "none",
-                      }}
-                      title={draggable ? "Drag to a column to change status" : (w.status === "unassigned" ? "Open detail to assign this work" : "Live data only - connect to Supabase to drag")}
-                    >
-                      <div className="row" style={{ justifyContent: "space-between" }}>
-                        <span className="kcard__id mono">{w.id}</span>
-                        <PriorityBadge level={w.priority} />
-                      </div>
-                      <div className="kcard__title">{w.title}</div>
-                      <AssignmentWarningBadges work={w} limit={2} />
-                      <div className="kcard__row">
-                        <Avatar memberId={w.assignee} />
-                        <Effort value={w.effort} />
-                        <Progress {...(w.checklist || { done: 0, total: 0 })} />
-                        <span className="spacer"></span>
-                        <DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} />
-                      </div>
-                      {w.blockReason && (
-                        <div className="kcard__row kcard__row--meta" style={{ color: "var(--garena-red)" }}>
-                          <Icon name="alert" size={11} /> {w.blockReason}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {byCol[c.key].length === 0 && (
-                  <div className="muted" style={{ fontSize: 12, padding: 12, textAlign: "center" }}>
-                    {isHover ? "Drop to move here" : (c.key === "blocked" ? "No blocked items." : "Empty.")}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      <div className="board-tabs" role="tablist" aria-label="Board views">
+        <button type="button" id="flowmate-board-tab-active" role="tab" aria-selected={activeTab === "active"} aria-controls="flowmate-board-panel-active" tabIndex={activeTab === "active" ? 0 : -1} className={activeTab === "active" ? "is-active" : ""} onKeyDown={handleBoardTabKeyDown} onClick={() => selectBoardTab("active")}>Active Board</button>
+        <button type="button" id="flowmate-board-tab-delivered" role="tab" aria-selected={activeTab === "delivered"} aria-controls="flowmate-board-panel-delivered" tabIndex={activeTab === "delivered" ? 0 : -1} className={activeTab === "delivered" ? "is-active" : ""} onKeyDown={handleBoardTabKeyDown} onClick={() => selectBoardTab("delivered")}>Delivered</button>
       </div>
+
+      <div className="board-announcer" aria-live="polite" aria-atomic="true">
+        {flash?.text || Object.values(cardErrors).filter(Boolean)[0] || ""}
+      </div>
+      {flash && <div className={`reason-box board-flash ${flash.tone === "bad" ? "reason-box--need" : flash.tone === "warn" ? "reason-box--queued" : ""}`}>{flash.text}<button type="button" className="btn btn--xs btn--ghost" onClick={() => setFlash(null)}>Dismiss</button></div>}
+
+      {activeTab === "active" ? (
+        <div id="flowmate-board-panel-active" className="kanban board-active" role="tabpanel" aria-labelledby="flowmate-board-tab-active" tabIndex="0" aria-label="Active work lanes">
+          {columns.map(column => {
+            const lane = lanes[column.key] || emptyLane;
+            const isHover = hoverCol === column.key;
+            const wipSignal = laneWipSignal(column.key);
+            return (
+              <section
+                className={`kcol board-lane ${isHover ? "is-drop-target" : ""}`}
+                key={column.key}
+                aria-labelledby={`board-lane-${column.key}`}
+                onDragOver={event => { event.preventDefault(); setHoverCol(column.key); }}
+                onDragLeave={() => setHoverCol(null)}
+                onDrop={event => handleDrop(event, column.key)}
+              >
+                <div className="kcol__head board-lane__head">
+                  <div>
+                    <h2 id={`board-lane-${column.key}`} className="kcol__title">{column.label}</h2>
+                    {wipSignal.text && <div className={`board-wip ${wipSignal.isWarning ? "is-warning" : ""}`}><Icon name="alert" size={11} /> {wipSignal.text}</div>}
+                  </div>
+                  <span className="kcol__count" aria-label={`${lane.total} ${column.label} tasks`}>{lane.total}</span>
+                </div>
+                <div className="kcol__body board-lane__body" ref={node => { if (node) laneBodyRefs.current[column.key] = node; }} onScroll={event => { rememberLaneScroll(column.key, event.currentTarget); persistBoardViewState(); }}>
+                  {lane.status === "loading" && <div className="board-state" role="status">Loading {column.label}...</div>}
+                  {lane.status === "error" && <div className="board-state board-state--error" role="alert">{lane.message}<button type="button" className="btn btn--xs btn--secondary" onClick={() => loadLane(column.key)}>Retry</button></div>}
+                  {lane.rows.map(w => {
+                    const row = w;
+                    const pending = Boolean(cardPending[row.id]);
+                    return (
+                      <article
+                        key={row.id}
+                        className={`kcard board-card ${pending ? "is-pending" : ""}`}
+                        draggable={canTransitionBoardWork(row) && row.type !== "quick" && !pending && row.status !== "unassigned"}
+                        onDragStart={event => handleDragStart(event, row)}
+                        onDragEnd={handleDragEnd}
+                        onClick={() => openActiveWork(row)}
+                        aria-label={`${row.id}, ${row.title}, ${column.label}${row.priority === "urgent" ? ", Urgent" : ""}${row.blockReason ? `, Blocked reason: ${row.blockReason}` : ""}`}
+                      >
+                        <div className="board-card__top"><span className="kcard__id mono">{row.id}</span><PriorityBadge level={row.priority} /></div>
+                        <div className="kcard__title">{row.title}</div>
+                        <AssignmentWarningBadges work={row} limit={2} />
+                        <div className="kcard__row"><Avatar memberId={row.assignee} /><span className="board-card__owner">{row.ownerName || "Unassigned"}</span><Effort value={row.effort} /><Progress {...(row.checklist || { done: 0, total: 0 })} /></div>
+                        <div className="kcard__row"><DueBadge delta={row.dueDelta} label={row.dueLabel} status={row.status} /></div>
+                        {row.blockReason && <div className="kcard__row kcard__row--meta board-card__blocked"><Icon name="alert" size={11} /> Blocked: {row.blockReason}</div>}
+                        <div className="board-card__actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
+                          {row.type === "quick" && canTransitionBoardWork(row) && <button type="button" className="btn btn--xs btn--secondary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark done"}</button>}
+                          {row.type === "creative" && row.status === "review" && canTransitionBoardWork(row) && <button type="button" className="btn btn--xs btn--primary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark Delivered"}</button>}
+                          <details className="board-card-menu">
+                            <summary aria-label={`Actions for ${row.id}`}>Actions</summary>
+                            <div className="board-card-menu__items">
+                              <button type="button" onClick={() => openActiveWork(row)}>Open detail</button>
+                              {boardTransitionTargets(row).map(target => <button type="button" key={target} disabled={pending} onClick={() => moveBoardWork(row, target)}>Move to {STATUS_LABEL[target]}</button>)}
+                            </div>
+                          </details>
+                        </div>
+                        {cardErrors[row.id] && <div className="board-card__error" role="alert">{cardErrors[row.id]}</div>}
+                      </article>
+                    );
+                  })}
+                  {lane.status === "live" && lane.rows.length === 0 && <div className="board-state">{column.key === "blocked" ? "No blocked items." : `No ${column.label} work.`}</div>}
+                  {lane.hasMore && <button type="button" className="btn btn--sm btn--secondary board-load-more" disabled={lane.status === "loading-more"} onClick={() => loadLane(column.key, { append: true })}>{lane.status === "loading-more" ? "Loading..." : `Load more (${lane.rows.length} of ${lane.total})`}</button>}
+                  <button type="button" className="board-view-list" onClick={() => openListForStatus(column.key)}>View all in List</button>
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      ) : (
+        <section id="flowmate-board-panel-delivered" className="delivered-history" role="tabpanel" aria-labelledby="flowmate-board-tab-delivered" tabIndex="0">
+          <div className="delivered-history__header">
+            <div><h2 id="delivered-history-title">Delivered history</h2><p>{deliveredState.total} items match the current server filters.</p></div>
+            {hasDeliveredFilters && <button type="button" className="btn btn--sm btn--secondary" onClick={resetDeliveredFilters}>Reset filters</button>}
+          </div>
+          <div className="delivered-filters">
+            <label>Search<input className="input" type="search" value={deliveredFilters.search} onChange={event => setDeliveredFilter("search", event.target.value)} placeholder="ID, title or campaign" /></label>
+            <label>Delivered month<input className="input" type="month" value={deliveredFilters.deliveredMonth} onChange={event => setDeliveredFilter("deliveredMonth", event.target.value)} /></label>
+            <label>Campaign<select className="select" value={deliveredFilters.campaign} onChange={event => setDeliveredFilter("campaign", event.target.value)}><option value="">All campaigns</option>{campaigns.map(campaign => <option key={campaign.value || campaign} value={campaign.value || campaign}>{campaign.label || campaign}</option>)}</select></label>
+            <label>Owner<select className="select" value={deliveredFilters.ownerId} onChange={event => setDeliveredFilter("ownerId", event.target.value)}><option value="">All owners</option>{owners.map(owner => <option key={owner.id || owner.value} value={owner.id || owner.value}>{owner.name || owner.label}</option>)}</select></label>
+            <label>Scope<select className="select" value={deliveredFilters.scope} onChange={event => setDeliveredFilter("scope", event.target.value)}><option value="recent">Last 60 days</option><option value="archived">Archived</option></select></label>
+          </div>
+
+          {deliveredState.status === "loading" && <div className="board-state" role="status">Loading Delivered history...</div>}
+          {deliveredState.status === "error" && <div className="board-state board-state--error" role="alert">{deliveredState.message}<button type="button" className="btn btn--sm btn--secondary" onClick={() => loadDelivered()}>Retry</button></div>}
+          {deliveredState.status === "live" && deliveredState.rows.length === 0 && <div className="board-state">{hasDeliveredFilters ? "No Delivered items match these filters." : "No Delivered items yet."}</div>}
+          {deliveredState.rows.length > 0 && <div className="delivered-table-wrap"><table className="tbl delivered-table"><thead><tr><th>ID / Title</th><th>Campaign</th><th>Owner</th><th>Delivered at</th><th>Due result</th><th>Work type</th><th>Action</th></tr></thead><tbody>{deliveredState.rows.map(row => <tr key={row.workItemId || row.id}><td data-label="ID / Title"><strong className="mono">{row.id}</strong><span>{row.title}</span>{row.legacyMissingDeliveredAt && <span className="tag">Legacy date missing</span>}</td><td data-label="Campaign">{row.campaign || "-"}</td><td data-label="Owner">{row.ownerName || "Unassigned"}</td><td data-label="Delivered at">{row.deliveredLabel || "Needs review"}</td><td data-label="Due result"><span className={`delivery-result delivery-result--${row.dueResult || "unknown"}`}>{row.dueResult || "Unknown"}</span></td><td data-label="Work type">{row.type === "quick" ? "Quick task" : "Creative"}</td><td data-label="Action"><button type="button" className="btn btn--sm btn--secondary" onClick={() => openDeliveredWork(row)}>Open detail</button></td></tr>)}</tbody></table></div>}
+          <div className="delivered-pagination" aria-label="Delivered history pagination">
+            <button type="button" className="btn btn--sm btn--secondary" disabled={!deliveredCursorStack.length || deliveredState.status === "loading"} onClick={showPreviousDeliveredPage}>Previous</button>
+            <span>{deliveredCursorStack.length + 1}</span>
+            <button type="button" className="btn btn--sm btn--secondary" disabled={!deliveredState.hasMore || deliveredState.status === "loading"} onClick={showNextDeliveredPage}>Next</button>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -635,7 +1010,7 @@ function BoardScreen({ onOpen }) {
    ============================================================ */
 const FLOWMATE_ATTENTION_CATEGORIES_B = [
   { code: "unassigned", label: "Unassigned", hint: "Choose an active GD/VE owner from the work item detail." },
-  { code: "over_capacity", label: "Over capacity", hint: "Owner load exceeds nominal capacity; review the AM/PM allocation." },
+  { code: "over_capacity", label: "Over capacity", hint: "Owner workload exceeds their normal daily capacity; review priority or reassign the task." },
   { code: "wip_exceeded", label: "WIP exceeded", hint: "Owner has more active production work than their WIP limit." },
   { code: "skill_mismatch", label: "Skill mismatch", hint: "Assigned owner does not have the requested primary skill." },
   { code: "backup_skill", label: "Backup skill", hint: "Assignment used a configured backup skill." },

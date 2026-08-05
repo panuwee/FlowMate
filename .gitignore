@@ -8,3 +8,10 @@ node_modules/
 dist/
 coverage/
 .npm-cache/
+.superpowers/
+
+# The deployed static frontend is a separate local repository.
+/github/
+
+# Local secretlint fixture; never commit secret-shaped test data.
+fake-secret.txt

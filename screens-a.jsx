@@ -1873,7 +1873,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const directDetailMatch = directDetailItem && directDetailItem.id === id ? directDetailItem : null;
   // Do not fall back to a static item when the id cannot be resolved.
   // If we genuinely have nothing, render an empty state below.
-  const w = selected || directDetailMatch || WORK_BY_ID[id] || null;
+  const w = selected || directDetailMatch || null;
 
   // CR-2: ALL hooks must run unconditionally and BEFORE any early return
   // (Rules of Hooks). When a live refresh clears the selected item, `w` can
@@ -1928,7 +1928,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   useEffect(() => {
     let alive = true;
-    if (!w || !w.isSupabaseRow || !window.loadFlowMateAiTags) return () => { alive = false; };
+    if (!w || !w.isSupabaseRow || w.archivedAt || !window.loadFlowMateAiTags) return () => { alive = false; };
     window.loadFlowMateAiTags({ displayId: w.id })
       .then((tags) => {
         if (!alive) return;
@@ -1942,7 +1942,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
         console.warn("[FlowMate AI Tags] Load failed:", error && error.message);
       });
     return () => { alive = false; };
-  }, [w && w.id, w && w.isSupabaseRow]);
+  }, [w && w.id, w && w.isSupabaseRow, w && w.archivedAt]);
 
   useEffect(() => {
     let alive = true;
@@ -1960,16 +1960,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   useEffect(() => {
     let alive = true;
-    if (!id || w || !window.loadFlowMateListRows || !window.findFlowMateWorkItemById) {
+    if (!id || w || !window.loadFlowMateWorkItemById) {
       if (w) setDirectDetailLoadState({ status: "idle", message: "" });
       return () => { alive = false; };
     }
 
     setDirectDetailLoadState({ status: "loading", message: "Loading work item..." });
-    window.loadFlowMateListRows()
-      .then((rows) => {
+    window.loadFlowMateWorkItemById(id, { includeArchived: true })
+      .then((row) => {
         if (!alive) return;
-        const row = window.findFlowMateWorkItemById(rows, id);
         if (row) {
           window.flowmateSelectedWorkItem = row;
           setDirectDetailItem(row);
@@ -2013,7 +2012,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             ) : (
               <>
                 <div className="reason-box reason-box--need">
-                  We could not find <span className="mono">{id}</span> in the current view. Open it from <strong>My work</strong>, <strong>List</strong>, <strong>Board</strong>, or <strong>Attention Needed</strong> so the full row is fetched from Supabase.
+                  We could not load <span className="mono">{id}</span> from Supabase. Check your connection and workspace access, then retry from <strong>List</strong> or <strong>Board</strong>.
                 </div>
                 <div style={{ marginTop: 12 }}>
                   <button className="btn btn--secondary" onClick={() => onNav("list")}><Icon name="list" /> Open list view</button>
@@ -2035,14 +2034,15 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const currentTeamMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const isArchivedDetail = Boolean(w.archivedAt);
   const isRequesterUser = currentUserId === w.requesterUserId;
   const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
   const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
-  const canManageAssignee = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
-  const canSelfAssignUnassigned = Boolean(w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
+  const canManageAssignee = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
+  const canSelfAssignUnassigned = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : (w.assignmentWarnings || []);
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
-  const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (
+  const canStatusTransition = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (
     isAdminUser ||
     currentUserId === w.requesterUserId ||
     currentUserId === w.assigneeUserId ||
@@ -2164,17 +2164,23 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   // selected-item global, then bump the tick so the detail re-renders with
   // fresh status/owner/flags. The list refresh event is dispatched by the RPC
   // wrappers; this keeps the detail view itself in sync.
-  async function refreshDetailItem() {
-    if (!w || !window.loadFlowMateListRows) return;
+  async function refreshDetailItem({ throwOnError = false } = {}) {
+    if (!w || !window.loadFlowMateWorkItemById) {
+      const error = new Error("Live work item detail loader is unavailable.");
+      if (throwOnError) throw error;
+      return null;
+    }
     try {
-      const rows = await window.loadFlowMateListRows();
-      const updated = (rows || []).find((row) => row.id === w.id);
-      if (updated) {
-        window.flowmateSelectedWorkItem = updated;
-        setDetailRefreshTick((tick) => tick + 1);
-      }
+      const updated = await window.loadFlowMateWorkItemById(w.id, { includeArchived: true });
+      if (!updated) throw new Error("Work item could not be reloaded after the change.");
+      window.flowmateSelectedWorkItem = updated;
+      setDirectDetailItem(updated);
+      setDetailRefreshTick((tick) => tick + 1);
+      return updated;
     } catch (error) {
       console.warn("[FlowMate Detail] refresh after mutation failed:", error && error.message);
+      if (throwOnError) throw error;
+      return null;
     }
   }
 
@@ -2478,6 +2484,38 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     }
   }
 
+  async function runAdminRestore() {
+    if (!isAdminUser || !isArchivedDetail || !window.restoreFlowMateArchivedWorkItem) return;
+    const reason = await window.flowmatePrompt({
+      title: "Restore archived work",
+      label: "Restore reason",
+      note: "The work keeps its current status and receives a 7-day archive grace period.",
+      multiline: true,
+      required: true,
+      confirmText: "Restore",
+    });
+    if (!reason || !reason.trim()) return;
+    setPending(true);
+    try {
+      await window.restoreFlowMateArchivedWorkItem(w.id, reason);
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "admin_restore" } }));
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+      try {
+        await refreshDetailItem({ throwOnError: true });
+        setActionMsg({ tone: "ok", text: `${w.id} restored with a 7-day archive grace period.` });
+      } catch (refreshError) {
+        setActionMsg({
+          tone: "warn",
+          text: `Restored in Supabase, but detail refresh failed. Reload this page to show the active item. ${window.flowmateUserError(refreshError, "")}`.trim(),
+        });
+      }
+    } catch (error) {
+      setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Admin restore failed.") });
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
     <div className="page">
       <div className="row" style={{ marginBottom: 12, fontSize: 12 }}>
@@ -2499,6 +2537,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="page__sub" style={{ marginTop: 4 }}>{w.requesterTeam || "No team"} - {w.campaign || "No campaign"} - requested by {w.requester || "-"}</div>
         </div>
         <div className="page__actions">
+          {isAdminUser && isArchivedDetail && (
+            <button className="btn btn--primary" onClick={runAdminRestore} disabled={pending}><Icon name="rerun" /> Restore archived work</button>
+          )}
           {canStatusTransition && ["assigned", "in_progress", "review"].includes(w.status) && (
             <button className="btn btn--danger" onClick={() => runCreativeTransition("blocked")} disabled={pending}><Icon name="block" /> Block</button>
           )}
@@ -2537,6 +2578,13 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           )}
         </div>
       </div>
+
+      {isArchivedDetail && (
+        <div className="reason-box reason-box--queued" style={{ marginBottom: 12 }} role="status">
+          <strong>Archived work item.</strong> This detail is read-only. Archived {w.archivedAt ? new Date(w.archivedAt).toLocaleString("en-GB") : "-"}
+          {w.archiveReason ? ` — ${w.archiveReason}` : ""}
+        </div>
+      )}
 
       {actionMsg && (
         <div className={`reason-box ${actionMsg.tone === "bad" ? "reason-box--need" : actionMsg.tone === "warn" ? "reason-box--queued" : ""}`} style={{ marginBottom: 12 }}>
@@ -2617,7 +2665,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               )) : (
                 <div className="muted">No links yet.</div>
               )}
-              <form className="form-grid" onSubmit={submitLink}>
+              {!isArchivedDetail && <form className="form-grid" onSubmit={submitLink}>
                 <label className="field">
                   <span className="field__label">URL</span>
                   <input className="input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." disabled={pending} />
@@ -2630,7 +2678,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   <span className="field__label">&nbsp;</span>
                   <button className="btn btn--primary" type="submit" disabled={pending || !linkUrl.trim()}><Icon name="link" /> Add link</button>
                 </div>
-              </form>
+              </form>}
             </div>
           </div>
 
@@ -2671,7 +2719,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               ) : (
                 <div className="muted">No comments yet.</div>
               )}
-              <form className="form-grid" onSubmit={submitComment}>
+              {!isArchivedDetail && <form className="form-grid" onSubmit={submitComment}>
                 <label className="field field--full">
                   <span className="field__label">Comment</span>
                   <textarea className="textarea" value={commentBody} onChange={(e) => setCommentBody(e.target.value)} placeholder="Add comment" disabled={pending}></textarea>
@@ -2696,7 +2744,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   <span className="field__label">&nbsp;</span>
                   <button className="btn btn--primary" type="submit" disabled={pending || !commentBody.trim()}><Icon name="send" /> Add comment</button>
                 </div>
-              </form>
+              </form>}
             </div>
           </div>
 
@@ -2761,7 +2809,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   ) : (
                     <span className="muted">No watchers</span>
                   )}
-                  <form className="watcher-add-form" onSubmit={submitWatcher}>
+                  {!isArchivedDetail && <form className="watcher-add-form" onSubmit={submitWatcher}>
                     <select className="select watcher-add-form__select" value={watcherUserId} onChange={(e) => setWatcherUserId(e.target.value)} disabled={pending}>
                       <option value="">Add watcher</option>
                       {watcherOptions.map((member) => (
@@ -2769,7 +2817,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                       ))}
                     </select>
                     <button className="btn btn--secondary watcher-add-form__button" type="submit" disabled={pending || !watcherUserId}><Icon name="plus" /> Add watcher</button>
-                  </form>
+                  </form>}
                 </div>
               </div>
               <div className="meta-row">
@@ -2791,7 +2839,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                     {visibleAiTags.length > 0 ? visibleAiTags.map((tag) => (
                       <span className="tag ai-tag" key={tag.id || tag.tag}>
                         <Icon name="zap" size={11} /> {tag.tag}
-                        {w.isSupabaseRow && window.removeFlowMateAiTag && (
+                        {!isArchivedDetail && w.isSupabaseRow && window.removeFlowMateAiTag && (
                           <button type="button" className="ai-tag__remove" onClick={() => removeAiTag(tag)} disabled={pending} aria-label={`Remove ${tag.tag}`}>
                             <Icon name="x" size={10} />
                             <span>Remove tag</span>
@@ -2801,9 +2849,9 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                     )) : (
                       <span className="muted">No AI tags</span>
                     )}
-                    <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || !w.isSupabaseRow || !window.addFlowMateAiTag}>
+                    {!isArchivedDetail && <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || !w.isSupabaseRow || !window.addFlowMateAiTag}>
                       <Icon name="plus" /> Add AI Tag
-                    </button>
+                    </button>}
                   </div>
                 </div>
               </div>
