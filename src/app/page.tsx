@@ -10,7 +10,7 @@ import {
   type WorkItemSummary,
 } from "@/lib/flowmate";
 import { MOCK_CURRENT_USER_ID, MOCK_CURRENT_USER_NAME } from "@/lib/mock-auth";
-import { supabase } from "@/lib/supabase";
+import { getSupabase } from "@/lib/supabase";
 
 type WorkItemRow = {
   id: string;
@@ -122,6 +122,15 @@ export default function Home() {
     async function loadDashboard() {
       setLoading(true);
       setError(null);
+
+      let supabase;
+      try {
+        supabase = getSupabase();
+      } catch (configError) {
+        setError(configError instanceof Error ? configError.message : String(configError));
+        setLoading(false);
+        return;
+      }
 
       const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, workloadResult] =
         await Promise.all([
