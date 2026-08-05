@@ -1719,21 +1719,27 @@ function KpiScreen() {
   useEffectC(() => {
     let alive = true;
     async function loadRows() {
-      if (!window.loadFlowMateListRows) {
+      if (!window.loadFlowMateKpiRows) {
         setRows([]);
         setLoadState({
           status: "error",
-          message: "Live data unavailable: Supabase list loader is not ready."
+          message: "Historical data unavailable: Supabase KPI loader is not ready."
         });
         return;
       }
       try {
-        const liveRows = await window.loadFlowMateListRows();
+        setLoadState({
+          status: "loading",
+          message: `Loading ${flowMateMonthLabelC(kpiExportMonth)} history...`
+        });
+        const liveRows = await window.loadFlowMateKpiRows({
+          month: kpiExportMonth
+        });
         if (!alive) return;
         setRows(liveRows);
         setLoadState({
           status: "live",
-          message: "Live Supabase data"
+          message: "Historical Supabase data"
         });
       } catch (error) {
         if (!alive) return;
@@ -1751,13 +1757,9 @@ function KpiScreen() {
       alive = false;
       cleanup();
     };
-  }, []);
-  const kpiMonthOptions = flowMateRowsMonthOptionsC(rows, ["calendarDate", "dueDate"]);
-  const effectiveKpiMonthOptions = kpiMonthOptions.length ? kpiMonthOptions : [{
-    key: kpiExportMonth,
-    label: flowMateMonthLabelC(kpiExportMonth)
-  }];
-  const selectedKpiExportMonth = effectiveKpiMonthOptions.some(option => option.key === kpiExportMonth) ? kpiExportMonth : effectiveKpiMonthOptions[effectiveKpiMonthOptions.length - 1]?.key || kpiExportMonth;
+  }, [kpiExportMonth]);
+  const effectiveKpiMonthOptions = flowMateMonthOptionsC();
+  const selectedKpiExportMonth = kpiExportMonth;
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
   const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
   const cancelledRows = kpiRows.filter(w => w.status === "cancelled");

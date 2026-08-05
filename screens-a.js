@@ -2368,7 +2368,7 @@ function DetailScreen({
     message: ""
   });
   const directDetailMatch = directDetailItem && directDetailItem.id === id ? directDetailItem : null;
-  const w = selected || directDetailMatch || WORK_BY_ID[id] || null;
+  const w = selected || directDetailMatch || null;
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
   const [detailRefreshTick, setDetailRefreshTick] = useState(0);
@@ -2411,7 +2411,7 @@ function DetailScreen({
   }, [w && w.id, w && w.assignee, w && w.isSupabaseRow, w && w.type]);
   useEffect(() => {
     let alive = true;
-    if (!w || !w.isSupabaseRow || !window.loadFlowMateAiTags) return () => {
+    if (!w || !w.isSupabaseRow || w.archivedAt || !window.loadFlowMateAiTags) return () => {
       alive = false;
     };
     window.loadFlowMateAiTags({
@@ -2429,7 +2429,7 @@ function DetailScreen({
     return () => {
       alive = false;
     };
-  }, [w && w.id, w && w.isSupabaseRow]);
+  }, [w && w.id, w && w.isSupabaseRow, w && w.archivedAt]);
   useEffect(() => {
     let alive = true;
     if (window.FLOWMATE_MENTION_USERS && window.FLOWMATE_MENTION_USERS.length > 0) {
@@ -2449,7 +2449,7 @@ function DetailScreen({
   }, [w && w.id]);
   useEffect(() => {
     let alive = true;
-    if (!id || w || !window.loadFlowMateListRows || !window.findFlowMateWorkItemById) {
+    if (!id || w || !window.loadFlowMateWorkItemById) {
       if (w) setDirectDetailLoadState({
         status: "idle",
         message: ""
@@ -2462,9 +2462,10 @@ function DetailScreen({
       status: "loading",
       message: "Loading work item..."
     });
-    window.loadFlowMateListRows().then(rows => {
+    window.loadFlowMateWorkItemById(id, {
+      includeArchived: true
+    }).then(row => {
       if (!alive) return;
-      const row = window.findFlowMateWorkItemById(rows, id);
       if (row) {
         window.flowmateSelectedWorkItem = row;
         setDirectDetailItem(row);
@@ -2539,9 +2540,9 @@ function DetailScreen({
       className: "mono"
     }, id), " from Supabase...") : React.createElement(React.Fragment, null, React.createElement("div", {
       className: "reason-box reason-box--need"
-    }, "We could not find ", React.createElement("span", {
+    }, "We could not load ", React.createElement("span", {
       className: "mono"
-    }, id), " in the current view. Open it from ", React.createElement("strong", null, "My work"), ", ", React.createElement("strong", null, "List"), ", ", React.createElement("strong", null, "Board"), ", or ", React.createElement("strong", null, "Attention Needed"), " so the full row is fetched from Supabase."), React.createElement("div", {
+    }, id), " from Supabase. Check your connection and workspace access, then retry from ", React.createElement("strong", null, "List"), " or ", React.createElement("strong", null, "Board"), "."), React.createElement("div", {
       style: {
         marginTop: 12
       }
@@ -2561,14 +2562,15 @@ function DetailScreen({
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const currentTeamMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const isArchivedDetail = Boolean(w.archivedAt);
   const isRequesterUser = currentUserId === w.requesterUserId;
   const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
   const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
-  const canManageAssignee = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
-  const canSelfAssignUnassigned = Boolean(w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
+  const canManageAssignee = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
+  const canSelfAssignUnassigned = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : w.assignmentWarnings || [];
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
-  const canStatusTransition = Boolean(w.isSupabaseRow && w.type !== "quick" && (isAdminUser || currentUserId === w.requesterUserId || currentUserId === w.assigneeUserId || owner?.userId === currentUserId || currentUserId === w.marketingPlanSubPicUserId));
+  const canStatusTransition = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || currentUserId === w.requesterUserId || currentUserId === w.assigneeUserId || owner?.userId === currentUserId || currentUserId === w.marketingPlanSubPicUserId));
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
@@ -2674,17 +2676,27 @@ function DetailScreen({
       return next;
     });
   }
-  async function refreshDetailItem() {
-    if (!w || !window.loadFlowMateListRows) return;
+  async function refreshDetailItem({
+    throwOnError = false
+  } = {}) {
+    if (!w || !window.loadFlowMateWorkItemById) {
+      const error = new Error("Live work item detail loader is unavailable.");
+      if (throwOnError) throw error;
+      return null;
+    }
     try {
-      const rows = await window.loadFlowMateListRows();
-      const updated = (rows || []).find(row => row.id === w.id);
-      if (updated) {
-        window.flowmateSelectedWorkItem = updated;
-        setDetailRefreshTick(tick => tick + 1);
-      }
+      const updated = await window.loadFlowMateWorkItemById(w.id, {
+        includeArchived: true
+      });
+      if (!updated) throw new Error("Work item could not be reloaded after the change.");
+      window.flowmateSelectedWorkItem = updated;
+      setDirectDetailItem(updated);
+      setDetailRefreshTick(tick => tick + 1);
+      return updated;
     } catch (error) {
       console.warn("[FlowMate Detail] refresh after mutation failed:", error && error.message);
+      if (throwOnError) throw error;
+      return null;
     }
   }
   async function runCreativeTransition(nextStatus) {
@@ -3080,6 +3092,49 @@ function DetailScreen({
       setPending(false);
     }
   }
+  async function runAdminRestore() {
+    if (!isAdminUser || !isArchivedDetail || !window.restoreFlowMateArchivedWorkItem) return;
+    const reason = await window.flowmatePrompt({
+      title: "Restore archived work",
+      label: "Restore reason",
+      note: "The work keeps its current status and receives a 7-day archive grace period.",
+      multiline: true,
+      required: true,
+      confirmText: "Restore"
+    });
+    if (!reason || !reason.trim()) return;
+    setPending(true);
+    try {
+      await window.restoreFlowMateArchivedWorkItem(w.id, reason);
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
+        detail: {
+          reason: "admin_restore"
+        }
+      }));
+      window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+      try {
+        await refreshDetailItem({
+          throwOnError: true
+        });
+        setActionMsg({
+          tone: "ok",
+          text: `${w.id} restored with a 7-day archive grace period.`
+        });
+      } catch (refreshError) {
+        setActionMsg({
+          tone: "warn",
+          text: `Restored in Supabase, but detail refresh failed. Reload this page to show the active item. ${window.flowmateUserError(refreshError, "")}`.trim()
+        });
+      }
+    } catch (error) {
+      setActionMsg({
+        tone: "bad",
+        text: window.flowmateUserError(error, "Admin restore failed.")
+      });
+    } finally {
+      setPending(false);
+    }
+  }
   return React.createElement("div", {
     className: "page"
   }, React.createElement("div", {
@@ -3139,7 +3194,13 @@ function DetailScreen({
     }
   }, w.requesterTeam || "No team", " - ", w.campaign || "No campaign", " - requested by ", w.requester || "-")), React.createElement("div", {
     className: "page__actions"
-  }, canStatusTransition && ["assigned", "in_progress", "review"].includes(w.status) && React.createElement("button", {
+  }, isAdminUser && isArchivedDetail && React.createElement("button", {
+    className: "btn btn--primary",
+    onClick: runAdminRestore,
+    disabled: pending
+  }, React.createElement(Icon, {
+    name: "rerun"
+  }), " Restore archived work"), canStatusTransition && ["assigned", "in_progress", "review"].includes(w.status) && React.createElement("button", {
     className: "btn btn--danger",
     onClick: () => runCreativeTransition("blocked"),
     disabled: pending
@@ -3208,7 +3269,13 @@ function DetailScreen({
     disabled: pending
   }, React.createElement(Icon, {
     name: "rerun"
-  }), " Recheck brief"))), actionMsg && React.createElement("div", {
+  }), " Recheck brief"))), isArchivedDetail && React.createElement("div", {
+    className: "reason-box reason-box--queued",
+    style: {
+      marginBottom: 12
+    },
+    role: "status"
+  }, React.createElement("strong", null, "Archived work item."), " This detail is read-only. Archived ", w.archivedAt ? new Date(w.archivedAt).toLocaleString("en-GB") : "-", w.archiveReason ? ` — ${w.archiveReason}` : ""), actionMsg && React.createElement("div", {
     className: `reason-box ${actionMsg.tone === "bad" ? "reason-box--need" : actionMsg.tone === "warn" ? "reason-box--queued" : ""}`,
     style: {
       marginBottom: 12
@@ -3416,7 +3483,7 @@ function DetailScreen({
     }
   }, link.url)))) : React.createElement("div", {
     className: "muted"
-  }, "No links yet."), React.createElement("form", {
+  }, "No links yet."), !isArchivedDetail && React.createElement("form", {
     className: "form-grid",
     onSubmit: submitLink
   }, React.createElement("label", {
@@ -3515,7 +3582,7 @@ function DetailScreen({
     }
   }, comment.body)))) : React.createElement("div", {
     className: "muted"
-  }, "No comments yet."), React.createElement("form", {
+  }, "No comments yet."), !isArchivedDetail && React.createElement("form", {
     className: "form-grid",
     onSubmit: submitComment
   }, React.createElement("label", {
@@ -3694,7 +3761,7 @@ function DetailScreen({
     size: 13
   }), React.createElement("span", null, watcher.watcherName || watcher.watcher_user_id)))) : React.createElement("span", {
     className: "muted"
-  }, "No watchers"), React.createElement("form", {
+  }, "No watchers"), !isArchivedDetail && React.createElement("form", {
     className: "watcher-add-form",
     onSubmit: submitWatcher
   }, React.createElement("select", {
@@ -3745,7 +3812,7 @@ function DetailScreen({
   }, React.createElement(Icon, {
     name: "zap",
     size: 11
-  }), " ", tag.tag, w.isSupabaseRow && window.removeFlowMateAiTag && React.createElement("button", {
+  }), " ", tag.tag, !isArchivedDetail && w.isSupabaseRow && window.removeFlowMateAiTag && React.createElement("button", {
     type: "button",
     className: "ai-tag__remove",
     onClick: () => removeAiTag(tag),
@@ -3756,7 +3823,7 @@ function DetailScreen({
     size: 10
   }), React.createElement("span", null, "Remove tag")))) : React.createElement("span", {
     className: "muted"
-  }, "No AI tags"), React.createElement("button", {
+  }, "No AI tags"), !isArchivedDetail && React.createElement("button", {
     type: "button",
     className: "btn btn--xs btn--secondary",
     onClick: addAiTag,

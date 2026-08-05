@@ -519,6 +519,10 @@ async function loadFlowMateListRows() {
     const requester = usersById[item.requester_user_id] || {};
     const details = detailsByWorkItemId[item.id] || {};
     const assignmentRun = assignmentRunByWorkItemId[item.id] || null;
+    const activityEvents = eventsByWorkItemId[item.id] || [];
+    const chronologicalEvents = activityEvents.slice().sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+    const startedEvent = chronologicalEvents.find((event) => event.to_status === "in_progress");
+    const assignedEvent = chronologicalEvents.find((event) => event.to_status === "assigned" || event.event_type === "assigned");
     const assignmentOwnerMemberId = item.final_owner_member_id || assignmentRun?.final_owner_member_id || null;
     const owner =
       (assignmentOwnerMemberId && membersById[assignmentOwnerMemberId]) ||
@@ -568,6 +572,8 @@ async function loadFlowMateListRows() {
       planningLabel: flowmateDateLabel(item.publish_date || item.launch_date),
       planningFullLabel: flowmateDateFullLabel(item.publish_date || item.launch_date),
       createdAt: item.created_at,
+      assignedAt: assignedEvent?.created_at || assignmentRun?.ran_at || null,
+      startedAt: startedEvent?.created_at || null,
       createdLabel: flowmateDateTimeBangkokLabel(item.created_at),
       deliveredAt: item.delivered_at,
       deliveredLabel: flowmateDateTimeFullLabel(item.delivered_at),
@@ -612,7 +618,7 @@ async function loadFlowMateListRows() {
       links: linksByWorkItemId[item.id] || [],
       watchers: watchersByWorkItemId[item.id] || [],
       aiTags: aiTagsByWorkItemId[item.id] || [],
-      activityEvents: eventsByWorkItemId[item.id] || [],
+      activityEvents,
       overdue: Boolean(flags.is_overdue),
       dueSoon: Boolean(flags.is_due_soon),
       isSupabaseRow: true,
@@ -621,6 +627,425 @@ async function loadFlowMateListRows() {
   });
   emitFlowMateSynced("work_items");
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Active Board and Delivered history loaders.
+// These are intentionally additive: List/Calendar/Attention continue to use
+// loadFlowMateListRows() with its original default contract.
+// ---------------------------------------------------------------------------
+const FLOWMATE_ACTIVE_BOARD_STATUSES = ["unassigned", "assigned", "in_progress", "review", "blocked"];
+const FLOWMATE_BOARD_WORK_ITEM_COLUMNS = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,created_at,delivered_at,archived_at,archive_reason,owning_team_code";
+
+function flowMateClampPageSize(value, fallback = 50) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(100, Math.trunc(parsed)));
+}
+
+function flowMateApplyWorkspaceScope(query) {
+  const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
+  if (activeTeam === "gdve") return query.eq("work_type", "creative_request");
+  if (activeTeam) return query.eq("owning_team_code", activeTeam);
+  return query;
+}
+
+function flowMateApplyBoardCursor(query, cursor) {
+  if (!cursor) return query;
+  const dueDate = cursor.dueDate || cursor.due_date || null;
+  const createdAt = cursor.createdAt || cursor.created_at || null;
+  const displayId = cursor.displayId || cursor.display_id || cursor.id || null;
+  if (!createdAt || !displayId) return query;
+  if (!dueDate) {
+    return query
+      .is("due_date", null)
+      .or(`created_at.gt.${createdAt},and(created_at.eq.${createdAt},display_id.gt.${displayId})`);
+  }
+  return query.or([
+    `due_date.gt.${dueDate}`,
+    `and(due_date.eq.${dueDate},created_at.gt.${createdAt})`,
+    `and(due_date.eq.${dueDate},created_at.eq.${createdAt},display_id.gt.${displayId})`,
+    "due_date.is.null",
+  ].join(","));
+}
+
+function flowMateBoardCursorFromRow(row, priorityGroup) {
+  if (!row) return null;
+  return {
+    priorityGroup,
+    dueDate: row.due_date || null,
+    createdAt: row.created_at,
+    displayId: row.display_id,
+  };
+}
+
+async function flowMateQueryBoardPriorityGroup(status, priorityGroup, cursor, limit) {
+  let query = window.flowmateSupabase
+    .from("work_items")
+    .select(FLOWMATE_BOARD_WORK_ITEM_COLUMNS)
+    .is("archived_at", null)
+    .eq("status", status);
+  query = flowMateApplyWorkspaceScope(query);
+  query = priorityGroup === "urgent" ? query.eq("priority", "urgent") : query.neq("priority", "urgent");
+  query = flowMateApplyBoardCursor(query, cursor);
+  return query
+    .order("due_date", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: true })
+    .order("display_id", { ascending: true })
+    .limit(limit);
+}
+
+function flowMateGroupByWorkItemId(rows) {
+  return (rows || []).reduce((grouped, row) => {
+    if (!grouped[row.work_item_id]) grouped[row.work_item_id] = [];
+    grouped[row.work_item_id].push(row);
+    return grouped;
+  }, {});
+}
+
+async function loadFlowMateBoardRelatedData(items, options = {}) {
+  const ids = (items || []).map(item => item.id).filter(Boolean);
+  if (!ids.length) return {
+    flagsById: {}, usersById: {}, membersById: {}, membersByUserId: {}, detailsById: {}, checklistById: {},
+    commentsById: {}, linksById: {}, watchersById: {}, aiTagsById: {}, eventsById: {}, assignmentRunById: {},
+  };
+  const userIds = Array.from(new Set(items.flatMap(item => [item.requester_user_id, item.assignee_user_id]).filter(Boolean)));
+  const memberIds = Array.from(new Set(items.map(item => item.final_owner_member_id).filter(Boolean)));
+  const baseQueries = [
+    window.flowmateSupabase.from("work_item_flags_v").select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked").in("work_item_id", ids),
+    userIds.length
+      ? window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    memberIds.length
+      ? window.flowmateSupabase.from("team_members").select("id,user_id,member_code,display_name,initials,color,discipline,discipline_short,active,availability,wip_limit").in("id", memberIds)
+      : Promise.resolve({ data: [], error: null }),
+    window.flowmateSupabase.from("creative_request_details").select("work_item_id,asset_type,asset_subtype,asset_count,asset_type_2,asset_subtype_2,asset_count_2,platforms,size_format,brief_link,reference_link,brief_missing_reason").in("work_item_id", ids),
+    window.flowmateSupabase.from("checklist_items").select("id,work_item_id,title,is_done,sort_order").in("work_item_id", ids).order("sort_order", { ascending: true }),
+  ];
+  const detailQueries = options.includeDetail ? [
+    window.flowmateSupabase.from("comments").select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at").in("work_item_id", ids).is("deleted_at", null).order("created_at", { ascending: true }),
+    window.flowmateSupabase.from("work_item_links").select("id,work_item_id,url,description,created_by_user_id,created_at,deleted_at").in("work_item_id", ids).is("deleted_at", null).order("created_at", { ascending: true }),
+    window.flowmateSupabase.from("work_item_watchers").select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at").in("work_item_id", ids).is("removed_at", null).order("created_at", { ascending: true }),
+    window.flowmateSupabase.from("work_item_ai_tags").select("id,work_item_id,tag,created_by_user_id,created_at").in("work_item_id", ids).order("created_at", { ascending: true }),
+    window.flowmateSupabase.from("work_item_events").select("id,work_item_id,actor_user_id,event_type,from_status,to_status,metadata,created_at").in("work_item_id", ids).order("created_at", { ascending: false }),
+    window.flowmateSupabase.from("assignment_runs").select("work_item_id,capacity_snapshot,reason,result,final_owner_member_id,ran_at").in("work_item_id", ids).order("ran_at", { ascending: false }),
+  ] : [];
+  const results = await Promise.all([...baseQueries, ...detailQueries]);
+  const firstError = results.find(result => result && result.error)?.error;
+  if (firstError) throw firstError;
+  const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult] = results;
+  const usersById = Object.fromEntries((usersResult.data || []).map(user => [user.id, user]));
+  const membersById = Object.fromEntries((membersResult.data || []).map(member => [member.id, member]));
+  const membersByUserId = Object.fromEntries((membersResult.data || []).filter(member => member.user_id).map(member => [member.user_id, member]));
+  syncFlowMateMembers(membersResult.data || []);
+  syncFlowMateMentionUsers(usersResult.data || []);
+  const assignmentRunById = {};
+  (assignmentRunsResult?.data || []).forEach(run => {
+    if (!assignmentRunById[run.work_item_id]) assignmentRunById[run.work_item_id] = run;
+  });
+  return {
+    flagsById: Object.fromEntries((flagsResult.data || []).map(row => [row.work_item_id, row])),
+    usersById,
+    membersById,
+    membersByUserId,
+    detailsById: Object.fromEntries((detailsResult.data || []).map(row => [row.work_item_id, row])),
+    checklistById: flowMateGroupByWorkItemId(checklistResult.data || []),
+    commentsById: flowMateGroupByWorkItemId(commentsResult?.data || []),
+    linksById: flowMateGroupByWorkItemId(linksResult?.data || []),
+    watchersById: flowMateGroupByWorkItemId(watchersResult?.data || []),
+    aiTagsById: flowMateGroupByWorkItemId(aiTagsResult?.data || []),
+    eventsById: flowMateGroupByWorkItemId(eventsResult?.data || []),
+    assignmentRunById,
+  };
+}
+
+function normalizeFlowMateBoardWorkItem(item, related = {}) {
+  const flags = related.flagsById?.[item.id] || {};
+  const requester = related.usersById?.[item.requester_user_id] || {};
+  const details = related.detailsById?.[item.id] || {};
+  const owner = related.membersById?.[item.final_owner_member_id]
+    || related.membersByUserId?.[item.assignee_user_id]
+    || null;
+  const assigneeUser = related.usersById?.[item.assignee_user_id] || null;
+  const assigneeOtherName = String(item.assignee_other_name || "").trim();
+  const otherAssigneeId = assigneeOtherName ? `other:${assigneeOtherName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : null;
+  const checklistItems = related.checklistById?.[item.id] || [];
+  const events = (related.eventsById?.[item.id] || []).map(event => ({
+    ...event,
+    actorName: related.usersById?.[event.actor_user_id]?.display_name || "System",
+    createdLabel: flowmateDateTimeFullLabel(event.created_at),
+  }));
+  const assignmentRun = related.assignmentRunById?.[item.id] || null;
+  return {
+    workItemId: item.id,
+    id: item.display_id,
+    type: item.work_type === "quick_task" ? "quick" : "creative",
+    title: item.title || "",
+    note: item.description || "",
+    briefNote: item.description || "",
+    status: item.status,
+    priority: item.priority || "normal",
+    urgentReason: item.urgent_reason || "",
+    effort: item.work_type === "quick_task" ? null : item.effort_point,
+    dueDate: item.due_date,
+    dueLabel: flowmateDateLabel(item.due_date),
+    dueFullLabel: flowmateDateFullLabel(item.due_date),
+    dueDelta: flowmateDueDelta(item.due_date),
+    launchDate: item.launch_date,
+    launchLabel: flowmateDateLabel(item.launch_date),
+    launchFullLabel: flowmateDateTimeWithOptionalTimeLabel(item.launch_date, item.publish_time),
+    publishDate: item.publish_date,
+    publishTime: item.publish_time,
+    publishLabel: flowmateDateLabel(item.publish_date),
+    publishFullLabel: flowmateDateFullLabel(item.publish_date),
+    createdAt: item.created_at,
+    createdLabel: flowmateDateTimeBangkokLabel(item.created_at),
+    deliveredAt: item.delivered_at,
+    deliveredLabel: flowmateDateTimeFullLabel(item.delivered_at),
+    archivedAt: item.archived_at || null,
+    archiveReason: item.archive_reason || "",
+    campaign: item.campaign_name || item.project_name || "",
+    owningTeamKey: item.owning_team_code || "",
+    requesterUserId: item.requester_user_id,
+    requesterTeam: normalizeFlowMateRequesterTeam(item.requester_team || requester.requester_team) || "No team",
+    requester: requester.display_name || "-",
+    assigneeUserId: item.assignee_user_id,
+    assignee: owner ? owner.id : (assigneeUser?.id || otherAssigneeId),
+    ownerName: owner?.display_name || assigneeUser?.display_name || assigneeOtherName || "Unassigned",
+    assigneeOtherName,
+    assetType: flowmateToKebab(details.asset_type),
+    subtype: details.asset_subtype || "",
+    assetCount: details.asset_count || 1,
+    platforms: details.platforms || [],
+    platform: (details.platforms || []).join(", "),
+    channel: (details.platforms || []).join(", "),
+    size: details.size_format || "",
+    briefLink: details.brief_link || "",
+    referenceLink: details.reference_link || "",
+    reviewRound: item.review_round || 0,
+    needsSplit: Boolean(item.needs_split),
+    assignmentWarnings: parseFlowMateAssignmentWarnings(assignmentRun?.capacity_snapshot),
+    assignmentResult: assignmentRun?.result || item.status || "",
+    assignmentReason: assignmentRun?.reason || item.assignment_reason || "",
+    blockReason: item.blocked_reason || "",
+    cancelReason: item.cancel_reason || "",
+    checklistItems,
+    checklist: { done: checklistItems.filter(entry => entry.is_done).length, total: checklistItems.length },
+    comments: (related.commentsById?.[item.id] || []).map(comment => ({ ...comment, authorName: related.usersById?.[comment.author_user_id]?.display_name || "Unknown", createdLabel: flowmateDateTimeFullLabel(comment.created_at) })),
+    links: (related.linksById?.[item.id] || []).map(link => ({ ...link, createdByName: related.usersById?.[link.created_by_user_id]?.display_name || "Unknown", createdLabel: flowmateDateTimeLabel(link.created_at) })),
+    watchers: related.watchersById?.[item.id] || [],
+    aiTags: (related.aiTagsById?.[item.id] || []).map(tag => ({ id: tag.id, workItemId: tag.work_item_id, tag: tag.tag, createdByUserId: tag.created_by_user_id, createdAt: tag.created_at })),
+    activityEvents: events,
+    overdue: Boolean(flags.is_overdue),
+    dueSoon: Boolean(flags.is_due_soon),
+    isSupabaseRow: true,
+  };
+}
+
+async function loadFlowMateBoardLane({ status, cursor = null, limit = 50 } = {}) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!FLOWMATE_ACTIVE_BOARD_STATUSES.includes(status)) {
+    throw new Error("Active Board status must be one of: " + FLOWMATE_ACTIVE_BOARD_STATUSES.join(", ") + ".");
+  }
+  const pageSize = flowMateClampPageSize(limit);
+  let countQuery = window.flowmateSupabase.from("work_items").select("id", { count: "exact", head: true }).is("archived_at", null).eq("status", status);
+  countQuery = flowMateApplyWorkspaceScope(countQuery);
+  const countPromise = countQuery;
+  const phase = cursor?.priorityGroup || cursor?.priority_group || "urgent";
+  const loaded = [];
+  let nextCursor = null;
+
+  if (phase === "urgent") {
+    const urgentResult = await flowMateQueryBoardPriorityGroup(status, "urgent", cursor, pageSize + 1);
+    if (urgentResult.error) throw urgentResult.error;
+    const urgentRows = urgentResult.data || [];
+    loaded.push(...urgentRows.slice(0, pageSize));
+    if (urgentRows.length > pageSize) {
+      nextCursor = flowMateBoardCursorFromRow(loaded[loaded.length - 1], "urgent");
+    }
+  }
+
+  if (!nextCursor && loaded.length < pageSize) {
+    const remaining = pageSize - loaded.length;
+    const otherCursor = phase === "other" ? cursor : null;
+    const otherResult = await flowMateQueryBoardPriorityGroup(status, "other", otherCursor, remaining + 1);
+    if (otherResult.error) throw otherResult.error;
+    const otherRows = otherResult.data || [];
+    loaded.push(...otherRows.slice(0, remaining));
+    if (otherRows.length > remaining) {
+      nextCursor = flowMateBoardCursorFromRow(loaded[loaded.length - 1], "other");
+    }
+  }
+
+  const countResult = await countPromise;
+  if (countResult.error) throw countResult.error;
+  const total = Number(countResult.count || 0);
+  if (!nextCursor && loaded.length < total && loaded.length === pageSize) {
+    nextCursor = phase === "urgent" ? { priorityGroup: "other" } : flowMateBoardCursorFromRow(loaded[loaded.length - 1], "other");
+  }
+  const related = await loadFlowMateBoardRelatedData(loaded);
+  return {
+    rows: loaded.map(item => normalizeFlowMateBoardWorkItem(item, related)),
+    total,
+    nextCursor,
+    hasMore: Boolean(nextCursor),
+    asOf: new Date().toISOString(),
+  };
+}
+
+async function loadFlowMateBoardSummary() {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const result = await window.flowmateSupabase.rpc("flowmate_board_summary");
+  if (result.error) throw result.error;
+  const payload = Array.isArray(result.data) ? (result.data[0] || {}) : (result.data || {});
+  const rawCounts = payload.counts || {};
+  const counts = Object.fromEntries(FLOWMATE_ACTIVE_BOARD_STATUSES.map(status => [status, Number(rawCounts[status] || 0)]));
+  const rawWip = payload.wip || {};
+  const rawOwners = rawWip.in_progress_by_owner || rawWip.inProgressByOwner || {};
+  const ownerEntries = Array.isArray(rawOwners)
+    ? rawOwners.map(owner => [owner?.owner_member_id || owner?.ownerMemberId, owner]).filter(([ownerId]) => ownerId)
+    : Object.entries(rawOwners);
+  const inProgressByOwner = Object.fromEntries(ownerEntries.map(([ownerId, owner]) => [ownerId, {
+    name: owner?.name || owner?.display_name || owner?.owner_name || "Owner",
+    count: Number(owner?.count ?? owner?.current_wip ?? 0),
+    limit: Number(owner?.limit ?? owner?.wip_limit ?? 0),
+  }]));
+  return {
+    counts,
+    wip: {
+      inProgressByOwner,
+      reviewTeamCount: Number(rawWip.review_team_count ?? rawWip.reviewTeamCount ?? counts.review ?? 0),
+      reviewTeamLimit: Number(rawWip.review_team_limit ?? rawWip.reviewTeamLimit ?? 8),
+    },
+    asOf: payload.as_of || payload.asOf || new Date().toISOString(),
+  };
+}
+
+function normalizeFlowMateDeliveredRow(row) {
+  return {
+    workItemId: row.id,
+    id: row.display_id,
+    title: row.title || "",
+    type: row.work_type === "quick_task" ? "quick" : "creative",
+    status: "delivered",
+    campaign: row.campaign_name || "",
+    assignee: row.owner_member_id || null,
+    ownerName: row.owner_name || "Unassigned",
+    effort: row.work_type === "quick_task" ? null : row.effort_point,
+    dueDate: row.due_date || null,
+    dueLabel: flowmateDateLabel(row.due_date),
+    dueFullLabel: flowmateDateFullLabel(row.due_date),
+    launchDate: row.launch_date || null,
+    deliveredAt: row.delivered_at || null,
+    deliveredLabel: flowmateDateTimeFullLabel(row.delivered_at),
+    archivedAt: row.archived_at || null,
+    archiveReason: row.archive_reason || "",
+    dueResult: row.delivery_result || "",
+    legacyMissingDeliveredAt: Boolean(row.legacy_missing_delivered_at),
+    isSupabaseRow: true,
+  };
+}
+
+function flowMateNormalizeDeliveredMonth(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  return /^\d{4}-\d{2}$/.test(text) ? `${text}-01` : text;
+}
+
+async function loadFlowMateDeliveredHistory({ scope = "recent", search = "", deliveredMonth = null, campaign = null, ownerId = null, cursor = null, limit = 50 } = {}) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (!["recent", "archived"].includes(scope)) throw new Error("Delivered scope must be recent or archived.");
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_list_delivered_history", {
+    p_scope: scope,
+    p_search: String(search || "").trim() || null,
+    p_delivered_month: flowMateNormalizeDeliveredMonth(deliveredMonth),
+    p_campaign: String(campaign || "").trim() || null,
+    p_owner_member_id: ownerId || null,
+    p_page_size: flowMateClampPageSize(limit),
+    p_cursor_delivered_at: cursor?.deliveredAt || cursor?.delivered_at || null,
+    p_cursor_id: cursor?.id || null,
+  });
+  if (error) throw error;
+  const payload = data || {};
+  const rawRows = payload.rows || payload.items || [];
+  const rawCursor = payload.next_cursor || payload.nextCursor || null;
+  return {
+    rows: rawRows.map(normalizeFlowMateDeliveredRow),
+    total: Number(payload.total ?? payload.total_count ?? 0),
+    nextCursor: rawCursor ? { deliveredAt: rawCursor.delivered_at || rawCursor.deliveredAt || null, id: rawCursor.id || null } : null,
+    hasMore: Boolean(payload.has_more ?? payload.hasMore ?? rawCursor),
+    filterOptions: payload.filter_options || payload.filterOptions || {},
+    asOf: payload.as_of || payload.asOf || null,
+  };
+}
+
+function normalizeFlowMateKpiRow(row) {
+  return {
+    workItemId: row.id,
+    id: row.display_id,
+    title: row.title || "",
+    type: row.work_type === "quick_task" ? "quick" : "creative",
+    status: row.status,
+    priority: row.priority || "normal",
+    effort: row.work_type === "quick_task" ? null : row.effort_point,
+    dueDate: row.due_date || null,
+    dueLabel: flowmateDateLabel(row.due_date),
+    dueFullLabel: flowmateDateFullLabel(row.due_date),
+    launchDate: row.launch_date || null,
+    launchLabel: flowmateDateLabel(row.launch_date),
+    createdAt: row.created_at || null,
+    assignedAt: row.assigned_at || null,
+    deliveredAt: row.delivered_at || null,
+    archivedAt: row.archived_at || null,
+    assignee: row.final_owner_member_id || row.owner_member_id || null,
+    ownerName: row.owner_name || row.final_owner_name || "Unassigned",
+    assigneeOtherName: row.assignee_other_name || "",
+    requester: row.requester_name || "-",
+    requesterTeam: normalizeFlowMateRequesterTeam(row.requester_team) || row.requester_team || "No team",
+    reviewRound: Number(row.review_round || 0),
+    campaign: row.campaign_name || row.project_name || "",
+    platform: row.platform || "",
+    size: row.size_format || "",
+    aiTags: Array.isArray(row.ai_tags) ? row.ai_tags : [],
+    isSupabaseRow: true,
+  };
+}
+
+async function loadFlowMateKpiRows({ month } = {}) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const normalizedMonth = String(month || "").trim();
+  if (normalizedMonth && !/^\d{4}-(0[1-9]|1[0-2])$/.test(normalizedMonth)) {
+    throw new Error("KPI month must use YYYY-MM format.");
+  }
+  let query = window.flowmateSupabase
+    .from("flowmate_kpi_work_items_v")
+    .select("id,display_id,title,work_type,status,priority,effort_point,due_date,launch_date,created_at,assigned_at,delivered_at,archived_at,final_owner_member_id,owner_member_id,owner_name,final_owner_name,assignee_other_name,requester_name,requester_team,review_round,campaign_name,project_name,platform,size_format,ai_tags");
+  if (normalizedMonth) {
+    const monthStart = `${normalizedMonth}-01`;
+    const nextMonthDate = new Date(`${monthStart}T00:00:00Z`);
+    nextMonthDate.setUTCMonth(nextMonthDate.getUTCMonth() + 1);
+    const nextMonthStart = nextMonthDate.toISOString().slice(0, 10);
+    query = query
+      .gte("due_date", monthStart)
+      .lt("due_date", nextMonthStart);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(`Archive-inclusive KPI history is unavailable: ${error.message || "flowmate_kpi_work_items_v query failed."}`);
+  return (data || []).map(normalizeFlowMateKpiRow);
+}
+
+async function loadFlowMateWorkItemById(displayId, { includeArchived = false } = {}) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const normalizedId = String(displayId || "").trim().toUpperCase();
+  if (!normalizedId) throw new Error("Work item ID is required.");
+  let query = window.flowmateSupabase.from("work_items").select(FLOWMATE_BOARD_WORK_ITEM_COLUMNS).eq("display_id", normalizedId);
+  query = flowMateApplyWorkspaceScope(query);
+  if (!includeArchived) query = query.is("archived_at", null);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const related = await loadFlowMateBoardRelatedData([data], { includeDetail: true });
+  return normalizeFlowMateBoardWorkItem(data, related);
 }
 
 function normalizeFlowMateMember(member) {
@@ -762,6 +1187,36 @@ async function loadFlowMateCalendarRows() {
   return [...workRows, ...leaveRows];
 }
 
+async function loadFlowMateTeamScheduleRows() {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const { data, error } = await window.flowmateSupabase
+    .from("flowmate_team_schedule_v")
+    .select("work_item_id,display_id,title,status,priority,effort_point,owner_member_id,first_draft_date,launch_date,first_assigned_at,actual_started_at,suggested_start_date,asset_type,asset_subtype")
+    .order("first_draft_date", { ascending: true });
+  if (error && ["42P01", "PGRST205"].includes(error.code)) return loadFlowMateCalendarRows();
+  if (error) throw error;
+  const leaveRows = await loadFlowMateLeaveRows();
+  const workRows = (data || []).map(row => ({
+    workItemId: row.work_item_id,
+    id: row.display_id,
+    type: "creative",
+    title: row.title,
+    status: row.status,
+    priority: row.priority,
+    effort: Number(row.effort_point || 0),
+    assignee: row.owner_member_id,
+    dueDate: row.first_draft_date,
+    launchDate: row.launch_date,
+    assignedAt: row.first_assigned_at,
+    startedAt: row.actual_started_at,
+    suggestedStartDate: row.suggested_start_date,
+    assetType: flowmateToKebab(row.asset_type),
+    subtype: row.asset_subtype || "",
+    isSupabaseRow: true,
+  }));
+  return [...workRows, ...leaveRows];
+}
+
 async function loadFlowMateCapacityAllocationRows(startDate, endDate) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -790,6 +1245,21 @@ async function loadFlowMateCapacityAllocationRows(startDate, endDate) {
     bucketHalf: allocation.bucket_half === "pm" ? "pm" : "am",
     capacityPoint: Number(allocation.capacity_point || 0),
   }));
+}
+
+async function loadFlowMateNonWorkingDays(startDate, endDate) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  let query = window.flowmateSupabase
+    .from("flowmate_non_working_days")
+    .select("day,name,scope,active")
+    .eq("active", true)
+    .order("day", { ascending: true });
+  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate || "")) query = query.gte("day", startDate);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(endDate || "")) query = query.lte("day", endDate);
+  const { data, error } = await query;
+  if (error && ["42P01", "PGRST205"].includes(error.code)) return [];
+  if (error) throw error;
+  return (data || []).map(row => ({ date: row.day, name: row.name, scope: row.scope, active: row.active !== false }));
 }
 
 async function loadFlowMateCapacityAllocationsForWorkItem(workItemId) {
@@ -857,7 +1327,7 @@ async function loadFlowMateActiveCreativeMembers() {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   const { data, error } = await window.flowmateSupabase
     .from("team_members")
-    .select("id,user_id,member_code,display_name,initials,color,discipline,discipline_short,active,availability")
+    .select("id,user_id,member_code,display_name,initials,color,discipline,discipline_short,active,availability,capacity_per_day,capacity_override_per_day,wip_limit")
     .eq("active", true)
     .not("user_id", "is", null)
     .order("display_name", { ascending: true });
@@ -869,10 +1339,17 @@ async function loadFlowMateActiveCreativeMembers() {
 }
 
 window.loadFlowMateListRows = loadFlowMateListRows;
+window.loadFlowMateBoardLane = loadFlowMateBoardLane;
+window.loadFlowMateBoardSummary = loadFlowMateBoardSummary;
+window.loadFlowMateDeliveredHistory = loadFlowMateDeliveredHistory;
+window.loadFlowMateKpiRows = loadFlowMateKpiRows;
+window.loadFlowMateWorkItemById = loadFlowMateWorkItemById;
 window.loadFlowMateLeaveRows = loadFlowMateLeaveRows;
 window.loadFlowMateCalendarRows = loadFlowMateCalendarRows;
+window.loadFlowMateTeamScheduleRows = loadFlowMateTeamScheduleRows;
 window.loadFlowMateCapacityAllocationRows = loadFlowMateCapacityAllocationRows;
 window.loadFlowMateCapacityAllocationsForWorkItem = loadFlowMateCapacityAllocationsForWorkItem;
+window.loadFlowMateNonWorkingDays = loadFlowMateNonWorkingDays;
 window.loadFlowMateAssignees = loadFlowMateAssignees;
 window.loadFlowMateActiveCreativeMembers = loadFlowMateActiveCreativeMembers;
 window.loadFlowMateMentionUsers = loadFlowMateMentionUsers;
