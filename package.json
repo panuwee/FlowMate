@@ -8,7 +8,8 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:github": "node build-github.cjs"
+    "build:github": "node build-github.cjs",
+    "prepare": "husky"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
@@ -19,9 +20,14 @@
   "devDependencies": {
     "@babel/core": "^8.0.1",
     "@babel/preset-react": "^8.0.1",
+    "@secretlint/secretlint-rule-no-dotenv": "^13.0.2",
+    "@secretlint/secretlint-rule-preset-recommend": "^13.0.2",
     "@types/node": "^20.12.12",
     "@types/react": "^18.3.2",
     "@types/react-dom": "^18.3.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.1.0",
+    "secretlint": "^13.0.2",
     "supabase": "^2.109.1",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
