@@ -2424,6 +2424,7 @@ button.gantt__capacity-summary:focus-visible {
 }
 
 /* ---------- Team Schedule ---------- */
+.team-schedule { width: 100%; max-width: none; }
 .team-schedule__header .select { width: 140px; }
 .team-schedule__controls {
   display: flex;
@@ -2476,6 +2477,11 @@ button.gantt__capacity-summary:focus-visible {
 .schedule-legend.is-review { background: #F59E0B; }
 .schedule-legend.is-blocked { background: #B45309; }
 .team-schedule__timeline { max-height: calc(100vh - 330px); }
+.team-schedule__timeline :is(.gantt__timeline-head, .gantt__scale, .gantt__lane, .gantt__tracks, .gantt__capacity-lane) {
+  width: 100%;
+  min-width: calc(var(--gantt-days, 62) * 30px);
+}
+.team-schedule__timeline .gantt__month-scale { width: 100%; min-width: 100%; }
 .team-schedule__row { min-height: 62px; }
 .team-schedule__lane { min-height: 61px; grid-auto-rows: 28px; padding: 8px 0; }
 .team-schedule__task {

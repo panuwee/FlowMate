@@ -91,6 +91,9 @@ describe("FlowMate Board integration contracts", () => {
       });
       expect(versions[0], `${assetName} must have a cache token`).not.toBe("");
       expect(new Set(versions).size, `${assetName} cache tokens must match`).toBe(1);
+      if (assetName === "app.css") {
+        expect(versions[0], "app.css must use the current stylesheet release token").toBe("20260806-02");
+      }
       if (currentReleaseAssets.has(assetName)) {
         expect(versions[0], `${assetName} must use the current release token`).toBe("20260806-01");
       }

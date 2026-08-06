@@ -3952,6 +3952,14 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appCss).toMatch(/\.gantt__header\s*\{[\s\S]*position: sticky;[\s\S]*top: 0;[\s\S]*z-index: 20;/);
   });
 
+  it("Team Schedule fills the available desktop width without shrinking days below the scroll floor", () => {
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
+
+    expect(appCss).toMatch(/\.team-schedule\s*\{[^}]*max-width:\s*none;/);
+    expect(appCss).toMatch(/\.team-schedule__timeline :is\([^)]*\.gantt__timeline-head[^)]*\)\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*calc\(var\(--gantt-days, 62\) \* 30px\);/);
+    expect(appCss).toMatch(/\.team-schedule__timeline \.gantt__month-scale\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*100%;/);
+  });
+
   it("keeps the Gantt owner column above horizontally scrolling task bars", () => {
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
 
