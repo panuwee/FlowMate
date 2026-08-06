@@ -7,6 +7,121 @@ const {
 const FLOWMATE_LIST_VIEW_STATE_KEY = "flowmate:list:viewState:v1";
 const FLOWMATE_DETAIL_BACK_CONTEXT_KEY = "flowmate:detail:backContext:v1";
 const FLOWMATE_BOARD_VIEW_STATE_KEY = "flowmate:board:viewState:v1";
+const FLOWMATE_BOARD_SNAPSHOT_TTL_MS = 30_000;
+const FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS = new Map();
+const flowMateBoardRefreshCoordinators = new Map();
+const FLOWMATE_BOARD_CACHE_LIFECYCLE_KEY = "__flowMateBoardCacheLifecycle";
+function getFlowMateBoardWorkspaceKey() {
+  const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : window.FLOWMATE_ACTIVE_TEAM;
+  const workspace = String(activeTeam || "").trim().toLowerCase() || "no-workspace";
+  const userId = String(window.FLOWMATE_CURRENT_USER?.id || "signed-out").trim() || "signed-out";
+  return `${userId}:${workspace}`;
+}
+function cloneFlowMateBoardData(value) {
+  if (Array.isArray(value)) return value.map(cloneFlowMateBoardData);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneFlowMateBoardData(item)]));
+  }
+  return value;
+}
+function cloneFlowMateBoardLanes(lanes) {
+  return Object.fromEntries(Object.entries(lanes || {}).map(([status, lane]) => [status, cloneFlowMateBoardData(lane || {})]));
+}
+function cloneFlowMateBoardSummary(summary) {
+  const next = summary || {};
+  return {
+    ...next,
+    counts: {
+      ...(next.counts || {})
+    },
+    wip: {
+      ...(next.wip || {}),
+      inProgressByOwner: {
+        ...(next.wip?.inProgressByOwner || {})
+      }
+    }
+  };
+}
+function readFlowMateBoardSnapshot(workspaceKey = getFlowMateBoardWorkspaceKey()) {
+  const snapshot = FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS.get(workspaceKey);
+  if (!snapshot) return null;
+  if (snapshot.expiresAt <= Date.now()) {
+    FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS.delete(workspaceKey);
+    return null;
+  }
+  return {
+    lanes: cloneFlowMateBoardLanes(snapshot.lanes),
+    summary: cloneFlowMateBoardSummary(snapshot.summary)
+  };
+}
+function writeFlowMateBoardSnapshot(workspaceKey, changes = {}) {
+  const previous = FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS.get(workspaceKey) || {};
+  FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS.set(workspaceKey, {
+    lanes: changes.lanes ? cloneFlowMateBoardLanes(changes.lanes) : cloneFlowMateBoardLanes(previous.lanes),
+    summary: changes.summary ? cloneFlowMateBoardSummary(changes.summary) : cloneFlowMateBoardSummary(previous.summary),
+    expiresAt: Date.now() + FLOWMATE_BOARD_SNAPSHOT_TTL_MS
+  });
+}
+function clearFlowMateBoardSnapshot(workspaceKey = getFlowMateBoardWorkspaceKey()) {
+  FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS.delete(workspaceKey);
+  flowMateBoardRefreshCoordinators.delete(workspaceKey);
+}
+function clearFlowMateBoardSnapshots() {
+  FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS.clear();
+  flowMateBoardRefreshCoordinators.clear();
+}
+function ensureFlowMateBoardCacheLifecycleListeners() {
+  const existing = window[FLOWMATE_BOARD_CACHE_LIFECYCLE_KEY];
+  if (existing?.cleanup) return existing.cleanup;
+  const clearForWorkspaceChange = () => clearFlowMateBoardSnapshots();
+  const clearForSignOut = () => clearFlowMateBoardSnapshots();
+  window.addEventListener("flowmate:team-workspace-changed", clearForWorkspaceChange);
+  window.addEventListener("flowmate:signed-out", clearForSignOut);
+  const cleanup = () => {
+    window.removeEventListener("flowmate:team-workspace-changed", clearForWorkspaceChange);
+    window.removeEventListener("flowmate:signed-out", clearForSignOut);
+    if (window[FLOWMATE_BOARD_CACHE_LIFECYCLE_KEY]?.cleanup === cleanup) {
+      delete window[FLOWMATE_BOARD_CACHE_LIFECYCLE_KEY];
+    }
+  };
+  window[FLOWMATE_BOARD_CACHE_LIFECYCLE_KEY] = {
+    cleanup
+  };
+  return cleanup;
+}
+function runFlowMateBoardRefresh(workspaceKey, refresh) {
+  const existing = flowMateBoardRefreshCoordinators.get(workspaceKey);
+  if (existing) {
+    existing.queued = true;
+    existing.queuedRefresh = refresh;
+    return existing.promise;
+  }
+  const coordinator = {
+    queued: false,
+    queuedRefresh: null,
+    promise: null
+  };
+  coordinator.promise = Promise.resolve().then(async () => {
+    let activeRefresh = refresh;
+    while (activeRefresh) {
+      const queuedBeforeActiveRefresh = coordinator.queued ? coordinator.queuedRefresh : null;
+      coordinator.queued = false;
+      coordinator.queuedRefresh = null;
+      await activeRefresh();
+      const queuedDuringActiveRefresh = coordinator.queued ? coordinator.queuedRefresh : null;
+      coordinator.queued = false;
+      coordinator.queuedRefresh = null;
+      activeRefresh = queuedDuringActiveRefresh || queuedBeforeActiveRefresh;
+    }
+  }).finally(() => {
+    if (flowMateBoardRefreshCoordinators.get(workspaceKey) === coordinator) {
+      flowMateBoardRefreshCoordinators.delete(workspaceKey);
+    }
+  });
+  flowMateBoardRefreshCoordinators.set(workspaceKey, coordinator);
+  return coordinator.promise;
+}
+ensureFlowMateBoardCacheLifecycleListeners();
 function readFlowMateListViewState() {
   try {
     const raw = window.sessionStorage && window.sessionStorage.getItem(FLOWMATE_LIST_VIEW_STATE_KEY);
@@ -67,7 +182,12 @@ Object.assign(window, {
   saveFlowMateDetailBackContext,
   readFlowMateDetailBackContext,
   readFlowMateBoardViewState,
-  saveFlowMateBoardViewState
+  saveFlowMateBoardViewState,
+  readFlowMateBoardSnapshot,
+  writeFlowMateBoardSnapshot,
+  clearFlowMateBoardSnapshots,
+  ensureFlowMateBoardCacheLifecycleListeners,
+  runFlowMateBoardRefresh
 });
 function exportRowsCsv(rows) {
   const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "1st Draft", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
@@ -78,9 +198,10 @@ function ListScreen({
   onOpen,
   searchQuery = ""
 }) {
-  const LIST_STATUS_FILTER_KEYS = ["need_brief", "unassigned", "assigned", "in_progress", "review", "blocked", "delivered", "cancelled", "queued"];
+  const LIST_STATUS_FILTER_KEYS = ["need_brief", "unassigned", "assigned", "in_progress", "review", "blocked", "queued"];
   const savedListState = readFlowMateListViewState();
-  const [filterStatus, setFilterStatus] = useStateB(savedListState.filterStatus || "all");
+  const initialListStatus = LIST_STATUS_FILTER_KEYS.includes(savedListState.filterStatus) ? savedListState.filterStatus : "all";
+  const [filterStatus, setFilterStatus] = useStateB(initialListStatus);
   const [filterFlag, setFilterFlag] = useStateB(savedListState.filterFlag || "all");
   const [filterOwner, setFilterOwner] = useStateB(savedListState.filterOwner || "all");
   const [filterTeam, setFilterTeam] = useStateB(savedListState.filterTeam || "all");
@@ -162,7 +283,8 @@ function ListScreen({
     const values = rawValues.map(value => String(value || "").trim()).filter(Boolean);
     return values.length ? values : ["No channel"];
   }
-  const rows = sourceRows.filter(w => {
+  const listVisibleRows = window.getFlowMateListVisibleRows(sourceRows, filterStatus);
+  const rows = listVisibleRows.filter(w => {
     if (!window.matchesFlowMateSearch(w, searchQuery)) return false;
     if (filterStatus !== "all" && w.status !== filterStatus) return false;
     if (filterOwner !== "all" && (w.assignee || "unassigned") !== filterOwner) return false;
@@ -442,11 +564,13 @@ function BoardScreen({
     campaign: "",
     ownerId: ""
   };
+  const boardWorkspaceKeyRef = useRefB(null);
+  if (!boardWorkspaceKeyRef.current) boardWorkspaceKeyRef.current = getFlowMateBoardWorkspaceKey();
   const [activeTab, setActiveTab] = useStateB(savedBoardState.activeTab === "delivered" ? "delivered" : "active");
-  const [lanes, setLanes] = useStateB(() => Object.fromEntries(columns.map(column => [column.key, {
+  const [lanes, setLanes] = useStateB(() => readFlowMateBoardSnapshot(boardWorkspaceKeyRef.current)?.lanes || Object.fromEntries(columns.map(column => [column.key, {
     ...emptyLane
   }])));
-  const [summary, setSummary] = useStateB({
+  const [summary, setSummary] = useStateB(() => readFlowMateBoardSnapshot(boardWorkspaceKeyRef.current)?.summary || {
     counts: {},
     wip: {
       inProgressByOwner: {},
@@ -547,16 +671,18 @@ function BoardScreen({
       return false;
     }
     const requestId = ++laneRequestRef.current[status];
+    const workspaceKey = boardWorkspaceKeyRef.current;
     const currentLane = laneStateRef.current[status] || emptyLane;
     let cursor = append ? currentLane.nextCursor : null;
     const desiredCount = append ? currentLane.rows.length + 50 : Math.max(50, Number(targetCount || laneLoadedCounts.current[status] || currentLane.rows.length || 0));
     let accumulatedRows = append ? [...currentLane.rows] : [];
     let latestResult = null;
+    const nextStatus = append ? "loading-more" : currentLane.rows.length > 0 ? "refreshing" : "loading";
     setLanes(current => ({
       ...current,
       [status]: {
         ...current[status],
-        status: append ? "loading-more" : "loading",
+        status: nextStatus,
         message: ""
       }
     }));
@@ -568,7 +694,7 @@ function BoardScreen({
           cursor,
           limit: pageSize
         });
-        if (!isAlive() || requestId !== laneRequestRef.current[status]) return false;
+        if (!isAlive() || requestId !== laneRequestRef.current[status] || workspaceKey !== boardWorkspaceKeyRef.current) return false;
         accumulatedRows = Array.from(new Map([...accumulatedRows, ...(latestResult.rows || [])].map(row => [row.id, row])).values());
         cursor = latestResult.nextCursor || null;
       } while (cursor && accumulatedRows.length < desiredCount);
@@ -586,6 +712,9 @@ function BoardScreen({
           ...laneStateRef.current,
           [status]: nextLane
         };
+        writeFlowMateBoardSnapshot(workspaceKey, {
+          lanes: laneStateRef.current
+        });
         return {
           ...current,
           [status]: nextLane
@@ -595,13 +724,13 @@ function BoardScreen({
       persistBoardViewState();
       return true;
     } catch (error) {
-      if (!isAlive() || requestId !== laneRequestRef.current[status]) return false;
+      if (!isAlive() || requestId !== laneRequestRef.current[status] || workspaceKey !== boardWorkspaceKeyRef.current) return false;
       console.error(`[FlowMate Board] ${status} lane load failed:`, error);
       setLanes(current => ({
         ...current,
         [status]: {
           ...current[status],
-          status: "error",
+          status: currentLane.rows.length > 0 ? "stale-error" : "error",
           message: boardError(error, "Could not load this lane.")
         }
       }));
@@ -615,6 +744,10 @@ function BoardScreen({
       const next = await window.loadFlowMateBoardSummary();
       if (!isAlive() || requestId !== summaryRequestRef.current || activeBoardRequestId !== activeBoardRequestRef.current) return false;
       setSummary(next);
+      writeFlowMateBoardSnapshot(boardWorkspaceKeyRef.current, {
+        lanes: laneStateRef.current,
+        summary: next
+      });
       return true;
     } catch (error) {
       if (!isAlive() || requestId !== summaryRequestRef.current || activeBoardRequestId !== activeBoardRequestRef.current) return false;
@@ -644,9 +777,9 @@ function BoardScreen({
   }
   async function refreshActiveBoardPreservingState(isAlive = () => true) {
     columns.forEach(column => rememberLaneScroll(column.key, laneBodyRefs.current[column.key]));
-    return loadActiveBoard(isAlive, {
+    return runFlowMateBoardRefresh(boardWorkspaceKeyRef.current, () => loadActiveBoard(isAlive, {
       preserveScroll: true
-    });
+    }));
   }
   async function loadDelivered(cursor = deliveredCursorRef.current, isAlive = () => true, filters = deliveredFiltersRef.current) {
     if (!window.loadFlowMateDeliveredHistory) {
@@ -795,6 +928,9 @@ function BoardScreen({
       }));
     }
     function resetForWorkspaceChange() {
+      clearFlowMateBoardSnapshot(boardWorkspaceKeyRef.current);
+      boardWorkspaceKeyRef.current = getFlowMateBoardWorkspaceKey();
+      clearFlowMateBoardSnapshot(boardWorkspaceKeyRef.current);
       activeBoardRequestRef.current += 1;
       summaryRequestRef.current += 1;
       Object.keys(laneRequestRef.current).forEach(status => {
@@ -802,9 +938,11 @@ function BoardScreen({
       });
       laneLoadedCounts.current = {};
       laneScrollPositions.current = {};
-      setLanes(Object.fromEntries(columns.map(column => [column.key, {
+      const nextLanes = Object.fromEntries(columns.map(column => [column.key, {
         ...emptyLane
-      }])));
+      }]));
+      laneStateRef.current = nextLanes;
+      setLanes(nextLanes);
       setSummary({
         counts: {},
         wip: {
@@ -823,11 +961,17 @@ function BoardScreen({
         laneScrollPositions: {}
       });
     }
+    function resetForSignedOut() {
+      clearFlowMateBoardSnapshots();
+      resetForWorkspaceChange();
+    }
     window.addEventListener("flowmate:search-cleared", clearArchivedSearch);
     window.addEventListener("flowmate:team-workspace-changed", resetForWorkspaceChange);
+    window.addEventListener("flowmate:signed-out", resetForSignedOut);
     return () => {
       window.removeEventListener("flowmate:search-cleared", clearArchivedSearch);
       window.removeEventListener("flowmate:team-workspace-changed", resetForWorkspaceChange);
+      window.removeEventListener("flowmate:signed-out", resetForSignedOut);
     };
   }, []);
   useEffectB(() => {
@@ -1100,7 +1244,6 @@ function BoardScreen({
       options.blockedReason = blockedReason;
     }
     await runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, targetStatus, options), `${row.id} moved to ${STATUS_LABEL[targetStatus]}.`);
-    await loadLane(targetStatus);
     return true;
   }
   async function handleDrop(event, targetStatus) {
@@ -1253,10 +1396,10 @@ function BoardScreen({
         rememberLaneScroll(column.key, event.currentTarget);
         persistBoardViewState();
       }
-    }, lane.status === "loading" && React.createElement("div", {
+    }, lane.status === "loading" && lane.rows.length === 0 && React.createElement("div", {
       className: "board-state",
       role: "status"
-    }, "Loading ", column.label, "..."), lane.status === "error" && React.createElement("div", {
+    }, "Loading ", column.label, "..."), (lane.status === "error" || lane.status === "stale-error") && React.createElement("div", {
       className: "board-state board-state--error",
       role: "alert"
     }, lane.message, React.createElement("button", {

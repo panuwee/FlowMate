@@ -4,15 +4,15 @@ import { describe, expect, it } from "vitest";
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
-const app = read("github/app.jsx");
-const screensA = read("github/screens-a.jsx");
-const screensB = read("github/screens-b.jsx");
-const screensC = read("github/screens-c.jsx");
-const listData = read("github/supabase-list-data.js");
-const quickTask = read("github/supabase-quick-task.js");
-const data = read("github/data.jsx");
-const search = read("github/search-utils.js");
-const css = read("github/app.css");
+const app = read("app.jsx");
+const screensA = read("screens-a.jsx");
+const screensB = read("screens-b.jsx");
+const screensC = read("screens-c.jsx");
+const listData = read("supabase-list-data.js");
+const quickTask = read("supabase-quick-task.js");
+const data = read("data.jsx");
+const search = read("search-utils.js");
+const css = read("app.css");
 const flowmate = read("src/lib/flowmate.ts");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string): string {
@@ -253,15 +253,15 @@ describe("FlowMate Trello + Asana hybrid frontend static UAT", () => {
 
   it("contains no obvious mojibake sequences in the touched frontend sources", () => {
     const touchedSources: Record<string, string> = {
-      "github/app.jsx": app,
-      "github/screens-a.jsx": screensA,
-      "github/screens-b.jsx": screensB,
-      "github/screens-c.jsx": screensC,
-      "github/supabase-list-data.js": listData,
-      "github/supabase-quick-task.js": quickTask,
-      "github/data.jsx": data,
-      "github/search-utils.js": search,
-      "github/app.css": css,
+      "app.jsx": app,
+      "screens-a.jsx": screensA,
+      "screens-b.jsx": screensB,
+      "screens-c.jsx": screensC,
+      "supabase-list-data.js": listData,
+      "supabase-quick-task.js": quickTask,
+      "data.jsx": data,
+      "search-utils.js": search,
+      "app.css": css,
       "src/lib/flowmate.ts": flowmate,
     };
     const obviousMojibake = ["\uFFFD", "\u00C2", "\u00C3", "\u0E22\u0E17", "\u00E2\u20AC", "\u00EF\u00BF\u00BD"];

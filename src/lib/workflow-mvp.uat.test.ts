@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8");
-const app = () => read("github", "app.jsx");
-const css = () => read("github", "app.css");
-const createScreen = () => read("github", "screens-a.jsx");
+const app = () => read("app.jsx");
+const css = () => read("app.css");
+const createScreen = () => read("screens-a.jsx");
 const catalogSql = () => read("supabase", "workflow_mvp_catalogs.sql");
 const esportFormatSql = () => read("supabase", "workflow_esport_channel_multi_format.sql");
 const noTagSql = () => read("supabase", "workflow_no_tag_channel.sql");
@@ -175,8 +175,8 @@ describe("Workflow Management MVP R1-R9 integration", () => {
   });
 
   it("R5 enforces four team workspaces in UI queries and database RLS", () => {
-    const listData = read("github", "supabase-list-data.js");
-    const authData = read("github", "supabase-quick-task.js");
+    const listData = read("supabase-list-data.js");
+    const authData = read("supabase-quick-task.js");
     const sql = teamSql();
     const gdveSql = gdveVisibilitySql();
     expect(listData).toContain('.eq("owning_team_code", activeTeam)');
@@ -300,13 +300,13 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(source).toContain("onSwitchProductBook");
     expect(source).toContain('data-testid": "global-home"');
     for (const entry of [
-      ["github", "index.html"],
-      ["github", "home", "index.html"],
-      ["github", "product-book", "index.html"],
+      ["index.html"],
+      ["home", "index.html"],
+      ["product-book", "index.html"],
     ]) {
       const html = read(...entry);
       expect(html).toContain("workflow-mvp.js");
-      expect(html).toContain("app.js?v=20260804-06");
+      expect(html).toContain("app.js?v=20260806-01");
     }
   });
 
@@ -360,9 +360,9 @@ describe("Workflow Management MVP R1-R9 integration", () => {
       app(),
       css(),
       createScreen(),
-      read("github", "screens-b.jsx"),
-      read("github", "screens-c.jsx"),
-      read("github", "workflow-mvp.js"),
+      read("screens-b.jsx"),
+      read("screens-c.jsx"),
+      read("workflow-mvp.js"),
     ].join("\n");
     for (const marker of ["เธข", "ยท", "โ€", "�"]) expect(runtime).not.toContain(marker);
   });

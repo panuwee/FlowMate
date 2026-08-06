@@ -3052,7 +3052,7 @@ function TeamGanttScreen({
     return dueKey && dueKey >= todayKey && dueKey <= calendarAddDaysC(todayKey, 7);
   }).length;
   function openScheduleItem(item) {
-    window.flowmateSelectedWorkItem = item;
+    window.flowmateSelectedWorkItem = null;
     onOpen(item.id);
   }
   function resetFilters() {
@@ -3358,6 +3358,7 @@ function TeamGanttScreen({
 function CalendarScreen({
   onOpen
 }) {
+  const CALENDAR_STATUS_FILTER_KEYS = ["need_brief", "unassigned", "assigned", "in_progress", "review", "blocked", "queued"];
   const todayKey = calendarUtcKeyC(new Date());
   const [sourceRows, setSourceRows] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({
@@ -3451,7 +3452,7 @@ function CalendarScreen({
   const calendarRows = (sourceRows || []).map(row => ({
     ...row,
     calendarDate: window.getFlowMateCalendarDateKey ? window.getFlowMateCalendarDateKey(row) : ""
-  })).filter(row => row.calendarDate && (row.type === "quick" || row.type === "creative" || row.type === "leave"));
+  })).filter(row => row.calendarDate && (row.type === "quick" || row.type === "creative" || row.type === "leave") && (row.type === "leave" || window.isFlowMateOperationalRow(row)));
   const rowsByDate = calendarRows.reduce((map, row) => {
     if (!map[row.calendarDate]) map[row.calendarDate] = [];
     map[row.calendarDate].push(row);
@@ -3720,10 +3721,10 @@ function CalendarScreen({
     onChange: e => setFilterStatus(e.target.value)
   }, React.createElement("option", {
     value: "all"
-  }, "All statuses"), Object.entries(STATUS_LABEL).map(([key, label]) => React.createElement("option", {
+  }, "All statuses"), CALENDAR_STATUS_FILTER_KEYS.map(key => React.createElement("option", {
     key: key,
     value: key
-  }, label))), React.createElement("select", {
+  }, STATUS_LABEL[key]))), React.createElement("select", {
     className: "select",
     value: filterType,
     onChange: e => setFilterType(e.target.value)

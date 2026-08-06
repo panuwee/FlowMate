@@ -7,7 +7,7 @@ const readRepo = (path: string) => readFileSync(join(repoRoot, path), "utf8");
 
 describe("FlowMate Board integration contracts", () => {
   it("loads archived work directly and makes archived detail read-only", () => {
-    const detailSource = readRepo("github/screens-a.jsx");
+    const detailSource = readRepo("screens-a.jsx");
 
     expect(detailSource).toContain("loadFlowMateWorkItemById");
     expect(detailSource).toContain("includeArchived: true");
@@ -22,7 +22,7 @@ describe("FlowMate Board integration contracts", () => {
   });
 
   it("uses the archive-inclusive KPI loader instead of the active List loader", () => {
-    const screensC = readRepo("github/screens-c.jsx");
+    const screensC = readRepo("screens-c.jsx");
     const kpiSource = screensC.slice(
       screensC.indexOf("function KpiScreen"),
       screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"),
@@ -34,14 +34,14 @@ describe("FlowMate Board integration contracts", () => {
     expect(kpiSource).not.toContain("window.loadFlowMateListRows()");
     expect(kpiSource).toContain("Historical Supabase data");
 
-    const loaderSource = readRepo("github/supabase-list-data.js");
+    const loaderSource = readRepo("supabase-list-data.js");
     expect(loaderSource).toContain("async function loadFlowMateKpiRows({ month } = {})");
     expect(loaderSource).toContain('.gte("due_date", monthStart)');
     expect(loaderSource).toContain('.lt("due_date", nextMonthStart)');
   });
 
   it("passes global search into Board so archived search is an explicit opt-in", () => {
-    const appSource = readRepo("github/app.jsx");
+    const appSource = readRepo("app.jsx");
     const boardRender = appSource.slice(
       appSource.indexOf('route === "board"'),
       appSource.indexOf('route === "calendar"'),
@@ -62,19 +62,27 @@ describe("FlowMate Board integration contracts", () => {
 
   it("keeps cache tokens synchronized across all deployed entry pages", () => {
     const entries = [
-      readRepo("github/index.html"),
-      readRepo("github/home/index.html"),
-      readRepo("github/product-book/index.html"),
+      readRepo("index.html"),
+      readRepo("home/index.html"),
+      readRepo("product-book/index.html"),
     ];
     const assetNames = [
       "app.css",
       "supabase-list-data.js",
       "supabase-quick-task.js",
+      "search-utils.js",
       "screens-a.js",
       "screens-b.js",
       "screens-c.js",
       "app.js",
     ];
+    const currentReleaseAssets = new Set([
+      "supabase-list-data.js",
+      "search-utils.js",
+      "screens-b.js",
+      "screens-c.js",
+      "app.js",
+    ]);
 
     for (const assetName of assetNames) {
       const versions = entries.map((entry) => {
@@ -83,6 +91,9 @@ describe("FlowMate Board integration contracts", () => {
       });
       expect(versions[0], `${assetName} must have a cache token`).not.toBe("");
       expect(new Set(versions).size, `${assetName} cache tokens must match`).toBe(1);
+      if (currentReleaseAssets.has(assetName)) {
+        expect(versions[0], `${assetName} must use the current release token`).toBe("20260806-01");
+      }
     }
   });
 });

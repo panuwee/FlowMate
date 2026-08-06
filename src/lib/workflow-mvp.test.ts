@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 // Runtime helper uses a small UMD wrapper so the same contract can be tested
 // in Node and loaded directly by GitHub Pages.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const mvp = require("../../github/workflow-mvp.js");
+const mvp = require("../../workflow-mvp.js");
 
 describe("workflow MVP contracts", () => {
   it("returns exact formats for each supported channel", () => {

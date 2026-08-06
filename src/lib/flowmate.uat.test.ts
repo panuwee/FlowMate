@@ -131,7 +131,7 @@ const fixture: WorkItemSummary[] = [
 ];
 
 function loadGithubSearchUtils() {
-  const code = readFileSync(join(process.cwd(), "github", "search-utils.js"), "utf8");
+  const code = readFileSync(join(process.cwd(), "search-utils.js"), "utf8");
   const sandbox = {
     window: {
       MEMBERS_BY_ID: {},
@@ -150,6 +150,8 @@ function loadGithubSearchUtils() {
       query?: string,
     ) => T[];
     getFlowMateAttentionRows: <T extends { id?: string; status?: string }>(rows: T[], query?: string) => T[];
+    isFlowMateOperationalRow: (row: { status?: string } | null | undefined) => boolean;
+    getFlowMateListVisibleRows: <T extends { id?: string; status?: string }>(rows: T[] | null | undefined, filterStatus?: string) => T[];
     getFlowMateAttentionGroups: <T extends { id?: string; status?: string }>(rows: T[], query?: string) => Record<string, T[]>;
     getFlowMateNavCounts: <T extends { assignee?: string; status?: string }>(
       rows: T[],
@@ -205,7 +207,7 @@ function loadGithubSearchUtils() {
 }
 
 function loadGithubQuickTaskUtils() {
-  const code = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+  const code = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
   const rpcCalls: Array<{ name: string; params: Record<string, unknown> }> = [];
   const sandbox = {
     console,
@@ -468,7 +470,7 @@ describe("create form title helper", () => {
 });
 
 describe("MVP 1.1 create form draft saving", () => {
-  const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+  const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
 
   it("stores Quick Task and Creative Request drafts under separate localStorage keys", () => {
     expect(createScreenJsx).toContain('quick: "flowmate:create:quickDraft:v1"');
@@ -521,11 +523,11 @@ describe("MVP 1.1 create form draft saving", () => {
 
 describe("quick task Other assignee SQL support", () => {
   it("shows the current deploy cache version beside the FlowMate brand", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
-    const indexHtml = readFileSync(join(process.cwd(), "github", "index.html"), "utf8");
-    const homeIndexHtml = readFileSync(join(process.cwd(), "github", "home", "index.html"), "utf8");
-    const productBookIndexHtml = readFileSync(join(process.cwd(), "github", "product-book", "index.html"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
+    const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
+    const homeIndexHtml = readFileSync(join(process.cwd(), "home", "index.html"), "utf8");
+    const productBookIndexHtml = readFileSync(join(process.cwd(), "product-book", "index.html"), "utf8");
     const activeEntryHtml = [indexHtml, homeIndexHtml, productBookIndexHtml].join("\n");
 
     // Version-agnostic: the deploy stamp changes on every cache-bust, so
@@ -547,7 +549,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("serves Product Book from a direct GitHub Pages path", () => {
-    const productBookIndexPath = join(process.cwd(), "github", "product-book", "index.html");
+    const productBookIndexPath = join(process.cwd(), "product-book", "index.html");
 
     expect(existsSync(productBookIndexPath)).toBe(true);
 
@@ -559,7 +561,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("serves a GitHub Pages 404 fallback for direct deep links", () => {
-    const notFoundPath = join(process.cwd(), "github", "404.html");
+    const notFoundPath = join(process.cwd(), "404.html");
 
     expect(existsSync(notFoundPath)).toBe(true);
 
@@ -587,7 +589,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("quick task create flow stores launch date and requester team/function", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
 
     expect(quickTaskJs).toContain("p_launch_date: input.launchDate");
@@ -600,7 +602,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("quick task form uses the creative title template fields", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
 
     expect(createScreenJsx).toContain('All fields with * are required');
@@ -614,7 +616,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request form explains its auto-filled title template", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const creativeFormSource = createScreenJsx.slice(
       createScreenJsx.indexOf("function CreativeRequestForm"),
       createScreenJsx.indexOf("function CreateResultScreen"),
@@ -632,7 +634,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request removes Publish Date and places Reference link beside Brief link", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const creativeFormSource = createScreenJsx.slice(
       createScreenJsx.indexOf("function CreativeRequestForm"),
       createScreenJsx.indexOf("function CreateResultScreen"),
@@ -647,7 +649,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request uses the signed-in account team without rendering a requester team picker", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const creativeFormSource = createScreenJsx.slice(
       createScreenJsx.indexOf("function CreativeRequestForm"),
       createScreenJsx.indexOf("function CreateResultScreen"),
@@ -665,8 +667,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request auto-generates an effort-aware 1st Draft without moving past Launch", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"), createScreenJsx.indexOf("function CreativeRequestForm"));
@@ -693,8 +695,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request form has a Brief Note field that is submitted to description", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
 
@@ -707,7 +709,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request uses the agreed Type / Skill picker instead of asset type and subtype fields", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
 
     expect(createScreenJsx).toContain("const FLOWMATE_CREATIVE_TYPE_OPTIONS =");
@@ -723,9 +725,9 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request captures Asset Count and sends it to the assignment RPC", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
@@ -760,7 +762,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("warns and auto-promotes Creative Requests to Urgent for production or review-buffer risk", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const handleSubmitSource = createScreenJsx.slice(createScreenJsx.indexOf("async function handleSubmit"));
 
@@ -788,7 +790,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("removes Hybrid from the Creative Request asset type picker", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
 
     expect(creativeFormSource).not.toContain('value="hybrid"');
@@ -798,9 +800,9 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("creative request form no longer exposes platform and size templates", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const creativeFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreativeRequestForm"));
 
     expect(createScreenJsx).not.toContain("const [creativeTemplates, setCreativeTemplates]");
@@ -817,8 +819,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("keeps incomplete create forms on the page with inline validation instead of showing Could not save", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const createScreenSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreateScreen"));
     const handleSubmitSource = createScreenJsx.slice(
       createScreenJsx.indexOf("async function handleSubmit()"),
@@ -845,7 +847,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("blocks Creative Request submit and shows a popup when Brief Link is not a real URL", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const validationSource = createScreenJsx.slice(
       createScreenJsx.indexOf("function getFlowMateCreateValidationErrors"),
       createScreenJsx.indexOf("function readFlowMateCreateDraft"),
@@ -869,8 +871,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("live detail loads and shows work item description as note content", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
 
     expect(listDataJs).toContain("description");
@@ -882,15 +884,15 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("detail cancel failure tells admins which SQL RPC files to rerun", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("Cancel failed. Run supabase/rpc_quick_task.sql and supabase/collaboration_admin.sql, then refresh.");
   });
 
   it("detail view surfaces all extra fields collected by create forms", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
 
     expect(listDataJs).toContain("urgent_reason");
@@ -908,7 +910,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("detail side panel orders Created, 1st Draft, Launch date, then AI Tag and hides Publish Date", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
     const creativeDetailsSource = detailSource.slice(detailSource.indexOf("{hasCreativeDetails"), detailSource.indexOf("Link zone"));
     const sideSource = detailSource.slice(detailSource.indexOf("detail__side"), detailSource.indexOf("Activity log"));
@@ -922,8 +924,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("MVP 1.3 create flow captures Campaign, Channel Tag, and Launch Date without a separate Publish Date field", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const creativeFormSource = createScreenJsx.slice(
       createScreenJsx.indexOf("function CreativeRequestForm"),
       createScreenJsx.indexOf("function CreateResultScreen"),
@@ -941,7 +943,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("MVP 1.3 list loader maps publish date and planning date fallback fields", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
 
     expect(listDataJs).toContain("publish_date");
     expect(listDataJs).toContain("publishDate: item.publish_date");
@@ -952,8 +954,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("MVP 1.3 detail, list filters, and export surface planning fields", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const listScreenJsx = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const listScreenJsx = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
     const listSource = listScreenJsx.slice(listScreenJsx.indexOf("function ListScreen"));
     const exportSource = listScreenJsx.slice(
@@ -984,7 +986,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("quick task detail mirrors the fields from quick task creation", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("Quick Task details");
@@ -996,8 +998,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("my work and sidebar counts use active rows instead of static counts", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const myWorkSource = createScreenJsx.slice(createScreenJsx.indexOf("function MyWorkScreen"));
 
     expect(appJsx).not.toContain("count: 7");
@@ -1012,14 +1014,14 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("detail note preserves line breaks from the create textarea", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain('whiteSpace: "pre-wrap"');
   });
 
   it("live detail view does not show static mock brief, checklist, comments, or activity", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("const isLiveDetail = Boolean(w.isSupabaseRow)");
@@ -1033,7 +1035,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("removes static sample work rows from the deployed fallback data", () => {
-    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
+    const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
 
     expect(dataJsx).toContain("const WORK = [];");
     expect(dataJsx).not.toContain("CR-1051");
@@ -1043,8 +1045,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("does not show hard-coded mock fallback messages or timestamps in live screens", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const combined = `${screensA}\n${screensB}`;
 
     expect(combined).not.toContain("Using mock data");
@@ -1058,7 +1060,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("KPI screen does not render static sample metrics", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
 
     expect(screensC).not.toContain("const memberKpi = [");
     expect(screensC).not.toContain("const teamKpi = [");
@@ -1069,9 +1071,9 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("KPI monthly export controls are enabled", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
-    const searchUtils = readFileSync(join(process.cwd(), "github", "search-utils.js"), "utf8");
+    const searchUtils = readFileSync(join(process.cwd(), "search-utils.js"), "utf8");
 
     expect(searchUtils).toContain('const FLOWMATE_MONTH_EXPORT_START = "2026-01"');
     expect(searchUtils).toContain('const FLOWMATE_MONTH_EXPORT_END = "2027-12"');
@@ -1092,9 +1094,9 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("KPI tracks AI-tagged work per member and exports GD/VE AI detail tabs", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
-    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
+    const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
 
     expect(listDataJs).toContain('"work_item_ai_tags"');
@@ -1114,8 +1116,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("KPI tracks average days from assigned to delivered and exports task-level completion detail", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
 
     expect(listDataJs).toContain("delivered_at");
@@ -1134,8 +1136,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("KPI shows and exports a Cancelled report with reason and audit timestamps", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
 
     expect(listDataJs).toContain("cancel_reason");
@@ -1150,8 +1152,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("KPI exports multi-tab data as xlsx and falls back to csv, not legacy xls", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
 
     expect(dataJsx).toContain("function flowmateCreateZipBlob(");
@@ -1165,8 +1167,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("topbar search shows global dropdown results outside List and opens the selected task", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
 
     expect(appJsx).toContain("const [globalSearchRows, setGlobalSearchRows]");
     expect(appJsx).toContain("const [isGlobalSearchOpen, setIsGlobalSearchOpen]");
@@ -1187,7 +1189,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("topbar search closes results on outside click without clearing the typed query", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
     expect(appJsx).toContain("const searchWrapRef = useRefApp(null)");
     expect(appJsx).toContain('document.addEventListener("mousedown", onSearchOutsideMouseDown)');
@@ -1201,7 +1203,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("My work UI has Team Flow style status filters and ordered sections", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const myWorkSource = screensA.slice(screensA.indexOf("function MyWorkScreen"));
 
     expect(myWorkSource).toContain("filterStatus");
@@ -1212,7 +1214,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("My work removes redundant header actions, uses Bangkok time, and hides empty sections", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const myWorkSource = screensA.slice(screensA.indexOf("function MyWorkScreen"));
     const groupSource = screensA.slice(screensA.indexOf("function MyWorkGroup"));
 
@@ -1226,8 +1228,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("My work row actions use a shared wrapper so Submit review and Block align", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const groupSource = screensA.slice(screensA.indexOf("function MyWorkGroup"));
 
     expect(groupSource).toContain('className="my-work-actions"');
@@ -1238,7 +1240,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("Workload UI splits Non GD/VE and GD/VE tabs with defensive skill rendering", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"));
 
     expect(workloadSource).toContain("workloadTab");
@@ -1251,7 +1253,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("Workload UI filters standard workload by Operations, Marketing, and Esport teams", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"));
 
     expect(workloadSource).toContain('const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];');
@@ -1263,7 +1265,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("Workload uses a data-backed month filter and removes the range dropdown", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"), screensC.indexOf("/* ============================================================\n   KPI VIEW"));
 
     expect(screensC).toContain("function flowMateWorkloadMonthOptionsC(rows)");
@@ -1287,7 +1289,7 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("Workload assigned effort and capacity are scoped to the selected month", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"), screensC.indexOf("/* ============================================================\n   KPI VIEW"));
 
     expect(workloadSource).toContain("const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth)");
@@ -1303,8 +1305,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("Workload and assignment capacity keep Review counted until delivery", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const workloadDataJs = readFileSync(join(process.cwd(), "github", "supabase-workload-data.js"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const workloadDataJs = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
     const collaborationSql = readFileSync(join(process.cwd(), "supabase", "collaboration_admin.sql"), "utf8");
@@ -1317,8 +1319,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("Workload counts Urgent assigned and requested items for the selected month", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const workloadDataJs = readFileSync(join(process.cwd(), "github", "supabase-workload-data.js"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const workloadDataJs = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
     const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"), screensC.indexOf("/* ============================================================\n   KPI VIEW"));
 
     expect(workloadDataJs).toContain("user_id");
@@ -1335,8 +1337,8 @@ describe("quick task Other assignee SQL support", () => {
   });
 
   it("list and workload loaders expose dates/items needed by range filters", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
-    const workloadDataJs = readFileSync(join(process.cwd(), "github", "supabase-workload-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
+    const workloadDataJs = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
 
     expect(listDataJs).toContain("dueDate: item.due_date");
     expect(workloadDataJs).toContain("allItems: memberItems");
@@ -1404,13 +1406,13 @@ describe("full assignee roster", () => {
   });
 
   it("frontend exposes a Supabase assignee loader", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     expect(listDataJs).toContain("async function loadFlowMateAssignees()");
     expect(listDataJs).toContain("window.loadFlowMateAssignees = loadFlowMateAssignees");
   });
 
   it("quick task assignee picker contains the full roster and no Other option", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     for (const name of [
       "Gear", "Panu", "Big", "Mark", "Po", "Aof", "Folk", "Mac", "No", "May",
       "Boss", "Mag", "Real", "Pointer", "Pond", "Joe", "Tong", "Eye", "Vee",
@@ -1448,7 +1450,7 @@ describe("full assignee roster", () => {
   });
 
   it("quick task assignee picker uses a searchable text input instead of a select", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
     expect(quickTaskFormSource).toContain("assigneeQuery");
     expect(quickTaskFormSource).toContain("filterFlowMateAssigneeOptions");
@@ -1456,7 +1458,7 @@ describe("full assignee roster", () => {
   });
 
   it("list assignee filter includes all synced team members", () => {
-    const listScreenJsx = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const listScreenJsx = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     expect(listScreenJsx).toContain("...(window.MEMBERS || [])");
     expect(listScreenJsx).toContain("scopedOwnerOptionRows");
     expect(listScreenJsx).toContain("filterTeam === \"all\" || getListMemberTeam(member) === filterTeam");
@@ -1547,10 +1549,10 @@ describe("requester function sync", () => {
   });
 
   it("frontend restricts requester teams to the four canonical teams across Create and List", () => {
-    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
 
     expect(dataJsx).toContain('const TEAMS = ["Operations", "Marketing", "Esport", "GD/VE"];');
     expect(dataJsx).not.toContain('"PM"');
@@ -1575,7 +1577,7 @@ describe("requester function sync", () => {
   });
 
   it("workload and team settings hide Gear while keeping assignee data unchanged elsewhere", () => {
-    const workloadDataJs = readFileSync(join(process.cwd(), "github", "supabase-workload-data.js"), "utf8");
+    const workloadDataJs = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
 
     expect(workloadDataJs).toContain('const isVisibleMemberCode = (memberCode) => String(memberCode || "").toLowerCase() !== "gear";');
     expect(workloadDataJs).toContain(".select(\"id,user_id,member_code,display_name");
@@ -1965,11 +1967,27 @@ describe("Marketing Plan Supervisor backend SQL", () => {
 });
 
 // ============================================================================
+// Operational performance regressions
+// ============================================================================
+describe("FlowMate operational performance", () => {
+  it("refreshes nav counts for identity or workspace changes, not route-only transitions", () => {
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const refreshStart = appJsx.indexOf("async function refreshNavCounts()");
+    const effectEnd = appJsx.indexOf("  useEffectApp(() => {", refreshStart);
+    const navEffect = appJsx.slice(refreshStart, effectEnd);
+
+    expect(navEffect).toContain('window.addEventListener("flowmate:refresh-counts", refreshNavCounts)');
+    expect(navEffect).toContain("}, [authState.status, authState.user && authState.user.id, activeTeamKey]);");
+    expect(navEffect).not.toContain("route");
+  });
+});
+
+// ============================================================================
 // MVP 1.3 Planning Channel View frontend
 // ============================================================================
 describe("MVP 1.3 Planning Channel View frontend", () => {
   it("keeps old planning routes dormant and removes them from default FlowMate navigation", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const navSource = appJsx.slice(
       appJsx.indexOf("const NAV = ["),
       appJsx.indexOf("const ADMIN_NAV_GROUP"),
@@ -1992,7 +2010,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
   });
 
   it("uses a planning loader that tries planning_work_items_v before falling back to live list rows", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const loaderSource = screensC.slice(
       screensC.indexOf("async function loadFlowMatePlanningRowsC"),
       screensC.indexOf("function filterFlowMatePlanningRowsC"),
@@ -2006,7 +2024,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
   });
 
   it("groups active creative requests by normalized channel and duplicates multi-channel items", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const helperSource = screensC.slice(0, screensC.indexOf("/* ============================================================\n   WORKLOAD VIEW"));
     const sandbox = {
       console,
@@ -2042,7 +2060,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
   });
 
   it("renders required planning card fields and filters", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const screenSource = screensC.slice(screensC.indexOf("function PlanningChannelViewScreen"));
 
     for (const label of ["Month", "Campaign", "Channel", "Status", "Requester team", "Priority", "Type / Skill"]) {
@@ -2056,7 +2074,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
   });
 
   it("groups active creative requests by campaign and summarizes visible rows once per asset", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const helperSource = screensC.slice(0, screensC.indexOf("/* ============================================================\n   WORKLOAD VIEW"));
     const sandbox = {
       console,
@@ -2100,7 +2118,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
   });
 
   it("builds planning content calendar items from publish date with launch date fallback and filters by campaign/channel", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const helperSource = screensC.slice(0, screensC.indexOf("/* ============================================================\n   WORKLOAD VIEW"));
     const sandbox = {
       console,
@@ -2137,7 +2155,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
 // ============================================================================
 describe("Marketing Plan product split shell", () => {
   it("adds a post-login product switch and keeps Marketing Plan out of FlowMate navigation", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const navSource = appJsx.slice(
       appJsx.indexOf("const NAV = ["),
       appJsx.indexOf("const ADMIN_NAV_GROUP"),
@@ -2175,8 +2193,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("opens the workspace chooser after a fresh Google login instead of forcing My work", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const authJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const authJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(authJs).toContain('sessionStorage.setItem("flowmate:showProductChoiceAfterLogin", "1")');
     expect(authJs).toContain('sessionStorage.removeItem("flowmate:postLoginHash")');
@@ -2193,8 +2211,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("implements Campaign Timeline from Marketing Plan placement dates only", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const workflowCatalogSql = readFileSync(join(process.cwd(), "supabase", "workflow_mvp_catalogs.sql"), "utf8");
     const timelineSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanTimelineScreen"),
@@ -2275,7 +2293,7 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("groups timeline rows as campaign > Product / Event > channel placements", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const timelineGroupSource = appJsx.slice(
       appJsx.indexOf("function groupMarketingPlanTimelineRows"),
       appJsx.indexOf("const MARKETING_PLAN_CHANNELS"),
@@ -2297,9 +2315,9 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("shares Marketing Plan Campaign tags with Working Sheet and FlowMate Creative Request", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const marketingShellSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanShell"),
       appJsx.indexOf("function GlobalSearchResultsPanel"),
@@ -2335,7 +2353,7 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("implements Channel Plan from Marketing Plan placements grouped by channel", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const channelPlanSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanChannelPlanScreen"),
       appJsx.indexOf("function MarketingPlanCalendarScreen"),
@@ -2377,7 +2395,7 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("implements Marketing Plan Calendar from placement publish date and channel filters", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const calendarSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanCalendarScreen"),
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
@@ -2418,7 +2436,7 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("keeps Marketing Plan Campaign Timeline ordered by first publish date and tier without raw not_started text", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const timelineGroupSource = appJsx.slice(
       appJsx.indexOf("function groupMarketingPlanTimelineRows"),
       appJsx.indexOf("const MARKETING_PLAN_CHANNELS"),
@@ -2439,8 +2457,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("makes Marketing Plan Calendar open in Schedule view, uses timeline statuses, and caps Month cells at two rows", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const calendarSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanCalendarScreen"),
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
@@ -2461,7 +2479,7 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("implements Marketing Plan Working Sheet as the monthly source-of-truth entry form", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
@@ -2520,8 +2538,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("lets Working Sheet edit placement time and status while keeping asset rows grouped", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const css = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const css = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
@@ -2644,8 +2662,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("backfills a Marketing Plan Working Sheet brief link with the created Creative Request detail link only when the source link was empty", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const draftSource = appJsx.slice(
       appJsx.indexOf("function createFlowMateDraftFromMarketingPlanRow"),
       appJsx.indexOf("function openFlowMateCreativeBriefFromMarketingRow"),
@@ -2697,8 +2715,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("derives Marketing Plan row status from linked FlowMate status when available", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const searchUtilsJs = readFileSync(join(process.cwd(), "github", "search-utils.js"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const searchUtilsJs = readFileSync(join(process.cwd(), "search-utils.js"), "utf8");
     const marketingSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan.sql"), "utf8");
     const timelineNormalizeSource = appJsx.slice(
       appJsx.indexOf("function normalizeMarketingPlanTimelineRow"),
@@ -2724,10 +2742,10 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("passes Marketing Plan Time into Creative Request Publish Time and stores it on work_items", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const draftSource = appJsx.slice(
@@ -2766,7 +2784,7 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("maps task Created display to include Bangkok 24-hour time like Launch date", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
 
     expect(listDataJs).toContain("function flowmateDateTimeBangkokLabel");
     expect(listDataJs).toContain('timeZone: "Asia/Bangkok"');
@@ -2774,8 +2792,8 @@ describe("Marketing Plan product split shell", () => {
   });
 
   it("normalizes Marketing Plan HH:mm:ss database times before opening the Creative Request draft", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const appTimeSource = [
       appJsx.slice(
         appJsx.indexOf("function normalizeMarketingPlanTimeInput"),
@@ -2812,8 +2830,8 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("uses Activity log on the detail sidebar and hides Publish Date there", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const collaborationSql = readFileSync(join(process.cwd(), "supabase", "collaboration_admin.sql"), "utf8");
     const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
     const detailSource = createScreenJsx.slice(
@@ -2840,8 +2858,8 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("treats Working Sheet rows with a Creative Request link as assigned and prevents duplicate brief creation", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const css = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const css = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
@@ -2864,7 +2882,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("limits Working Sheet actions to the row PIC, Sub PIC, or admin and cancels linked FlowMate work before row deletion", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const marketingPlanSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan.sql"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
@@ -2897,9 +2915,9 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("keeps Sub PIC searchable in Working Sheet and gives Sub PIC FlowMate transition parity", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const listData = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const listData = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const marketingPlanSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan.sql"), "utf8");
     const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
     const workingSheetSource = appJsx.slice(
@@ -2928,7 +2946,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("restores Sub PIC autocomplete, persistence, assignment RPC, and cross-team FlowMate participant access", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const subPicSql = readFileSync(
       join(process.cwd(), "supabase", "marketing_plan_sub_pic_restore.sql"),
       "utf8",
@@ -2966,7 +2984,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
 
   it("documents the member/admin access matrix and Marketing Plan write guard contract", () => {
     const accessMatrix = readFileSync(join(process.cwd(), "docs", "ACCESS_MATRIX.md"), "utf8");
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const marketingPlanSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan.sql"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
@@ -2984,8 +3002,8 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("gives schedule operators only Working Sheet Time and Marketing placement Status controls", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const accessMatrix = readFileSync(join(process.cwd(), "docs", "ACCESS_MATRIX.md"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
@@ -3040,8 +3058,8 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("loads FlowMate detail rows from Supabase when opening a detail URL directly", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const appRouteSource = appJsx.slice(
       appJsx.indexOf("function App()"),
       appJsx.indexOf("  // O-6:"),
@@ -3063,7 +3081,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("refreshes the open FlowMate detail when a Marketing Plan edit syncs schedule fields", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(
       createScreenJsx.indexOf("function DetailScreen"),
       createScreenJsx.indexOf("const owner = MEMBERS_BY_ID"),
@@ -3076,7 +3094,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("keeps Marketing Plan CSV export for visible placement rows only", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const workingSheetSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanPlaceholderScreen"),
@@ -3107,7 +3125,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("adds admin-only Marketing Plan Supervisor navigation and direct-route guard", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const shellSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanShell"),
       appJsx.indexOf("function GlobalSearchResultsPanel"),
@@ -3127,7 +3145,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("loads Supervisor reports from the four admin report views without querying for non-admin direct routes", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const loaderSource = appJsx.slice(
       appJsx.indexOf("async function loadMarketingPlanSupervisorRows"),
       appJsx.indexOf("function getMarketingPlanSupervisorMonthOptions"),
@@ -3142,7 +3160,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("implements Supervisor summary cards, tabs, month data filter, and filtered CSV export", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const supervisorSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
       appJsx.indexOf("function MarketingPlanShell"),
@@ -3199,7 +3217,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
   });
 
   it("renders Supervisor risk buckets with expected labels/classes and no ranking language", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const supervisorSource = appJsx.slice(
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
       appJsx.indexOf("function MarketingPlanPlaceholderScreen"),
@@ -3526,8 +3544,8 @@ describe("MVP 1.2 collaboration/admin backend SQL", () => {
 
   it("repairs CR-1047 through the engine without changing GD/VE member settings", () => {
     const repairSql = readFileSync(join(process.cwd(), "supabase", "fix_cr1047_assignment_window.sql"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const ganttScreenJsx = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const ganttScreenJsx = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
 
     expect(repairSql).toContain("where display_id = 'CR-1047'");
     expect(repairSql).toContain("if v_work.status <> 'queued' then");
@@ -3586,10 +3604,10 @@ describe("MVP 1.2 AI Tag backend and detail UI", () => {
   });
 
   it("exposes frontend helpers and wires AI Tag UI under Created in the detail side panel", () => {
-    const indexHtml = readFileSync(join(process.cwd(), "github", "index.html"), "utf8");
-    const helperJs = readFileSync(join(process.cwd(), "github", "supabase-ai-tags.js"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const indexHtml = readFileSync(join(process.cwd(), "index.html"), "utf8");
+    const helperJs = readFileSync(join(process.cwd(), "supabase-ai-tags.js"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(indexHtml).toMatch(/supabase-ai-tags\.js\?v=\d{8}-\d+/);
@@ -3623,7 +3641,7 @@ describe("MVP 1.2 AI Tag backend and detail UI", () => {
 // ============================================================================
 describe("MVP 1.2 realtime live updates frontend", () => {
   it("subscribes to Supabase Realtime changes and debounces refresh requests", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
 
     expect(listDataJs).toContain("function startFlowMateRealtime()");
     expect(listDataJs).toContain('window.flowmateSupabase.channel("flowmate-live-updates-v1")');
@@ -3636,11 +3654,11 @@ describe("MVP 1.2 realtime live updates frontend", () => {
   });
 
   it("keeps polling and focus refresh as a fallback when realtime is degraded", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
     expect(listDataJs).toContain("function attachFlowMateLiveRefresh");
     expect(listDataJs).toContain("FLOWMATE_REFRESH_POLL_MS");
@@ -3657,8 +3675,8 @@ describe("MVP 1.2 realtime live updates frontend", () => {
   });
 
   it("shows connected and degraded realtime status without signed-out data access", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
 
     expect(appJsx).toContain('authState.status !== "signed-in"');
     expect(appJsx).toContain("setRealtimeState");
@@ -3676,7 +3694,7 @@ describe("MVP 1.2 realtime live updates frontend", () => {
 // ============================================================================
 describe("MVP 1.2 List filters and refresh controls", () => {
   it("renders due dates consistently by date instead of hiding badges for delivered or cancelled rows", () => {
-    const dataJsx = readFileSync(join(process.cwd(), "github", "data.jsx"), "utf8");
+    const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
     const dueBadgeSource = dataJsx.slice(
       dataJsx.indexOf("function DueBadge"),
       dataJsx.indexOf("function Effort"),
@@ -3690,7 +3708,7 @@ describe("MVP 1.2 List filters and refresh controls", () => {
   });
 
   it("removes Saved views and orders Team before Assignee filters with scoped assignee options", () => {
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
 
     expect(listSource).not.toContain("Saved views");
@@ -3705,7 +3723,7 @@ describe("MVP 1.2 List filters and refresh controls", () => {
   });
 
   it("removes unused New and Need Brief statuses from the List status dropdown", () => {
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
 
     expect(listSource).toContain("const LIST_STATUS_FILTER_KEYS =");
@@ -3716,9 +3734,9 @@ describe("MVP 1.2 List filters and refresh controls", () => {
   });
 
   it("keeps List filter context when opening a task detail", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
@@ -3736,7 +3754,7 @@ describe("MVP 1.2 List filters and refresh controls", () => {
 
   it("shows unique Attention Needed rows grouped by unassigned and advisory risk", () => {
     const utils = loadGithubSearchUtils();
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const attentionSource = screensB.slice(screensB.indexOf("function QueueScreen"), screensB.indexOf("function AttentionGroup"));
     const rows = [
       { id: "CR-1", status: "unassigned", title: "Needs owner" },
@@ -3755,9 +3773,47 @@ describe("MVP 1.2 List filters and refresh controls", () => {
     expect(attentionSource).not.toContain('return w.status === "queued"');
   });
 
+  it("keeps closed work out of operational views without mutating input", () => {
+    const utils = loadGithubSearchUtils();
+    const rows = [
+      { id: "A", status: "assigned" },
+      { id: "D", status: "delivered", assignmentWarnings: [{ code: "over_capacity" }] },
+      { id: "C", status: "cancelled", needsSplit: true },
+      { id: "L", status: "done", needsSplit: true },
+    ];
+
+    expect(utils.getFlowMateListVisibleRows(rows, "all").map(row => row.id)).toEqual(["A"]);
+    expect(utils.getFlowMateAttentionRows(rows).map(row => row.id)).toEqual([]);
+    expect(rows.map(row => row.id)).toEqual(["A", "D", "C", "L"]);
+  });
+
+  it("never exposes closed rows for persisted explicit filters and normalizes status matching", () => {
+    const utils = loadGithubSearchUtils();
+    const rows = [
+      { id: "OPEN", status: "ReViEw" },
+      { id: "DELIVERED", status: "DELIVERED" },
+      { id: "CANCELLED", status: "Cancelled" },
+      { id: "DONE", status: "DoNe" },
+    ];
+
+    ["delivered", "cancelled", "done", "DELIVERED", "Cancelled", "DoNe"].forEach((filterStatus) => {
+      expect(utils.getFlowMateListVisibleRows(rows, filterStatus).map(row => row.id)).toEqual([]);
+    });
+    expect(utils.getFlowMateListVisibleRows(rows, "review").map(row => row.id)).toEqual(["OPEN"]);
+    expect(rows.map(row => row.id)).toEqual(["OPEN", "DELIVERED", "CANCELLED", "DONE"]);
+  });
+
+  it("recovers an obsolete persisted List status filter to all", () => {
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
+    const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
+
+    expect(listSource).toContain('const initialListStatus = LIST_STATUS_FILTER_KEYS.includes(savedListState.filterStatus)');
+    expect(listSource).toContain('const [filterStatus, setFilterStatus] = useStateB(initialListStatus);');
+  });
+
   it("keeps visible Refresh buttons wired to real reload handlers", () => {
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const boardSource = screensB.slice(screensB.indexOf("function BoardScreen"), screensB.indexOf("function QueueScreen"));
     const timelineSource = appJsx.slice(appJsx.indexOf("function MarketingPlanTimelineScreen"), appJsx.indexOf("function MarketingPlanChannelPlanScreen"));
     const channelSource = appJsx.slice(appJsx.indexOf("function MarketingPlanChannelPlanScreen"), appJsx.indexOf("function MarketingPlanCalendarScreen"));
@@ -3788,7 +3844,7 @@ describe("MVP 1.2 List filters and refresh controls", () => {
 // ============================================================================
 describe("MVP 1.2 Team Calendar frontend", () => {
   it("adds a Calendar route to team navigation and renders CalendarScreen", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
 
     expect(navSource).toContain('key: "calendar"');
@@ -3801,9 +3857,9 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("adds Team Schedule below Calendar with Timeline and Workload", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
     const calendarIndex = navSource.indexOf('key: "calendar"');
     const ganttIndex = navSource.indexOf('key: "gantt"');
@@ -3825,7 +3881,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(ganttSource).toContain("flowmate-team-schedule-workload-tab");
     expect(ganttSource).toContain("priorityClass");
     expect(ganttSource).toContain("Capacity = actual weekday capacity minus leave and holidays");
-    expect(ganttSource).toContain("window.flowmateSelectedWorkItem = item");
+    expect(ganttSource).toContain("window.flowmateSelectedWorkItem = null");
     expect(ganttSource).toContain("onOpen(item.id)");
     expect(appCss).toContain(".gantt");
     expect(appCss).toContain(".gantt__bar");
@@ -3835,9 +3891,27 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appCss).toContain(".gantt__bar.is-urgent");
   });
 
+  it("opens a partial Team Schedule card through the full detail loader", () => {
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
+    const openScheduleItemBody = ganttSource.match(/function openScheduleItem\(item\) \{([\s\S]*?)\n  \}/)?.[1];
+    expect(openScheduleItemBody).toBeTruthy();
+
+    const openedIds: string[] = [];
+    const sandbox = {
+      window: { flowmateSelectedWorkItem: { id: "CR-OLD", campaign: "stale summary" } },
+      onOpen: (id: string) => openedIds.push(id),
+      item: { id: "CR-1064", title: "Schedule summary only" },
+    };
+    vm.runInNewContext(`(function openScheduleItem(item) {${openScheduleItemBody}\n})(item);`, sandbox);
+
+    expect(sandbox.window.flowmateSelectedWorkItem).toBeNull();
+    expect(openedIds).toEqual(["CR-1064"]);
+  });
+
   it("Team Schedule month dropdown keeps the current month selectable", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const searchUtils = readFileSync(join(process.cwd(), "github", "search-utils.js"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const searchUtils = readFileSync(join(process.cwd(), "search-utils.js"), "utf8");
     const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
 
     expect(searchUtils).toContain('const FLOWMATE_MONTH_EXPORT_START = "2026-01"');
@@ -3851,8 +3925,8 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("Team Schedule renders a horizontally scrollable one-month timeline", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
 
     expect(screensC).toContain("function ganttTimelineWindowC(monthKey)");
@@ -3879,7 +3953,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("keeps the Gantt owner column above horizontally scrolling task bars", () => {
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
 
     expect(appCss).toMatch(/\.gantt__owner\s*\{[\s\S]*position: sticky;[\s\S]*left: 0;[\s\S]*z-index: 7;/);
     expect(appCss).toMatch(/\.gantt__owner-head\s*\{[\s\S]*position: sticky;[\s\S]*left: 0;[\s\S]*z-index: 10;/);
@@ -3888,8 +3962,8 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("Team Schedule renders GD/VE leave requests on assignee rows", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
 
     expect(screensC).toContain("function ganttLeaveModelC(row, monthKey, ganttWindow)");
@@ -3905,9 +3979,9 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("shows simplified weekly capacity with task drill-down in Team Schedule", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const listData = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const listData = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const capacitySql = readFileSync(join(process.cwd(), "supabase", "gantt_capacity_allocation_read.sql"), "utf8");
     const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
 
@@ -3962,8 +4036,22 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(filtered.map((row) => row.id)).toEqual(["CR-1"]);
   });
 
+  it("keeps leave rows but excludes delivered, cancelled, and legacy done work from calendar day and week results", () => {
+    const utils = loadGithubSearchUtils();
+    const rows = [
+      { id: "OPEN", dueDate: "2026-05-20", status: "assigned", type: "creative" },
+      { id: "DELIVERED", dueDate: "2026-05-20", status: "delivered", type: "creative" },
+      { id: "CANCELLED", dueDate: "2026-05-20", status: "cancelled", type: "quick" },
+      { id: "LEGACY-DONE", dueDate: "2026-05-21", status: "done", type: "creative" },
+      { id: "LEAVE", calendarDate: "2026-05-20", status: "approved", type: "leave" },
+    ];
+
+    expect(utils.getFlowMateCalendarAgendaRows(rows, { dateKey: "2026-05-20", range: "day" }).map(row => row.id)).toEqual(["LEAVE", "OPEN"]);
+    expect(utils.getFlowMateCalendarAgendaRows(rows, { dateKey: "2026-05-20", range: "week" }).map(row => row.id)).toEqual(["LEAVE", "OPEN"]);
+  });
+
   it("CalendarScreen shows month and agenda modes with launch date context and opens detail rows", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(calendarSource).toContain("function CalendarScreen({ onOpen })");
@@ -3977,9 +4065,24 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(calendarSource).not.toContain("draggable=");
   });
 
+  it("keeps closed statuses out of List and Calendar operational status dropdowns", () => {
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
+    const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
+
+    expect(listSource).toContain("window.getFlowMateListVisibleRows(sourceRows, filterStatus)");
+    expect(listSource).not.toContain('"delivered"');
+    expect(listSource).not.toContain('"cancelled"');
+    expect(calendarSource).toContain("window.isFlowMateOperationalRow(row)");
+    expect(calendarSource).not.toContain("Object.entries(STATUS_LABEL).map");
+    expect(calendarSource).not.toContain('value="delivered"');
+    expect(calendarSource).not.toContain('value="cancelled"');
+  });
+
   it("CalendarScreen keeps summary metrics in a compact horizontal row", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(calendarSource).toContain('className="calendar-metrics"');
@@ -3993,7 +4096,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("Calendar agenda Prev, Today, and Next move the selected day or selected week", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(calendarSource).toContain("function shiftCalendarWindow(direction)");
@@ -4012,7 +4115,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("month overflow is clickable and switches the selected date into agenda view", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(calendarSource).toContain("function openCalendarOverflow(event, dateKey)");
@@ -4023,7 +4126,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("calendar month item text is constrained so long titles do not overflow cells", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(calendarSource).toContain('minWidth: 0');
@@ -4033,8 +4136,8 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("Calendar loads leave request rows and exposes Create Leave Request", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(listDataJs).toContain("async function loadFlowMateLeaveRows()");
@@ -4053,7 +4156,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
   });
 
   it("Calendar leave cards show only owner and leave period without LV ids", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
     const calendarItemSource = calendarSource.slice(
       calendarSource.indexOf("function calendarItem"),
@@ -4076,7 +4179,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
 // ============================================================================
 describe("MVP 1.2 Notification Center frontend", () => {
   it("loads signed-in user notifications and marks read state through backend-scoped APIs", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const notificationSource = quickTaskJs.slice(quickTaskJs.indexOf("async function loadFlowMateNotifications"));
 
     expect(quickTaskJs).toContain("async function loadFlowMateNotifications()");
@@ -4093,7 +4196,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
   });
 
   it("refreshes notification state after work mutations that can create notifications", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const createQuickSource = quickTaskJs.slice(
       quickTaskJs.indexOf("async function createFlowMateQuickTask"),
       quickTaskJs.indexOf("window.createFlowMateQuickTask"),
@@ -4113,7 +4216,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
   });
 
   it("hides dismissed notifications and clears read notifications through auth.uid-scoped RPCs", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const notificationSource = quickTaskJs.slice(quickTaskJs.indexOf("async function loadFlowMateNotifications"));
     const dismissSource = quickTaskJs.slice(quickTaskJs.indexOf("async function dismissReadFlowMateNotifications"));
 
@@ -4126,7 +4229,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
   });
 
   it("enables the Notifications topbar button with unread count and panel actions", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const topbarSource = appJsx.slice(
       appJsx.indexOf('className: "app__topbar"'),
       appJsx.indexOf('className: "app__sidebar"'),
@@ -4151,7 +4254,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
   });
 
   it("toggles the Notifications popup closed on a second topbar click", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const topbarSource = appJsx.slice(
       appJsx.indexOf('className: "app__topbar"'),
       appJsx.indexOf('className: "app__sidebar"'),
@@ -4165,7 +4268,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
   });
 
   it("renders clear notification loading, empty, unread, and read states", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const panelSource = appJsx.slice(appJsx.indexOf("function NotificationCenterPanel"));
 
     expect(panelSource).toContain("No notifications yet");
@@ -4179,7 +4282,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
   });
 
   it("labels link and watcher collaboration notifications", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const panelSource = appJsx.slice(appJsx.indexOf("function NotificationCenterPanel"));
 
     expect(panelSource).toContain("link_added: \"Link\"");
@@ -4190,7 +4293,7 @@ describe("MVP 1.2 Notification Center frontend", () => {
 
 describe("MVP 1.2 topbar create menu", () => {
   it("opens a topbar Create dropdown with Quick Task, Creative Request, and Leave request choices", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const topbarSource = appJsx.slice(
       appJsx.indexOf('className: "app__topbar"'),
       appJsx.indexOf('className: "app__sidebar"'),
@@ -4206,8 +4309,8 @@ describe("MVP 1.2 topbar create menu", () => {
   });
 
   it("routes Create menu choices to the correct create mode or leave modal", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
 
     expect(appJsx).toContain('onQuick: () => handleTopbarCreateChoice("quick")');
     expect(appJsx).toContain('onCreative: () => handleTopbarCreateChoice("creative")');
@@ -4227,7 +4330,7 @@ describe("MVP 1.2 topbar create menu", () => {
 // ============================================================================
 describe("MVP 1.2 collaboration/admin frontend", () => {
   it("loads links and watchers into live detail rows", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
 
     expect(listDataJs).toContain('"work_item_links"');
     expect(listDataJs).toContain('"work_item_watchers"');
@@ -4242,7 +4345,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("routes link, watcher, and admin status actions through backend RPC helpers", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(quickTaskJs).toContain("async function addFlowMateWorkItemLink(displayId, url, description)");
     expect(quickTaskJs).toContain('rpc("add_work_item_link"');
@@ -4265,7 +4368,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("renders usable detail link and watcher zones", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("Link zone");
@@ -4281,8 +4384,8 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("formats detail comment timestamps with day month year and AM/PM time", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(listDataJs).toContain("flowmateDateTimeFullLabel(comment.created_at)");
@@ -4294,14 +4397,14 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("preserves line breaks when rendering detail comment text", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain('<div className="comment__text" style={{ whiteSpace: "pre-wrap" }}>{comment.body}</div>');
   });
 
   it("updates detail links and watchers immediately after successful add", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     // CR-2: initializers are null-safe ((w && w.links) || []) so the hooks can
@@ -4321,7 +4424,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   it("records Submit Review links as Review Link rows in the Link zone", () => {
     const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
     const adminSql = readFileSync(join(process.cwd(), "supabase", "collaboration_admin.sql"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const transitionSource = quickTaskSql.slice(
       quickTaskSql.indexOf("elsif p_next_status = 'review' and v_from_status = 'in_progress'"),
       quickTaskSql.indexOf("elsif p_next_status = 'delivered' and v_from_status = 'review'"),
@@ -4340,7 +4443,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("shows AI tag changes as explicit Activity log entries", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const aiTagSql = readFileSync(join(process.cwd(), "supabase", "ai_tags.sql"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
@@ -4351,7 +4454,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("does not show status controls to read-only watchers", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("const canStatusTransition");
@@ -4363,8 +4466,8 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("keeps the watcher add controls readable in the narrow detail sidebar", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "github", "app.css"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("watcher-add-form");
@@ -4379,7 +4482,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("board drag status changes use the admin-aware transition helper", () => {
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const boardSource = screensB.slice(screensB.indexOf("function BoardScreen"), screensB.indexOf("function QueueScreen"));
 
     expect(boardSource).toContain("window.transitionFlowMateWorkStatus(row.id, targetStatus, options)");
@@ -4387,7 +4490,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("routes admin archive through the soft archive RPC without client actor spoofing", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(quickTaskJs).toContain("async function adminArchiveFlowMateWorkItem(displayId, reason)");
     expect(quickTaskJs).toContain('rpc("flowmate_admin_archive_work_item"');
@@ -4402,7 +4505,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("hides soft archived work items from normal live list rows after refresh", () => {
-    const listDataJs = readFileSync(join(process.cwd(), "github", "supabase-list-data.js"), "utf8");
+    const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
 
     expect(listDataJs).toContain("archived_at");
     expect(listDataJs).toContain("const activeWorkItems = (workItemsResult.data || []).filter((item) => !item.archived_at)");
@@ -4410,8 +4513,8 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("removes View as perspective controls and keeps My work on the signed-in user", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const myWorkSource = screensA.slice(screensA.indexOf("function MyWorkScreen"));
 
     expect(appJsx).not.toContain("View as");
@@ -4425,7 +4528,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   });
 
   it("renders admin archive controls only in detail with a soft archive confirmation", () => {
-    const screensA = readFileSync(join(process.cwd(), "github", "screens-a.jsx"), "utf8");
+    const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = screensA.slice(screensA.indexOf("function DetailScreen"));
 
     expect(detailSource).toContain("const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === \"admin\"");
@@ -4454,7 +4557,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
   it("resets linked Marketing Plan working rows when a Creative Request is cancelled", () => {
     const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
     const adminSql = readFileSync(join(process.cwd(), "supabase", "collaboration_admin.sql"), "utf8");
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
     for (const sql of [quickTaskSql, adminSql]) {
       expect(sql).toContain("if v_work.work_type = 'creative_request'");
@@ -4506,14 +4609,14 @@ describe("MVP 1.1 admin whitelist backend SQL", () => {
 
 describe("MVP 1.1 admin whitelist frontend UI", () => {
   it("loads the signed-in user's role so admin-only routes can be gated client-side", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(quickTaskJs).toContain("id, email, display_name, requester_team, is_active, role");
     expect(quickTaskJs).toContain("role: profile.role || \"member\"");
   });
 
   it("shows whitelist entry points only for admin users", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
     expect(appJsx).toContain("const isAdminUser = user.role === \"admin\"");
     expect(appJsx).toContain("getVisibleNavGroups(user.role)");
@@ -4525,7 +4628,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
   });
 
   it("limits member FlowMate navigation to Personal and Team while admins see Supervisor and Admin", () => {
-    const appJsx = readFileSync(join(process.cwd(), "github", "app.jsx"), "utf8");
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
     expect(appJsx).toContain("const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === \"Personal\" || group.group === \"Team\");");
     expect(appJsx).toContain("function getVisibleNavGroups(role)");
@@ -4536,7 +4639,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
   });
 
   it("uses admin whitelist helpers and RPCs instead of direct browser writes", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(quickTaskJs).toContain("async function loadFlowMateWhitelistUsers()");
     expect(quickTaskJs).toContain(".from(\"user_whitelist\")");
@@ -4550,7 +4653,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
   });
 
   it("loads whitelist timestamps from the actual added_at column to avoid PostgREST 400s", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(quickTaskJs).toContain(".select(\"email,display_name,role,team_member_code,added_at,added_by\")");
     expect(quickTaskJs).toContain("created_at: row.created_at || row.added_at");
@@ -4558,7 +4661,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
   });
 
   it("renders list, add, deactivate, and Supabase error states for admin whitelist management", () => {
-    const screensB = readFileSync(join(process.cwd(), "github", "screens-b.jsx"), "utf8");
+    const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
 
     expect(screensB).toContain("function AdminWhitelistScreen()");
     expect(screensB).toContain("loadFlowMateWhitelistUsers");
@@ -4686,7 +4789,7 @@ describe("MVP 1.2 Chat H team settings frontend", () => {
   });
 
   it("renders Team settings edit modal with capacity, WIP, and GD/VE skill fields", () => {
-    const screensC = readFileSync(join(process.cwd(), "github", "screens-c.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const editModalSource = screensC.slice(
       screensC.indexOf("{editMember && uiModel.canEditMembers && ("),
       screensC.indexOf("</form>", screensC.indexOf("{editMember && uiModel.canEditMembers && (")),
@@ -4702,7 +4805,7 @@ describe("MVP 1.2 Chat H team settings frontend", () => {
   });
 
   it("renders the agreed GD/VE skill set in Team settings and removes legacy skill labels", () => {
-    const quickTaskJs = readFileSync(join(process.cwd(), "github", "supabase-quick-task.js"), "utf8");
+    const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
 
     expect(quickTaskJs).toContain('key: "banner", label: "Banner"');
     expect(quickTaskJs).toContain('key: "hero-album", label: "Hero Album (Banner x8)"');

@@ -8,14 +8,14 @@ const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8");
 
 describe("Product Book Mini CMS", () => {
   const sql = read("supabase", "product_book_cms.sql");
-  const app = read("github", "app.jsx");
-  const client = read("github", "supabase-product-book.js");
-  const css = read("github", "app.css");
+  const app = read("app.jsx");
+  const client = read("supabase-product-book.js");
+  const css = read("app.css");
   const docs = read("docs", "PRODUCT_BOOK_MINI_CMS.md");
   const entryPaths = [
-    ["github", "index.html"],
-    ["github", "home", "index.html"],
-    ["github", "product-book", "index.html"],
+    ["index.html"],
+    ["home", "index.html"],
+    ["product-book", "index.html"],
   ];
 
   it("keeps patch identity separate from draft and published revisions", () => {
@@ -63,7 +63,7 @@ describe("Product Book Mini CMS", () => {
     for (const path of entryPaths) {
       const html = read(...path);
       expect(html).toContain('supabase-product-book.js?v=20260803-5');
-      expect(html).toContain('app.js?v=20260804-06');
+      expect(html).toContain('app.js?v=20260806-01');
       expect(html.indexOf("supabase-product-book.js")).toBeLessThan(html.indexOf("app.js"));
     }
     expect(app).toContain("getProductBookStaticPublishedPatches");

@@ -97,6 +97,20 @@ function filterFlowMateAssigneeOptions(options, query) {
 }
 
 const FLOWMATE_DONE_STATUSES = ["delivered", "cancelled", "done"];
+
+function isFlowMateOperationalRow(row) {
+  return Boolean(row) && !FLOWMATE_DONE_STATUSES.includes(String(row.status || "").toLowerCase());
+}
+
+function getFlowMateListVisibleRows(rows, filterStatus = "all") {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const normalizedFilterStatus = String(filterStatus || "all").toLowerCase();
+  const operationalRows = safeRows.filter(isFlowMateOperationalRow);
+  return normalizedFilterStatus === "all"
+    ? operationalRows
+    : operationalRows.filter(row => String(row.status || "").toLowerCase() === normalizedFilterStatus);
+}
+
 const FLOWMATE_ASSIGNMENT_WARNING_CODES = [
   "over_capacity",
   "wip_exceeded",
@@ -151,7 +165,7 @@ function getFlowMateAttentionCategoryCodes(row) {
 function getFlowMateAttentionRows(rows, query) {
   const seen = new Set();
   return (rows || []).filter((row) => {
-    if (!row || seen.has(row.id) || !matchesFlowMateSearch(row, query)) return false;
+    if (!isFlowMateOperationalRow(row) || seen.has(row.id) || !matchesFlowMateSearch(row, query)) return false;
     if (getFlowMateAttentionCategoryCodes(row).length === 0) return false;
     seen.add(row.id);
     return true;
@@ -319,6 +333,7 @@ function getFlowMateCalendarAgendaRows(rows, filters = {}, today = new Date()) {
   const weekBounds = filters.range === "week" ? getFlowMateCalendarWeekBounds(selectedDateKey) : null;
   return (rows || []).filter((row) => {
     if (!row) return false;
+    if (row.type !== "leave" && !isFlowMateOperationalRow(row)) return false;
     const dateKey = getFlowMateCalendarDateKey(row, today);
     if (!dateKey) return false;
     if (weekBounds) {
@@ -396,6 +411,8 @@ window.filterFlowMateMyWorkByStatus = filterFlowMateMyWorkByStatus;
 window.sortFlowMateMyWorkRows = sortFlowMateMyWorkRows;
 window.getFlowMateCalendarDateKey = getFlowMateCalendarDateKey;
 window.getFlowMateCalendarAgendaRows = getFlowMateCalendarAgendaRows;
+window.isFlowMateOperationalRow = isFlowMateOperationalRow;
+window.getFlowMateListVisibleRows = getFlowMateListVisibleRows;
 window.getFlowMateQueueRows = getFlowMateQueueRows;
 window.FLOWMATE_ASSIGNMENT_WARNING_CODES = FLOWMATE_ASSIGNMENT_WARNING_CODES;
 window.FLOWMATE_ATTENTION_CATEGORY_CODES = FLOWMATE_ATTENTION_CATEGORY_CODES;

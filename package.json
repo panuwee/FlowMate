@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:github": "node build-github.cjs",
+    "build:github:mirror": "node build-github.cjs github",
     "prepare": "husky"
   },
   "dependencies": {

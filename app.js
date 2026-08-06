@@ -527,6 +527,9 @@ function App() {
     } catch (error) {
       console.error("[FlowMate Auth] sign-out failed:", error);
     } finally {
+      if (window.invalidateFlowMateListRowsCache) window.invalidateFlowMateListRowsCache();
+      if (window.clearFlowMateBoardSnapshots) window.clearFlowMateBoardSnapshots();
+      window.dispatchEvent(new CustomEvent("flowmate:signed-out"));
       setActiveProduct(null);
       try {
         sessionStorage.removeItem("flowmate:activeProduct");
@@ -616,6 +619,8 @@ function App() {
   }, [authState.status, authState.user && authState.user.id, activeTeamKey]);
   useEffectApp(() => {
     if (authState.status !== "signed-in") {
+      if (window.invalidateFlowMateListRowsCache) window.invalidateFlowMateListRowsCache();
+      if (window.clearFlowMateBoardSnapshots) window.clearFlowMateBoardSnapshots();
       if (window.stopFlowMateRealtime) window.stopFlowMateRealtime();
       return;
     }
@@ -644,7 +649,7 @@ function App() {
       alive = false;
       window.removeEventListener("flowmate:refresh-counts", refreshNavCounts);
     };
-  }, [authState.status, route]);
+  }, [authState.status, authState.user && authState.user.id, activeTeamKey]);
   useEffectApp(() => {
     if (authState.status !== "signed-in") {
       setNotifications([]);

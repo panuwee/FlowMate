@@ -3,20 +3,22 @@
  * FlowMate build step (O-1): precompile the browser JSX to plain JS so the
  * deployed page does NOT transpile with Babel-standalone on every load.
  *
- * Source of truth stays the .jsx files in github/. This compiles each one to a
+ * Source of truth stays the tracked root .jsx files. This compiles each one to a
  * sibling .js (classic React runtime -> uses the global `React` from the UMD
  * script, same as before). Run after editing any .jsx:
  *
  *   npm run build:github
  *
- * Then upload the generated .js files + index.html. index.html loads the .js
- * (no `type="text/babel"`, no Babel CDN).
+ * Pass `github` only when regenerating the ignored legacy mirror:
+ *
+ *   npm run build:github:mirror
  */
 const fs = require("fs");
 const path = require("path");
 const babel = require("@babel/core");
 
-const dir = path.join(__dirname, "github");
+const targetArg = process.argv[2] || ".";
+const dir = path.resolve(__dirname, targetArg);
 const FILES = ["data.jsx", "screens-a.jsx", "screens-b.jsx", "screens-c.jsx", "app.jsx"];
 
 let ok = 0;

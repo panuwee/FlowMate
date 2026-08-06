@@ -2786,7 +2786,10 @@ function TeamGanttScreen({ onOpen }) {
   }).length;
 
   function openScheduleItem(item) {
-    window.flowmateSelectedWorkItem = item;
+    // Team Schedule rows come from a projection that intentionally contains
+    // timing/capacity fields only. Clear the partial row so DetailScreen uses
+    // the RLS-scoped full-detail loader instead of rendering missing fields.
+    window.flowmateSelectedWorkItem = null;
     onOpen(item.id);
   }
 
@@ -2911,6 +2914,7 @@ function TeamGanttScreen({ onOpen }) {
 }
 
 function CalendarScreen({ onOpen }) {
+  const CALENDAR_STATUS_FILTER_KEYS = ["need_brief", "unassigned", "assigned", "in_progress", "review", "blocked", "queued"];
   const todayKey = calendarUtcKeyC(new Date());
   const [sourceRows, setSourceRows] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
@@ -2980,7 +2984,9 @@ function CalendarScreen({ onOpen }) {
   const calendarRows = (sourceRows || []).map((row) => ({
     ...row,
     calendarDate: window.getFlowMateCalendarDateKey ? window.getFlowMateCalendarDateKey(row) : "",
-  })).filter((row) => row.calendarDate && (row.type === "quick" || row.type === "creative" || row.type === "leave"));
+  })).filter((row) => row.calendarDate
+    && (row.type === "quick" || row.type === "creative" || row.type === "leave")
+    && (row.type === "leave" || window.isFlowMateOperationalRow(row)));
 
   const rowsByDate = calendarRows.reduce((map, row) => {
     if (!map[row.calendarDate]) map[row.calendarDate] = [];
@@ -3155,7 +3161,7 @@ function CalendarScreen({ onOpen }) {
         </select>
         <select className="select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           <option value="all">All statuses</option>
-          {Object.entries(STATUS_LABEL).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          {CALENDAR_STATUS_FILTER_KEYS.map(key => <option key={key} value={key}>{STATUS_LABEL[key]}</option>)}
         </select>
         <select className="select" value={filterType} onChange={e => setFilterType(e.target.value)}>
           <option value="all">All types</option>

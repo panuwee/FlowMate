@@ -361,7 +361,33 @@ async function loadFlowMateWorkItemsForList() {
   return result;
 }
 
-async function loadFlowMateListRows() {
+const FLOWMATE_LIST_ROWS_CACHE_TTL_MS = 30_000;
+const flowMateListRowsCacheByWorkspace = new Map();
+
+function getFlowMateListRowsWorkspaceKey() {
+  const activeTeam = window.getFlowMateActiveTeam
+    ? window.getFlowMateActiveTeam()
+    : window.FLOWMATE_ACTIVE_TEAM;
+  const workspace = String(activeTeam || "").trim().toLowerCase() || "no-workspace";
+  const userId = String(window.FLOWMATE_CURRENT_USER?.id || "signed-out").trim() || "signed-out";
+  return `${userId}:${workspace}`;
+}
+
+function invalidateFlowMateListRowsCache(options = {}) {
+  const workspaceKey = options.workspaceKey || null;
+  const keys = workspaceKey ? [workspaceKey] : Array.from(flowMateListRowsCacheByWorkspace.keys());
+  keys.forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
+}
+
+function cloneFlowMateListData(value) {
+  if (Array.isArray(value)) return value.map(cloneFlowMateListData);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nestedValue]) => [key, cloneFlowMateListData(nestedValue)]));
+  }
+  return value;
+}
+
+async function loadFlowMateListRowsUncached() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
@@ -629,6 +655,52 @@ async function loadFlowMateListRows() {
   return rows;
 }
 
+function loadFlowMateListRows(options = {}) {
+  if (!window.flowmateSupabase) {
+    return Promise.reject(new Error("Supabase client is not ready."));
+  }
+
+  const workspaceKey = getFlowMateListRowsWorkspaceKey();
+  const force = options.force === true;
+  const now = Date.now();
+  const cached = flowMateListRowsCacheByWorkspace.get(workspaceKey);
+  if (cached?.promise) return cached.promise.then(cloneFlowMateListData);
+  if (!force && cached?.rows && cached.expiresAt > now) return Promise.resolve(cloneFlowMateListData(cached.rows));
+
+  const entry = { rows: null, expiresAt: 0, promise: null };
+  const request = loadFlowMateListRowsUncached();
+  const tracked = request
+    .then((rows) => {
+      const cachedRows = cloneFlowMateListData(rows);
+      if (flowMateListRowsCacheByWorkspace.get(workspaceKey) === entry) {
+        entry.rows = cachedRows;
+        entry.expiresAt = Date.now() + FLOWMATE_LIST_ROWS_CACHE_TTL_MS;
+      }
+      return cachedRows;
+    })
+    .catch((error) => {
+      if (flowMateListRowsCacheByWorkspace.get(workspaceKey) === entry) {
+        entry.rows = null;
+        entry.expiresAt = 0;
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (flowMateListRowsCacheByWorkspace.get(workspaceKey) !== entry) return;
+      entry.promise = null;
+      if (!entry.rows) flowMateListRowsCacheByWorkspace.delete(workspaceKey);
+    });
+  entry.promise = tracked;
+  flowMateListRowsCacheByWorkspace.set(workspaceKey, entry);
+  return tracked.then(cloneFlowMateListData);
+}
+
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("flowmate:team-workspace-changed", () => invalidateFlowMateListRowsCache());
+  window.addEventListener("flowmate:refresh-request", () => invalidateFlowMateListRowsCache());
+  window.addEventListener("flowmate:signed-out", () => invalidateFlowMateListRowsCache());
+}
+
 // ---------------------------------------------------------------------------
 // Active Board and Delivered history loaders.
 // These are intentionally additive: List/Calendar/Attention continue to use
@@ -652,43 +724,62 @@ function flowMateApplyWorkspaceScope(query) {
 
 function flowMateApplyBoardCursor(query, cursor) {
   if (!cursor) return query;
+  const launchDate = cursor.launchDate || cursor.launch_date || null;
   const dueDate = cursor.dueDate || cursor.due_date || null;
   const createdAt = cursor.createdAt || cursor.created_at || null;
   const displayId = cursor.displayId || cursor.display_id || cursor.id || null;
   if (!createdAt || !displayId) return query;
-  if (!dueDate) {
-    return query
-      .is("due_date", null)
-      .or(`created_at.gt.${createdAt},and(created_at.eq.${createdAt},display_id.gt.${displayId})`);
+  const quotedCreatedAt = `"${String(createdAt).replace(/\\"/g, '\\\\"')}"`;
+  const sameTupleAfter = (prefix) => [
+    `and(${prefix},created_at.gt.${quotedCreatedAt})`,
+    `and(${prefix},created_at.eq.${quotedCreatedAt},display_id.gt.${displayId})`,
+  ];
+  if (launchDate) {
+    if (dueDate) {
+      return query.or([
+        `launch_date.gt.${launchDate}`,
+        "launch_date.is.null",
+        `and(launch_date.eq.${launchDate},due_date.gt.${dueDate})`,
+        `and(launch_date.eq.${launchDate},due_date.is.null)`,
+        ...sameTupleAfter(`launch_date.eq.${launchDate},due_date.eq.${dueDate}`),
+      ].join(","));
+    }
+    return query.or([
+      `launch_date.gt.${launchDate}`,
+      "launch_date.is.null",
+      ...sameTupleAfter(`launch_date.eq.${launchDate},due_date.is.null`),
+    ].join(","));
   }
-  return query.or([
-    `due_date.gt.${dueDate}`,
-    `and(due_date.eq.${dueDate},created_at.gt.${createdAt})`,
-    `and(due_date.eq.${dueDate},created_at.eq.${createdAt},display_id.gt.${displayId})`,
-    "due_date.is.null",
-  ].join(","));
+  if (dueDate) {
+    return query.or([
+      `and(launch_date.is.null,due_date.gt.${dueDate})`,
+      "and(launch_date.is.null,due_date.is.null)",
+      ...sameTupleAfter(`launch_date.is.null,due_date.eq.${dueDate}`),
+    ].join(","));
+  }
+  return query.or(sameTupleAfter("launch_date.is.null,due_date.is.null").join(","));
 }
 
-function flowMateBoardCursorFromRow(row, priorityGroup) {
+function flowMateBoardCursorFromRow(row) {
   if (!row) return null;
   return {
-    priorityGroup,
+    launchDate: row.launch_date || null,
     dueDate: row.due_date || null,
     createdAt: row.created_at,
     displayId: row.display_id,
   };
 }
 
-async function flowMateQueryBoardPriorityGroup(status, priorityGroup, cursor, limit) {
+async function flowMateQueryBoardLane(status, cursor, limit) {
   let query = window.flowmateSupabase
     .from("work_items")
     .select(FLOWMATE_BOARD_WORK_ITEM_COLUMNS)
     .is("archived_at", null)
     .eq("status", status);
   query = flowMateApplyWorkspaceScope(query);
-  query = priorityGroup === "urgent" ? query.eq("priority", "urgent") : query.neq("priority", "urgent");
   query = flowMateApplyBoardCursor(query, cursor);
   return query
+    .order("launch_date", { ascending: true, nullsFirst: false })
     .order("due_date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: true })
     .order("display_id", { ascending: true })
@@ -851,38 +942,17 @@ async function loadFlowMateBoardLane({ status, cursor = null, limit = 50 } = {})
   let countQuery = window.flowmateSupabase.from("work_items").select("id", { count: "exact", head: true }).is("archived_at", null).eq("status", status);
   countQuery = flowMateApplyWorkspaceScope(countQuery);
   const countPromise = countQuery;
-  const phase = cursor?.priorityGroup || cursor?.priority_group || "urgent";
-  const loaded = [];
-  let nextCursor = null;
-
-  if (phase === "urgent") {
-    const urgentResult = await flowMateQueryBoardPriorityGroup(status, "urgent", cursor, pageSize + 1);
-    if (urgentResult.error) throw urgentResult.error;
-    const urgentRows = urgentResult.data || [];
-    loaded.push(...urgentRows.slice(0, pageSize));
-    if (urgentRows.length > pageSize) {
-      nextCursor = flowMateBoardCursorFromRow(loaded[loaded.length - 1], "urgent");
-    }
-  }
-
-  if (!nextCursor && loaded.length < pageSize) {
-    const remaining = pageSize - loaded.length;
-    const otherCursor = phase === "other" ? cursor : null;
-    const otherResult = await flowMateQueryBoardPriorityGroup(status, "other", otherCursor, remaining + 1);
-    if (otherResult.error) throw otherResult.error;
-    const otherRows = otherResult.data || [];
-    loaded.push(...otherRows.slice(0, remaining));
-    if (otherRows.length > remaining) {
-      nextCursor = flowMateBoardCursorFromRow(loaded[loaded.length - 1], "other");
-    }
-  }
+  const laneResult = await flowMateQueryBoardLane(status, cursor, pageSize + 1);
+  if (laneResult.error) throw laneResult.error;
+  const rawRows = laneResult.data || [];
+  const loaded = rawRows.slice(0, pageSize);
+  const nextCursor = rawRows.length > pageSize
+    ? flowMateBoardCursorFromRow(loaded[loaded.length - 1])
+    : null;
 
   const countResult = await countPromise;
   if (countResult.error) throw countResult.error;
   const total = Number(countResult.count || 0);
-  if (!nextCursor && loaded.length < total && loaded.length === pageSize) {
-    nextCursor = phase === "urgent" ? { priorityGroup: "other" } : flowMateBoardCursorFromRow(loaded[loaded.length - 1], "other");
-  }
   const related = await loadFlowMateBoardRelatedData(loaded);
   return {
     rows: loaded.map(item => normalizeFlowMateBoardWorkItem(item, related)),
@@ -1339,6 +1409,7 @@ async function loadFlowMateActiveCreativeMembers() {
 }
 
 window.loadFlowMateListRows = loadFlowMateListRows;
+window.invalidateFlowMateListRowsCache = invalidateFlowMateListRowsCache;
 window.loadFlowMateBoardLane = loadFlowMateBoardLane;
 window.loadFlowMateBoardSummary = loadFlowMateBoardSummary;
 window.loadFlowMateDeliveredHistory = loadFlowMateDeliveredHistory;

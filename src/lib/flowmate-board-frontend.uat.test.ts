@@ -6,16 +6,25 @@ import { describe, expect, it, vi } from "vitest";
 const repoRoot = join(__dirname, "..", "..");
 const readRepo = (path: string) => readFileSync(join(repoRoot, path), "utf8");
 
-function loadBrowserScript(path: string, overrides: Record<string, unknown> = {}) {
+function loadBrowserScript(path: string, overrides: Record<string, unknown> = {}, runtime: { Date?: DateConstructor } = {}) {
+  const eventListeners = new Map<string, Set<(event: { type: string; detail?: unknown }) => void>>();
   const windowObject: Record<string, any> = {
     FLOWMATE_CURRENT_USER: { id: "user-1", role: "member" },
     FLOWMATE_ACTIVE_TEAM: "mkt",
     MEMBERS: [],
     MEMBERS_BY_ID: {},
     TEAMS: [],
-    dispatchEvent: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn((event: { type: string; detail?: unknown }) => {
+      Array.from(eventListeners.get(event.type) || []).forEach(listener => listener(event));
+      return true;
+    }),
+    addEventListener: vi.fn((type: string, listener: (event: { type: string; detail?: unknown }) => void) => {
+      if (!eventListeners.has(type)) eventListeners.set(type, new Set());
+      eventListeners.get(type)?.add(listener);
+    }),
+    removeEventListener: vi.fn((type: string, listener: (event: { type: string; detail?: unknown }) => void) => {
+      eventListeners.get(type)?.delete(listener);
+    }),
     ...overrides,
   };
   const context = {
@@ -30,7 +39,7 @@ function loadBrowserScript(path: string, overrides: Record<string, unknown> = {}
       }
     },
     URL,
-    Date,
+    Date: runtime.Date || Date,
     setTimeout,
     clearTimeout,
   };
@@ -38,9 +47,59 @@ function loadBrowserScript(path: string, overrides: Record<string, unknown> = {}
   return windowObject;
 }
 
-function makeQueryResult(data: unknown[] = [], count: number | null = null) {
+function loadBoardCacheHelpers(overrides: Record<string, unknown> = {}, runtime: { Date?: DateConstructor } = {}) {
+  const eventListeners = new Map<string, Set<(event: { type: string; detail?: unknown }) => void>>();
+  const windowObject: Record<string, any> = {
+    FLOWMATE_CURRENT_USER: { id: "user-1", role: "member" },
+    FLOWMATE_ACTIVE_TEAM: "mkt",
+    dispatchEvent: vi.fn((event: { type: string; detail?: unknown }) => {
+      Array.from(eventListeners.get(event.type) || []).forEach(listener => listener(event));
+      return true;
+    }),
+    addEventListener: vi.fn((type: string, listener: (event: { type: string; detail?: unknown }) => void) => {
+      if (!eventListeners.has(type)) eventListeners.set(type, new Set());
+      eventListeners.get(type)?.add(listener);
+    }),
+    removeEventListener: vi.fn((type: string, listener: (event: { type: string; detail?: unknown }) => void) => {
+      eventListeners.get(type)?.delete(listener);
+    }),
+    ...overrides,
+  };
+  const source = readRepo("screens-b.jsx");
+  const helperSource = source.slice(0, source.indexOf("function ListScreen"));
+  runInNewContext(helperSource, {
+    window: windowObject,
+    React: {},
+    Date: runtime.Date || Date,
+    Object,
+    Map,
+    Array,
+    Promise,
+    setTimeout,
+    clearTimeout,
+  }, { filename: "screens-b.jsx" });
+  return windowObject;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks() {
+  for (let cycle = 0; cycle < 8; cycle += 1) {
+    await Promise.resolve();
+  }
+}
+
+function makeQueryResult(data: unknown[] = [], count: number | null = null, error: Error | null = null) {
   const calls: Array<[string, ...unknown[]]> = [];
-  const result = { data, count, error: null };
+  const result = { data, count, error };
   const query: Record<string, any> = {};
   ["select", "eq", "neq", "is", "in", "not", "or", "gt", "gte", "lt", "lte", "order", "limit", "range"].forEach(method => {
     query[method] = (...args: unknown[]) => {
@@ -55,10 +114,326 @@ function makeQueryResult(data: unknown[] = [], count: number | null = null) {
   return { query, calls };
 }
 
+function makeListLoaderSupabase(batches: Array<{ flagError?: Error }> = [{}]) {
+  let tableCallCount = 0;
+  const from = vi.fn((table: string) => {
+    const batch = batches[Math.min(Math.floor(tableCallCount / 13), batches.length - 1)] || {};
+    tableCallCount += 1;
+    return makeQueryResult([], null, table === "work_item_flags_v" ? batch.flagError || null : null).query;
+  });
+  return {
+    flowmateSupabase: { from },
+    workItemSelectCount: () => from.mock.calls.filter(([table]) => table === "work_items").length,
+  };
+}
+
+function makeDeferredListLoaderSupabase() {
+  const batches = [deferred<void>(), deferred<void>(), deferred<void>(), deferred<void>()];
+  let tableCallCount = 0;
+  const from = vi.fn((table: string) => {
+    const batchIndex = Math.floor(tableCallCount / 13);
+    tableCallCount += 1;
+    const result = {
+      data: table === "work_items" ? [{
+        id: `work-${batchIndex}`,
+        display_id: `CR-${batchIndex}`,
+        title: batchIndex === 0 ? "old batch" : `fresh batch ${batchIndex}`,
+        work_type: "creative_request",
+        status: "assigned",
+        priority: "normal",
+        created_at: "2026-08-06T00:00:00Z",
+      }] : [],
+      count: null,
+      error: null,
+    };
+    const query: Record<string, any> = {};
+    ["select", "eq", "neq", "is", "in", "not", "or", "gt", "gte", "lt", "lte", "order", "limit", "range"].forEach(method => {
+      query[method] = () => query;
+    });
+    query.then = (resolve: (value: typeof result) => unknown, reject: (reason: unknown) => unknown) =>
+      batches[batchIndex].promise.then(() => result).then(resolve, reject);
+    return query;
+  });
+  return {
+    flowmateSupabase: { from },
+    batches,
+    workItemSelectCount: () => from.mock.calls.filter(([table]) => table === "work_items").length,
+  };
+}
+
+function makeNestedListLoaderSupabase() {
+  const from = vi.fn((table: string) => makeQueryResult(table === "work_items" ? [{
+    id: "work-1",
+    display_id: "CR-1001",
+    title: "Copy-safe row",
+    work_type: "creative_request",
+    status: "assigned",
+    priority: "normal",
+    created_at: "2026-08-06T00:00:00Z",
+  }] : []).query);
+  return { flowmateSupabase: { from } };
+}
+
 describe("FlowMate Board and Delivered frontend", () => {
+  it("shares one List backend batch for concurrent consumers and expires it after 30 seconds", async () => {
+    let now = 1_000;
+    class FixedDate extends Date {
+      static now() {
+        return now;
+      }
+    }
+    const supabase = makeListLoaderSupabase();
+    const windowObject = loadBrowserScript("supabase-list-data.js", supabase, { Date: FixedDate });
+
+    const [first, second, third] = await Promise.all([
+      windowObject.loadFlowMateListRows(),
+      windowObject.loadFlowMateListRows(),
+      windowObject.loadFlowMateListRows(),
+    ]);
+
+    expect(supabase.workItemSelectCount()).toBe(1);
+    expect(first).toEqual(second);
+    expect(second).toEqual(third);
+
+    now += 29_999;
+    await windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(1);
+
+    now += 1;
+    await windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(2);
+  });
+
+  it("shares forced refreshes and lets explicit invalidation start one new List batch", async () => {
+    const supabase = makeListLoaderSupabase();
+    const windowObject = loadBrowserScript("supabase-list-data.js", supabase);
+
+    await windowObject.loadFlowMateListRows();
+    await Promise.all([
+      windowObject.loadFlowMateListRows({ force: true }),
+      windowObject.loadFlowMateListRows({ force: true }),
+    ]);
+
+    expect(supabase.workItemSelectCount()).toBe(2);
+    expect(typeof windowObject.invalidateFlowMateListRowsCache).toBe("function");
+    windowObject.invalidateFlowMateListRowsCache();
+    await windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(3);
+  });
+
+  it("tombstones an active List generation on invalidation so an old response cannot overwrite a fresh batch", async () => {
+    const supabase = makeDeferredListLoaderSupabase();
+    const windowObject = loadBrowserScript("supabase-list-data.js", supabase);
+
+    const oldRequest = windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(1);
+    windowObject.invalidateFlowMateListRowsCache();
+    const [freshRequest, sharedFreshRequest] = [
+      windowObject.loadFlowMateListRows(),
+      windowObject.loadFlowMateListRows(),
+    ];
+    expect(supabase.workItemSelectCount()).toBe(2);
+
+    supabase.batches[1].resolve();
+    const [freshRows, sharedRows] = await Promise.all([freshRequest, sharedFreshRequest]);
+    expect(freshRows[0].title).toBe("fresh batch 1");
+    expect(sharedRows[0].title).toBe("fresh batch 1");
+
+    supabase.batches[0].resolve();
+    await expect(oldRequest).resolves.toMatchObject([{ title: "old batch" }]);
+    await expect(windowObject.loadFlowMateListRows()).resolves.toMatchObject([{ title: "fresh batch 1" }]);
+    expect(supabase.workItemSelectCount()).toBe(2);
+
+    windowObject.dispatchEvent({ type: "flowmate:refresh-request" });
+    const afterRefreshEvent = windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(3);
+    supabase.batches[2].resolve();
+    await afterRefreshEvent;
+
+    windowObject.dispatchEvent({ type: "flowmate:signed-out" });
+    const afterSignOutEvent = windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(4);
+    supabase.batches[3].resolve();
+    await afterSignOutEvent;
+  });
+
+  it("returns isolated List row copies so one consumer cannot mutate another consumer cache result", async () => {
+    const windowObject = loadBrowserScript("supabase-list-data.js", makeNestedListLoaderSupabase());
+
+    const firstConsumer = await windowObject.loadFlowMateListRows();
+    firstConsumer[0].comments.push({ id: "local-only" });
+    firstConsumer[0].checklist.done = 99;
+    firstConsumer[0].platforms.push("Local mutation");
+
+    const secondConsumer = await windowObject.loadFlowMateListRows();
+    expect(secondConsumer[0].comments).toEqual([]);
+    expect(secondConsumer[0].checklist).toEqual({ done: 0, total: 0 });
+    expect(secondConsumer[0].platforms).toEqual([]);
+  });
+
+  it("expires Board snapshots and clears them from module lifecycle events even while Board is unmounted", () => {
+    let now = 1_000;
+    class FixedDate extends Date {
+      static now() {
+        return now;
+      }
+    }
+    const windowObject = loadBoardCacheHelpers({}, { Date: FixedDate });
+    const workspaceKey = "user-1:mkt";
+    expect(typeof windowObject.writeFlowMateBoardSnapshot).toBe("function");
+    expect(typeof windowObject.readFlowMateBoardSnapshot).toBe("function");
+    const snapshot = {
+      lanes: { assigned: { status: "live", rows: [{ id: "CR-1" }], total: 1, nextCursor: null, hasMore: false, message: "" } },
+      summary: { counts: { assigned: 1 }, wip: { inProgressByOwner: {}, reviewTeamCount: 0, reviewTeamLimit: 8 } },
+    };
+
+    windowObject.writeFlowMateBoardSnapshot(workspaceKey, snapshot);
+    expect(windowObject.readFlowMateBoardSnapshot(workspaceKey)?.lanes.assigned.rows).toEqual([{ id: "CR-1" }]);
+    now += 30_000;
+    expect(windowObject.readFlowMateBoardSnapshot(workspaceKey)).toBeNull();
+
+    windowObject.writeFlowMateBoardSnapshot(workspaceKey, snapshot);
+    windowObject.dispatchEvent({ type: "flowmate:team-workspace-changed" });
+    expect(windowObject.readFlowMateBoardSnapshot(workspaceKey)).toBeNull();
+
+    windowObject.writeFlowMateBoardSnapshot(workspaceKey, snapshot);
+    windowObject.dispatchEvent({ type: "flowmate:signed-out" });
+    expect(windowObject.readFlowMateBoardSnapshot(workspaceKey)).toBeNull();
+  });
+
+  it("returns isolated Board snapshot rows so nested card mutations do not leak into the cache", () => {
+    const windowObject = loadBoardCacheHelpers();
+    const workspaceKey = "user-1:mkt";
+    windowObject.writeFlowMateBoardSnapshot(workspaceKey, {
+      lanes: {
+        assigned: {
+          status: "live",
+          rows: [{
+            id: "CR-1",
+            comments: [{ id: "comment-1", metadata: { source: "server" } }],
+            aiTags: [{ id: "tag-1", tag: "launch" }],
+            checklist: { done: 0, total: 1 },
+          }],
+          total: 1,
+          nextCursor: null,
+          hasMore: false,
+          message: "",
+        },
+      },
+      summary: { counts: { assigned: 1 }, wip: { inProgressByOwner: {}, reviewTeamCount: 0, reviewTeamLimit: 8 } },
+    });
+
+    const firstRead = windowObject.readFlowMateBoardSnapshot(workspaceKey);
+    firstRead.lanes.assigned.rows[0].comments[0].metadata.source = "local";
+    firstRead.lanes.assigned.rows[0].aiTags.push({ id: "tag-2", tag: "local" });
+    firstRead.lanes.assigned.rows[0].checklist.done = 99;
+
+    const secondRead = windowObject.readFlowMateBoardSnapshot(workspaceKey);
+    expect(secondRead.lanes.assigned.rows[0].comments).toEqual([{ id: "comment-1", metadata: { source: "server" } }]);
+    expect(secondRead.lanes.assigned.rows[0].aiTags).toEqual([{ id: "tag-1", tag: "launch" }]);
+    expect(secondRead.lanes.assigned.rows[0].checklist).toEqual({ done: 0, total: 1 });
+  });
+
+  it("attaches Board cache lifecycle listeners once and runs at most one queued five-lane refresh", async () => {
+    const windowObject = loadBoardCacheHelpers();
+    expect(typeof windowObject.ensureFlowMateBoardCacheLifecycleListeners).toBe("function");
+    expect(typeof windowObject.runFlowMateBoardRefresh).toBe("function");
+    expect(windowObject.addEventListener).toHaveBeenCalledTimes(2);
+    windowObject.ensureFlowMateBoardCacheLifecycleListeners();
+    expect(windowObject.addEventListener).toHaveBeenCalledTimes(2);
+
+    const firstPipeline = deferred<void>();
+    const secondPipeline = deferred<void>();
+    const runFiveLanePipeline = vi.fn(() => runFiveLanePipeline.mock.calls.length === 1 ? firstPipeline.promise : secondPipeline.promise);
+    const directRefresh = windowObject.runFlowMateBoardRefresh("user-1:mkt", runFiveLanePipeline);
+    const eventRefresh = windowObject.runFlowMateBoardRefresh("user-1:mkt", runFiveLanePipeline);
+    const mutationRefresh = windowObject.runFlowMateBoardRefresh("user-1:mkt", runFiveLanePipeline);
+
+    await flushMicrotasks();
+    expect(runFiveLanePipeline).toHaveBeenCalledTimes(1);
+    firstPipeline.resolve();
+    await flushMicrotasks();
+    expect(runFiveLanePipeline).toHaveBeenCalledTimes(2);
+    secondPipeline.resolve();
+    await Promise.all([directRefresh, eventRefresh, mutationRefresh]);
+    expect(runFiveLanePipeline).toHaveBeenCalledTimes(2);
+  });
+
+  it("drains the latest queued Board refresh that arrives during the follow-up without concurrent pipelines", async () => {
+    const windowObject = loadBoardCacheHelpers();
+    const firstPipeline = deferred<void>();
+    const secondPipeline = deferred<void>();
+    const thirdPipeline = deferred<void>();
+    let activePipelines = 0;
+    let maxActivePipelines = 0;
+    function pipeline(pending: { promise: Promise<void> }) {
+      return () => {
+        activePipelines += 1;
+        maxActivePipelines = Math.max(maxActivePipelines, activePipelines);
+        return pending.promise.finally(() => { activePipelines -= 1; });
+      };
+    }
+    const first = vi.fn(pipeline(firstPipeline));
+    const second = vi.fn(pipeline(secondPipeline));
+    const replacedThird = vi.fn(pipeline(thirdPipeline));
+    const latestThird = vi.fn(pipeline(thirdPipeline));
+
+    const initialRefresh = windowObject.runFlowMateBoardRefresh("user-1:mkt", first);
+    const queuedFollowUp = windowObject.runFlowMateBoardRefresh("user-1:mkt", second);
+    await flushMicrotasks();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(maxActivePipelines).toBe(1);
+
+    firstPipeline.resolve();
+    await flushMicrotasks();
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(maxActivePipelines).toBe(1);
+
+    const replacedTrigger = windowObject.runFlowMateBoardRefresh("user-1:mkt", replacedThird);
+    const latestTrigger = windowObject.runFlowMateBoardRefresh("user-1:mkt", latestThird);
+    secondPipeline.resolve();
+    await flushMicrotasks();
+    expect(replacedThird).not.toHaveBeenCalled();
+    expect(latestThird).toHaveBeenCalledTimes(1);
+    expect(maxActivePipelines).toBe(1);
+
+    thirdPipeline.resolve();
+    await Promise.all([initialRefresh, queuedFollowUp, replacedTrigger, latestTrigger]);
+    expect(first.mock.calls.length + second.mock.calls.length + latestThird.mock.calls.length).toBe(3);
+    expect(maxActivePipelines).toBe(1);
+  });
+
+  it("cleans up a rejected Board refresh coordinator so the next refresh can run", async () => {
+    const windowObject = loadBoardCacheHelpers();
+    const failedRefresh = vi.fn(() => Promise.reject(new Error("lane failed")));
+    await expect(windowObject.runFlowMateBoardRefresh("user-1:mkt", failedRefresh)).rejects.toThrow("lane failed");
+
+    const recoveredRefresh = vi.fn(() => Promise.resolve());
+    await expect(windowObject.runFlowMateBoardRefresh("user-1:mkt", recoveredRefresh)).resolves.toBeUndefined();
+    expect(failedRefresh).toHaveBeenCalledTimes(1);
+    expect(recoveredRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("separates List cache entries by workspace and removes a rejected batch before retry", async () => {
+    const supabase = makeListLoaderSupabase([{ flagError: new Error("temporary list failure") }, {}]);
+    const windowObject = loadBrowserScript("supabase-list-data.js", supabase);
+
+    await expect(windowObject.loadFlowMateListRows()).rejects.toThrow("temporary list failure");
+    await windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(2);
+
+    windowObject.FLOWMATE_ACTIVE_TEAM = "ops";
+    await windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(3);
+
+    windowObject.FLOWMATE_ACTIVE_TEAM = "mkt";
+    await windowObject.loadFlowMateListRows();
+    expect(supabase.workItemSelectCount()).toBe(3);
+  });
+
   it("rejects a non-active Board lane before querying Supabase", async () => {
     const from = vi.fn();
-    const windowObject = loadBrowserScript("github/supabase-list-data.js", {
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
     });
 
@@ -66,6 +441,187 @@ describe("FlowMate Board and Delivered frontend", () => {
     await expect(windowObject.loadFlowMateBoardLane({ status: "delivered" }))
       .rejects.toThrow("Active Board status");
     expect(from).not.toHaveBeenCalled();
+  });
+
+  it("emits one Board lane query ordered by the locked tuple without priority phases", async () => {
+    const countResult = makeQueryResult([], 4);
+    const workItems = makeQueryResult([
+      {
+        id: "work-1", display_id: "CR-1001", title: "Earlier normal launch", work_type: "creative_request",
+        status: "assigned", priority: "normal", due_date: "2026-08-06", launch_date: "2026-08-04", created_at: "2026-08-01T00:00:00Z",
+      },
+      {
+        id: "work-2", display_id: "CR-1002", title: "Later urgent launch", work_type: "creative_request",
+        status: "assigned", priority: "urgent", due_date: "2026-08-03", launch_date: "2026-08-05", created_at: "2026-08-01T00:00:00Z",
+      },
+      {
+        id: "work-3", display_id: "CR-1003", title: "Equal-date deterministic tie", work_type: "creative_request",
+        status: "assigned", priority: "normal", due_date: "2026-08-03", launch_date: "2026-08-05", created_at: "2026-08-01T00:00:00Z",
+      },
+      {
+        id: "work-4", display_id: "CR-1004", title: "Null launch date is last", work_type: "creative_request",
+        status: "assigned", priority: "urgent", due_date: "2026-08-01", launch_date: null, created_at: "2026-08-01T00:00:00Z",
+      },
+    ]);
+    const empty = makeQueryResult([]);
+    const workItemQueries = [countResult.query, workItems.query];
+    const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    const result = await windowObject.loadFlowMateBoardLane({ status: "assigned", limit: 2 });
+
+    expect(workItems.calls.filter(([method]) => method === "order")).toEqual([
+      ["order", "launch_date", { ascending: true, nullsFirst: false }],
+      ["order", "due_date", { ascending: true, nullsFirst: false }],
+      ["order", "created_at", { ascending: true }],
+      ["order", "display_id", { ascending: true }],
+    ]);
+    expect(workItems.calls).toContainEqual(["limit", 3]);
+    expect(workItems.calls).not.toContainEqual(["eq", "priority", "urgent"]);
+    expect(workItems.calls).not.toContainEqual(["neq", "priority", "urgent"]);
+    expect(result.rows.map((row: { id: string }) => row.id)).toEqual(["CR-1001", "CR-1002"]);
+    expect(result.rows.map((row: { priority: string }) => row.priority)).toEqual(["normal", "urgent"]);
+    expect(result.total).toBe(4);
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toEqual({
+      launchDate: "2026-08-05",
+      dueDate: "2026-08-03",
+      createdAt: "2026-08-01T00:00:00Z",
+      displayId: "CR-1002",
+    });
+    expect(result.nextCursor).not.toHaveProperty("priorityGroup");
+    expect(result.nextCursor).not.toHaveProperty("priority_group");
+  });
+
+  it("continues a Board lane with the same launch-date tuple, including null-last branches", async () => {
+    const countResult = makeQueryResult([], 4);
+    const workItems = makeQueryResult([]);
+    const otherWorkItems = makeQueryResult([]);
+    const empty = makeQueryResult([]);
+    const workItemQueries = [countResult.query, workItems.query, otherWorkItems.query];
+    const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    const result = await windowObject.loadFlowMateBoardLane({
+      status: "assigned",
+      cursor: {
+        launchDate: "2026-08-05",
+        dueDate: "2026-08-03",
+        createdAt: "2026-08-01T00:00:00Z",
+        displayId: "CR-1002",
+      },
+      limit: 2,
+    });
+
+    expect(workItems.calls).toContainEqual(["or", "launch_date.gt.2026-08-05,launch_date.is.null,and(launch_date.eq.2026-08-05,due_date.gt.2026-08-03),and(launch_date.eq.2026-08-05,due_date.is.null),and(launch_date.eq.2026-08-05,due_date.eq.2026-08-03,created_at.gt.\"2026-08-01T00:00:00Z\"),and(launch_date.eq.2026-08-05,due_date.eq.2026-08-03,created_at.eq.\"2026-08-01T00:00:00Z\",display_id.gt.CR-1002)"]);
+    expect(workItems.calls).not.toContainEqual(["eq", "priority", "urgent"]);
+    expect(workItems.calls).not.toContainEqual(["neq", "priority", "urgent"]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it("continues after a null launch and due date without returning earlier non-null dates", async () => {
+    const countResult = makeQueryResult([], 4);
+    const workItems = makeQueryResult([]);
+    const otherWorkItems = makeQueryResult([]);
+    const empty = makeQueryResult([]);
+    const workItemQueries = [countResult.query, workItems.query, otherWorkItems.query];
+    const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    await windowObject.loadFlowMateBoardLane({
+      status: "assigned",
+      cursor: {
+        launchDate: null,
+        dueDate: null,
+        createdAt: "2026-08-01T00:00:00Z",
+        displayId: "CR-1004",
+      },
+      limit: 2,
+    });
+
+    expect(workItems.calls).toContainEqual(["or", "and(launch_date.is.null,due_date.is.null,created_at.gt.\"2026-08-01T00:00:00Z\"),and(launch_date.is.null,due_date.is.null,created_at.eq.\"2026-08-01T00:00:00Z\",display_id.gt.CR-1004)"]);
+  });
+
+  it("continues a non-null launch with a null due date in its null-last bucket", async () => {
+    const countResult = makeQueryResult([], 4);
+    const workItems = makeQueryResult([]);
+    const empty = makeQueryResult([]);
+    const workItemQueries = [countResult.query, workItems.query];
+    const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    await windowObject.loadFlowMateBoardLane({
+      status: "assigned",
+      cursor: {
+        launchDate: "2026-08-05",
+        dueDate: null,
+        createdAt: "2026-08-01T00:00:00Z",
+        displayId: "CR-1004",
+      },
+      limit: 2,
+    });
+
+    expect(workItems.calls).toContainEqual(["or", "launch_date.gt.2026-08-05,launch_date.is.null,and(launch_date.eq.2026-08-05,due_date.is.null,created_at.gt.\"2026-08-01T00:00:00Z\"),and(launch_date.eq.2026-08-05,due_date.is.null,created_at.eq.\"2026-08-01T00:00:00Z\",display_id.gt.CR-1004)"]);
+  });
+
+  it("continues a null launch with a non-null due date and keeps both null-last branches", async () => {
+    const countResult = makeQueryResult([], 4);
+    const workItems = makeQueryResult([]);
+    const empty = makeQueryResult([]);
+    const workItemQueries = [countResult.query, workItems.query];
+    const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    await windowObject.loadFlowMateBoardLane({
+      status: "assigned",
+      cursor: {
+        launchDate: null,
+        dueDate: "2026-08-03",
+        createdAt: "2026-08-01T00:00:00Z",
+        displayId: "CR-1002",
+      },
+      limit: 2,
+    });
+
+    expect(workItems.calls).toContainEqual(["or", "and(launch_date.is.null,due_date.gt.2026-08-03),and(launch_date.is.null,due_date.is.null),and(launch_date.is.null,due_date.eq.2026-08-03,created_at.gt.\"2026-08-01T00:00:00Z\"),and(launch_date.is.null,due_date.eq.2026-08-03,created_at.eq.\"2026-08-01T00:00:00Z\",display_id.gt.CR-1002)"]);
+  });
+
+  it("does not emit a cursor for an exact Board page without an extra raw row", async () => {
+    const countResult = makeQueryResult([], 2);
+    const workItems = makeQueryResult([
+      {
+        id: "work-1", display_id: "CR-1001", title: "First exact-page item", work_type: "creative_request",
+        status: "assigned", priority: "normal", due_date: "2026-08-03", launch_date: "2026-08-04", created_at: "2026-08-01T00:00:00Z",
+      },
+      {
+        id: "work-2", display_id: "CR-1002", title: "Second exact-page item", work_type: "creative_request",
+        status: "assigned", priority: "urgent", due_date: "2026-08-03", launch_date: "2026-08-05", created_at: "2026-08-01T00:00:00Z",
+      },
+    ]);
+    const empty = makeQueryResult([]);
+    const workItemQueries = [countResult.query, workItems.query];
+    const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    const result = await windowObject.loadFlowMateBoardLane({ status: "assigned", limit: 2 });
+
+    expect(workItems.calls).toContainEqual(["limit", 3]);
+    expect(result.rows.map((row: { id: string }) => row.id)).toEqual(["CR-1001", "CR-1002"]);
+    expect(result.total).toBe(2);
+    expect(result.nextCursor).toBeNull();
+    expect(result.hasMore).toBe(false);
   });
 
   it("calls the canonical Delivered RPC and normalizes its snake_case response", async () => {
@@ -97,7 +653,7 @@ describe("FlowMate Board and Delivered frontend", () => {
       },
       error: null,
     }));
-    const windowObject = loadBrowserScript("github/supabase-list-data.js", {
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { rpc },
     });
 
@@ -149,7 +705,7 @@ describe("FlowMate Board and Delivered frontend", () => {
       expect(table).toBe("flowmate_kpi_work_items_v");
       return viewResult.query;
     });
-    const windowObject = loadBrowserScript("github/supabase-list-data.js", {
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
     });
 
@@ -161,6 +717,7 @@ describe("FlowMate Board and Delivered frontend", () => {
       { id: "CR-1002", status: "in_progress", effort: 5, archivedAt: null },
       { id: "QT-1003", type: "quick", status: "cancelled", effort: null, archivedAt: null },
     ]);
+    expect(rows.find((row: { id: string }) => row.id === "QT-1003")).toMatchObject({ status: "cancelled" });
   });
 
   it("loads an archived work item by display ID without widening RLS", async () => {
@@ -183,7 +740,7 @@ describe("FlowMate Board and Delivered frontend", () => {
       tableCalls.push(table);
       return table === "work_items" ? workItems.query : empty.query;
     });
-    const windowObject = loadBrowserScript("github/supabase-list-data.js", {
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
     });
 
@@ -223,7 +780,7 @@ describe("FlowMate Board and Delivered frontend", () => {
       if (table === "users") return users.query;
       return empty.query;
     });
-    const windowObject = loadBrowserScript("github/supabase-list-data.js", {
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
     });
 
@@ -254,7 +811,7 @@ describe("FlowMate Board and Delivered frontend", () => {
       },
       error: null,
     }));
-    const windowObject = loadBrowserScript("github/supabase-list-data.js", {
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from, rpc },
     });
 
@@ -275,7 +832,7 @@ describe("FlowMate Board and Delivered frontend", () => {
 
   it("requires a restore reason and calls the admin restore RPC once", async () => {
     const rpc = vi.fn(async () => ({ data: { restored: true }, error: null }));
-    const windowObject = loadBrowserScript("github/supabase-quick-task.js", {
+    const windowObject = loadBrowserScript("supabase-quick-task.js", {
       flowmateSupabase: { rpc },
     });
 
@@ -293,7 +850,7 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("renders five viewport lanes and lazy Delivered history without the List loader", () => {
-    const source = readRepo("github/screens-b.jsx");
+    const source = readRepo("screens-b.jsx");
     const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
 
     expect(board).toContain('function BoardScreen({ onOpen, searchQuery = "" })');
@@ -315,8 +872,29 @@ describe("FlowMate Board and Delivered frontend", () => {
     expect(board).not.toContain('{ key: "delivered",   label: "Delivered" }');
   });
 
+  it("hydrates Board snapshots lazily and keeps non-empty lanes visible while they refresh", () => {
+    const source = readRepo("screens-b.jsx");
+    const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
+
+    expect(source).toContain("const FLOWMATE_BOARD_WORKSPACE_SNAPSHOTS = new Map()");
+    expect(board).toContain("readFlowMateBoardSnapshot");
+    expect(board).toContain('currentLane.rows.length > 0 ? "refreshing" : "loading"');
+    expect(board).toContain('status: currentLane.rows.length > 0 ? "stale-error" : "error"');
+    expect(board).toContain('{lane.status === "loading" && lane.rows.length === 0 && <div className="board-state" role="status">Loading {column.label}...</div>}');
+    expect(board).not.toContain('{lane.status === "loading" && <div className="board-state" role="status">Loading {column.label}...</div>}');
+    expect(board).toContain("clearFlowMateBoardSnapshot");
+  });
+
+  it("routes mount, live, manual, and card refreshes through the Board refresh coordinator", () => {
+    const source = readRepo("screens-b.jsx");
+    const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
+
+    expect(board).toContain("runFlowMateBoardRefresh");
+    expect(board).not.toContain("await loadLane(targetStatus);");
+  });
+
   it("keeps ordinary search on the current Board tab and restores Board navigation state", () => {
-    const source = readRepo("github/screens-b.jsx");
+    const source = readRepo("screens-b.jsx");
     const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
 
     expect(board).not.toContain('useStateB(searchQuery ? "delivered" : "active")');
@@ -330,7 +908,7 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("guards async refreshes, clears stale Delivered rows and invalidates partial detail cache", () => {
-    const source = readRepo("github/screens-b.jsx");
+    const source = readRepo("screens-b.jsx");
     const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
     const deliveredOpen = board.slice(board.indexOf("function openDeliveredWork"), board.indexOf("async function runCardMutation"));
 
@@ -345,7 +923,7 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("provides complete keyboard tabs and permission-aware non-drag actions", () => {
-    const source = readRepo("github/screens-b.jsx");
+    const source = readRepo("screens-b.jsx");
     const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
 
     expect(board).toContain('aria-controls="flowmate-board-panel-active"');
@@ -363,9 +941,9 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("guards summary generations, clears sticky archived scope, and keeps card actions unclipped", () => {
-    const source = readRepo("github/screens-b.jsx");
-    const appSource = readRepo("github/app.jsx");
-    const css = readRepo("github/app.css");
+    const source = readRepo("screens-b.jsx");
+    const appSource = readRepo("app.jsx");
+    const css = readRepo("app.css");
     const board = source.slice(source.indexOf("function BoardScreen"), source.indexOf("/* ============================================================\n   ATTENTION NEEDED"));
 
     expect(board).toContain("summaryRequestRef");
@@ -379,7 +957,7 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("locks independent lane scrolling, no-wrap responsiveness and accessible targets in CSS", () => {
-    const css = readRepo("github/app.css");
+    const css = readRepo("app.css");
     const boardCss = css.slice(css.indexOf("/* ---------- FlowMate Active Board"), css.indexOf("/* ---------- Capacity meter"));
 
     expect(boardCss).toContain("grid-template-columns: repeat(5");
