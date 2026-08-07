@@ -122,11 +122,39 @@
     ];
   }
 
-  function deriveRequestStatus(request) {
+  function getRequestLimitState(request, requestType) {
+    const prefix = requestType;
+    const snakePrefix = requestType;
+    const candidates = [
+      ["weeklyTotalMinutes", "weekly_total_minutes"],
+      [`${prefix}WeeklyMinutes`, `${snakePrefix}_weekly_minutes`],
+      [`${prefix}WeekTotalMinutes`, `${snakePrefix}_week_total_minutes`],
+      [`${prefix}Minutes`, `${snakePrefix}_minutes`],
+    ];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const minutes = valueOf(request, candidates[index][0], candidates[index][1]);
+      if (minutes !== undefined && minutes !== null) return getLimitState(minutes);
+    }
+    return null;
+  }
+
+  function getReferenceTimestamp(reference) {
+    const now = reference && typeof reference === "object" ? reference.now : reference;
+    if (now === undefined || now === null) return null;
+    const timestamp = new Date(now).getTime();
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  function deriveRequestStatus(request, reference) {
     const has = (camel, snake) => Boolean(valueOf(request, camel, snake));
     const decision = valueOf(request, "planDecision", "plan_decision");
+    const requestType = valueOf(request, "requestType", "request_type");
+    const limitState = ["planned", "consented", "actual"].includes(requestType) ? getRequestLimitState(request, requestType) : null;
+    const complianceReviewed = has("complianceReviewedAt", "compliance_reviewed_at") || has("complianceOutcome", "compliance_outcome");
     if (has("cancelledAt", "cancelled_at")) return "cancelled";
-    if (has("complianceRequired", "compliance_required")) return "compliance_review_required";
+    if (requestType === "actual" && limitState && limitState.key === "blocked" && !complianceReviewed) return "compliance_review_required";
+    if (["planned", "consented"].includes(requestType) && limitState && limitState.key === "blocked") return "blocked";
+    if (has("complianceRequired", "compliance_required") && !complianceReviewed) return "compliance_review_required";
     if (has("exportedAt", "exported_at")) return "exported";
     if (has("hrReadyAt", "hr_ready_at")) return "hr_ready";
     if (has("actualSubmittedAt", "actual_submitted_at")) return "pending_actual_verification";
@@ -134,7 +162,9 @@
     if (has("revisionRequiredAt", "revision_required_at") || decision === "revision_required") return "revision_required";
     if (has("approvedAt", "approved_at") || decision === "approved") {
       const plannedEndAt = valueOf(request, "plannedEndAt", "planned_end_at");
-      if (plannedEndAt && new Date(plannedEndAt).getTime() <= Date.now()) return "actual_confirmation_required";
+      const plannedEndTimestamp = plannedEndAt ? new Date(plannedEndAt).getTime() : null;
+      const referenceTimestamp = getReferenceTimestamp(reference);
+      if (Number.isFinite(plannedEndTimestamp) && referenceTimestamp !== null && plannedEndTimestamp <= referenceTimestamp) return "actual_confirmation_required";
       return "approved";
     }
     if (valueOf(request, "isEventAssignment", "is_event_assignment") && !has("consentAt", "consent_at")) return "awaiting_consent";

@@ -97,6 +97,45 @@ describe("OT request domain", () => {
     expect(domain.deriveRequestStatus({ exportedAt: "2026-08-02T10:00:00Z" })).toBe("exported");
   });
 
+  it("hard-blocks a planned weekly total above 36 hours", () => {
+    const domain = loadDomain();
+    expect(domain.deriveRequestStatus({
+      requestType: "planned",
+      plannedWeeklyMinutes: 36 * 60 + 1,
+      submittedAt: "2026-08-01T10:00:00Z",
+    })).toBe("blocked");
+  });
+
+  it("hard-blocks a consented weekly total above 36 hours", () => {
+    const domain = loadDomain();
+    expect(domain.deriveRequestStatus({
+      requestType: "consented",
+      consentedWeeklyMinutes: 36 * 60 + 1,
+      consentAt: "2026-08-01T10:00:00Z",
+    })).toBe("blocked");
+  });
+
+  it("routes over-limit actual time to compliance review even when HR-ready is present", () => {
+    const domain = loadDomain();
+    expect(domain.deriveRequestStatus({
+      requestType: "actual",
+      actualWeeklyMinutes: 36 * 60 + 1,
+      actualSubmittedAt: "2026-08-01T22:00:00Z",
+      hrReadyAt: "2026-08-02T10:00:00Z",
+    })).toBe("compliance_review_required");
+  });
+
+  it("uses only a caller-supplied reference time for actual confirmation", () => {
+    const domain = loadDomain();
+    const approvedRequest = {
+      approvedAt: "2026-08-01T10:00:00Z",
+      plannedEndAt: "2026-08-01T22:00:00Z",
+    };
+    expect(domain.deriveRequestStatus(approvedRequest, { now: "2026-08-01T21:59:00Z" })).toBe("approved");
+    expect(domain.deriveRequestStatus(approvedRequest, { now: "2026-08-01T22:00:00Z" })).toBe("actual_confirmation_required");
+    expect(domain.deriveRequestStatus(approvedRequest)).toBe("approved");
+  });
+
   it("flags material confirmed-OT changes against the prior four-week average", () => {
     const domain = loadDomain();
     const insights = domain.buildRootCauseInsights([
