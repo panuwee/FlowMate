@@ -125,16 +125,79 @@ function OtLimitProgress({ totalMinutes }) {
   );
 }
 
+function getOtWeekSegments(request, prefix) {
+  const segments = otValue(request, `${prefix}WeekSegments`, `${prefix}_week_segments`);
+  if (Array.isArray(segments) && segments.length) return segments;
+  const startAt = otValue(request, `${prefix}StartAt`, `${prefix}_start_at`) || otValue(request, "plannedStartAt", "planned_start_at");
+  const minutes = Number(otValue(request, `${prefix}Minutes`, `${prefix}_minutes`) || 0);
+  const start = getOtBangkokParts(startAt);
+  return start.date && minutes > 0
+    ? [{ weekStart: window.FlowMateOtRequestDomain.getWeekStartKey(start.date), minutes }]
+    : [];
+}
+
+function useOtWeekSummaries(segments) {
+  const weekKey = Array.from(new Set((Array.isArray(segments) ? segments : []).map(segment => segment.weekStart).filter(Boolean))).sort().join("|");
+  const [retryKey, setRetryKey] = useStateApp(0);
+  const [state, setState] = useStateApp({ weekKey, status: weekKey ? "loading" : "ready", summaries: {}, message: "" });
+
+  useEffectApp(() => {
+    const weekStarts = weekKey ? weekKey.split("|") : [];
+    if (!weekStarts.length) {
+      setState({ weekKey, status: "ready", summaries: {}, message: "" });
+      return undefined;
+    }
+    let alive = true;
+    setState({ weekKey, status: "loading", summaries: {}, message: "" });
+    Promise.all(weekStarts.map(weekStart => window.loadMyOtDashboard(weekStart))).then(dashboards => {
+      if (!alive) return;
+      const summaries = {};
+      weekStarts.forEach((weekStart, index) => { summaries[weekStart] = dashboards[index] || {}; });
+      setState({ weekKey, status: "ready", summaries, message: "" });
+    }).catch(error => {
+      if (alive) setState({ weekKey, status: "error", summaries: {}, message: error.message || "Weekly OT totals could not be loaded." });
+    });
+    return () => { alive = false; };
+  }, [weekKey, retryKey]);
+
+  const currentState = state.weekKey === weekKey
+    ? state
+    : { weekKey, status: weekKey ? "loading" : "ready", summaries: {}, message: "" };
+  return { ...currentState, retry: () => setRetryKey(value => value + 1) };
+}
+
+function OtWeekProjection({ title, rows }) {
+  if (!rows.length) return null;
+  return (
+    <section aria-label={title}>
+      {rows.map(row => (
+        <div key={row.weekStart}>
+          <small className="muted">Week of {formatOtDate(row.weekStart)}</small>
+          <section className="ot-preview">
+            <div><span>Current</span><strong>{formatOtHours(row.currentMinutes)}</strong></div>
+            <div><span>Added</span><strong>{formatOtHours(row.addedMinutes)}</strong></div>
+            <div><span>Projected</span><strong>{formatOtHours(row.projectedMinutes)}</strong></div>
+            <div><span>Remaining</span><strong>{formatOtHours(row.remainingMinutes)}</strong></div>
+          </section>
+          <OtLimitProgress totalMinutes={row.projectedMinutes} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function OtEmployeeDashboard({ access, listOnly = false }) {
   const [weekStart, setWeekStart] = useStateApp(getCurrentOtWeekStart);
-  const [loadState, setLoadState] = useStateApp({ status: "loading", dashboard: null, requests: [] });
+  const [loadState, setLoadState] = useStateApp(() => window.FlowMateOtRequestDomain.startPersonalWeekLoad(getCurrentOtWeekStart()));
   const [refreshKey, setRefreshKey] = useStateApp(0);
   const [action, setAction] = useStateApp(null);
   const loadErrorRef = useRefApp(null);
 
   useEffectApp(() => {
     let alive = true;
-    setLoadState(current => ({ ...current, status: "loading", message: "" }));
+    setLoadState(current => current.weekStart === weekStart && current.dashboard
+      ? { ...current, status: "loading", message: "" }
+      : window.FlowMateOtRequestDomain.startPersonalWeekLoad(weekStart));
     Promise.all([
       window.loadMyOtDashboard(weekStart),
       window.loadMyOtRequests(weekStart),
@@ -142,8 +205,10 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
       if (!alive) return;
       setLoadState({
         status: "ready",
+        weekStart,
         dashboard: dashboard || {},
         requests: Array.isArray(requests) ? requests : [],
+        message: "",
       });
     }).catch(error => {
       if (alive) setLoadState(current => ({ ...current, status: "error", message: error.message || "Your OT could not be loaded." }));
@@ -158,6 +223,14 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
   function refreshAfterAction() {
     setAction(null);
     setRefreshKey(value => value + 1);
+  }
+
+  function selectWeek(value) {
+    const nextWeekStart = window.FlowMateOtRequestDomain.getWeekStartKey(value);
+    if (nextWeekStart === weekStart) return;
+    setAction(null);
+    setLoadState(window.FlowMateOtRequestDomain.startPersonalWeekLoad(nextWeekStart));
+    setWeekStart(nextWeekStart);
   }
 
   if (loadState.status === "loading" && !loadState.dashboard) {
@@ -191,12 +264,17 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
       <div className="ot-toolbar">
         <label className="field">
           <span className="field__label">Week starting</span>
-          <input className="input" type="date" value={weekStart} onChange={event => setWeekStart(window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value))} />
+          <input className="input" type="date" value={weekStart} onChange={event => selectWeek(event.target.value)} />
         </label>
         <button type="button" className="btn btn--primary" onClick={() => setAction({ type: "new", request: null })}>New OT request</button>
       </div>
 
-      {loadState.status === "error" && <OtWarning kind="error" title="Refresh failed" message={`${loadState.message} Your current form is preserved; retry when ready.`} />}
+      {loadState.status === "error" && (
+        <div ref={loadErrorRef} tabIndex="-1">
+          <OtWarning kind="error" title="Refresh failed" message={`${loadState.message} Your current form is preserved; retry when ready.`} />
+          <button type="button" className="btn btn--secondary" onClick={() => setRefreshKey(value => value + 1)}>Retry refresh</button>
+        </div>
+      )}
 
       {!listOnly && (
         <>
@@ -234,9 +312,9 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
             <h2>{action.type === "new" ? "New OT request" : action.type === "consent" ? "Event consent" : "Confirm actual time"}</h2>
             <button type="button" className="btn btn--ghost" onClick={() => setAction(null)}>Close</button>
           </div>
-          {action.type === "new" && <OtRequestForm currentWeekMinutes={summary.countedMinutes} weekStart={weekStart} onSuccess={refreshAfterAction} />}
-          {action.type === "consent" && <OtConsentPanel request={action.request} currentWeekMinutes={summary.countedMinutes} onSuccess={refreshAfterAction} />}
-          {action.type === "actual" && <OtActualConfirmationForm request={action.request} currentActualWeekMinutes={summary.confirmedMinutes} onSuccess={refreshAfterAction} />}
+          {action.type === "new" && <OtRequestForm weekStart={weekStart} onSuccess={refreshAfterAction} />}
+          {action.type === "consent" && <OtConsentPanel request={action.request} onSuccess={refreshAfterAction} />}
+          {action.type === "actual" && <OtActualConfirmationForm request={action.request} onSuccess={refreshAfterAction} />}
         </section>
       )}
 
@@ -245,7 +323,7 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
   );
 }
 
-function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
+function OtRequestForm({ weekStart, onSuccess }) {
   const today = getBangkokDateKey();
   const initialWorkDate = window.FlowMateOtRequestDomain.getWeekStartKey(today) === weekStart ? today : weekStart;
   const [form, setForm] = useStateApp({
@@ -268,8 +346,10 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
   const [approverState, setApproverState] = useStateApp({ status: "loading", rows: [] });
   const [approverRetry, setApproverRetry] = useStateApp(0);
   const [submitState, setSubmitState] = useStateApp({ status: "idle", message: "" });
-  const [idempotencyKey, setIdempotencyKey] = useStateApp(() => crypto.randomUUID());
+  const [intent, setIntent] = useStateApp(() => ({ key: crypto.randomUUID(), attempted: false }));
   const errorRef = useRefApp(null);
+  const approverErrorRef = useRefApp(null);
+  const summaryErrorRef = useRefApp(null);
 
   useEffectApp(() => {
     let alive = true;
@@ -287,8 +367,16 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
 
+  useEffectApp(() => {
+    if (approverState.status === "error" && approverErrorRef.current) approverErrorRef.current.focus();
+  }, [approverState.status]);
+
   function update(field, value) {
     setForm(current => ({ ...current, [field]: value }));
+    if (intent.attempted) {
+      setIntent(current => window.FlowMateOtRequestDomain.resetIntentAfterEdit(current, () => crypto.randomUUID()));
+      setSubmitState({ status: "idle", message: "" });
+    }
   }
 
   let crossesWeek = false;
@@ -318,9 +406,13 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
     preview = { ...preview, endDate: previewEndDate, crossesWeek, message: error.message };
   }
 
-  const addedMinutes = preview.segments.find(segment => segment.weekStart === weekStart)?.minutes || preview.minutes;
-  const projectedMinutes = Number(currentWeekMinutes || 0) + Number(addedMinutes || 0);
-  const overLimit = projectedMinutes > OT_LIMIT_MINUTES;
+  const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
+  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(
+    preview.valid ? preview.segments : [],
+    weekSummaryState.summaries,
+    { totalField: "plannedMinutes" },
+  );
+  const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
   const approverUnavailable = approverState.status !== "ready" || approverState.rows.length === 0;
@@ -334,7 +426,12 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
     && form.approverUserId
     && form.consented
     && !approverUnavailable
+    && weekSummaryState.status === "ready"
     && submitState.status !== "submitting";
+
+  useEffectApp(() => {
+    if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
+  }, [weekSummaryState.status]);
 
   async function submitRequest(event) {
     event.preventDefault();
@@ -342,6 +439,7 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
       setSubmitState({ status: "error", message: overLimit ? "This request would exceed the 36-hour weekly limit." : "Complete the required fields and consent before submitting." });
       return;
     }
+    setIntent(current => ({ ...current, attempted: true }));
     setSubmitState({ status: "submitting", message: "Submitting your request…" });
     const payload = {
       functionCode: form.functionCode,
@@ -359,9 +457,9 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
       consentStatementVersion: OT_CONSENT_STATEMENT_VERSION,
     };
     try {
-      await window.createOtRequest(payload, idempotencyKey);
+      await window.createOtRequest(payload, intent.key);
       setSubmitState({ status: "success", message: "Your OT request was submitted for approval." });
-      setIdempotencyKey(crypto.randomUUID());
+      setIntent({ key: crypto.randomUUID(), attempted: false });
       onSuccess();
     } catch (error) {
       setSubmitState({ status: "error", message: error.message || "Your OT request could not be submitted. Retry uses the same request key." });
@@ -382,16 +480,15 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
         {preview.crossesWeek && <><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[0]?.weekStart || weekStart)} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesBeforeBoundary} onChange={event => update("breakMinutesBeforeBoundary", event.target.value)} /></label><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[1]?.weekStart || addOtDays(weekStart, 7))} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesAfterBoundary} onChange={event => update("breakMinutesAfterBoundary", event.target.value)} /></label></>}
         {venueRequired && <label className="field field--full"><span className="field__label">Venue *</span><input className="input" value={form.venue} onChange={event => update("venue", event.target.value)} placeholder="Event or tournament venue" required /></label>}
         <label className="field"><span className="field__label">Reason *</span><select className="select" value={form.reasonCode} onChange={event => update("reasonCode", event.target.value)} required><option value="">Select reason</option>{window.FlowMateOtRequestDomain.REASON_OPTIONS.map(reason => <option key={reason.key} value={reason.key}>{reason.label}</option>)}</select></label>
-        <label className="field"><span className="field__label">Assigned approver *</span><select className="select" aria-label="Assigned approver" value={form.approverUserId} onChange={event => update("approverUserId", event.target.value)} disabled={approverState.status !== "ready" || !approverState.rows.length} required><option value="">{approverState.status === "loading" ? "Loading approvers…" : approverState.rows.length ? "Select approver" : "No approver available"}</option>{approverState.rows.map(approver => <option key={approver.userId} value={approver.userId}>{approver.displayName || approver.email}{approver.displayName ? ` — ${approver.email}` : ""}</option>)}</select>{approverState.status === "error" && <span className="field__error">{approverState.message} <button type="button" className="ot-link-button" onClick={() => setApproverRetry(value => value + 1)}>Retry</button></span>}{approverState.status === "ready" && !approverState.rows.length && <span className="field__error">No active OT approver is available. Contact the OT Owner.</span>}</label>
+        <label className="field"><span className="field__label">Assigned approver *</span><select className="select" aria-label="Assigned approver" value={form.approverUserId} onChange={event => update("approverUserId", event.target.value)} disabled={approverState.status !== "ready" || !approverState.rows.length} required><option value="">{approverState.status === "loading" ? "Loading approvers…" : approverState.rows.length ? "Select approver" : "No approver available"}</option>{approverState.rows.map(approver => <option key={approver.userId} value={approver.userId}>{approver.displayName || approver.email}{approver.displayName ? ` — ${approver.email}` : ""}</option>)}</select>{approverState.status === "error" && <span className="field__error" role="alert" tabIndex="-1" ref={approverErrorRef}>{approverState.message} <button type="button" className="ot-link-button" onClick={() => setApproverRetry(value => value + 1)}>Retry</button></span>}{approverState.status === "ready" && !approverState.rows.length && <span className="field__error">No active OT approver is available. Contact the OT Owner.</span>}</label>
         <label className="field field--full"><span className="field__label">Reason detail {detailRequired ? "*" : "(optional)"}</span><textarea className="textarea" value={form.reasonDetail} onChange={event => update("reasonDetail", event.target.value)} required={detailRequired} placeholder={detailRequired ? "Explain what happened and why OT is required" : "Add only information needed for approval"} /></label>
       </div>
 
-      <section className="ot-preview" aria-label="Planned weekly total">
-        <div><span>Current</span><strong>{formatOtHours(currentWeekMinutes)}</strong></div><div><span>Added</span><strong>{preview.valid ? formatOtHours(addedMinutes) : "—"}</strong></div><div><span>Projected</span><strong>{preview.valid ? formatOtHours(projectedMinutes) : "—"}</strong></div><div><span>Remaining</span><strong>{preview.valid ? formatOtHours(Math.max(0, OT_LIMIT_MINUTES - projectedMinutes)) : "—"}</strong></div>
-      </section>
-      {preview.valid && <OtLimitProgress totalMinutes={projectedMinutes} />}
+      {weekSummaryState.status === "loading" && preview.valid && <div className="ot-state ot-state--compact" role="status">Loading every affected week's OT total…</div>}
+      {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Weekly totals unavailable" message={`${weekSummaryState.message} Submission remains blocked until the totals are refreshed.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry totals</button></div>}
+      <OtWeekProjection title="Planned totals by affected week" rows={projections} />
       {!preview.valid && <OtWarning kind="error" title="Schedule needs attention" message={preview.message} />}
-      {overLimit && <OtWarning kind="critical" title="Request blocked" message={`Week of ${formatOtDate(weekStart)} has ${formatOtHours(currentWeekMinutes)} counted. This adds ${formatOtHours(addedMinutes)}, above the 36h limit.`} />}
+      {overLimit && <OtWarning kind="critical" title="Request blocked" message={`At least one affected week would exceed the 36-hour limit: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}.`} />}
 
       <label className="ot-consent">
         <input type="checkbox" checked={form.consented} onChange={event => update("consented", event.target.checked)} />
@@ -404,14 +501,21 @@ function OtRequestForm({ currentWeekMinutes, weekStart, onSuccess }) {
   );
 }
 
-function OtConsentPanel({ request, currentWeekMinutes, onSuccess }) {
+function OtConsentPanel({ request, onSuccess }) {
   const [accepted, setAccepted] = useStateApp(false);
   const [submitState, setSubmitState] = useStateApp({ status: "idle", message: "" });
   const [intent, setIntent] = useStateApp(() => ({ choice: null, key: crypto.randomUUID() }));
   const errorRef = useRefApp(null);
+  const summaryErrorRef = useRefApp(null);
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-  const projectedMinutes = Number(currentWeekMinutes || 0);
-  const overLimit = projectedMinutes > OT_LIMIT_MINUTES;
+  const plannedSegments = getOtWeekSegments(request, "planned");
+  const weekSummaryState = useOtWeekSummaries(plannedSegments);
+  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(
+    plannedSegments,
+    weekSummaryState.summaries,
+    { totalField: "plannedMinutes", excludedSegments: plannedSegments },
+  );
+  const overLimit = projections.some(row => row.overLimit);
   const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const end = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
 
@@ -419,16 +523,20 @@ function OtConsentPanel({ request, currentWeekMinutes, onSuccess }) {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
 
+  useEffectApp(() => {
+    if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
+  }, [weekSummaryState.status]);
+
   async function recordConsent(choice) {
-    if (choice && (!accepted || overLimit)) {
-      setSubmitState({ status: "error", message: overLimit ? "Consent is blocked because the projected week exceeds 36 hours." : "Check the consent box before accepting this occurrence." });
+    if (choice && (!accepted || overLimit || weekSummaryState.status !== "ready")) {
+      setSubmitState({ status: "error", message: overLimit ? "Consent is blocked because an affected week exceeds 36 hours." : weekSummaryState.status !== "ready" ? "Weekly OT totals must load before accepting this occurrence." : "Check the consent box before accepting this occurrence." });
       return;
     }
     const key = intent.choice === choice ? intent.key : crypto.randomUUID();
     setIntent({ choice, key });
     setSubmitState({ status: "submitting", message: choice ? "Recording your consent…" : "Recording your choice…" });
     try {
-      await window.recordOtConsent(request.id, choice, key);
+      await window.recordOtConsent(request.id, choice, OT_CONSENT_STATEMENT_VERSION, key);
       setSubmitState({ status: "success", message: choice ? "Consent recorded for this occurrence." : "You declined this occurrence. The assignment remains in the audit history." });
       setIntent({ choice: null, key: crypto.randomUUID() });
       onSuccess();
@@ -446,11 +554,11 @@ function OtConsentPanel({ request, currentWeekMinutes, onSuccess }) {
         <div><span>Planned schedule</span><strong>{formatOtDate(start.date)} {start.time} – {start.date === end.date ? "" : `${formatOtDate(end.date)} `}{end.time}</strong></div>
         <div><span>Break</span><strong>{otValue(request, "plannedBreakMinutes", "planned_break_minutes") || 0} min</strong></div>
         <div><span>Planned hours</span><strong>{formatOtHours(plannedMinutes)}</strong></div>
-        <div><span>Week total after consent</span><strong>{formatOtHours(projectedMinutes)} / 36h</strong></div>
-        <div><span>Remaining after consent</span><strong>{formatOtHours(Math.max(0, OT_LIMIT_MINUTES - projectedMinutes))}</strong></div>
       </div>
-      <OtLimitProgress totalMinutes={projectedMinutes} />
-      {overLimit && <OtWarning kind="critical" title="Consent blocked" message="The projected weekly total is above 36 hours. Reload the week or contact the Event Lead because the server will not accept this planned occurrence." />}
+      {weekSummaryState.status === "loading" && <div className="ot-state ot-state--compact" role="status">Loading every affected week's OT total…</div>}
+      {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Weekly totals unavailable" message={`${weekSummaryState.message} Accepting is blocked until the totals are refreshed; declining remains available.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry totals</button></div>}
+      <OtWeekProjection title="Consent totals by affected week" rows={projections} />
+      {overLimit && <OtWarning kind="critical" title="Consent blocked" message={`At least one affected week would exceed 36 hours: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}. Contact the Event Lead because the server will not accept this planned occurrence.`} />}
       <label className="ot-consent">
         <input type="checkbox" checked={accepted} onChange={event => setAccepted(event.target.checked)} />
         <span>I consent to this overtime occurrence and confirm the planned date and time shown above.</span>
@@ -458,18 +566,18 @@ function OtConsentPanel({ request, currentWeekMinutes, onSuccess }) {
       <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
       {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
       <div className="ot-form__actions">
-        <button type="button" className="btn btn--primary" disabled={!accepted || overLimit || submitState.status === "submitting"} onClick={() => recordConsent(true)}>Accept occurrence</button>
+        <button type="button" className="btn btn--primary" disabled={!accepted || overLimit || weekSummaryState.status !== "ready" || submitState.status === "submitting"} onClick={() => recordConsent(true)}>Accept occurrence</button>
         <button type="button" className="btn btn--secondary" disabled={submitState.status === "submitting"} onClick={() => recordConsent(false)}>Decline occurrence</button>
       </div>
     </div>
   );
 }
 
-function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess }) {
+function OtActualConfirmationForm({ request, onSuccess }) {
   const plannedStart = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const plannedEnd = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-  const existingActualMinutes = Number(otValue(request, "actualMinutes", "actual_minutes") || 0);
+  const existingActualSegments = getOtWeekSegments(request, "actual");
   const [form, setForm] = useStateApp({
     startDate: plannedStart.date,
     startTime: plannedStart.time,
@@ -481,8 +589,9 @@ function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess
     varianceReason: "",
   });
   const [submitState, setSubmitState] = useStateApp({ status: "idle", message: "", result: null });
-  const [idempotencyKey, setIdempotencyKey] = useStateApp(() => crypto.randomUUID());
+  const [intent, setIntent] = useStateApp(() => ({ key: crypto.randomUUID(), attempted: false }));
   const errorRef = useRefApp(null);
+  const summaryErrorRef = useRefApp(null);
 
   useEffectApp(() => {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
@@ -490,6 +599,10 @@ function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess
 
   function update(field, value) {
     setForm(current => ({ ...current, [field]: value }));
+    if (intent.attempted) {
+      setIntent(current => window.FlowMateOtRequestDomain.resetIntentAfterEdit(current, () => crypto.randomUUID()));
+      setSubmitState({ status: "idle", message: "", result: null });
+    }
   }
 
   let crossesWeek = false;
@@ -518,9 +631,18 @@ function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess
 
   const actualMinutes = preview.minutes;
   const varianceRequired = preview.valid && Math.abs(actualMinutes - plannedMinutes) > 30;
-  const projectedActualMinutes = Math.max(0, Number(currentActualWeekMinutes || 0) - existingActualMinutes) + actualMinutes;
-  const complianceLikely = preview.valid && projectedActualMinutes > OT_LIMIT_MINUTES;
+  const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
+  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(
+    preview.valid ? preview.segments : [],
+    weekSummaryState.summaries,
+    { totalField: "actualMinutes", excludedSegments: existingActualSegments },
+  );
+  const complianceLikely = projections.some(row => row.overLimit);
   const canSubmit = preview.valid && (!varianceRequired || form.varianceReason.trim()) && submitState.status !== "submitting" && submitState.status !== "success";
+
+  useEffectApp(() => {
+    if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
+  }, [weekSummaryState.status]);
 
   async function submitActual(event) {
     event.preventDefault();
@@ -528,6 +650,7 @@ function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess
       setSubmitState({ status: "error", message: varianceRequired ? "Explain the difference from the plan before submitting." : preview.message, result: null });
       return;
     }
+    setIntent(current => ({ ...current, attempted: true }));
     setSubmitState({ status: "submitting", message: "Saving the hours you actually worked…", result: null });
     const payload = {
       actualStartAt: toOtBangkokIso(form.startDate, form.startTime),
@@ -537,9 +660,9 @@ function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess
       varianceReason: form.varianceReason.trim() || null,
     };
     try {
-      const result = await window.submitOtActual(request.id, payload, idempotencyKey);
+      const result = await window.submitOtActual(request.id, payload, intent.key);
       const status = otValue(result, "status", "status");
-      setIdempotencyKey(crypto.randomUUID());
+      setIntent({ key: crypto.randomUUID(), attempted: false });
       if (status === "compliance_review_required") {
         setSubmitState({ status: "success", message: "Actual hours saved truthfully. Compliance review is required before this record can become HR ready.", result });
       } else {
@@ -573,8 +696,10 @@ function OtActualConfirmationForm({ request, currentActualWeekMinutes, onSuccess
         {preview.crossesWeek && <><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[0]?.weekStart || window.FlowMateOtRequestDomain.getWeekStartKey(form.startDate))} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesBeforeBoundary} onChange={event => update("breakMinutesBeforeBoundary", event.target.value)} required /></label><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[1]?.weekStart || window.FlowMateOtRequestDomain.getWeekStartKey(form.endDate))} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesAfterBoundary} onChange={event => update("breakMinutesAfterBoundary", event.target.value)} required /></label></>}
         {varianceRequired && <label className="field field--full"><span className="field__label">Why actual time differs from plan *</span><textarea className="textarea" value={form.varianceReason} onChange={event => update("varianceReason", event.target.value)} placeholder="Explain the variance of more than 30 minutes" required /></label>}
       </div>
-      <section className="ot-preview" aria-label="Actual weekly total"><div><span>Planned</span><strong>{formatOtHours(plannedMinutes)}</strong></div><div><span>Actual</span><strong>{preview.valid ? formatOtHours(actualMinutes) : "—"}</strong></div><div><span>Week actual after save</span><strong>{preview.valid ? formatOtHours(projectedActualMinutes) : "—"}</strong></div><div><span>Remaining</span><strong>{preview.valid ? formatOtHours(Math.max(0, OT_LIMIT_MINUTES - projectedActualMinutes)) : "—"}</strong></div></section>
-      {preview.valid && <OtLimitProgress totalMinutes={projectedActualMinutes} />}
+      <section className="ot-preview" aria-label="Actual occurrence total"><div><span>Planned</span><strong>{formatOtHours(plannedMinutes)}</strong></div><div><span>Truthful actual</span><strong>{preview.valid ? formatOtHours(actualMinutes) : "—"}</strong></div></section>
+      {weekSummaryState.status === "loading" && preview.valid && <div className="ot-state ot-state--compact" role="status">Loading compliance previews for every affected week…</div>}
+      {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Compliance preview unavailable" message={`${weekSummaryState.message} You can still submit the truthful actual time; the server will apply the authoritative compliance check.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry preview</button></div>}
+      <OtWeekProjection title="Actual totals by affected week" rows={projections} />
       {!preview.valid && <OtWarning kind="error" title="Actual schedule needs attention" message={preview.message} />}
       {complianceLikely && <OtWarning kind="critical" title="Compliance review expected" message="Submit the truthful actual hours. They will be saved and routed for compliance review rather than blocked." />}
       {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}

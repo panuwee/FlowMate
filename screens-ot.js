@@ -132,32 +132,120 @@ function OtLimitProgress({
     }
   })), state.key !== "neutral" && React.createElement("small", null, state.key === "blocked" ? "Above the 36h limit" : state.key === "limit_reached" ? "36h limit reached" : state.key === "high_risk" ? "High risk — review remaining hours" : "Approaching weekly limit"));
 }
+function getOtWeekSegments(request, prefix) {
+  const segments = otValue(request, `${prefix}WeekSegments`, `${prefix}_week_segments`);
+  if (Array.isArray(segments) && segments.length) return segments;
+  const startAt = otValue(request, `${prefix}StartAt`, `${prefix}_start_at`) || otValue(request, "plannedStartAt", "planned_start_at");
+  const minutes = Number(otValue(request, `${prefix}Minutes`, `${prefix}_minutes`) || 0);
+  const start = getOtBangkokParts(startAt);
+  return start.date && minutes > 0 ? [{
+    weekStart: window.FlowMateOtRequestDomain.getWeekStartKey(start.date),
+    minutes
+  }] : [];
+}
+function useOtWeekSummaries(segments) {
+  const weekKey = Array.from(new Set((Array.isArray(segments) ? segments : []).map(segment => segment.weekStart).filter(Boolean))).sort().join("|");
+  const [retryKey, setRetryKey] = useStateApp(0);
+  const [state, setState] = useStateApp({
+    weekKey,
+    status: weekKey ? "loading" : "ready",
+    summaries: {},
+    message: ""
+  });
+  useEffectApp(() => {
+    const weekStarts = weekKey ? weekKey.split("|") : [];
+    if (!weekStarts.length) {
+      setState({
+        weekKey,
+        status: "ready",
+        summaries: {},
+        message: ""
+      });
+      return undefined;
+    }
+    let alive = true;
+    setState({
+      weekKey,
+      status: "loading",
+      summaries: {},
+      message: ""
+    });
+    Promise.all(weekStarts.map(weekStart => window.loadMyOtDashboard(weekStart))).then(dashboards => {
+      if (!alive) return;
+      const summaries = {};
+      weekStarts.forEach((weekStart, index) => {
+        summaries[weekStart] = dashboards[index] || {};
+      });
+      setState({
+        weekKey,
+        status: "ready",
+        summaries,
+        message: ""
+      });
+    }).catch(error => {
+      if (alive) setState({
+        weekKey,
+        status: "error",
+        summaries: {},
+        message: error.message || "Weekly OT totals could not be loaded."
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [weekKey, retryKey]);
+  const currentState = state.weekKey === weekKey ? state : {
+    weekKey,
+    status: weekKey ? "loading" : "ready",
+    summaries: {},
+    message: ""
+  };
+  return {
+    ...currentState,
+    retry: () => setRetryKey(value => value + 1)
+  };
+}
+function OtWeekProjection({
+  title,
+  rows
+}) {
+  if (!rows.length) return null;
+  return React.createElement("section", {
+    "aria-label": title
+  }, rows.map(row => React.createElement("div", {
+    key: row.weekStart
+  }, React.createElement("small", {
+    className: "muted"
+  }, "Week of ", formatOtDate(row.weekStart)), React.createElement("section", {
+    className: "ot-preview"
+  }, React.createElement("div", null, React.createElement("span", null, "Current"), React.createElement("strong", null, formatOtHours(row.currentMinutes))), React.createElement("div", null, React.createElement("span", null, "Added"), React.createElement("strong", null, formatOtHours(row.addedMinutes))), React.createElement("div", null, React.createElement("span", null, "Projected"), React.createElement("strong", null, formatOtHours(row.projectedMinutes))), React.createElement("div", null, React.createElement("span", null, "Remaining"), React.createElement("strong", null, formatOtHours(row.remainingMinutes)))), React.createElement(OtLimitProgress, {
+    totalMinutes: row.projectedMinutes
+  }))));
+}
 function OtEmployeeDashboard({
   access,
   listOnly = false
 }) {
   const [weekStart, setWeekStart] = useStateApp(getCurrentOtWeekStart);
-  const [loadState, setLoadState] = useStateApp({
-    status: "loading",
-    dashboard: null,
-    requests: []
-  });
+  const [loadState, setLoadState] = useStateApp(() => window.FlowMateOtRequestDomain.startPersonalWeekLoad(getCurrentOtWeekStart()));
   const [refreshKey, setRefreshKey] = useStateApp(0);
   const [action, setAction] = useStateApp(null);
   const loadErrorRef = useRefApp(null);
   useEffectApp(() => {
     let alive = true;
-    setLoadState(current => ({
+    setLoadState(current => current.weekStart === weekStart && current.dashboard ? {
       ...current,
       status: "loading",
       message: ""
-    }));
+    } : window.FlowMateOtRequestDomain.startPersonalWeekLoad(weekStart));
     Promise.all([window.loadMyOtDashboard(weekStart), window.loadMyOtRequests(weekStart)]).then(([dashboard, requests]) => {
       if (!alive) return;
       setLoadState({
         status: "ready",
+        weekStart,
         dashboard: dashboard || {},
-        requests: Array.isArray(requests) ? requests : []
+        requests: Array.isArray(requests) ? requests : [],
+        message: ""
       });
     }).catch(error => {
       if (alive) setLoadState(current => ({
@@ -176,6 +264,13 @@ function OtEmployeeDashboard({
   function refreshAfterAction() {
     setAction(null);
     setRefreshKey(value => value + 1);
+  }
+  function selectWeek(value) {
+    const nextWeekStart = window.FlowMateOtRequestDomain.getWeekStartKey(value);
+    if (nextWeekStart === weekStart) return;
+    setAction(null);
+    setLoadState(window.FlowMateOtRequestDomain.startPersonalWeekLoad(nextWeekStart));
+    setWeekStart(nextWeekStart);
   }
   if (loadState.status === "loading" && !loadState.dashboard) {
     return React.createElement("div", {
@@ -219,7 +314,7 @@ function OtEmployeeDashboard({
     className: "input",
     type: "date",
     value: weekStart,
-    onChange: event => setWeekStart(window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value))
+    onChange: event => selectWeek(event.target.value)
   })), React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
@@ -227,11 +322,18 @@ function OtEmployeeDashboard({
       type: "new",
       request: null
     })
-  }, "New OT request")), loadState.status === "error" && React.createElement(OtWarning, {
+  }, "New OT request")), loadState.status === "error" && React.createElement("div", {
+    ref: loadErrorRef,
+    tabIndex: "-1"
+  }, React.createElement(OtWarning, {
     kind: "error",
     title: "Refresh failed",
     message: `${loadState.message} Your current form is preserved; retry when ready.`
-  }), !listOnly && React.createElement(React.Fragment, null, React.createElement("section", {
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => setRefreshKey(value => value + 1)
+  }, "Retry refresh")), !listOnly && React.createElement(React.Fragment, null, React.createElement("section", {
     className: "ot-metric-grid ot-metric-grid--employee",
     "aria-label": "Your weekly overtime"
   }, React.createElement("section", {
@@ -280,16 +382,13 @@ function OtEmployeeDashboard({
     className: "btn btn--ghost",
     onClick: () => setAction(null)
   }, "Close")), action.type === "new" && React.createElement(OtRequestForm, {
-    currentWeekMinutes: summary.countedMinutes,
     weekStart: weekStart,
     onSuccess: refreshAfterAction
   }), action.type === "consent" && React.createElement(OtConsentPanel, {
     request: action.request,
-    currentWeekMinutes: summary.countedMinutes,
     onSuccess: refreshAfterAction
   }), action.type === "actual" && React.createElement(OtActualConfirmationForm, {
     request: action.request,
-    currentActualWeekMinutes: summary.confirmedMinutes,
     onSuccess: refreshAfterAction
   })), React.createElement(OtMyRequestsTable, {
     requests: requests,
@@ -300,7 +399,6 @@ function OtEmployeeDashboard({
   }));
 }
 function OtRequestForm({
-  currentWeekMinutes,
   weekStart,
   onSuccess
 }) {
@@ -332,8 +430,13 @@ function OtRequestForm({
     status: "idle",
     message: ""
   });
-  const [idempotencyKey, setIdempotencyKey] = useStateApp(() => crypto.randomUUID());
+  const [intent, setIntent] = useStateApp(() => ({
+    key: crypto.randomUUID(),
+    attempted: false
+  }));
   const errorRef = useRefApp(null);
+  const approverErrorRef = useRefApp(null);
+  const summaryErrorRef = useRefApp(null);
   useEffectApp(() => {
     let alive = true;
     setApproverState(current => ({
@@ -361,11 +464,21 @@ function OtRequestForm({
   useEffectApp(() => {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
+  useEffectApp(() => {
+    if (approverState.status === "error" && approverErrorRef.current) approverErrorRef.current.focus();
+  }, [approverState.status]);
   function update(field, value) {
     setForm(current => ({
       ...current,
       [field]: value
     }));
+    if (intent.attempted) {
+      setIntent(current => window.FlowMateOtRequestDomain.resetIntentAfterEdit(current, () => crypto.randomUUID()));
+      setSubmitState({
+        status: "idle",
+        message: ""
+      });
+    }
   }
   let crossesWeek = false;
   let previewEndDate = form.workDate;
@@ -412,13 +525,18 @@ function OtRequestForm({
       message: error.message
     };
   }
-  const addedMinutes = preview.segments.find(segment => segment.weekStart === weekStart)?.minutes || preview.minutes;
-  const projectedMinutes = Number(currentWeekMinutes || 0) + Number(addedMinutes || 0);
-  const overLimit = projectedMinutes > OT_LIMIT_MINUTES;
+  const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
+  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
+    totalField: "plannedMinutes"
+  });
+  const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
   const approverUnavailable = approverState.status !== "ready" || approverState.rows.length === 0;
-  const canSubmit = preview.valid && !overLimit && form.functionCode && form.title.trim() && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && form.consented && !approverUnavailable && submitState.status !== "submitting";
+  const canSubmit = preview.valid && !overLimit && form.functionCode && form.title.trim() && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && form.consented && !approverUnavailable && weekSummaryState.status === "ready" && submitState.status !== "submitting";
+  useEffectApp(() => {
+    if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
+  }, [weekSummaryState.status]);
   async function submitRequest(event) {
     event.preventDefault();
     if (!canSubmit) {
@@ -428,6 +546,10 @@ function OtRequestForm({
       });
       return;
     }
+    setIntent(current => ({
+      ...current,
+      attempted: true
+    }));
     setSubmitState({
       status: "submitting",
       message: "Submitting your request…"
@@ -448,12 +570,15 @@ function OtRequestForm({
       consentStatementVersion: OT_CONSENT_STATEMENT_VERSION
     };
     try {
-      await window.createOtRequest(payload, idempotencyKey);
+      await window.createOtRequest(payload, intent.key);
       setSubmitState({
         status: "success",
         message: "Your OT request was submitted for approval."
       });
-      setIdempotencyKey(crypto.randomUUID());
+      setIntent({
+        key: crypto.randomUUID(),
+        attempted: false
+      });
       onSuccess();
     } catch (error) {
       setSubmitState({
@@ -635,7 +760,10 @@ function OtRequestForm({
     key: approver.userId,
     value: approver.userId
   }, approver.displayName || approver.email, approver.displayName ? ` — ${approver.email}` : ""))), approverState.status === "error" && React.createElement("span", {
-    className: "field__error"
+    className: "field__error",
+    role: "alert",
+    tabIndex: "-1",
+    ref: approverErrorRef
   }, approverState.message, " ", React.createElement("button", {
     type: "button",
     className: "ot-link-button",
@@ -652,11 +780,23 @@ function OtRequestForm({
     onChange: event => update("reasonDetail", event.target.value),
     required: detailRequired,
     placeholder: detailRequired ? "Explain what happened and why OT is required" : "Add only information needed for approval"
-  }))), React.createElement("section", {
-    className: "ot-preview",
-    "aria-label": "Planned weekly total"
-  }, React.createElement("div", null, React.createElement("span", null, "Current"), React.createElement("strong", null, formatOtHours(currentWeekMinutes))), React.createElement("div", null, React.createElement("span", null, "Added"), React.createElement("strong", null, preview.valid ? formatOtHours(addedMinutes) : "—")), React.createElement("div", null, React.createElement("span", null, "Projected"), React.createElement("strong", null, preview.valid ? formatOtHours(projectedMinutes) : "—")), React.createElement("div", null, React.createElement("span", null, "Remaining"), React.createElement("strong", null, preview.valid ? formatOtHours(Math.max(0, OT_LIMIT_MINUTES - projectedMinutes)) : "—"))), preview.valid && React.createElement(OtLimitProgress, {
-    totalMinutes: projectedMinutes
+  }))), weekSummaryState.status === "loading" && preview.valid && React.createElement("div", {
+    className: "ot-state ot-state--compact",
+    role: "status"
+  }, "Loading every affected week's OT total…"), weekSummaryState.status === "error" && React.createElement("div", {
+    ref: summaryErrorRef,
+    tabIndex: "-1"
+  }, React.createElement(OtWarning, {
+    kind: "error",
+    title: "Weekly totals unavailable",
+    message: `${weekSummaryState.message} Submission remains blocked until the totals are refreshed.`
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: weekSummaryState.retry
+  }, "Retry totals")), React.createElement(OtWeekProjection, {
+    title: "Planned totals by affected week",
+    rows: projections
   }), !preview.valid && React.createElement(OtWarning, {
     kind: "error",
     title: "Schedule needs attention",
@@ -664,7 +804,7 @@ function OtRequestForm({
   }), overLimit && React.createElement(OtWarning, {
     kind: "critical",
     title: "Request blocked",
-    message: `Week of ${formatOtDate(weekStart)} has ${formatOtHours(currentWeekMinutes)} counted. This adds ${formatOtHours(addedMinutes)}, above the 36h limit.`
+    message: `At least one affected week would exceed the 36-hour limit: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}.`
   }), React.createElement("label", {
     className: "ot-consent"
   }, React.createElement("input", {
@@ -689,7 +829,6 @@ function OtRequestForm({
 }
 function OtConsentPanel({
   request,
-  currentWeekMinutes,
   onSuccess
 }) {
   const [accepted, setAccepted] = useStateApp(false);
@@ -702,19 +841,28 @@ function OtConsentPanel({
     key: crypto.randomUUID()
   }));
   const errorRef = useRefApp(null);
+  const summaryErrorRef = useRefApp(null);
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-  const projectedMinutes = Number(currentWeekMinutes || 0);
-  const overLimit = projectedMinutes > OT_LIMIT_MINUTES;
+  const plannedSegments = getOtWeekSegments(request, "planned");
+  const weekSummaryState = useOtWeekSummaries(plannedSegments);
+  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(plannedSegments, weekSummaryState.summaries, {
+    totalField: "plannedMinutes",
+    excludedSegments: plannedSegments
+  });
+  const overLimit = projections.some(row => row.overLimit);
   const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const end = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
   useEffectApp(() => {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
+  useEffectApp(() => {
+    if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
+  }, [weekSummaryState.status]);
   async function recordConsent(choice) {
-    if (choice && (!accepted || overLimit)) {
+    if (choice && (!accepted || overLimit || weekSummaryState.status !== "ready")) {
       setSubmitState({
         status: "error",
-        message: overLimit ? "Consent is blocked because the projected week exceeds 36 hours." : "Check the consent box before accepting this occurrence."
+        message: overLimit ? "Consent is blocked because an affected week exceeds 36 hours." : weekSummaryState.status !== "ready" ? "Weekly OT totals must load before accepting this occurrence." : "Check the consent box before accepting this occurrence."
       });
       return;
     }
@@ -728,7 +876,7 @@ function OtConsentPanel({
       message: choice ? "Recording your consent…" : "Recording your choice…"
     });
     try {
-      await window.recordOtConsent(request.id, choice, key);
+      await window.recordOtConsent(request.id, choice, OT_CONSENT_STATEMENT_VERSION, key);
       setSubmitState({
         status: "success",
         message: choice ? "Consent recorded for this occurrence." : "You declined this occurrence. The assignment remains in the audit history."
@@ -750,12 +898,27 @@ function OtConsentPanel({
     "data-testid": "ot-consent-required"
   }, React.createElement("div", {
     className: "ot-detail-grid"
-  }, React.createElement("div", null, React.createElement("span", null, "Assigned event"), React.createElement("strong", null, request.title || "—")), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(request, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Venue"), React.createElement("strong", null, otValue(request, "venue", "venue") || getOtStatusLabel(otValue(request, "workLocationType", "work_location_type")))), React.createElement("div", null, React.createElement("span", null, "Planned schedule"), React.createElement("strong", null, formatOtDate(start.date), " ", start.time, " – ", start.date === end.date ? "" : `${formatOtDate(end.date)} `, end.time)), React.createElement("div", null, React.createElement("span", null, "Break"), React.createElement("strong", null, otValue(request, "plannedBreakMinutes", "planned_break_minutes") || 0, " min")), React.createElement("div", null, React.createElement("span", null, "Planned hours"), React.createElement("strong", null, formatOtHours(plannedMinutes))), React.createElement("div", null, React.createElement("span", null, "Week total after consent"), React.createElement("strong", null, formatOtHours(projectedMinutes), " / 36h")), React.createElement("div", null, React.createElement("span", null, "Remaining after consent"), React.createElement("strong", null, formatOtHours(Math.max(0, OT_LIMIT_MINUTES - projectedMinutes))))), React.createElement(OtLimitProgress, {
-    totalMinutes: projectedMinutes
+  }, React.createElement("div", null, React.createElement("span", null, "Assigned event"), React.createElement("strong", null, request.title || "—")), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(request, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Venue"), React.createElement("strong", null, otValue(request, "venue", "venue") || getOtStatusLabel(otValue(request, "workLocationType", "work_location_type")))), React.createElement("div", null, React.createElement("span", null, "Planned schedule"), React.createElement("strong", null, formatOtDate(start.date), " ", start.time, " – ", start.date === end.date ? "" : `${formatOtDate(end.date)} `, end.time)), React.createElement("div", null, React.createElement("span", null, "Break"), React.createElement("strong", null, otValue(request, "plannedBreakMinutes", "planned_break_minutes") || 0, " min")), React.createElement("div", null, React.createElement("span", null, "Planned hours"), React.createElement("strong", null, formatOtHours(plannedMinutes)))), weekSummaryState.status === "loading" && React.createElement("div", {
+    className: "ot-state ot-state--compact",
+    role: "status"
+  }, "Loading every affected week's OT total…"), weekSummaryState.status === "error" && React.createElement("div", {
+    ref: summaryErrorRef,
+    tabIndex: "-1"
+  }, React.createElement(OtWarning, {
+    kind: "error",
+    title: "Weekly totals unavailable",
+    message: `${weekSummaryState.message} Accepting is blocked until the totals are refreshed; declining remains available.`
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: weekSummaryState.retry
+  }, "Retry totals")), React.createElement(OtWeekProjection, {
+    title: "Consent totals by affected week",
+    rows: projections
   }), overLimit && React.createElement(OtWarning, {
     kind: "critical",
     title: "Consent blocked",
-    message: "The projected weekly total is above 36 hours. Reload the week or contact the Event Lead because the server will not accept this planned occurrence."
+    message: `At least one affected week would exceed 36 hours: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}. Contact the Event Lead because the server will not accept this planned occurrence.`
   }), React.createElement("label", {
     className: "ot-consent"
   }, React.createElement("input", {
@@ -775,7 +938,7 @@ function OtConsentPanel({
   }, React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
-    disabled: !accepted || overLimit || submitState.status === "submitting",
+    disabled: !accepted || overLimit || weekSummaryState.status !== "ready" || submitState.status === "submitting",
     onClick: () => recordConsent(true)
   }, "Accept occurrence"), React.createElement("button", {
     type: "button",
@@ -786,13 +949,12 @@ function OtConsentPanel({
 }
 function OtActualConfirmationForm({
   request,
-  currentActualWeekMinutes,
   onSuccess
 }) {
   const plannedStart = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const plannedEnd = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-  const existingActualMinutes = Number(otValue(request, "actualMinutes", "actual_minutes") || 0);
+  const existingActualSegments = getOtWeekSegments(request, "actual");
   const [form, setForm] = useStateApp({
     startDate: plannedStart.date,
     startTime: plannedStart.time,
@@ -808,8 +970,12 @@ function OtActualConfirmationForm({
     message: "",
     result: null
   });
-  const [idempotencyKey, setIdempotencyKey] = useStateApp(() => crypto.randomUUID());
+  const [intent, setIntent] = useStateApp(() => ({
+    key: crypto.randomUUID(),
+    attempted: false
+  }));
   const errorRef = useRefApp(null);
+  const summaryErrorRef = useRefApp(null);
   useEffectApp(() => {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
@@ -818,6 +984,14 @@ function OtActualConfirmationForm({
       ...current,
       [field]: value
     }));
+    if (intent.attempted) {
+      setIntent(current => window.FlowMateOtRequestDomain.resetIntentAfterEdit(current, () => crypto.randomUUID()));
+      setSubmitState({
+        status: "idle",
+        message: "",
+        result: null
+      });
+    }
   }
   let crossesWeek = false;
   let preview = {
@@ -860,9 +1034,16 @@ function OtActualConfirmationForm({
   }
   const actualMinutes = preview.minutes;
   const varianceRequired = preview.valid && Math.abs(actualMinutes - plannedMinutes) > 30;
-  const projectedActualMinutes = Math.max(0, Number(currentActualWeekMinutes || 0) - existingActualMinutes) + actualMinutes;
-  const complianceLikely = preview.valid && projectedActualMinutes > OT_LIMIT_MINUTES;
+  const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
+  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
+    totalField: "actualMinutes",
+    excludedSegments: existingActualSegments
+  });
+  const complianceLikely = projections.some(row => row.overLimit);
   const canSubmit = preview.valid && (!varianceRequired || form.varianceReason.trim()) && submitState.status !== "submitting" && submitState.status !== "success";
+  useEffectApp(() => {
+    if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
+  }, [weekSummaryState.status]);
   async function submitActual(event) {
     event.preventDefault();
     if (!canSubmit) {
@@ -873,6 +1054,10 @@ function OtActualConfirmationForm({
       });
       return;
     }
+    setIntent(current => ({
+      ...current,
+      attempted: true
+    }));
     setSubmitState({
       status: "submitting",
       message: "Saving the hours you actually worked…",
@@ -886,9 +1071,12 @@ function OtActualConfirmationForm({
       varianceReason: form.varianceReason.trim() || null
     };
     try {
-      const result = await window.submitOtActual(request.id, payload, idempotencyKey);
+      const result = await window.submitOtActual(request.id, payload, intent.key);
       const status = otValue(result, "status", "status");
-      setIdempotencyKey(crypto.randomUUID());
+      setIntent({
+        key: crypto.randomUUID(),
+        attempted: false
+      });
       if (status === "compliance_review_required") {
         setSubmitState({
           status: "success",
@@ -1022,9 +1210,24 @@ function OtActualConfirmationForm({
     required: true
   }))), React.createElement("section", {
     className: "ot-preview",
-    "aria-label": "Actual weekly total"
-  }, React.createElement("div", null, React.createElement("span", null, "Planned"), React.createElement("strong", null, formatOtHours(plannedMinutes))), React.createElement("div", null, React.createElement("span", null, "Actual"), React.createElement("strong", null, preview.valid ? formatOtHours(actualMinutes) : "—")), React.createElement("div", null, React.createElement("span", null, "Week actual after save"), React.createElement("strong", null, preview.valid ? formatOtHours(projectedActualMinutes) : "—")), React.createElement("div", null, React.createElement("span", null, "Remaining"), React.createElement("strong", null, preview.valid ? formatOtHours(Math.max(0, OT_LIMIT_MINUTES - projectedActualMinutes)) : "—"))), preview.valid && React.createElement(OtLimitProgress, {
-    totalMinutes: projectedActualMinutes
+    "aria-label": "Actual occurrence total"
+  }, React.createElement("div", null, React.createElement("span", null, "Planned"), React.createElement("strong", null, formatOtHours(plannedMinutes))), React.createElement("div", null, React.createElement("span", null, "Truthful actual"), React.createElement("strong", null, preview.valid ? formatOtHours(actualMinutes) : "—"))), weekSummaryState.status === "loading" && preview.valid && React.createElement("div", {
+    className: "ot-state ot-state--compact",
+    role: "status"
+  }, "Loading compliance previews for every affected week…"), weekSummaryState.status === "error" && React.createElement("div", {
+    ref: summaryErrorRef,
+    tabIndex: "-1"
+  }, React.createElement(OtWarning, {
+    kind: "error",
+    title: "Compliance preview unavailable",
+    message: `${weekSummaryState.message} You can still submit the truthful actual time; the server will apply the authoritative compliance check.`
+  }), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: weekSummaryState.retry
+  }, "Retry preview")), React.createElement(OtWeekProjection, {
+    title: "Actual totals by affected week",
+    rows: projections
   }), !preview.valid && React.createElement(OtWarning, {
     kind: "error",
     title: "Actual schedule needs attention",

@@ -163,7 +163,10 @@ describe("OT Request static module integration", () => {
       expect(employee).toContain(`window.${api}`);
     }
     expect(employee).not.toContain("loadOtManagerDashboard");
-    expect(employee).toContain("projectedMinutes > OT_LIMIT_MINUTES");
+    expect(employee).toContain("const overLimit = projections.some(row => row.overLimit)");
+    const actual = employee.slice(employee.indexOf("function OtActualConfirmationForm("), employee.indexOf("function OtMyRequestsTable("));
+    expect(actual).toContain("const complianceLikely = projections.some(row => row.overLimit)");
+    expect(actual).not.toContain("&& !complianceLikely");
     expect(employee).toContain("Math.abs(actualMinutes - plannedMinutes) > 30");
     expect(employee).toContain('status === "compliance_review_required"');
     expect(employee).toContain("crypto.randomUUID()");
@@ -171,6 +174,12 @@ describe("OT Request static module integration", () => {
     expect(employee).toContain("approver.displayName || approver.email");
     expect(screen).toContain('storedStatus === "approved"');
     expect(employee).toContain('min={weekStart} max={addOtDays(weekStart, 6)}');
+    expect(employee).toContain("startPersonalWeekLoad(nextWeekStart)");
+    expect(employee).toContain("setAction(null)");
+    expect(employee).toContain("buildWeekProjections(");
+    expect(screen).toContain("state.weekKey === weekKey");
+    expect(employee).toContain("resetIntentAfterEdit(");
+    expect(employee).toContain("window.recordOtConsent(request.id, choice, OT_CONSENT_STATEMENT_VERSION, key)");
   });
 
   it("adds OT Request as the fourth product without changing the first three", () => {

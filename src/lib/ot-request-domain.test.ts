@@ -11,6 +11,43 @@ function loadDomain() {
 }
 
 describe("OT request domain", () => {
+  it("starts a selected personal week without retaining prior-week data", () => {
+    const domain = loadDomain();
+    expect(domain.startPersonalWeekLoad("2026-08-10")).toEqual({
+      status: "loading",
+      weekStart: "2026-08-10",
+      dashboard: null,
+      requests: [],
+      message: "",
+    });
+  });
+
+  it("projects every affected week independently and excludes the replaced occurrence", () => {
+    const domain = loadDomain();
+    const rows = domain.buildWeekProjections(
+      [
+        { weekStart: "2026-08-03", minutes: 30 },
+        { weekStart: "2026-08-10", minutes: 20 },
+      ],
+      {
+        "2026-08-03": { plannedMinutes: 2130, actualMinutes: 2110 },
+        "2026-08-10": { plannedMinutes: 2160, actualMinutes: 2155 },
+      },
+      { totalField: "plannedMinutes", excludedSegments: [{ weekStart: "2026-08-03", minutes: 30 }, { weekStart: "2026-08-10", minutes: 10 }] },
+    );
+    expect(rows).toEqual([
+      { weekStart: "2026-08-03", currentMinutes: 2100, addedMinutes: 30, projectedMinutes: 2130, remainingMinutes: 30, overLimit: false },
+      { weekStart: "2026-08-10", currentMinutes: 2150, addedMinutes: 20, projectedMinutes: 2170, remainingMinutes: 0, overLimit: true },
+    ]);
+  });
+
+  it("rotates an idempotency intent only after an attempted payload is edited", () => {
+    const domain = loadDomain();
+    const unattempted = { key: "intent-one", attempted: false };
+    expect(domain.resetIntentAfterEdit(unattempted, () => "intent-two")).toBe(unattempted);
+    expect(domain.resetIntentAfterEdit({ key: "intent-one", attempted: true }, () => "intent-two")).toEqual({ key: "intent-two", attempted: false });
+  });
+
   it("calculates same-day and overnight minutes after break", () => {
     const domain = loadDomain();
     expect(domain.calculateDurationMinutes({ startTime: "18:00", endTime: "22:30", breakMinutes: 30 })).toBe(240);

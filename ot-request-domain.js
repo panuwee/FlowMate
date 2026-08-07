@@ -81,6 +81,53 @@
     return { key, totalMinutes: total, remainingMinutes: Math.max(0, LIMIT_MINUTES - total) };
   }
 
+  function startPersonalWeekLoad(weekStart) {
+    return {
+      status: "loading",
+      weekStart,
+      dashboard: null,
+      requests: [],
+      message: "",
+    };
+  }
+
+  function collectSegmentMinutes(segments) {
+    return (Array.isArray(segments) ? segments : []).reduce((totals, segment) => {
+      const weekStart = segment && segment.weekStart;
+      if (!weekStart) return totals;
+      totals[weekStart] = (totals[weekStart] || 0) + asMinutes(segment.minutes);
+      return totals;
+    }, {});
+  }
+
+  function buildWeekProjections(segments, summariesByWeek, options) {
+    const config = options || {};
+    const totalField = config.totalField || "plannedMinutes";
+    const addedByWeek = collectSegmentMinutes(segments);
+    const excludedByWeek = collectSegmentMinutes(config.excludedSegments);
+    const summaries = summariesByWeek || {};
+
+    return Object.keys(addedByWeek).sort().map(weekStart => {
+      const summary = summaries[weekStart] || {};
+      const currentMinutes = Math.max(0, asMinutes(summary[totalField]) - (excludedByWeek[weekStart] || 0));
+      const addedMinutes = addedByWeek[weekStart];
+      const projectedMinutes = currentMinutes + addedMinutes;
+      return {
+        weekStart,
+        currentMinutes,
+        addedMinutes,
+        projectedMinutes,
+        remainingMinutes: Math.max(0, LIMIT_MINUTES - projectedMinutes),
+        overLimit: projectedMinutes > LIMIT_MINUTES,
+      };
+    });
+  }
+
+  function resetIntentAfterEdit(intent, createKey) {
+    if (!intent || !intent.attempted) return intent;
+    return { key: createKey(), attempted: false };
+  }
+
   function dateTimeMs(dateKey, time) {
     const date = parseDateKey(dateKey);
     return date.getTime() + parseTime(time) * MINUTE;
@@ -314,6 +361,9 @@
     getWeekStartKey,
     splitMinutesByWeek,
     getLimitState,
+    startPersonalWeekLoad,
+    buildWeekProjections,
+    resetIntentAfterEdit,
     deriveRequestStatus,
     canViewRequest,
     buildRootCauseInsights,
