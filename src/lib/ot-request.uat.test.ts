@@ -103,6 +103,36 @@ describe("OT Request backend contract", () => {
 });
 
 describe("OT Request static module integration", () => {
+  it("keeps employee OT private and makes personal actions explicit", () => {
+    const screen = read("screens-ot.jsx");
+    for (const component of ["OtEmployeeDashboard", "OtRequestForm", "OtConsentPanel", "OtActualConfirmationForm", "OtMyRequestsTable"]) {
+      expect(screen).toContain(`function ${component}(`);
+    }
+    expect(screen).toContain('data-testid="ot-week-total"');
+    expect(screen).toContain('data-testid="ot-consent-required"');
+    expect(screen).toContain('data-testid="ot-confirm-actual"');
+    expect(screen).toContain('"My OT requests"');
+    expect(screen).not.toContain('"Employee leaderboard"');
+  });
+
+  it("uses only personal OT RPCs for employee actions and preserves truthful over-limit actuals", () => {
+    const screen = read("screens-ot.jsx");
+    const employee = screen.slice(screen.indexOf("function OtEmployeeDashboard("), screen.indexOf("function OtRequestShell("));
+
+    for (const api of ["loadMyOtDashboard", "loadMyOtRequests", "loadOtEligibleApprovers", "createOtRequest", "recordOtConsent", "submitOtActual"]) {
+      expect(employee).toContain(`window.${api}`);
+    }
+    expect(employee).not.toContain("loadOtManagerDashboard");
+    expect(employee).toContain("projectedMinutes > OT_LIMIT_MINUTES");
+    expect(employee).toContain("Math.abs(actualMinutes - plannedMinutes) > 30");
+    expect(employee).toContain('status === "compliance_review_required"');
+    expect(employee).toContain("crypto.randomUUID()");
+    expect(employee).toContain('aria-label="Assigned approver"');
+    expect(employee).toContain("approver.displayName || approver.email");
+    expect(screen).toContain('storedStatus === "approved"');
+    expect(employee).toContain('min={weekStart} max={addOtDays(weekStart, 6)}');
+  });
+
   it("adds OT Request as the fourth product without changing the first three", () => {
     const app = read("app.jsx");
 
