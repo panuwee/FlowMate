@@ -145,12 +145,31 @@
     return Number.isNaN(timestamp) ? null : timestamp;
   }
 
+  function hasLimitPolicyFacts(request) {
+    return [
+      ["weeklyTotalMinutes", "weekly_total_minutes"],
+      ["plannedWeeklyMinutes", "planned_weekly_minutes"],
+      ["consentedWeeklyMinutes", "consented_weekly_minutes"],
+      ["actualWeeklyMinutes", "actual_weekly_minutes"],
+      ["plannedWeekTotalMinutes", "planned_week_total_minutes"],
+      ["consentedWeekTotalMinutes", "consented_week_total_minutes"],
+      ["actualWeekTotalMinutes", "actual_week_total_minutes"],
+      ["plannedMinutes", "planned_minutes"],
+      ["consentedMinutes", "consented_minutes"],
+      ["actualMinutes", "actual_minutes"],
+    ].some(fields => {
+      const minutes = valueOf(request, fields[0], fields[1]);
+      return minutes !== undefined && minutes !== null;
+    });
+  }
+
   function deriveRequestStatus(request, reference) {
     const has = (camel, snake) => Boolean(valueOf(request, camel, snake));
     const decision = valueOf(request, "planDecision", "plan_decision");
     const requestType = valueOf(request, "requestType", "request_type");
-    if (!["planned", "consented", "actual"].includes(requestType)) throw new Error("Request type must be planned, consented, or actual.");
-    const limitState = getRequestLimitState(request, requestType);
+    const validRequestType = ["planned", "consented", "actual"].includes(requestType);
+    if (!validRequestType && hasLimitPolicyFacts(request)) throw new Error("Request type must be planned, consented, or actual.");
+    const limitState = validRequestType ? getRequestLimitState(request, requestType) : null;
     const complianceReviewed = has("complianceReviewedAt", "compliance_reviewed_at") || has("complianceOutcome", "compliance_outcome");
     if (has("cancelledAt", "cancelled_at")) return "cancelled";
     if (requestType === "actual" && limitState && limitState.key === "blocked" && !complianceReviewed) return "compliance_review_required";

@@ -35,7 +35,6 @@ describe("OT request domain", () => {
   it("keeps over-limit actual time in compliance review before HR-ready", () => {
     const domain = loadDomain();
     expect(domain.deriveRequestStatus({
-      requestType: "actual",
       actualSubmittedAt: "2026-08-09T10:00:00Z",
       complianceRequired: true,
       hrReadyAt: "2026-08-10T10:00:00Z",
