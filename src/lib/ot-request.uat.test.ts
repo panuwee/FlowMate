@@ -77,6 +77,26 @@ describe("OT Request backend contract", () => {
     expect(sql).not.toMatch(/grant\s+(insert|update|delete)\s+on\s+public\.ot_requests\s+to\s+authenticated/i);
   });
 
+  it("returns privacy-scoped HR-ready export rows with normalized identity emails", () => {
+    const hrReady = functionSql(sql, "ot_list_hr_ready");
+
+    expect(sql).toContain("drop function if exists public.ot_list_hr_ready(date)");
+    expect(hrReady).toContain("returns setof jsonb");
+    expect(hrReady).toContain("security definer");
+    expect(hrReady).toContain("set search_path = ''");
+    expect(hrReady).toMatch(/ot_current_user_is_owner\(\)[\s\S]*ot_current_user_is_hr_admin\(\)[\s\S]*raise exception/);
+    expect(hrReady).toMatch(/to_jsonb\(r\)[\s\S]*jsonb_build_object\([\s\S]*'employee_email'[\s\S]*lower\(pg_catalog\.btrim\(employee\.email\)\)[\s\S]*'approver_email'[\s\S]*lower\(pg_catalog\.btrim\(approver\.email\)\)/);
+    expect(hrReady).toMatch(/join public\.users employee on employee\.id = r\.employee_user_id[\s\S]*join public\.users approver on approver\.id = r\.approver_user_id/);
+    expect(hrReady).toMatch(/r\.status = 'hr_ready'[\s\S]*r\.hr_ready_at is not null[\s\S]*compliance_reviewed_at is not null/);
+    expect(hrReady).toMatch(/p_week_start is null[\s\S]*actual_week_segments[\s\S]*weekStart/);
+    expect(hrReady).toContain("order by r.actual_start_at, r.id");
+    expect(sql).toContain("grant execute on function public.ot_list_hr_ready(date) to authenticated");
+    expect(sql).not.toMatch(/grant\s+(insert|update|delete)\s+on\s+public\.ot_requests\s+to\s+authenticated/i);
+    expect(verify).toContain("HR-ready export RPC contract (Expected = SETOF jsonb with normalized emails)");
+    expect(verify).toContain("has_employee_email");
+    expect(verify).toContain("has_approver_email");
+  });
+
   it("keeps event actuals behind per-occurrence employee consent", () => {
     const submit = functionSql(sql, "ot_submit_actual");
     const consent = functionSql(sql, "ot_record_consent");

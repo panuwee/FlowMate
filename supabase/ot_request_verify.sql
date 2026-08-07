@@ -90,6 +90,17 @@ where specific_schema = 'public'
 order by routine_name, grantee;
 
 select
+  'HR-ready export RPC contract (Expected = SETOF jsonb with normalized emails)' as check_name,
+  pg_catalog.pg_get_function_result(p.oid) as result_type,
+  pg_catalog.position('''employee_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_employee_email,
+  pg_catalog.position('''approver_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_approver_email
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_list_hr_ready'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'date';
+
+select
   'OT table grants' as check_name,
   table_name,
   grantee,

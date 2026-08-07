@@ -15,6 +15,8 @@ The OT request installer stores the consent statement version on each occurrence
 
 `ot_submit_actual` accepts `actualVarianceReason` (plus the snake-case and current `varianceReason` aliases). A non-empty reason is mandatory when absolute actual-versus-planned net minutes exceeds 30, and the normalized reason remains on the request and in its audit facts. These additions do not grant direct OT table writes or widen any existing read policy.
 
+`ot_list_hr_ready(date)` remains restricted to OT Owner or HR/Admin and keeps the existing HR-ready, compliance, and Bangkok-week filters. It returns each authorized row as JSON containing every `ot_requests` field plus normalized snake-case `employee_email` and `approver_email` keys for privacy-safe CSV export. No direct table-write permission is added.
+
 ## Files
 
 | File | Purpose |

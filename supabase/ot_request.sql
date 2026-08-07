@@ -1637,8 +1637,10 @@ begin
 end
 $function$;
 
+drop function if exists public.ot_list_hr_ready(date);
+
 create or replace function public.ot_list_hr_ready(p_week_start date default null)
-returns setof public.ot_requests
+returns setof jsonb
 language plpgsql
 stable
 security definer
@@ -1651,7 +1653,13 @@ begin
     raise exception 'OT Owner or HR/Admin access required';
   end if;
   return query
-  select r.* from public.ot_requests r
+  select pg_catalog.to_jsonb(r) || pg_catalog.jsonb_build_object(
+    'employee_email', pg_catalog.lower(pg_catalog.btrim(employee.email)),
+    'approver_email', pg_catalog.lower(pg_catalog.btrim(approver.email))
+  )
+  from public.ot_requests r
+  join public.users employee on employee.id = r.employee_user_id
+  join public.users approver on approver.id = r.approver_user_id
   where r.status = 'hr_ready'
     and r.hr_ready_at is not null
     and (not r.compliance_required or r.compliance_reviewed_at is not null)
