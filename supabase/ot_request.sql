@@ -278,7 +278,11 @@ begin
   else
     update public.ot_requests
     set employee_consent = 'declined', employee_consented_at = now(),
-        status = 'rejected', updated_at = now()
+        status = case
+          when actual_submitted_at is not null and compliance_required then 'compliance_review_required'
+          else 'rejected'
+        end,
+        updated_at = now()
     where id = p_request_id returning * into v_request;
   end if;
   insert into public.ot_request_audit (

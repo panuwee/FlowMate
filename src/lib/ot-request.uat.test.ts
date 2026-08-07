@@ -48,6 +48,14 @@ describe("OT Request backend contract", () => {
     expect(verifyActual).toMatch(/source = 'event_plan'[\s\S]*employee_consent is distinct from 'accepted'[\s\S]*raise exception/);
   });
 
+  it("preserves mandatory compliance review when late consent is declined", () => {
+    const consent = functionSql(sql, "ot_record_consent");
+
+    expect(consent).toMatch(
+      /else[\s\S]*employee_consent = 'declined'[\s\S]*status = case[\s\S]*actual_submitted_at is not null and compliance_required[\s\S]*compliance_review_required[\s\S]*else 'rejected'/,
+    );
+  });
+
   it("keeps finalized actuals immutable and rechecks state after locking", () => {
     const submit = functionSql(sql, "ot_submit_actual");
     const verifyActual = functionSql(sql, "ot_verify_actual");
