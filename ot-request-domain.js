@@ -276,19 +276,23 @@
     const varianceNeedsReason = Math.abs(actual - planned) > 30;
     const varianceHasReason = Boolean(String(valueOf(request, "actualVarianceReason", "actual_variance_reason") || "").trim());
     const status = valueOf(request, "status", "status");
+    const actualDecision = valueOf(request, "actualDecision", "actual_decision");
     const complianceRequired = Boolean(valueOf(request, "complianceRequired", "compliance_required")) || status === "compliance_review_required";
+    const awaitingHrCompliance = complianceRequired && actualDecision === "approved";
     const actualSubmitted = Boolean(valueOf(request, "actualSubmittedAt", "actual_submitted_at"))
       && Array.isArray(valueOf(request, "actualWeekSegments", "actual_week_segments"));
     const weeklyTotal = Number(weeklyTotalMinutes || 0);
     const canVerifyIndividually = actualSubmitted
       && consentAccepted
       && (!varianceNeedsReason || varianceHasReason)
+      && !awaitingHrCompliance
       && ["pending_actual_verification", "compliance_review_required"].includes(status);
     return {
       consentAccepted,
       varianceNeedsReason,
       varianceHasReason,
       complianceRequired,
+      awaitingHrCompliance,
       actualSubmitted,
       weeklyTotal,
       canVerifyIndividually,
@@ -321,7 +325,13 @@
   }
 
   function collectIds(records) {
-    return records.map(record => valueOf(record, "id", "id")).filter(Boolean);
+    return Array.from(new Set(records.map(record => valueOf(record, "requestId", "request_id") || valueOf(record, "id", "id")).filter(Boolean)));
+  }
+
+  function countWeeksWithActualMinutes(records) {
+    return new Set((Array.isArray(records) ? records : [])
+      .filter(record => recordMinutes(record, "actualMinutes", "actual_minutes") > 0)
+      .map(recordWeek)).size;
   }
 
   function buildRootCauseInsights(records, options) {
@@ -400,9 +410,10 @@
     });
 
     functions.forEach(functionCode => {
-      const recurring = withinFourWeeks.filter(record => (valueOf(record, "functionCode", "function_code") || "unassigned") === functionCode && ["rework", "scope_change"].includes(valueOf(record, "reasonCode", "reason_code")));
-      if (recurring.length >= 3) {
-        insights.push({ key: "recurring_rework_or_scope_change", functionCode, weekStart: currentWeekStart, recordIds: collectIds(recurring), message: "Rework or scope change appeared in at least three confirmed requests within four weeks." });
+      const recurringRows = withinFourWeeks.filter(record => (valueOf(record, "functionCode", "function_code") || "unassigned") === functionCode && ["rework", "scope_change"].includes(valueOf(record, "reasonCode", "reason_code")));
+      const recurringRequestIds = collectIds(recurringRows);
+      if (recurringRequestIds.length >= 3) {
+        insights.push({ key: "recurring_rework_or_scope_change", functionCode, weekStart: currentWeekStart, recordIds: recurringRequestIds, message: "Rework or scope change appeared in at least three confirmed requests within four weeks." });
       }
     });
 
@@ -427,6 +438,7 @@
     isConfirmedActual,
     getActualVerificationEligibility,
     formatSignedHours,
+    countWeeksWithActualMinutes,
     buildRootCauseInsights,
   });
 });

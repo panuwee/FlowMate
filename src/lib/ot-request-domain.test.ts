@@ -220,6 +220,26 @@ describe("OT request domain", () => {
     expect(compliance.complianceRequired).toBe(true);
   });
 
+  it("makes an already-approved compliance row await HR without another approver write", () => {
+    const domain = loadDomain();
+    const approvedCompliance = domain.getActualVerificationEligibility({
+      source: "event_plan",
+      employeeConsent: "accepted",
+      employeeConsentedAt: "2026-08-03T10:00:00Z",
+      actualSubmittedAt: "2026-08-03T22:00:00Z",
+      actualWeekSegments: [{ weekStart: "2026-08-03", minutes: 180 }],
+      plannedMinutes: 180,
+      actualMinutes: 180,
+      actualDecision: "approved",
+      complianceRequired: true,
+      status: "compliance_review_required",
+    }, 2200);
+
+    expect(approvedCompliance.awaitingHrCompliance).toBe(true);
+    expect(approvedCompliance.canVerifyIndividually).toBe(false);
+    expect(approvedCompliance.canBulkVerify).toBe(false);
+  });
+
   it("counts only accepted actual outcomes as confirmed", () => {
     const domain = loadDomain();
     expect(domain.isConfirmedActual({ actualVerifiedAt: "2026-08-03T22:00:00Z", status: "pending_actual_verification" })).toBe(false);
@@ -320,5 +340,30 @@ describe("OT request domain", () => {
       functionCode: "mkt",
       recordIds: ["mkt-1", "mkt-2", "mkt-3", "mkt-4"],
     }));
+  });
+
+  it("does not turn two cross-week rework requests into four request-count signals", () => {
+    const domain = loadDomain();
+    const rows = [
+      { id: "request-a:2026-07-27", requestId: "request-a", functionCode: "ops", weekStart: "2026-07-27", actualMinutes: 60, actualDecision: "approved", reasonCode: "rework" },
+      { id: "request-a:2026-08-03", requestId: "request-a", functionCode: "ops", weekStart: "2026-08-03", actualMinutes: 60, actualDecision: "approved", reasonCode: "rework" },
+      { id: "request-b:2026-07-27", requestId: "request-b", functionCode: "ops", weekStart: "2026-07-27", actualMinutes: 60, actualDecision: "approved", reasonCode: "scope_change" },
+      { id: "request-b:2026-08-03", requestId: "request-b", functionCode: "ops", weekStart: "2026-08-03", actualMinutes: 60, actualDecision: "approved", reasonCode: "scope_change" },
+    ];
+
+    expect(domain.buildRootCauseInsights(rows, { currentWeekStart: "2026-08-03" }).map((insight: { key: string }) => insight.key)).not.toContain("recurring_rework_or_scope_change");
+
+    const withThirdRequest = rows.concat({ id: "request-c:2026-08-03", requestId: "request-c", functionCode: "ops", weekStart: "2026-08-03", actualMinutes: 30, actualDecision: "approved", reasonCode: "rework" });
+    const recurring = domain.buildRootCauseInsights(withThirdRequest, { currentWeekStart: "2026-08-03" }).find((insight: { key: string }) => insight.key === "recurring_rework_or_scope_change");
+    expect(recurring?.recordIds).toEqual(["request-a", "request-b", "request-c"]);
+  });
+
+  it("counts only weeks with positive actual minutes", () => {
+    const domain = loadDomain();
+    expect(domain.countWeeksWithActualMinutes([
+      { requestId: "planned-only", weekStart: "2026-07-27", plannedMinutes: 120, actualMinutes: 0 },
+      { requestId: "worked-a", weekStart: "2026-08-03", plannedMinutes: 60, actualMinutes: 30 },
+      { requestId: "worked-b", weekStart: "2026-08-03", plannedMinutes: 60, actualMinutes: 30 },
+    ])).toBe(1);
   });
 });

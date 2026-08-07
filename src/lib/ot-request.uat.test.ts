@@ -236,6 +236,16 @@ describe("OT Request static module integration", () => {
     expect(approval).toContain("window.FlowMateOtRequestDomain.formatSignedHours(");
   });
 
+  it("renders approved compliance rows as non-actionable while awaiting HR", () => {
+    const screen = read("screens-ot.jsx");
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+
+    expect(approval).toContain("function canTakeAction(kind, request)");
+    expect(approval).toContain("checks.awaitingHrCompliance");
+    expect(approval).toContain("Awaiting HR compliance");
+    expect(approval).toContain("if (!canTakeAction(kind, request)) return;");
+  });
+
   it("previews event plans per employee and excludes every over-limit occurrence", () => {
     const screen = read("screens-ot.jsx");
     const eventForm = screen.slice(screen.indexOf("function OtEventPlanForm("), screen.indexOf("function OtRootCausePanel("));
@@ -258,6 +268,18 @@ describe("OT Request static module integration", () => {
     expect(rootCause).toContain("View authorized rows");
     expect(rootCause).toContain("Current filters stay applied");
     expect(rootCause).not.toMatch(/performance|productivity|commitment|value score/i);
+  });
+
+  it("deduplicates root-cause drill-down requests and ignores planned-only recurring weeks", () => {
+    const screen = read("screens-ot.jsx");
+    const rootCause = screen.slice(screen.indexOf("function buildOtInsightRows("), screen.indexOf("function OtRootCausePanel("));
+    const panel = screen.slice(screen.indexOf("function OtRootCausePanel("), screen.indexOf("function OtRequestShell("));
+
+    expect(rootCause).toContain("getOtManagerRequestId(request)");
+    expect(rootCause).toContain("plannedMinutes: current.plannedMinutes + Number(request.plannedMinutes || 0)");
+    expect(rootCause).toContain("actualMinutes: current.actualMinutes + Number(request.actualMinutes || 0)");
+    expect(panel).toContain("window.FlowMateOtRequestDomain.countWeeksWithActualMinutes(confirmedRows)");
+    expect(panel).toContain("buildOtInsightRows(filteredRows, selectedInsight.recordIds)");
   });
 
   it("adds OT Request as the fourth product without changing the first three", () => {
