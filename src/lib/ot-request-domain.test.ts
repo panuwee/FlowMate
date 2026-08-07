@@ -1,0 +1,148 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import vm from "node:vm";
+import { describe, expect, it } from "vitest";
+
+function loadDomain() {
+  const code = readFileSync(join(process.cwd(), "ot-request-domain.js"), "utf8");
+  const sandbox = { window: {} as Record<string, unknown> };
+  vm.runInNewContext(code, sandbox);
+  return (sandbox.window as any).FlowMateOtRequestDomain;
+}
+
+describe("OT request domain", () => {
+  it("calculates same-day and overnight minutes after break", () => {
+    const domain = loadDomain();
+    expect(domain.calculateDurationMinutes({ startTime: "18:00", endTime: "22:30", breakMinutes: 30 })).toBe(240);
+    expect(domain.calculateDurationMinutes({ startTime: "22:00", endTime: "02:00", breakMinutes: 30 })).toBe(210);
+  });
+
+  it("uses Monday as the Bangkok workweek start", () => {
+    const domain = loadDomain();
+    expect(domain.getWeekStartKey("2026-08-09")).toBe("2026-08-03");
+    expect(domain.getWeekStartKey("2026-08-10")).toBe("2026-08-10");
+  });
+
+  it("returns neutral, advisory, high risk, limit, and blocked states", () => {
+    const domain = loadDomain();
+    expect(domain.getLimitState(23 * 60).key).toBe("neutral");
+    expect(domain.getLimitState(24 * 60).key).toBe("advisory");
+    expect(domain.getLimitState(30 * 60).key).toBe("high_risk");
+    expect(domain.getLimitState(36 * 60).key).toBe("limit_reached");
+    expect(domain.getLimitState(36 * 60 + 1).key).toBe("blocked");
+  });
+
+  it("keeps over-limit actual time in compliance review before HR-ready", () => {
+    const domain = loadDomain();
+    expect(domain.deriveRequestStatus({
+      actualSubmittedAt: "2026-08-09T10:00:00Z",
+      complianceRequired: true,
+      hrReadyAt: "2026-08-10T10:00:00Z",
+    })).toBe("compliance_review_required");
+  });
+
+  it("requires explicit break allocation across a workweek boundary", () => {
+    const domain = loadDomain();
+    expect(() => domain.splitMinutesByWeek({
+      startDate: "2026-08-09", startTime: "22:00", endDate: "2026-08-10", endTime: "02:00", breakMinutes: 30,
+    })).toThrow("Break allocation is required across a workweek boundary.");
+  });
+
+  it("allocates an overnight Sunday occurrence between affected workweeks", () => {
+    const domain = loadDomain();
+    expect(domain.splitMinutesByWeek({
+      startDate: "2026-08-09", startTime: "22:00", endDate: "2026-08-10", endTime: "02:00", breakMinutes: 30,
+      breakMinutesBeforeBoundary: 10, breakMinutesAfterBoundary: 20,
+    })).toEqual([
+      { weekStart: "2026-08-03", minutes: 110 },
+      { weekStart: "2026-08-10", minutes: 100 },
+    ]);
+  });
+
+  it("rejects cross-week break allocations that do not equal the total break", () => {
+    const domain = loadDomain();
+    expect(() => domain.splitMinutesByWeek({
+      startDate: "2026-08-09", startTime: "22:00", endDate: "2026-08-10", endTime: "02:00", breakMinutes: 30,
+      breakMinutesBeforeBoundary: 10, breakMinutesAfterBoundary: 10,
+    })).toThrow("Break allocation must equal breakMinutes.");
+  });
+
+  it("rejects a week segment whose break leaves no worked OT time", () => {
+    const domain = loadDomain();
+    expect(() => domain.splitMinutesByWeek({
+      startDate: "2026-08-10", startTime: "18:00", endTime: "18:30", breakMinutes: 30,
+    })).toThrow("OT duration must be greater than zero.");
+  });
+
+  it("does not expose peer records", () => {
+    const domain = loadDomain();
+    expect(domain.canViewRequest({ userId: "peer" }, { employeeUserId: "employee", approverUserId: "lead" })).toBe(false);
+    expect(domain.canViewRequest({ userId: "employee" }, { employeeUserId: "employee", approverUserId: "lead" })).toBe(true);
+  });
+
+  it("allows only OT owner, HR/Admin, employee, or assigned approver to view a request", () => {
+    const domain = loadDomain();
+    const request = { employeeUserId: "employee", approverUserId: "lead" };
+    expect(domain.canViewRequest({ userId: "owner", roleCode: "owner" }, request)).toBe(true);
+    expect(domain.canViewRequest({ userId: "hr", roleCode: "hr_admin" }, request)).toBe(true);
+    expect(domain.canViewRequest({ userId: "lead" }, request)).toBe(true);
+  });
+
+  it("derives the consent, planned, actual, and export workflow facts in order", () => {
+    const domain = loadDomain();
+    expect(domain.deriveRequestStatus({ isEventAssignment: true })).toBe("awaiting_consent");
+    expect(domain.deriveRequestStatus({ submittedAt: "2026-08-01T10:00:00Z" })).toBe("pending_approval");
+    expect(domain.deriveRequestStatus({ approvedAt: "2026-08-01T10:00:00Z" })).toBe("approved");
+    expect(domain.deriveRequestStatus({ actualSubmittedAt: "2026-08-01T22:00:00Z" })).toBe("pending_actual_verification");
+    expect(domain.deriveRequestStatus({ exportedAt: "2026-08-02T10:00:00Z" })).toBe("exported");
+  });
+
+  it("flags material confirmed-OT changes against the prior four-week average", () => {
+    const domain = loadDomain();
+    const insights = domain.buildRootCauseInsights([
+      { id: "previous-1", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 100, actualVerifiedAt: "2026-07-06T20:00:00Z" },
+      { id: "previous-2", functionCode: "ops", workDate: "2026-07-13", actualMinutes: 100, actualVerifiedAt: "2026-07-13T20:00:00Z" },
+      { id: "previous-3", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 100, actualVerifiedAt: "2026-07-20T20:00:00Z" },
+      { id: "previous-4", functionCode: "ops", workDate: "2026-07-27", actualMinutes: 100, actualVerifiedAt: "2026-07-27T20:00:00Z" },
+      { id: "current", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 150, actualVerifiedAt: "2026-08-03T20:00:00Z" },
+    ], { currentWeekStart: "2026-08-03" });
+    expect(insights).toContainEqual(expect.objectContaining({ key: "function_confirmed_ot_change", functionCode: "ops", weekStart: "2026-08-03" }));
+  });
+
+  it("finds recurring high weekly OT without assigning employee value", () => {
+    const domain = loadDomain();
+    const insights = domain.buildRootCauseInsights([
+      { id: "week-one", employeeUserId: "employee", workDate: "2026-07-27", actualMinutes: 1500, actualVerifiedAt: "2026-07-27T20:00:00Z" },
+      { id: "week-two", employeeUserId: "employee", workDate: "2026-08-03", actualMinutes: 1500, actualVerifiedAt: "2026-08-03T20:00:00Z" },
+    ], { currentWeekStart: "2026-08-03" });
+    const recurring = insights.find((insight: { key: string }) => insight.key === "recurring_employee_high_ot");
+    expect(recurring).toEqual(expect.objectContaining({ weekStart: "2026-08-03", recordIds: ["week-one", "week-two"] }));
+    expect(JSON.stringify(recurring)).not.toMatch(/performance|productivity|commitment|value/i);
+  });
+
+  it("finds event variance, emergency share, and recurring rework or scope change", () => {
+    const domain = loadDomain();
+    const insights = domain.buildRootCauseInsights([
+      { id: "event-plan", eventPlanId: "event", functionCode: "ops", workDate: "2026-08-03", plannedMinutes: 100, actualMinutes: 130, actualVerifiedAt: "2026-08-03T20:00:00Z" },
+      { id: "incident", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 70, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "live_incident" },
+      { id: "rework", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "rework" },
+      { id: "scope-one", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
+      { id: "scope-two", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
+    ], { currentWeekStart: "2026-08-03" });
+    expect(insights.map((insight: { key: string }) => insight.key)).toEqual(expect.arrayContaining([
+      "event_actual_exceeds_plan",
+      "emergency_ot_share",
+      "recurring_rework_or_scope_change",
+    ]));
+  });
+
+  it("does not count a fifth-old week toward the four-week rework insight", () => {
+    const domain = loadDomain();
+    const insights = domain.buildRootCauseInsights([
+      { id: "excluded", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 10, actualVerifiedAt: "2026-07-06T20:00:00Z", reasonCode: "rework" },
+      { id: "included-one", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 10, actualVerifiedAt: "2026-07-20T20:00:00Z", reasonCode: "rework" },
+      { id: "included-two", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
+    ], { currentWeekStart: "2026-08-03" });
+    expect(insights.map((insight: { key: string }) => insight.key)).not.toContain("recurring_rework_or_scope_change");
+  });
+});
