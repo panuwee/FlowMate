@@ -35,6 +35,7 @@ describe("OT request domain", () => {
   it("keeps over-limit actual time in compliance review before HR-ready", () => {
     const domain = loadDomain();
     expect(domain.deriveRequestStatus({
+      requestType: "actual",
       actualSubmittedAt: "2026-08-09T10:00:00Z",
       complianceRequired: true,
       hrReadyAt: "2026-08-10T10:00:00Z",
@@ -90,11 +91,29 @@ describe("OT request domain", () => {
 
   it("derives the consent, planned, actual, and export workflow facts in order", () => {
     const domain = loadDomain();
-    expect(domain.deriveRequestStatus({ isEventAssignment: true })).toBe("awaiting_consent");
-    expect(domain.deriveRequestStatus({ submittedAt: "2026-08-01T10:00:00Z" })).toBe("pending_approval");
-    expect(domain.deriveRequestStatus({ approvedAt: "2026-08-01T10:00:00Z" })).toBe("approved");
-    expect(domain.deriveRequestStatus({ actualSubmittedAt: "2026-08-01T22:00:00Z" })).toBe("pending_actual_verification");
-    expect(domain.deriveRequestStatus({ exportedAt: "2026-08-02T10:00:00Z" })).toBe("exported");
+    expect(domain.deriveRequestStatus({ requestType: "consented", isEventAssignment: true })).toBe("awaiting_consent");
+    expect(domain.deriveRequestStatus({ requestType: "planned", submittedAt: "2026-08-01T10:00:00Z" })).toBe("pending_approval");
+    expect(domain.deriveRequestStatus({ requestType: "planned", approvedAt: "2026-08-01T10:00:00Z" })).toBe("approved");
+    expect(domain.deriveRequestStatus({ requestType: "actual", actualSubmittedAt: "2026-08-01T22:00:00Z" })).toBe("pending_actual_verification");
+    expect(domain.deriveRequestStatus({ requestType: "actual", exportedAt: "2026-08-02T10:00:00Z" })).toBe("exported");
+  });
+
+  it("rejects a missing request type before an over-limit record can become HR-ready", () => {
+    const domain = loadDomain();
+    expect(() => domain.deriveRequestStatus({
+      actualWeeklyMinutes: 36 * 60 + 1,
+      actualSubmittedAt: "2026-08-01T22:00:00Z",
+      hrReadyAt: "2026-08-02T10:00:00Z",
+    })).toThrow("Request type must be planned, consented, or actual.");
+  });
+
+  it("rejects an invalid request type before it can bypass the weekly limit", () => {
+    const domain = loadDomain();
+    expect(() => domain.deriveRequestStatus({
+      requestType: "preview",
+      actualWeeklyMinutes: 36 * 60 + 1,
+      hrReadyAt: "2026-08-02T10:00:00Z",
+    })).toThrow("Request type must be planned, consented, or actual.");
   });
 
   it("hard-blocks a planned weekly total above 36 hours", () => {
@@ -128,6 +147,7 @@ describe("OT request domain", () => {
   it("uses only a caller-supplied reference time for actual confirmation", () => {
     const domain = loadDomain();
     const approvedRequest = {
+      requestType: "planned",
       approvedAt: "2026-08-01T10:00:00Z",
       plannedEndAt: "2026-08-01T22:00:00Z",
     };

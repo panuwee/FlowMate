@@ -149,7 +149,8 @@
     const has = (camel, snake) => Boolean(valueOf(request, camel, snake));
     const decision = valueOf(request, "planDecision", "plan_decision");
     const requestType = valueOf(request, "requestType", "request_type");
-    const limitState = ["planned", "consented", "actual"].includes(requestType) ? getRequestLimitState(request, requestType) : null;
+    if (!["planned", "consented", "actual"].includes(requestType)) throw new Error("Request type must be planned, consented, or actual.");
+    const limitState = getRequestLimitState(request, requestType);
     const complianceReviewed = has("complianceReviewedAt", "compliance_reviewed_at") || has("complianceOutcome", "compliance_outcome");
     if (has("cancelledAt", "cancelled_at")) return "cancelled";
     if (requestType === "actual" && limitState && limitState.key === "blocked" && !complianceReviewed) return "compliance_review_required";
