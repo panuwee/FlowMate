@@ -216,6 +216,26 @@ describe("OT Request static module integration", () => {
     expect(manager).toContain('["cancelled", "rejected"].includes(getOtRequestStatus(request))');
   });
 
+  it("requires an assigned-approver bulk review surface before any actual verification writes", () => {
+    const screen = read("screens-ot.jsx");
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+
+    expect(approval).toContain("function openBulkReview()");
+    expect(approval).toContain("function confirmBulkVerification()");
+    expect(approval.indexOf("function openBulkReview()")).toBeLessThan(approval.indexOf("function confirmBulkVerification()"));
+    expect(approval).toContain("Bulk verification review");
+    expect(approval).toContain("Consent timestamp");
+    expect(approval).toContain("Signed variance");
+    expect(approval).toContain("Employee weekly total");
+    expect(approval).toContain("Excluded from bulk");
+    expect(approval).toContain("onClick={confirmBulkVerification}");
+    expect(approval).toContain("checks.canVerifyIndividually");
+    expect(approval).toContain("checks.canBulkVerify");
+    expect(approval).toContain("window.FlowMateOtRequestDomain.canActOnAssignedRequest(access, request)");
+    expect(approval).toContain("Read only — assigned approver action");
+    expect(approval).toContain("window.FlowMateOtRequestDomain.formatSignedHours(");
+  });
+
   it("previews event plans per employee and excludes every over-limit occurrence", () => {
     const screen = read("screens-ot.jsx");
     const eventForm = screen.slice(screen.indexOf("function OtEventPlanForm("), screen.indexOf("function OtRootCausePanel("));

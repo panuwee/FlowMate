@@ -200,14 +200,60 @@ describe("OT request domain", () => {
     expect(domain.deriveRequestStatus(approvedRequest)).toBe("approved");
   });
 
+  it("allows individual compliance verification while keeping compliance rows out of bulk", () => {
+    const domain = loadDomain();
+    const compliance = domain.getActualVerificationEligibility({
+      source: "event_plan",
+      employeeConsent: "accepted",
+      employeeConsentedAt: "2026-08-03T10:00:00Z",
+      actualSubmittedAt: "2026-08-03T22:00:00Z",
+      actualWeekSegments: [{ weekStart: "2026-08-03", minutes: 180 }],
+      plannedMinutes: 120,
+      actualMinutes: 180,
+      actualVarianceReason: "Venue close was delayed.",
+      complianceRequired: true,
+      status: "compliance_review_required",
+    }, 2200);
+
+    expect(compliance.canVerifyIndividually).toBe(true);
+    expect(compliance.canBulkVerify).toBe(false);
+    expect(compliance.complianceRequired).toBe(true);
+  });
+
+  it("counts only accepted actual outcomes as confirmed", () => {
+    const domain = loadDomain();
+    expect(domain.isConfirmedActual({ actualVerifiedAt: "2026-08-03T22:00:00Z", status: "pending_actual_verification" })).toBe(false);
+    expect(domain.isConfirmedActual({ actualVerifiedAt: "2026-08-03T22:00:00Z", actualDecision: "rejected", status: "rejected" })).toBe(false);
+    expect(domain.isConfirmedActual({ actualVerifiedAt: "2026-08-03T22:00:00Z", actualDecision: "revision_required", status: "revision_required" })).toBe(false);
+    expect(domain.isConfirmedActual({ actualVerifiedAt: "2026-08-03T22:00:00Z", actualDecision: "approved", status: "cancelled" })).toBe(false);
+    expect(domain.isConfirmedActual({ actualVerifiedAt: "2026-08-03T22:00:00Z", actualDecision: "approved", status: "compliance_review_required" })).toBe(true);
+    expect(domain.isConfirmedActual({ status: "hr_ready" })).toBe(true);
+  });
+
+  it("allows actions only for the explicitly assigned eligible approver", () => {
+    const domain = loadDomain();
+    const request = { approverUserId: "assigned-lead" };
+    expect(domain.canActOnAssignedRequest({ userId: "assigned-lead", isEligibleApprover: true }, request)).toBe(true);
+    expect(domain.canActOnAssignedRequest({ userId: "other-lead", isEligibleApprover: true }, request)).toBe(false);
+    expect(domain.canActOnAssignedRequest({ userId: "assigned-lead", isOwner: true, isEligibleApprover: false }, request)).toBe(false);
+    expect(domain.canActOnAssignedRequest({ userId: "assigned-lead", isHrAdmin: true, isEligibleApprover: false }, request)).toBe(false);
+  });
+
+  it("formats positive, negative, and zero OT variance with an explicit sign", () => {
+    const domain = loadDomain();
+    expect(domain.formatSignedHours(90)).toBe("+1h 30m");
+    expect(domain.formatSignedHours(-90)).toBe("-1h 30m");
+    expect(domain.formatSignedHours(0)).toBe("0h");
+  });
+
   it("flags material confirmed-OT changes against the prior four-week average", () => {
     const domain = loadDomain();
     const insights = domain.buildRootCauseInsights([
-      { id: "previous-1", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 100, actualVerifiedAt: "2026-07-06T20:00:00Z" },
-      { id: "previous-2", functionCode: "ops", workDate: "2026-07-13", actualMinutes: 100, actualVerifiedAt: "2026-07-13T20:00:00Z" },
-      { id: "previous-3", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 100, actualVerifiedAt: "2026-07-20T20:00:00Z" },
-      { id: "previous-4", functionCode: "ops", workDate: "2026-07-27", actualMinutes: 100, actualVerifiedAt: "2026-07-27T20:00:00Z" },
-      { id: "current", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 150, actualVerifiedAt: "2026-08-03T20:00:00Z" },
+      { id: "previous-1", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 100, actualDecision: "approved", actualVerifiedAt: "2026-07-06T20:00:00Z" },
+      { id: "previous-2", functionCode: "ops", workDate: "2026-07-13", actualMinutes: 100, actualDecision: "approved", actualVerifiedAt: "2026-07-13T20:00:00Z" },
+      { id: "previous-3", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 100, actualDecision: "approved", actualVerifiedAt: "2026-07-20T20:00:00Z" },
+      { id: "previous-4", functionCode: "ops", workDate: "2026-07-27", actualMinutes: 100, actualDecision: "approved", actualVerifiedAt: "2026-07-27T20:00:00Z" },
+      { id: "current", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 150, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z" },
     ], { currentWeekStart: "2026-08-03" });
     expect(insights).toContainEqual(expect.objectContaining({ key: "function_confirmed_ot_change", functionCode: "ops", weekStart: "2026-08-03" }));
   });
@@ -215,8 +261,8 @@ describe("OT request domain", () => {
   it("finds recurring high weekly OT without assigning employee value", () => {
     const domain = loadDomain();
     const insights = domain.buildRootCauseInsights([
-      { id: "week-one", employeeUserId: "employee", workDate: "2026-07-27", actualMinutes: 1500, actualVerifiedAt: "2026-07-27T20:00:00Z" },
-      { id: "week-two", employeeUserId: "employee", workDate: "2026-08-03", actualMinutes: 1500, actualVerifiedAt: "2026-08-03T20:00:00Z" },
+      { id: "week-one", employeeUserId: "employee", workDate: "2026-07-27", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-07-27T20:00:00Z" },
+      { id: "week-two", employeeUserId: "employee", workDate: "2026-08-03", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z" },
     ], { currentWeekStart: "2026-08-03" });
     const recurring = insights.find((insight: { key: string }) => insight.key === "recurring_employee_high_ot");
     expect(recurring).toEqual(expect.objectContaining({ weekStart: "2026-08-03", recordIds: ["week-one", "week-two"] }));
@@ -226,11 +272,11 @@ describe("OT request domain", () => {
   it("finds event variance, emergency share, and recurring rework or scope change", () => {
     const domain = loadDomain();
     const insights = domain.buildRootCauseInsights([
-      { id: "event-plan", eventPlanId: "event", functionCode: "ops", workDate: "2026-08-03", plannedMinutes: 100, actualMinutes: 130, actualVerifiedAt: "2026-08-03T20:00:00Z" },
-      { id: "incident", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 70, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "live_incident" },
-      { id: "rework", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "rework" },
-      { id: "scope-one", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
-      { id: "scope-two", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
+      { id: "event-plan", eventPlanId: "event", functionCode: "ops", workDate: "2026-08-03", plannedMinutes: 100, actualMinutes: 130, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z" },
+      { id: "incident", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 70, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "live_incident" },
+      { id: "rework", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "rework" },
+      { id: "scope-one", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
+      { id: "scope-two", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
     ], { currentWeekStart: "2026-08-03" });
     expect(insights.map((insight: { key: string }) => insight.key)).toEqual(expect.arrayContaining([
       "event_actual_exceeds_plan",
@@ -242,9 +288,9 @@ describe("OT request domain", () => {
   it("does not count a fifth-old week toward the four-week rework insight", () => {
     const domain = loadDomain();
     const insights = domain.buildRootCauseInsights([
-      { id: "excluded", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 10, actualVerifiedAt: "2026-07-06T20:00:00Z", reasonCode: "rework" },
-      { id: "included-one", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 10, actualVerifiedAt: "2026-07-20T20:00:00Z", reasonCode: "rework" },
-      { id: "included-two", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
+      { id: "excluded", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 10, actualDecision: "approved", actualVerifiedAt: "2026-07-06T20:00:00Z", reasonCode: "rework" },
+      { id: "included-one", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 10, actualDecision: "approved", actualVerifiedAt: "2026-07-20T20:00:00Z", reasonCode: "rework" },
+      { id: "included-two", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 10, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z", reasonCode: "scope_change" },
     ], { currentWeekStart: "2026-08-03" });
     expect(insights.map((insight: { key: string }) => insight.key)).not.toContain("recurring_rework_or_scope_change");
   });
@@ -258,5 +304,21 @@ describe("OT request domain", () => {
     ], { currentWeekStart: "2026-08-03" });
 
     expect(insights).toEqual([]);
+  });
+
+  it("flags a Function that drops to zero and includes the historical comparison rows", () => {
+    const domain = loadDomain();
+    const insights = domain.buildRootCauseInsights([
+      { id: "mkt-1", functionCode: "mkt", workDate: "2026-07-06", actualMinutes: 120, actualDecision: "approved" },
+      { id: "mkt-2", functionCode: "mkt", workDate: "2026-07-13", actualMinutes: 120, actualDecision: "approved" },
+      { id: "mkt-3", functionCode: "mkt", workDate: "2026-07-20", actualMinutes: 120, actualDecision: "approved" },
+      { id: "mkt-4", functionCode: "mkt", workDate: "2026-07-27", actualMinutes: 120, actualDecision: "approved" },
+    ], { currentWeekStart: "2026-08-03" });
+
+    expect(insights).toContainEqual(expect.objectContaining({
+      key: "function_confirmed_ot_change",
+      functionCode: "mkt",
+      recordIds: ["mkt-1", "mkt-2", "mkt-3", "mkt-4"],
+    }));
   });
 });

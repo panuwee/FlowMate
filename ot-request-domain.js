@@ -251,9 +251,59 @@
     return userId === valueOf(request, "employeeUserId", "employee_user_id") || userId === valueOf(request, "approverUserId", "approver_user_id");
   }
 
-  function isConfirmed(record) {
+  function canActOnAssignedRequest(actor, request) {
+    if (!actor || !request || !actor.isEligibleApprover) return false;
+    const actorId = valueOf(actor, "userId", "user_id") || actor.id;
+    return Boolean(actorId) && actorId === valueOf(request, "approverUserId", "approver_user_id");
+  }
+
+  function isConfirmedActual(record) {
     const status = valueOf(record, "status", "status");
-    return Boolean(valueOf(record, "actualVerifiedAt", "actual_verified_at") || valueOf(record, "actualVerified", "actual_verified") || ["hr_ready", "exported"].includes(status));
+    const decision = valueOf(record, "actualDecision", "actual_decision");
+    if (["rejected", "revision_required", "cancelled"].includes(status)) return false;
+    if (["rejected", "revision_required"].includes(decision)) return false;
+    return decision === "approved" || ["hr_ready", "exported"].includes(status);
+  }
+
+  function getActualVerificationEligibility(request, weeklyTotalMinutes) {
+    const source = valueOf(request, "source", "source");
+    const consentAccepted = source !== "event_plan" || (
+      valueOf(request, "employeeConsent", "employee_consent") === "accepted"
+      && Boolean(valueOf(request, "employeeConsentedAt", "employee_consented_at"))
+    );
+    const planned = Number(valueOf(request, "occurrencePlannedMinutes", "planned_minutes") ?? valueOf(request, "plannedMinutes", "planned_minutes") ?? 0);
+    const actual = Number(valueOf(request, "occurrenceActualMinutes", "actual_minutes") ?? valueOf(request, "actualMinutes", "actual_minutes") ?? 0);
+    const varianceNeedsReason = Math.abs(actual - planned) > 30;
+    const varianceHasReason = Boolean(String(valueOf(request, "actualVarianceReason", "actual_variance_reason") || "").trim());
+    const status = valueOf(request, "status", "status");
+    const complianceRequired = Boolean(valueOf(request, "complianceRequired", "compliance_required")) || status === "compliance_review_required";
+    const actualSubmitted = Boolean(valueOf(request, "actualSubmittedAt", "actual_submitted_at"))
+      && Array.isArray(valueOf(request, "actualWeekSegments", "actual_week_segments"));
+    const weeklyTotal = Number(weeklyTotalMinutes || 0);
+    const canVerifyIndividually = actualSubmitted
+      && consentAccepted
+      && (!varianceNeedsReason || varianceHasReason)
+      && ["pending_actual_verification", "compliance_review_required"].includes(status);
+    return {
+      consentAccepted,
+      varianceNeedsReason,
+      varianceHasReason,
+      complianceRequired,
+      actualSubmitted,
+      weeklyTotal,
+      canVerifyIndividually,
+      canBulkVerify: canVerifyIndividually && !complianceRequired && weeklyTotal <= LIMIT_MINUTES && status === "pending_actual_verification",
+    };
+  }
+
+  function formatSignedHours(minutes) {
+    const total = Math.round(Number(minutes || 0));
+    if (!Number.isFinite(total)) throw new Error("Minutes must be numeric.");
+    if (total === 0) return "0h";
+    const absolute = Math.abs(total);
+    const hours = Math.floor(absolute / 60);
+    const remainder = absolute % 60;
+    return `${total > 0 ? "+" : "-"}${hours}h${remainder ? ` ${remainder}m` : ""}`;
   }
 
   function recordWeek(record) {
@@ -275,7 +325,7 @@
   }
 
   function buildRootCauseInsights(records, options) {
-    const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmed);
+    const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmedActual);
     if (!confirmed.length) return [];
     const requestedWeek = options && options.currentWeekStart;
     const currentWeekStart = requestedWeek || confirmed.map(recordWeek).sort().slice(-1)[0];
@@ -286,16 +336,18 @@
     const withinFourWeeks = confirmed.filter(record => recordWeek(record) >= previousWeeks[2] && recordWeek(record) <= currentWeekStart);
     const insights = [];
 
-    const functions = Array.from(new Set(current.map(record => valueOf(record, "functionCode", "function_code") || "unassigned")));
+    const functions = Array.from(new Set(inLastFiveWeeks.map(record => valueOf(record, "functionCode", "function_code") || "unassigned")));
     functions.forEach(functionCode => {
       const functionCurrent = current.filter(record => (valueOf(record, "functionCode", "function_code") || "unassigned") === functionCode);
       const currentMinutes = functionCurrent.reduce((total, record) => total + recordMinutes(record, "actualMinutes", "actual_minutes"), 0);
-      const priorMinutes = inLastFiveWeeks
-        .filter(record => previousWeeks.includes(recordWeek(record)) && (valueOf(record, "functionCode", "function_code") || "unassigned") === functionCode)
+      const comparisonRecords = inLastFiveWeeks
+        .filter(record => (recordWeek(record) === currentWeekStart || previousWeeks.includes(recordWeek(record))) && (valueOf(record, "functionCode", "function_code") || "unassigned") === functionCode);
+      const priorMinutes = comparisonRecords
+        .filter(record => previousWeeks.includes(recordWeek(record)))
         .reduce((total, record) => total + recordMinutes(record, "actualMinutes", "actual_minutes"), 0);
       const priorAverage = priorMinutes / 4;
       if (priorAverage > 0 && Math.abs(currentMinutes - priorAverage) / priorAverage >= 0.25) {
-        insights.push({ key: "function_confirmed_ot_change", functionCode, weekStart: currentWeekStart, recordIds: collectIds(functionCurrent), message: "Confirmed OT changed materially from the prior four-week average." });
+        insights.push({ key: "function_confirmed_ot_change", functionCode, weekStart: currentWeekStart, recordIds: collectIds(comparisonRecords), message: "Confirmed OT changed materially from the prior four-week average." });
       }
     });
 
@@ -371,6 +423,10 @@
     isSubmissionLocked,
     deriveRequestStatus,
     canViewRequest,
+    canActOnAssignedRequest,
+    isConfirmedActual,
+    getActualVerificationEligibility,
+    formatSignedHours,
     buildRootCauseInsights,
   });
 });

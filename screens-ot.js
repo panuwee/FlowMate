@@ -1332,6 +1332,8 @@ function normalizeOtManagerRow(request, weekStart) {
     id: `${request.id}:${weekStart}`,
     requestId: request.id,
     weekStart,
+    occurrencePlannedMinutes: Number(otValue(request, "plannedMinutes", "planned_minutes") || 0),
+    occurrenceActualMinutes: Number(otValue(request, "actualMinutes", "actual_minutes") || 0),
     plannedMinutes: getOtManagerWeekMinutes(request, "planned", weekStart),
     actualMinutes: getOtManagerWeekMinutes(request, "actual", weekStart)
   };
@@ -1361,8 +1363,7 @@ function getOtManagerTotals(rows, byWeek = false) {
   }, {});
 }
 function isOtActualConfirmed(request) {
-  const status = getOtRequestStatus(request);
-  return Boolean(otValue(request, "actualVerifiedAt", "actual_verified_at") || ["hr_ready", "exported"].includes(status));
+  return window.FlowMateOtRequestDomain.isConfirmedActual(request);
 }
 function applyOtManagerFilters(rows, filters, employeeTotals) {
   return rows.filter(request => {
@@ -1588,6 +1589,7 @@ function OtManagerDashboard({
     access: access,
     onSuccess: () => setRefreshKey(value => value + 1)
   })), React.createElement(OtApprovalQueue, {
+    access: access,
     requests: filteredCurrentRows,
     allRequests: currentRows,
     weekStart: weekStart,
@@ -1612,6 +1614,7 @@ function OtManagerDashboard({
   }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, loadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))))));
 }
 function OtApprovalQueue({
+  access,
   requests,
   allRequests,
   peopleById,
@@ -1619,6 +1622,7 @@ function OtApprovalQueue({
 }) {
   const [selected, setSelected] = useStateApp(null);
   const [note, setNote] = useStateApp("");
+  const [bulkReview, setBulkReview] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({
     status: "idle",
     message: ""
@@ -1626,29 +1630,40 @@ function OtApprovalQueue({
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request" && !otValue(request, "actualSubmittedAt", "actual_submitted_at") && ["pending_approval", "revision_required"].includes(getOtRequestStatus(request)));
   const actualRequests = requests.filter(request => ["pending_actual_verification", "compliance_review_required"].includes(getOtRequestStatus(request)));
+  function canAct(request) {
+    return window.FlowMateOtRequestDomain.canActOnAssignedRequest(access, request);
+  }
   function getActualChecks(request) {
-    const source = otValue(request, "source", "source");
-    const consentAccepted = source !== "event_plan" || otValue(request, "employeeConsent", "employee_consent") === "accepted" && Boolean(otValue(request, "employeeConsentedAt", "employee_consented_at"));
-    const planned = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-    const actual = Number(otValue(request, "actualMinutes", "actual_minutes") || 0);
-    const varianceNeedsReason = Math.abs(actual - planned) > 30;
-    const varianceHasReason = Boolean(String(otValue(request, "actualVarianceReason", "actual_variance_reason") || "").trim());
-    const complianceRequired = Boolean(otValue(request, "complianceRequired", "compliance_required")) || getOtRequestStatus(request) === "compliance_review_required";
     const weeklyTotal = employeeTotals[getOtManagerEmployeeId(request)]?.countedMinutes || 0;
-    return {
-      consentAccepted,
-      varianceNeedsReason,
-      varianceHasReason,
-      complianceRequired,
-      weeklyTotal,
-      eligible: consentAccepted && (!varianceNeedsReason || varianceHasReason) && !complianceRequired && weeklyTotal <= OT_LIMIT_MINUTES && getOtRequestStatus(request) === "pending_actual_verification"
-    };
+    return window.FlowMateOtRequestDomain.getActualVerificationEligibility(request, weeklyTotal);
+  }
+  function getOccurrenceMinutes(request, field) {
+    const occurrenceField = field === "plannedMinutes" ? "occurrencePlannedMinutes" : "occurrenceActualMinutes";
+    return Number(request[occurrenceField] ?? otValue(request, field, field === "plannedMinutes" ? "planned_minutes" : "actual_minutes") ?? 0);
+  }
+  function formatConsentTimestamp(request) {
+    const value = otValue(request, "employeeConsentedAt", "employee_consented_at");
+    return value ? new Date(value).toLocaleString("en-GB", {
+      timeZone: "Asia/Bangkok"
+    }) : "Not recorded";
+  }
+  function getBulkExclusionReasons(request, checks) {
+    const reasons = [];
+    if (!canAct(request)) reasons.push("Not assigned to you as the eligible approver.");
+    if (!checks.consentAccepted) reasons.push("Employee consent is missing.");
+    if (checks.varianceNeedsReason && !checks.varianceHasReason) reasons.push("The signed variance needs an employee reason.");
+    if (checks.complianceRequired) reasons.push("Compliance review required; verify this occurrence individually.");
+    if (checks.weeklyTotal > OT_LIMIT_MINUTES) reasons.push("Employee weekly total is above 36h.");
+    if (!checks.actualSubmitted) reasons.push("Actual time has not been submitted with weekly segments.");
+    return reasons.length ? reasons : ["This occurrence is not ready for bulk verification."];
   }
   function openDecision(kind, request) {
+    if (!canAct(request)) return;
     setSelected({
       kind,
       request
     });
+    setBulkReview(null);
     setNote("");
     setActionState({
       status: "idle",
@@ -1656,7 +1671,7 @@ function OtApprovalQueue({
     });
   }
   async function decide(decision) {
-    if (!selected || actionState.status === "submitting") return;
+    if (!selected || !canAct(selected.request) || actionState.status === "submitting") return;
     if (decision !== "approved" && !note.trim()) {
       setActionState({
         status: "error",
@@ -1664,10 +1679,10 @@ function OtApprovalQueue({
       });
       return;
     }
-    if (selected.kind === "actual" && decision === "approved" && !getActualChecks(selected.request).eligible) {
+    if (selected.kind === "actual" && decision === "approved" && !getActualChecks(selected.request).canVerifyIndividually) {
       setActionState({
         status: "error",
-        message: "This actual record cannot be verified until consent, variance, weekly-limit, and compliance checks are clear."
+        message: "This actual record cannot be verified until consent, submitted actual time, and variance checks are complete."
       });
       return;
     }
@@ -1695,8 +1710,28 @@ function OtApprovalQueue({
       });
     }
   }
-  async function verifyEligibleActuals() {
-    const requestsToVerify = actualRequests.filter(request => getActualChecks(request).eligible);
+  function openBulkReview() {
+    if (actionState.status === "submitting") return;
+    const requestsToVerify = actualRequests.filter(request => {
+      const checks = getActualChecks(request);
+      return canAct(request) && checks.canBulkVerify;
+    });
+    const excludedRequests = actualRequests.filter(request => {
+      const checks = getActualChecks(request);
+      return !canAct(request) || !checks.canBulkVerify;
+    });
+    setSelected(null);
+    setBulkReview({
+      requestsToVerify,
+      excludedRequests
+    });
+    setActionState({
+      status: "idle",
+      message: ""
+    });
+  }
+  async function confirmBulkVerification() {
+    const requestsToVerify = bulkReview?.requestsToVerify || [];
     if (!requestsToVerify.length || actionState.status === "submitting") return;
     setActionState({
       status: "submitting",
@@ -1712,6 +1747,7 @@ function OtApprovalQueue({
         status: "success",
         message: `${completed} actual occurrence(s) verified individually and audited.`
       });
+      setBulkReview(null);
       onChanged();
     } catch (error) {
       setActionState({
@@ -1723,24 +1759,85 @@ function OtApprovalQueue({
   }
   const selectedChecks = selected?.kind === "actual" ? getActualChecks(selected.request) : null;
   const selectedTotal = selected ? employeeTotals[getOtManagerEmployeeId(selected.request)]?.countedMinutes || 0 : 0;
-  const selectedPlanned = selected ? Number(otValue(selected.request, "plannedMinutes", "planned_minutes") || 0) : 0;
-  const selectedActual = selected ? Number(otValue(selected.request, "actualMinutes", "actual_minutes") || 0) : 0;
-  const eligibleActualCount = actualRequests.filter(request => getActualChecks(request).eligible).length;
+  const selectedPlanned = selected ? getOccurrenceMinutes(selected.request, "plannedMinutes") : 0;
+  const selectedActual = selected ? getOccurrenceMinutes(selected.request, "actualMinutes") : 0;
+  const eligibleActualCount = actualRequests.filter(request => canAct(request) && getActualChecks(request).canBulkVerify).length;
+  function renderQueueItem(kind, request, statusNode) {
+    const content = React.createElement(React.Fragment, null, React.createElement("span", null, React.createElement("strong", null, request.title), React.createElement("small", null, getOtManagerEmployeeName(request, peopleById))), statusNode);
+    return canAct(request) ? React.createElement("button", {
+      key: request.id,
+      type: "button",
+      className: "ot-queue-item",
+      onClick: () => openDecision(kind, request)
+    }, content) : React.createElement("div", {
+      key: request.id,
+      className: "ot-queue-item ot-queue-item--readonly"
+    }, content, React.createElement("small", null, "Read only — assigned approver action"));
+  }
   return React.createElement("section", {
     className: "ot-list",
     "aria-label": "Manager OT approval queues"
   }, React.createElement("div", {
     className: "ot-section-head"
-  }, React.createElement("h2", null, "Approval & actual verification"), React.createElement("span", null, planRequests.length, " plan · ", actualRequests.length, " actual")), React.createElement("div", {
+  }, React.createElement("h2", null, "Approval & actual verification"), React.createElement("span", null, planRequests.length, " plan · ", actualRequests.length, " actual")), bulkReview && React.createElement("section", {
+    className: "ot-decision ot-bulk-review",
+    "aria-label": "Bulk verification review"
+  }, React.createElement("div", {
+    className: "ot-section-head"
+  }, React.createElement("div", null, React.createElement("h3", null, "Bulk verification review"), React.createElement("p", {
+    className: "muted"
+  }, "Confirm only after reviewing each included occurrence. Writes run sequentially and stop at the first server error.")), React.createElement("button", {
+    type: "button",
+    className: "btn btn--ghost",
+    onClick: () => setBulkReview(null)
+  }, "Close")), React.createElement("div", {
+    className: "ot-bulk-list"
+  }, bulkReview.requestsToVerify.map(request => {
+    const checks = getActualChecks(request);
+    const planned = getOccurrenceMinutes(request, "plannedMinutes");
+    const actual = getOccurrenceMinutes(request, "actualMinutes");
+    return React.createElement("article", {
+      className: "ot-bulk-row",
+      key: request.id
+    }, React.createElement("div", {
+      className: "ot-section-head"
+    }, React.createElement("div", null, React.createElement("strong", null, request.title), React.createElement("small", null, getOtManagerEmployeeName(request, peopleById))), React.createElement("span", {
+      className: "ot-status"
+    }, "Included")), React.createElement("div", {
+      className: "ot-detail-grid"
+    }, React.createElement("div", null, React.createElement("span", null, "Consent timestamp"), React.createElement("strong", null, formatConsentTimestamp(request))), React.createElement("div", null, React.createElement("span", null, "Signed variance"), React.createElement("strong", null, window.FlowMateOtRequestDomain.formatSignedHours(actual - planned))), React.createElement("div", null, React.createElement("span", null, "Employee weekly total"), React.createElement("strong", null, formatOtHours(checks.weeklyTotal), " / 36h"))), React.createElement("p", {
+      className: "muted"
+    }, "No blocking consent, variance, weekly-limit, or compliance warning."));
+  })), !!bulkReview.excludedRequests.length && React.createElement("div", {
+    className: "ot-bulk-excluded"
+  }, React.createElement("h4", null, "Excluded from bulk"), bulkReview.excludedRequests.map(request => {
+    const checks = getActualChecks(request);
+    const planned = getOccurrenceMinutes(request, "plannedMinutes");
+    const actual = getOccurrenceMinutes(request, "actualMinutes");
+    return React.createElement("article", {
+      className: "ot-bulk-row ot-bulk-row--excluded",
+      key: request.id
+    }, React.createElement("strong", null, request.title), React.createElement("small", null, getOtManagerEmployeeName(request, peopleById)), React.createElement("div", {
+      className: "ot-detail-grid"
+    }, React.createElement("div", null, React.createElement("span", null, "Consent timestamp"), React.createElement("strong", null, formatConsentTimestamp(request))), React.createElement("div", null, React.createElement("span", null, "Signed variance"), React.createElement("strong", null, window.FlowMateOtRequestDomain.formatSignedHours(actual - planned))), React.createElement("div", null, React.createElement("span", null, "Employee weekly total"), React.createElement("strong", null, formatOtHours(checks.weeklyTotal), " / 36h"))), React.createElement("ul", null, getBulkExclusionReasons(request, checks).map(reason => React.createElement("li", {
+      key: reason
+    }, reason))));
+  })), React.createElement("div", {
+    className: "ot-form__actions"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    onClick: () => setBulkReview(null)
+  }, "Cancel"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--primary",
+    disabled: !bulkReview.requestsToVerify.length || actionState.status === "submitting",
+    onClick: confirmBulkVerification
+  }, "Confirm ", bulkReview.requestsToVerify.length, " verifications"))), React.createElement("div", {
     className: "ot-queue-grid"
   }, React.createElement("section", {
     className: "ot-queue"
-  }, React.createElement("h3", null, "Planned requests"), planRequests.map(request => React.createElement("button", {
-    key: request.id,
-    type: "button",
-    className: "ot-queue-item",
-    onClick: () => openDecision("plan", request)
-  }, React.createElement("span", null, React.createElement("strong", null, request.title), React.createElement("small", null, getOtManagerEmployeeName(request, peopleById))), React.createElement("span", {
+  }, React.createElement("h3", null, "Planned requests"), planRequests.map(request => renderQueueItem("plan", request, React.createElement("span", {
     className: `ot-status ot-status--${getOtRequestStatus(request)}`
   }, getOtStatusLabel(getOtRequestStatus(request))))), !planRequests.length && React.createElement("div", {
     className: "ot-state ot-state--compact"
@@ -1752,17 +1849,12 @@ function OtApprovalQueue({
     type: "button",
     className: "btn btn--sm btn--secondary",
     disabled: !eligibleActualCount || actionState.status === "submitting",
-    onClick: verifyEligibleActuals
-  }, "Verify ", eligibleActualCount, " eligible")), actualRequests.map(request => {
+    onClick: openBulkReview
+  }, "Review ", eligibleActualCount, " eligible")), actualRequests.map(request => {
     const checks = getActualChecks(request);
-    return React.createElement("button", {
-      key: request.id,
-      type: "button",
-      className: "ot-queue-item",
-      onClick: () => openDecision("actual", request)
-    }, React.createElement("span", null, React.createElement("strong", null, request.title), React.createElement("small", null, getOtManagerEmployeeName(request, peopleById))), React.createElement("span", {
-      className: `ot-status ${checks.eligible ? "" : "ot-status--revision_required"}`
-    }, checks.eligible ? "Ready" : "Review"));
+    return renderQueueItem("actual", request, React.createElement("span", {
+      className: `ot-status ${checks.canVerifyIndividually ? "" : "ot-status--revision_required"}`
+    }, checks.canVerifyIndividually ? "Ready" : "Review"));
   }), !actualRequests.length && React.createElement("div", {
     className: "ot-state ot-state--compact"
   }, "No actual records need verification."))), selected && React.createElement("section", {
@@ -1778,10 +1870,12 @@ function OtApprovalQueue({
     className: "ot-detail-grid"
   }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selected.request, peopleById))), React.createElement("div", null, React.createElement("span", null, "Consent timestamp"), React.createElement("strong", null, otValue(selected.request, "employeeConsentedAt", "employee_consented_at") ? new Date(otValue(selected.request, "employeeConsentedAt", "employee_consented_at")).toLocaleString("en-GB", {
     timeZone: "Asia/Bangkok"
-  }) : "Not recorded")), React.createElement("div", null, React.createElement("span", null, "Planned / actual variance"), React.createElement("strong", null, formatOtHours(selectedPlanned), " / ", selectedActual ? formatOtHours(selectedActual) : "—", " (", selectedActual ? `${selectedActual - selectedPlanned}m` : "—", ")")), React.createElement("div", null, React.createElement("span", null, "Employee weekly total"), React.createElement("strong", null, formatOtHours(selectedTotal), " / 36h"))), selectedTotal > OT_LIMIT_MINUTES && React.createElement(OtWarning, {
+  }) : "Not recorded")), React.createElement("div", null, React.createElement("span", null, "Planned / actual variance"), React.createElement("strong", null, formatOtHours(selectedPlanned), " / ", selectedActual ? formatOtHours(selectedActual) : "—", " (", selectedActual ? `${selectedActual - selectedPlanned}m` : "—", ")")), React.createElement("div", null, React.createElement("span", null, "Employee weekly total"), React.createElement("strong", null, formatOtHours(selectedTotal), " / 36h"))), selected?.kind === "actual" && React.createElement("div", {
+    className: "ot-detail-grid"
+  }, React.createElement("div", null, React.createElement("span", null, "Signed variance"), React.createElement("strong", null, otValue(selected.request, "actualSubmittedAt", "actual_submitted_at") ? window.FlowMateOtRequestDomain.formatSignedHours(selectedActual - selectedPlanned) : "—"))), selectedTotal > OT_LIMIT_MINUTES && React.createElement(OtWarning, {
     kind: "critical",
     title: "Weekly limit",
-    message: "This employee/week is above 36h. Approval is blocked; actual time requires compliance review."
+    message: selected.kind === "actual" ? "This employee/week is above 36h. The assigned approver may verify truthful actual time; the server keeps the compliance gate active." : "This employee/week is above 36h. Plan approval is blocked."
   }), selectedChecks && !selectedChecks.consentAccepted && React.createElement(OtWarning, {
     kind: "critical",
     title: "Consent missing",
@@ -1793,7 +1887,7 @@ function OtApprovalQueue({
   }), selectedChecks?.complianceRequired && React.createElement(OtWarning, {
     kind: "critical",
     title: "Compliance review required",
-    message: "Normal actual verification cannot clear the server compliance workflow."
+    message: "The assigned approver may verify truthful actual time individually. The server retains the compliance gate after approval."
   }), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
@@ -1825,7 +1919,7 @@ function OtApprovalQueue({
   }, "Return actual"), React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
-    disabled: !selectedChecks?.eligible || actionState.status === "submitting",
+    disabled: !selectedChecks?.canVerifyIndividually || actionState.status === "submitting",
     onClick: () => decide("approved")
   }, "Verify actual")))), actionState.message && React.createElement(OtWarning, {
     kind: actionState.status === "error" ? "error" : "info",
@@ -2429,7 +2523,7 @@ function OtRootCausePanel({
   }, "No confirmed OT rows match the current authorized filters.") : React.createElement(React.Fragment, null, React.createElement("section", {
     className: "ot-root-summary",
     "aria-label": "Root cause summary"
-  }, React.createElement("div", null, React.createElement("span", null, "Planned share"), React.createElement("strong", null, totalActual ? `${Math.round(plannedMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Emergency share"), React.createElement("strong", null, totalActual ? `${Math.round(emergencyMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Plan / actual variance"), React.createElement("strong", null, totalActual - totalPlanned >= 0 ? "+" : "", formatOtHours(Math.abs(totalActual - totalPlanned)))), React.createElement("div", null, React.createElement("span", null, "Recurring weeks"), React.createElement("strong", null, recurringWeeks))), React.createElement("section", {
+  }, React.createElement("div", null, React.createElement("span", null, "Planned share"), React.createElement("strong", null, totalActual ? `${Math.round(plannedMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Emergency share"), React.createElement("strong", null, totalActual ? `${Math.round(emergencyMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Plan / actual variance"), React.createElement("strong", null, window.FlowMateOtRequestDomain.formatSignedHours(totalActual - totalPlanned))), React.createElement("div", null, React.createElement("span", null, "Recurring weeks"), React.createElement("strong", null, recurringWeeks))), React.createElement("section", {
     className: "ot-root-grid"
   }, React.createElement("article", {
     className: "ot-root-card"

@@ -3912,6 +3912,15 @@ html[data-theme="dark"] .product-book-cms__message--error {
   background: var(--garena-white);
 }
 .ot-decision { display: grid; gap: var(--s-4); margin-top: var(--s-4); }
+.ot-queue-item--readonly { flex-wrap: wrap; cursor: not-allowed; opacity: 0.78; }
+.ot-queue-item--readonly:hover { border-color: var(--garena-light-grey); }
+.ot-queue-item--readonly > small { flex: 0 0 100%; }
+.ot-bulk-list,
+.ot-bulk-excluded { display: grid; gap: var(--s-3); }
+.ot-bulk-row { padding: var(--s-3); border: var(--border-hairline); border-radius: var(--radius-sm); background: var(--garena-bg); }
+.ot-bulk-row--excluded { border-left: 3px solid var(--garena-red); }
+.ot-bulk-row > small { display: block; margin-top: 3px; color: var(--garena-grey); }
+.ot-bulk-row ul { margin: var(--s-3) 0 0; padding-left: 20px; color: var(--garena-grey); }
 .ot-participants,
 .ot-event-preview { display: grid; gap: var(--s-3); }
 .ot-participant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); max-height: 300px; overflow-y: auto; }

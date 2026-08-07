@@ -773,6 +773,8 @@ function normalizeOtManagerRow(request, weekStart) {
     id: `${request.id}:${weekStart}`,
     requestId: request.id,
     weekStart,
+    occurrencePlannedMinutes: Number(otValue(request, "plannedMinutes", "planned_minutes") || 0),
+    occurrenceActualMinutes: Number(otValue(request, "actualMinutes", "actual_minutes") || 0),
     plannedMinutes: getOtManagerWeekMinutes(request, "planned", weekStart),
     actualMinutes: getOtManagerWeekMinutes(request, "actual", weekStart),
   };
@@ -803,8 +805,7 @@ function getOtManagerTotals(rows, byWeek = false) {
 }
 
 function isOtActualConfirmed(request) {
-  const status = getOtRequestStatus(request);
-  return Boolean(otValue(request, "actualVerifiedAt", "actual_verified_at") || ["hr_ready", "exported"].includes(status));
+  return window.FlowMateOtRequestDomain.isConfirmedActual(request);
 }
 
 function applyOtManagerFilters(rows, filters, employeeTotals) {
@@ -917,7 +918,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false }) {
             <button type="button" className="btn btn--secondary" onClick={() => setRefreshKey(value => value + 1)}>Refresh assigned scope</button>
           </div>
           {showEventForm && <section className="ot-workflow"><div className="ot-workflow__head"><h2>Shared Event OT plan</h2></div><OtEventPlanForm access={access} onSuccess={() => setRefreshKey(value => value + 1)} /></section>}
-          <OtApprovalQueue requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={loadState.peopleById} onChanged={() => setRefreshKey(value => value + 1)} />
+          <OtApprovalQueue access={access} requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={loadState.peopleById} onChanged={() => setRefreshKey(value => value + 1)} />
           <OtTeamWeekTable requests={filteredCurrentRows} allRequests={currentRows} peopleById={loadState.peopleById} onOpenRequest={setSelectedRow} />
           {selectedRow && <section className="ot-manager-detail" aria-label="Authorized OT details"><div className="ot-section-head"><h2>{selectedRow.title}</h2><button type="button" className="btn btn--ghost" onClick={() => setSelectedRow(null)}>Close</button></div><div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selectedRow, loadState.peopleById)}</strong></div><div><span>Function</span><strong>{String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase()}</strong></div><div><span>Reason</span><strong>{getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code"))}</strong></div><div><span>Status</span><strong>{getOtStatusLabel(getOtRequestStatus(selectedRow))}</strong></div></div></section>}
         </>
@@ -926,9 +927,10 @@ function OtManagerDashboard({ access, rootCauseOnly = false }) {
   );
 }
 
-function OtApprovalQueue({ requests, allRequests, peopleById, onChanged }) {
+function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged }) {
   const [selected, setSelected] = useStateApp(null);
   const [note, setNote] = useStateApp("");
+  const [bulkReview, setBulkReview] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request"
@@ -936,39 +938,52 @@ function OtApprovalQueue({ requests, allRequests, peopleById, onChanged }) {
     && ["pending_approval", "revision_required"].includes(getOtRequestStatus(request)));
   const actualRequests = requests.filter(request => ["pending_actual_verification", "compliance_review_required"].includes(getOtRequestStatus(request)));
 
+  function canAct(request) {
+    return window.FlowMateOtRequestDomain.canActOnAssignedRequest(access, request);
+  }
+
   function getActualChecks(request) {
-    const source = otValue(request, "source", "source");
-    const consentAccepted = source !== "event_plan" || (otValue(request, "employeeConsent", "employee_consent") === "accepted" && Boolean(otValue(request, "employeeConsentedAt", "employee_consented_at")));
-    const planned = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-    const actual = Number(otValue(request, "actualMinutes", "actual_minutes") || 0);
-    const varianceNeedsReason = Math.abs(actual - planned) > 30;
-    const varianceHasReason = Boolean(String(otValue(request, "actualVarianceReason", "actual_variance_reason") || "").trim());
-    const complianceRequired = Boolean(otValue(request, "complianceRequired", "compliance_required")) || getOtRequestStatus(request) === "compliance_review_required";
     const weeklyTotal = employeeTotals[getOtManagerEmployeeId(request)]?.countedMinutes || 0;
-    return {
-      consentAccepted,
-      varianceNeedsReason,
-      varianceHasReason,
-      complianceRequired,
-      weeklyTotal,
-      eligible: consentAccepted && (!varianceNeedsReason || varianceHasReason) && !complianceRequired && weeklyTotal <= OT_LIMIT_MINUTES && getOtRequestStatus(request) === "pending_actual_verification",
-    };
+    return window.FlowMateOtRequestDomain.getActualVerificationEligibility(request, weeklyTotal);
+  }
+
+  function getOccurrenceMinutes(request, field) {
+    const occurrenceField = field === "plannedMinutes" ? "occurrencePlannedMinutes" : "occurrenceActualMinutes";
+    return Number(request[occurrenceField] ?? otValue(request, field, field === "plannedMinutes" ? "planned_minutes" : "actual_minutes") ?? 0);
+  }
+
+  function formatConsentTimestamp(request) {
+    const value = otValue(request, "employeeConsentedAt", "employee_consented_at");
+    return value ? new Date(value).toLocaleString("en-GB", { timeZone: "Asia/Bangkok" }) : "Not recorded";
+  }
+
+  function getBulkExclusionReasons(request, checks) {
+    const reasons = [];
+    if (!canAct(request)) reasons.push("Not assigned to you as the eligible approver.");
+    if (!checks.consentAccepted) reasons.push("Employee consent is missing.");
+    if (checks.varianceNeedsReason && !checks.varianceHasReason) reasons.push("The signed variance needs an employee reason.");
+    if (checks.complianceRequired) reasons.push("Compliance review required; verify this occurrence individually.");
+    if (checks.weeklyTotal > OT_LIMIT_MINUTES) reasons.push("Employee weekly total is above 36h.");
+    if (!checks.actualSubmitted) reasons.push("Actual time has not been submitted with weekly segments.");
+    return reasons.length ? reasons : ["This occurrence is not ready for bulk verification."];
   }
 
   function openDecision(kind, request) {
+    if (!canAct(request)) return;
     setSelected({ kind, request });
+    setBulkReview(null);
     setNote("");
     setActionState({ status: "idle", message: "" });
   }
 
   async function decide(decision) {
-    if (!selected || actionState.status === "submitting") return;
+    if (!selected || !canAct(selected.request) || actionState.status === "submitting") return;
     if (decision !== "approved" && !note.trim()) {
       setActionState({ status: "error", message: "A note is required when rejecting or returning OT." });
       return;
     }
-    if (selected.kind === "actual" && decision === "approved" && !getActualChecks(selected.request).eligible) {
-      setActionState({ status: "error", message: "This actual record cannot be verified until consent, variance, weekly-limit, and compliance checks are clear." });
+    if (selected.kind === "actual" && decision === "approved" && !getActualChecks(selected.request).canVerifyIndividually) {
+      setActionState({ status: "error", message: "This actual record cannot be verified until consent, submitted actual time, and variance checks are complete." });
       return;
     }
     setActionState({ status: "submitting", message: "Saving the audited decision…" });
@@ -987,8 +1002,23 @@ function OtApprovalQueue({ requests, allRequests, peopleById, onChanged }) {
     }
   }
 
-  async function verifyEligibleActuals() {
-    const requestsToVerify = actualRequests.filter(request => getActualChecks(request).eligible);
+  function openBulkReview() {
+    if (actionState.status === "submitting") return;
+    const requestsToVerify = actualRequests.filter(request => {
+      const checks = getActualChecks(request);
+      return canAct(request) && checks.canBulkVerify;
+    });
+    const excludedRequests = actualRequests.filter(request => {
+      const checks = getActualChecks(request);
+      return !canAct(request) || !checks.canBulkVerify;
+    });
+    setSelected(null);
+    setBulkReview({ requestsToVerify, excludedRequests });
+    setActionState({ status: "idle", message: "" });
+  }
+
+  async function confirmBulkVerification() {
+    const requestsToVerify = bulkReview?.requestsToVerify || [];
     if (!requestsToVerify.length || actionState.status === "submitting") return;
     setActionState({ status: "submitting", message: `Verifying ${requestsToVerify.length} eligible actual occurrence(s) individually…` });
     let completed = 0;
@@ -998,6 +1028,7 @@ function OtApprovalQueue({ requests, allRequests, peopleById, onChanged }) {
         completed += 1;
       }
       setActionState({ status: "success", message: `${completed} actual occurrence(s) verified individually and audited.` });
+      setBulkReview(null);
       onChanged();
     } catch (error) {
       setActionState({ status: "error", message: `${completed} verified. Bulk action stopped at the first server error: ${error.message || "Verification failed."}` });
@@ -1007,26 +1038,40 @@ function OtApprovalQueue({ requests, allRequests, peopleById, onChanged }) {
 
   const selectedChecks = selected?.kind === "actual" ? getActualChecks(selected.request) : null;
   const selectedTotal = selected ? employeeTotals[getOtManagerEmployeeId(selected.request)]?.countedMinutes || 0 : 0;
-  const selectedPlanned = selected ? Number(otValue(selected.request, "plannedMinutes", "planned_minutes") || 0) : 0;
-  const selectedActual = selected ? Number(otValue(selected.request, "actualMinutes", "actual_minutes") || 0) : 0;
-  const eligibleActualCount = actualRequests.filter(request => getActualChecks(request).eligible).length;
+  const selectedPlanned = selected ? getOccurrenceMinutes(selected.request, "plannedMinutes") : 0;
+  const selectedActual = selected ? getOccurrenceMinutes(selected.request, "actualMinutes") : 0;
+  const eligibleActualCount = actualRequests.filter(request => canAct(request) && getActualChecks(request).canBulkVerify).length;
+
+  function renderQueueItem(kind, request, statusNode) {
+    const content = <><span><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, peopleById)}</small></span>{statusNode}</>;
+    return canAct(request)
+      ? <button key={request.id} type="button" className="ot-queue-item" onClick={() => openDecision(kind, request)}>{content}</button>
+      : <div key={request.id} className="ot-queue-item ot-queue-item--readonly">{content}<small>Read only — assigned approver action</small></div>;
+  }
 
   return (
     <section className="ot-list" aria-label="Manager OT approval queues">
       <div className="ot-section-head"><h2>Approval & actual verification</h2><span>{planRequests.length} plan · {actualRequests.length} actual</span></div>
+      {bulkReview && <section className="ot-decision ot-bulk-review" aria-label="Bulk verification review">
+        <div className="ot-section-head"><div><h3>Bulk verification review</h3><p className="muted">Confirm only after reviewing each included occurrence. Writes run sequentially and stop at the first server error.</p></div><button type="button" className="btn btn--ghost" onClick={() => setBulkReview(null)}>Close</button></div>
+        <div className="ot-bulk-list">{bulkReview.requestsToVerify.map(request => { const checks = getActualChecks(request); const planned = getOccurrenceMinutes(request, "plannedMinutes"); const actual = getOccurrenceMinutes(request, "actualMinutes"); return <article className="ot-bulk-row" key={request.id}><div className="ot-section-head"><div><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, peopleById)}</small></div><span className="ot-status">Included</span></div><div className="ot-detail-grid"><div><span>Consent timestamp</span><strong>{formatConsentTimestamp(request)}</strong></div><div><span>Signed variance</span><strong>{window.FlowMateOtRequestDomain.formatSignedHours(actual - planned)}</strong></div><div><span>Employee weekly total</span><strong>{formatOtHours(checks.weeklyTotal)} / 36h</strong></div></div><p className="muted">No blocking consent, variance, weekly-limit, or compliance warning.</p></article>; })}</div>
+        {!!bulkReview.excludedRequests.length && <div className="ot-bulk-excluded"><h4>Excluded from bulk</h4>{bulkReview.excludedRequests.map(request => { const checks = getActualChecks(request); const planned = getOccurrenceMinutes(request, "plannedMinutes"); const actual = getOccurrenceMinutes(request, "actualMinutes"); return <article className="ot-bulk-row ot-bulk-row--excluded" key={request.id}><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, peopleById)}</small><div className="ot-detail-grid"><div><span>Consent timestamp</span><strong>{formatConsentTimestamp(request)}</strong></div><div><span>Signed variance</span><strong>{window.FlowMateOtRequestDomain.formatSignedHours(actual - planned)}</strong></div><div><span>Employee weekly total</span><strong>{formatOtHours(checks.weeklyTotal)} / 36h</strong></div></div><ul>{getBulkExclusionReasons(request, checks).map(reason => <li key={reason}>{reason}</li>)}</ul></article>; })}</div>}
+        <div className="ot-form__actions"><button type="button" className="btn btn--secondary" onClick={() => setBulkReview(null)}>Cancel</button><button type="button" className="btn btn--primary" disabled={!bulkReview.requestsToVerify.length || actionState.status === "submitting"} onClick={confirmBulkVerification}>Confirm {bulkReview.requestsToVerify.length} verifications</button></div>
+      </section>}
       <div className="ot-queue-grid">
-        <section className="ot-queue"><h3>Planned requests</h3>{planRequests.map(request => <button key={request.id} type="button" className="ot-queue-item" onClick={() => openDecision("plan", request)}><span><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, peopleById)}</small></span><span className={`ot-status ot-status--${getOtRequestStatus(request)}`}>{getOtStatusLabel(getOtRequestStatus(request))}</span></button>)}{!planRequests.length && <div className="ot-state ot-state--compact">No planned requests need a decision.</div>}</section>
-        <section className="ot-queue"><div className="ot-queue__head"><h3>Actual verification</h3><button type="button" className="btn btn--sm btn--secondary" disabled={!eligibleActualCount || actionState.status === "submitting"} onClick={verifyEligibleActuals}>Verify {eligibleActualCount} eligible</button></div>{actualRequests.map(request => { const checks = getActualChecks(request); return <button key={request.id} type="button" className="ot-queue-item" onClick={() => openDecision("actual", request)}><span><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, peopleById)}</small></span><span className={`ot-status ${checks.eligible ? "" : "ot-status--revision_required"}`}>{checks.eligible ? "Ready" : "Review"}</span></button>; })}{!actualRequests.length && <div className="ot-state ot-state--compact">No actual records need verification.</div>}</section>
+        <section className="ot-queue"><h3>Planned requests</h3>{planRequests.map(request => renderQueueItem("plan", request, <span className={`ot-status ot-status--${getOtRequestStatus(request)}`}>{getOtStatusLabel(getOtRequestStatus(request))}</span>))}{!planRequests.length && <div className="ot-state ot-state--compact">No planned requests need a decision.</div>}</section>
+        <section className="ot-queue"><div className="ot-queue__head"><h3>Actual verification</h3><button type="button" className="btn btn--sm btn--secondary" disabled={!eligibleActualCount || actionState.status === "submitting"} onClick={openBulkReview}>Review {eligibleActualCount} eligible</button></div>{actualRequests.map(request => { const checks = getActualChecks(request); return renderQueueItem("actual", request, <span className={`ot-status ${checks.canVerifyIndividually ? "" : "ot-status--revision_required"}`}>{checks.canVerifyIndividually ? "Ready" : "Review"}</span>); })}{!actualRequests.length && <div className="ot-state ot-state--compact">No actual records need verification.</div>}</section>
       </div>
 
       {selected && <section className="ot-decision" aria-label="OT decision details"><div className="ot-section-head"><h3>Review before decision</h3><button type="button" className="btn btn--ghost" onClick={() => setSelected(null)}>Close</button></div><div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selected.request, peopleById)}</strong></div><div><span>Consent timestamp</span><strong>{otValue(selected.request, "employeeConsentedAt", "employee_consented_at") ? new Date(otValue(selected.request, "employeeConsentedAt", "employee_consented_at")).toLocaleString("en-GB", { timeZone: "Asia/Bangkok" }) : "Not recorded"}</strong></div><div><span>Planned / actual variance</span><strong>{formatOtHours(selectedPlanned)} / {selectedActual ? formatOtHours(selectedActual) : "—"} ({selectedActual ? `${selectedActual - selectedPlanned}m` : "—"})</strong></div><div><span>Employee weekly total</span><strong>{formatOtHours(selectedTotal)} / 36h</strong></div></div>
-        {selectedTotal > OT_LIMIT_MINUTES && <OtWarning kind="critical" title="Weekly limit" message="This employee/week is above 36h. Approval is blocked; actual time requires compliance review." />}
+        {selected?.kind === "actual" && <div className="ot-detail-grid"><div><span>Signed variance</span><strong>{otValue(selected.request, "actualSubmittedAt", "actual_submitted_at") ? window.FlowMateOtRequestDomain.formatSignedHours(selectedActual - selectedPlanned) : "—"}</strong></div></div>}
+        {selectedTotal > OT_LIMIT_MINUTES && <OtWarning kind="critical" title="Weekly limit" message={selected.kind === "actual" ? "This employee/week is above 36h. The assigned approver may verify truthful actual time; the server keeps the compliance gate active." : "This employee/week is above 36h. Plan approval is blocked."} />}
         {selectedChecks && !selectedChecks.consentAccepted && <OtWarning kind="critical" title="Consent missing" message="Individual employee consent must be accepted before actual verification." />}
         {selectedChecks?.varianceNeedsReason && !selectedChecks.varianceHasReason && <OtWarning kind="critical" title="Variance reason missing" message="A change above 30 minutes needs an employee reason before verification." />}
-        {selectedChecks?.complianceRequired && <OtWarning kind="critical" title="Compliance review required" message="Normal actual verification cannot clear the server compliance workflow." />}
+        {selectedChecks?.complianceRequired && <OtWarning kind="critical" title="Compliance review required" message="The assigned approver may verify truthful actual time individually. The server retains the compliance gate after approval." />}
         <label className="field"><span className="field__label">Decision note {selected.kind === "plan" ? "(required for reject)" : "(required for return)"}</span><textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} placeholder="Add the operational decision context" /></label>
         <p className="muted">Every decision is saved through the assigned-request RPC and recorded in the audit trail.</p>
-        <div className="ot-form__actions">{selected.kind === "plan" ? <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("rejected")}>Reject plan</button><button type="button" className="btn btn--primary" disabled={selectedTotal > OT_LIMIT_MINUTES || actionState.status === "submitting"} onClick={() => decide("approved")}>Approve plan</button></> : <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("revision_required")}>Return actual</button><button type="button" className="btn btn--primary" disabled={!selectedChecks?.eligible || actionState.status === "submitting"} onClick={() => decide("approved")}>Verify actual</button></>}</div>
+        <div className="ot-form__actions">{selected.kind === "plan" ? <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("rejected")}>Reject plan</button><button type="button" className="btn btn--primary" disabled={selectedTotal > OT_LIMIT_MINUTES || actionState.status === "submitting"} onClick={() => decide("approved")}>Approve plan</button></> : <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("revision_required")}>Return actual</button><button type="button" className="btn btn--primary" disabled={!selectedChecks?.canVerifyIndividually || actionState.status === "submitting"} onClick={() => decide("approved")}>Verify actual</button></>}</div>
       </section>}
       {actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}
     </section>
@@ -1274,7 +1319,7 @@ function OtRootCausePanel({ filteredRows, currentWeekStart, peopleById }) {
     <section className="ot-root-cause" aria-labelledby="ot-root-cause-title">
       <div className="ot-section-head"><div><h2 id="ot-root-cause-title">OT Health & Root Cause</h2><p className="muted">Operational patterns by reason, Function, event, and week. Current filters stay applied to every drill-down.</p></div><span>{confirmedRows.length} confirmed rows</span></div>
       {!confirmedRows.length ? <div className="ot-state">No confirmed OT rows match the current authorized filters.</div> : <>
-        <section className="ot-root-summary" aria-label="Root cause summary"><div><span>Planned share</span><strong>{totalActual ? `${Math.round((plannedMinutes / totalActual) * 100)}%` : "0%"}</strong></div><div><span>Emergency share</span><strong>{totalActual ? `${Math.round((emergencyMinutes / totalActual) * 100)}%` : "0%"}</strong></div><div><span>Plan / actual variance</span><strong>{totalActual - totalPlanned >= 0 ? "+" : ""}{formatOtHours(Math.abs(totalActual - totalPlanned))}</strong></div><div><span>Recurring weeks</span><strong>{recurringWeeks}</strong></div></section>
+        <section className="ot-root-summary" aria-label="Root cause summary"><div><span>Planned share</span><strong>{totalActual ? `${Math.round((plannedMinutes / totalActual) * 100)}%` : "0%"}</strong></div><div><span>Emergency share</span><strong>{totalActual ? `${Math.round((emergencyMinutes / totalActual) * 100)}%` : "0%"}</strong></div><div><span>Plan / actual variance</span><strong>{window.FlowMateOtRequestDomain.formatSignedHours(totalActual - totalPlanned)}</strong></div><div><span>Recurring weeks</span><strong>{recurringWeeks}</strong></div></section>
         <section className="ot-root-grid"><article className="ot-root-card"><h3>{OT_ROOT_CAUSE_LABELS[0]}</h3>{Object.entries(functionTotals).sort((left, right) => left[0].localeCompare(right[0])).map(([functionCode, minutes]) => <div className="ot-root-bar" key={functionCode}><span>{OT_FUNCTIONS.find(option => option.value === functionCode)?.label || functionCode.toUpperCase()}</span><div><i style={{ width: `${totalActual ? Math.max(4, Math.round((minutes / totalActual) * 100)) : 0}%` }} /></div><strong>{formatOtHours(minutes)}</strong></div>)}</article><article className="ot-root-card"><h3>{OT_ROOT_CAUSE_LABELS[1]}</h3>{Object.entries(reasonTotals).sort((left, right) => right[1] - left[1]).map(([reasonCode, minutes]) => <div className="ot-root-bar" key={reasonCode}><span>{window.FlowMateOtRequestDomain.REASON_OPTIONS.find(reason => reason.key === reasonCode)?.label || getOtStatusLabel(reasonCode)}</span><div><i style={{ width: `${totalActual ? Math.max(4, Math.round((minutes / totalActual) * 100)) : 0}%` }} /></div><strong>{formatOtHours(minutes)}</strong></div>)}</article></section>
         <section className="ot-insights" aria-label="Deterministic OT insights"><div className="ot-section-head"><h3>Five approved operational checks</h3><span>{insights.length} signal{insights.length === 1 ? "" : "s"}</span></div>{!insights.length ? <div className="ot-state ot-state--compact">No deterministic rule is triggered by the confirmed rows in this scope.</div> : insights.map((insight, index) => <article className="ot-insight" key={`${insight.key}:${index}`}><div><strong>{insightCopy[insight.key] || insight.message}</strong><small>{insight.message}</small></div><button type="button" className="btn btn--sm btn--secondary" onClick={() => setSelectedInsight(insight)}>View authorized rows</button></article>)}</section>
       </>}
