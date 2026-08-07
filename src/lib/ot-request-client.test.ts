@@ -7,6 +7,7 @@ const clientPath = join(process.cwd(), "supabase-ot-request.js");
 const requestId = "11111111-1111-4111-8111-111111111111";
 const employeeId = "22222222-2222-4222-8222-222222222222";
 const idempotencyKey = "33333333-3333-4333-8333-333333333333";
+const consentStatementVersion = "ot-consent-v1";
 
 function loadClient(rpc: (name: string, params: unknown) => Promise<{ data: unknown; error: unknown }>, options: { userError?: (error: unknown, fallback: string) => string } = {}) {
   const sandbox: { window: Record<string, unknown> } = {
@@ -39,7 +40,7 @@ describe("OT request browser client", () => {
       { wrapper: "createOtRequest", args: [payload, idempotencyKey], name: "ot_create_request", params: { p_payload: payload, p_idempotency_key: idempotencyKey } },
       { wrapper: "previewOtEventPlan", args: [payload, [employeeId]], name: "ot_preview_event_plan", params: { p_payload: payload, p_employee_user_ids: [employeeId] } },
       { wrapper: "createOtEventPlan", args: [payload, [employeeId], idempotencyKey], name: "ot_create_event_plan", params: { p_payload: payload, p_employee_user_ids: [employeeId], p_idempotency_key: idempotencyKey } },
-      { wrapper: "recordOtConsent", args: [requestId, true, idempotencyKey], name: "ot_record_consent", params: { p_request_id: requestId, p_accept: true, p_idempotency_key: idempotencyKey } },
+      { wrapper: "recordOtConsent", args: [requestId, true, consentStatementVersion, idempotencyKey], name: "ot_record_consent", params: { p_request_id: requestId, p_accept: true, p_consent_statement_version: consentStatementVersion, p_idempotency_key: idempotencyKey } },
       { wrapper: "reviewOtPlan", args: [requestId, "approved", "Looks good", idempotencyKey], name: "ot_review_plan", params: { p_request_id: requestId, p_decision: "approved", p_note: "Looks good", p_idempotency_key: idempotencyKey } },
       { wrapper: "submitOtActual", args: [requestId, actualPayload, idempotencyKey], name: "ot_submit_actual", params: { p_request_id: requestId, p_payload: actualPayload, p_idempotency_key: idempotencyKey } },
       { wrapper: "verifyOtActual", args: [requestId, "verified", "Confirmed", idempotencyKey], name: "ot_verify_actual", params: { p_request_id: requestId, p_decision: "verified", p_note: "Confirmed", p_idempotency_key: idempotencyKey } },
@@ -57,6 +58,26 @@ describe("OT request browser client", () => {
     }
 
     expect(calls).toEqual(cases.map(({ name, params }) => ({ name, params })));
+  });
+
+  it("sends the accepted decision and consent statement version to the consent RPC", async () => {
+    const calls: Array<{ name: string; params: unknown }> = [];
+    const client = loadClient(async (name, params) => {
+      calls.push({ name, params });
+      return { data: { ok: true }, error: null };
+    });
+
+    await client.recordOtConsent(requestId, false, consentStatementVersion, idempotencyKey);
+
+    expect(calls).toEqual([{
+      name: "ot_record_consent",
+      params: {
+        p_request_id: requestId,
+        p_accept: false,
+        p_consent_statement_version: consentStatementVersion,
+        p_idempotency_key: idempotencyKey,
+      },
+    }]);
   });
 
   it("surfaces a safe OT-specific server error", async () => {
