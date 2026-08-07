@@ -29,6 +29,33 @@ where n.nspname = 'public'
 order by c.relname;
 
 select
+  'OT request consent and variance fields (Expected = 2)' as check_name,
+  pg_catalog.count(*) as actual_count,
+  pg_catalog.array_agg(c.column_name order by c.column_name) as found_columns
+from information_schema.columns c
+where c.table_schema = 'public'
+  and c.table_name = 'ot_requests'
+  and c.column_name in ('consent_statement_version', 'actual_variance_reason');
+
+select
+  'Legacy 3-argument consent RPC (Expected = 0)' as check_name,
+  pg_catalog.count(*) as actual_count
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_record_consent'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, uuid';
+
+select
+  'Versioned 4-argument consent RPC (Expected = 1)' as check_name,
+  pg_catalog.count(*) as actual_count
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_record_consent'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
+
+select
   'OT RPC signatures' as check_name,
   p.proname as function_name,
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,

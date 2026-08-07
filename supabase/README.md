@@ -11,6 +11,10 @@ For an existing Workgrid database, run only:
 
 Choose Run without RLS. The installer enables RLS, revokes direct writes, exposes authenticated RPCs, and seeds OT roles only for matching existing users. Production execution is a separate manual step and is not proven by local tests.
 
+The OT request installer stores the consent statement version on each occurrence. Employee-created requests require `consentStatementVersion` in `ot_create_request`; event consent uses `ot_record_consent(uuid, boolean, text, uuid)` and stores the version for either accept or decline. The installer removes the legacy three-argument consent signature so version capture cannot be bypassed.
+
+`ot_submit_actual` accepts `actualVarianceReason` (plus the snake-case and current `varianceReason` aliases). A non-empty reason is mandatory when absolute actual-versus-planned net minutes exceeds 30, and the normalized reason remains on the request and in its audit facts. These additions do not grant direct OT table writes or widen any existing read policy.
+
 ## Files
 
 | File | Purpose |

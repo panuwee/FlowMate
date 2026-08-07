@@ -37,6 +37,46 @@ describe("OT Request backend contract", () => {
     expect(verify).toContain("Expected active approver seed count = 3");
   });
 
+  it("persists the consent statement version for individual and event occurrences", () => {
+    const createRequest = functionSql(sql, "ot_create_request");
+    const recordConsent = functionSql(sql, "ot_record_consent");
+
+    expect(sql).toContain("consent_statement_version text");
+    expect(sql).toContain("add column if not exists consent_statement_version text");
+    expect(createRequest).toMatch(/consentStatementVersion[\s\S]*consent_statement_version[\s\S]*Consent statement version is required/);
+    expect(createRequest).toMatch(/employee_consent,[\s\S]*consent_statement_version,[\s\S]*employee_consented_at[\s\S]*'accepted', v_consent_statement_version,[\s\S]*now\(\)/);
+    expect(recordConsent).toContain("p_consent_statement_version text");
+    expect(recordConsent).toMatch(/nullif\(pg_catalog\.btrim\(p_consent_statement_version\), ''\)[\s\S]*Consent statement version is required/);
+    expect(recordConsent).toMatch(/employee_consent = 'accepted'[\s\S]*consent_statement_version = v_consent_statement_version/);
+    expect(recordConsent).toMatch(/employee_consent = 'declined'[\s\S]*consent_statement_version = v_consent_statement_version/);
+    expect(recordConsent).toMatch(/changed_fields[\s\S]*consentStatementVersion[\s\S]*v_consent_statement_version/);
+    expect(sql).toContain("drop function if exists public.ot_record_consent(uuid, boolean, uuid)");
+    expect(sql).toContain("grant execute on function public.ot_record_consent(uuid, boolean, text, uuid) to authenticated");
+  });
+
+  it("requires and persists a reason when actual net minutes vary by more than 30", () => {
+    const submit = functionSql(sql, "ot_submit_actual");
+
+    expect(sql).toContain("actual_variance_reason text");
+    expect(sql).toContain("add column if not exists actual_variance_reason text");
+    expect(submit).toMatch(/actualVarianceReason[\s\S]*actual_variance_reason[\s\S]*varianceReason/);
+    expect(submit).toContain("pg_catalog.abs(v_minutes - v_request.planned_minutes)");
+    expect(submit).toMatch(/v_variance_minutes > 30[\s\S]*v_variance_reason is null[\s\S]*Actual variance reason is required/);
+    expect(submit).toMatch(/actual_variance_reason = v_variance_reason/);
+    expect(submit).toMatch(/actualVarianceMinutes[\s\S]*v_variance_minutes[\s\S]*actualVarianceReason[\s\S]*v_variance_reason/);
+  });
+
+  it("verifies the new audit fields without widening direct writes", () => {
+    expect(verify).toContain("OT request consent and variance fields (Expected = 2)");
+    expect(verify).toContain("consent_statement_version");
+    expect(verify).toContain("actual_variance_reason");
+    expect(verify).toContain("Legacy 3-argument consent RPC (Expected = 0)");
+    expect(verify).toContain("Versioned 4-argument consent RPC (Expected = 1)");
+    expect(sql).toContain("revoke all on table public.ot_system_roles, public.ot_approvers");
+    expect(sql).toContain("grant select on public.ot_requests to authenticated");
+    expect(sql).not.toMatch(/grant\s+(insert|update|delete)\s+on\s+public\.ot_requests\s+to\s+authenticated/i);
+  });
+
   it("keeps event actuals behind per-occurrence employee consent", () => {
     const submit = functionSql(sql, "ot_submit_actual");
     const consent = functionSql(sql, "ot_record_consent");

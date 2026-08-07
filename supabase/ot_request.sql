@@ -72,6 +72,7 @@ create table if not exists public.ot_requests (
   actual_break_minutes integer check (actual_break_minutes is null or actual_break_minutes >= 0),
   actual_minutes integer check (actual_minutes is null or actual_minutes > 0),
   actual_week_segments jsonb,
+  actual_variance_reason text,
   status text not null check (status in (
     'draft', 'pending_approval', 'awaiting_consent', 'approved', 'rejected',
     'revision_required', 'actual_confirmation_required',
@@ -79,6 +80,7 @@ create table if not exists public.ot_requests (
     'hr_ready', 'exported', 'cancelled'
   )),
   employee_consent text check (employee_consent is null or employee_consent in ('accepted', 'declined')),
+  consent_statement_version text,
   employee_consented_at timestamptz,
   employee_submitted_at timestamptz,
   plan_decision text check (plan_decision is null or plan_decision in ('approved', 'rejected', 'revision_required')),
@@ -112,6 +114,10 @@ create table if not exists public.ot_requests (
   constraint ot_requests_week_segments_array check (pg_catalog.jsonb_typeof(planned_week_segments) = 'array' and (actual_week_segments is null or pg_catalog.jsonb_typeof(actual_week_segments) = 'array')),
   unique (created_by_user_id, idempotency_key, employee_user_id)
 );
+
+alter table public.ot_requests
+  add column if not exists consent_statement_version text,
+  add column if not exists actual_variance_reason text;
 
 create table if not exists public.ot_request_audit (
   id uuid primary key default gen_random_uuid(),
@@ -222,9 +228,12 @@ begin
 end
 $function$;
 
+drop function if exists public.ot_record_consent(uuid, boolean, uuid);
+
 create or replace function public.ot_record_consent(
   p_request_id uuid,
   p_accept boolean,
+  p_consent_statement_version text,
   p_idempotency_key uuid
 )
 returns jsonb
@@ -236,10 +245,14 @@ declare
   v_actor_id uuid := public.ot_require_current_user();
   v_request public.ot_requests;
   v_old_status text;
+  v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
 begin
   perform public.ot_lock_idempotency('record_consent', p_idempotency_key);
   if p_accept is null then
     raise exception 'Consent choice is required';
+  end if;
+  if v_consent_statement_version is null then
+    raise exception 'Consent statement version is required';
   end if;
   select * into v_request from public.ot_requests r where r.id = p_request_id;
   if not found or v_request.employee_user_id <> v_actor_id then
@@ -267,7 +280,9 @@ begin
   if p_accept then
     perform public.ot_assert_planned_limit(v_request.employee_user_id, v_request.planned_week_segments, v_request.id);
     update public.ot_requests
-    set employee_consent = 'accepted', employee_consented_at = now(),
+    set employee_consent = 'accepted',
+        consent_statement_version = v_consent_statement_version,
+        employee_consented_at = now(),
         status = case
           when actual_submitted_at is not null and compliance_required then 'compliance_review_required'
           when actual_submitted_at is not null then 'pending_actual_verification'
@@ -277,7 +292,9 @@ begin
     where id = p_request_id returning * into v_request;
   else
     update public.ot_requests
-    set employee_consent = 'declined', employee_consented_at = now(),
+    set employee_consent = 'declined',
+        consent_statement_version = v_consent_statement_version,
+        employee_consented_at = now(),
         status = case
           when actual_submitted_at is not null and compliance_required then 'compliance_review_required'
           else 'rejected'
@@ -291,7 +308,11 @@ begin
   ) values (
     v_request.id, v_request.event_plan_id, v_actor_id, 'record_consent',
     v_old_status, v_request.status,
-    pg_catalog.jsonb_build_object('accepted', p_accept, 'employeeConsentedAt', v_request.employee_consented_at),
+    pg_catalog.jsonb_build_object(
+      'accepted', p_accept,
+      'consentStatementVersion', v_consent_statement_version,
+      'employeeConsentedAt', v_request.employee_consented_at
+    ),
     p_idempotency_key
   );
   return pg_catalog.to_jsonb(v_request);
@@ -387,6 +408,8 @@ declare
   v_week date;
   v_total integer;
   v_over_limit boolean := false;
+  v_variance_minutes integer;
+  v_variance_reason text;
 begin
   perform public.ot_lock_idempotency('submit_actual', p_idempotency_key);
   perform pg_catalog.pg_advisory_xact_lock(
@@ -410,6 +433,11 @@ begin
   v_end_at := pg_catalog.coalesce(p_payload->>'actualEndAt', p_payload->>'actual_end_at')::timestamptz;
   v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'actualBreakMinutes', p_payload->>'actual_break_minutes')::integer, 0);
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
+  v_variance_reason := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'actualVarianceReason',
+    p_payload->>'actual_variance_reason',
+    p_payload->>'varianceReason'
+  )), '');
   v_segments := public.ot_build_week_segments(
     v_start_at, v_end_at, v_break_minutes,
     pg_catalog.coalesce(p_payload->'actualWeekSegments', p_payload->'actual_week_segments')
@@ -432,6 +460,10 @@ begin
   if v_request.status in ('cancelled', 'exported', 'hr_ready') then
     raise exception 'Actual OT cannot be changed after cancellation, HR readiness, or export';
   end if;
+  v_variance_minutes := pg_catalog.abs(v_minutes - v_request.planned_minutes);
+  if v_variance_minutes > 30 and v_variance_reason is null then
+    raise exception 'Actual variance reason is required when actual net minutes differ from planned net minutes by more than 30';
+  end if;
   for v_segment in select item from pg_catalog.jsonb_array_elements(v_segments) item
   loop
     v_week := (v_segment->>'weekStart')::date;
@@ -449,6 +481,7 @@ begin
       actual_break_minutes = v_break_minutes,
       actual_minutes = v_minutes,
       actual_week_segments = v_segments,
+      actual_variance_reason = v_variance_reason,
       actual_submitted_at = now(),
       actual_decision = null,
       actual_decision_note = null,
@@ -475,6 +508,8 @@ begin
     pg_catalog.jsonb_build_object(
       'actualStartAt', v_start_at, 'actualEndAt', v_end_at,
       'actualBreakMinutes', v_break_minutes, 'actualMinutes', v_minutes,
+      'actualVarianceMinutes', v_variance_minutes,
+      'actualVarianceReason', v_variance_reason,
       'weekSegments', v_segments, 'complianceRequired', v_over_limit
     ),
     case when v_over_limit then 'Truthful actual recorded above 36 hours; compliance review is required before HR readiness' else null end,
@@ -1189,6 +1224,7 @@ declare
   v_break_minutes integer;
   v_minutes integer;
   v_segments jsonb;
+  v_consent_statement_version text;
   v_request public.ot_requests;
 begin
   perform public.ot_lock_idempotency('create_request', p_idempotency_key);
@@ -1199,6 +1235,14 @@ begin
     and r.idempotency_key = p_idempotency_key;
   if found then
     return pg_catalog.to_jsonb(v_request);
+  end if;
+
+  v_consent_statement_version := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'consentStatementVersion',
+    p_payload->>'consent_statement_version'
+  )), '');
+  if v_consent_statement_version is null then
+    raise exception 'Consent statement version is required';
   end if;
 
   v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
@@ -1225,7 +1269,8 @@ begin
     employee_user_id, approver_user_id, created_by_user_id, source, request_type,
     function_code, title, day_type, work_location_type, venue, reason_code, reason_detail,
     planned_start_at, planned_end_at, planned_break_minutes, planned_minutes,
-    planned_week_segments, status, employee_submitted_at, idempotency_key
+    planned_week_segments, status, employee_consent, consent_statement_version,
+    employee_consented_at, employee_submitted_at, idempotency_key
   ) values (
     v_actor_id,
     v_approver_user_id,
@@ -1240,14 +1285,22 @@ begin
     pg_catalog.coalesce(p_payload->>'reasonCode', p_payload->>'reason_code'),
     pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_payload->>'reasonDetail', p_payload->>'reason_detail')), ''),
     v_start_at, v_end_at, v_break_minutes, v_minutes, v_segments,
-    'pending_approval', now(), p_idempotency_key
+    'pending_approval', 'accepted', v_consent_statement_version,
+    now(), now(), p_idempotency_key
   ) returning * into v_request;
 
   insert into public.ot_request_audit (
     request_id, actor_user_id, action, old_status, new_status, changed_fields, idempotency_key
   ) values (
     v_request.id, v_actor_id, 'create_request', null, v_request.status,
-    pg_catalog.jsonb_build_object('requestId', v_request.id, 'plannedMinutes', v_minutes, 'weekSegments', v_segments),
+    pg_catalog.jsonb_build_object(
+      'requestId', v_request.id,
+      'plannedMinutes', v_minutes,
+      'weekSegments', v_segments,
+      'employeeConsent', 'accepted',
+      'consentStatementVersion', v_consent_statement_version,
+      'employeeConsentedAt', v_request.employee_consented_at
+    ),
     p_idempotency_key
   );
   return pg_catalog.to_jsonb(v_request);
@@ -1901,7 +1954,7 @@ revoke all on function public.ot_list_people_for_event() from public, anon, auth
 revoke all on function public.ot_create_request(jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_preview_event_plan(jsonb, uuid[]) from public, anon, authenticated;
 revoke all on function public.ot_create_event_plan(jsonb, uuid[], uuid) from public, anon, authenticated;
-revoke all on function public.ot_record_consent(uuid, boolean, uuid) from public, anon, authenticated;
+revoke all on function public.ot_record_consent(uuid, boolean, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_review_plan(uuid, text, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_submit_actual(uuid, jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_verify_actual(uuid, text, text, uuid) from public, anon, authenticated;
@@ -1928,7 +1981,7 @@ grant execute on function public.ot_list_people_for_event() to authenticated;
 grant execute on function public.ot_create_request(jsonb, uuid) to authenticated;
 grant execute on function public.ot_preview_event_plan(jsonb, uuid[]) to authenticated;
 grant execute on function public.ot_create_event_plan(jsonb, uuid[], uuid) to authenticated;
-grant execute on function public.ot_record_consent(uuid, boolean, uuid) to authenticated;
+grant execute on function public.ot_record_consent(uuid, boolean, text, uuid) to authenticated;
 grant execute on function public.ot_review_plan(uuid, text, text, uuid) to authenticated;
 grant execute on function public.ot_submit_actual(uuid, jsonb, uuid) to authenticated;
 grant execute on function public.ot_verify_actual(uuid, text, text, uuid) to authenticated;
