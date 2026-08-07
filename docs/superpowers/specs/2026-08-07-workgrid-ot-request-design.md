@@ -24,6 +24,8 @@ The system is an approval and time-record source for HR. It does not calculate O
   - Big — `nithidol.k@garena.com`
   - Mac — `weerayut@garena.com`
   - Pluem — `napol.a@garena.com`
+- `panuwee.w@garena.com` is the initial `OT Owner`, the highest OT Request role with full visibility across all Functions, requests, event plans, compliance cases, audit history, and exports.
+- OT Owner authority is scoped to the OT Request module and does not grant additional rights in FlowMate, Marketing Plan, or Product Book.
 - Approver access is assignment-based. Being eligible does not grant visibility into every request automatically.
 - Store hours and day type only. HR calculates money outside Workgrid.
 - At request, consent, and manager-approval steps, block any action that would make the projected weekly total exceed 36 hours.
@@ -84,10 +86,13 @@ Inside OT Request, the product switcher contains all four modules. The OT Reques
 | Employee | Own requests, assignments, weekly total, remaining hours, and action items | Create, edit draft, consent, withdraw before approval, confirm actual time, respond to revision |
 | Event Lead / head | Requests explicitly assigned to the approver and employees in assigned event plans | Create group plan, approve/reject planned OT, verify actual time, request revision |
 | HR / Admin | All OT records, compliance exceptions, audit history, and exports | Review exceptions, mark HR ready, export, administer eligible approvers |
+| OT Owner | Full named and aggregate visibility across every Function, request, event plan, compliance case, audit record, and export | Manage OT roles and approvers, reassign pending work, perform compliance review, and export. Normal approvals still require assignment; administrative intervention requires a reason and audit record |
 | Executive / Director | Aggregate function, reason, and trend data by default | View management insight; named drill-down only when explicitly authorized |
 | Peer employee | No other employee's hours, reasons, or request history | View shared event information necessary to perform the work, without private OT detail |
 
 An Event participant may see aggregate progress such as `Consent received 7/10`. They do not see which peers have or have not consented unless they are an assigned Event Lead.
+
+The initial OT Owner is `panuwee.w@garena.com`. This identity must be configured server-side and protected by RLS; hiding or showing UI controls is not an authorization mechanism.
 
 ## 6. Information architecture
 
@@ -335,6 +340,7 @@ Use isolated OT tables and service functions so the module can evolve without co
 
 - `ot_event_plans`: shared event information and creator/approver assignment.
 - `ot_requests`: one employee and one OT occurrence per row, optionally linked to an event plan.
+- `ot_system_roles`: OT-specific owner and administrative role assignments.
 - `ot_approvers`: eligible approver email and active state.
 - `ot_request_audit`: append-only workflow and field-change history.
 - `ot_export_batches`: HR export metadata and included request IDs.
@@ -342,6 +348,8 @@ Use isolated OT tables and service functions so the module can evolve without co
 Calculated durations and limit validation are enforced by Supabase functions, not trusted from browser input. RLS enforces the visibility matrix. The UI may predict totals for immediate feedback, but the server result is authoritative.
 
 Initial approvers are seeded in `ot_approvers`. A request or event plan explicitly selects an eligible approver; eligibility alone does not provide global read access.
+
+`panuwee.w@garena.com` is seeded as the active `owner` in `ot_system_roles`. OT Owner checks happen in Supabase authorization functions and RLS policies. The frontend must not hardcode a global-visibility bypass.
 
 ## 16. Errors and edge cases
 
@@ -351,6 +359,7 @@ Initial approvers are seeded in `ot_approvers`. A request or event plan explicit
 - Missing consent: never approve or bulk approve.
 - Approver creates a group plan: creation records plan authorization, but individual consent is still mandatory.
 - Approver becomes inactive: HR/Admin reassigns pending records; history retains the original approver.
+- OT Owner administrative intervention: require a reason, retain the originally assigned approver, and append an audit event; never silently impersonate the assigned approver.
 - Employee withdraws before approval: mark cancelled and release projected hours.
 - Approved plan changes materially: invalidate prior consent when date, planned time, employee, or assignment changes; request new consent.
 - Actual time differs from plan: require a variance reason when difference exceeds 30 minutes.
@@ -402,6 +411,9 @@ The module extends the existing Workgrid design rather than introducing a new vi
 - Over-limit actual records cannot become `HR ready` or enter a normal export before HR review.
 - HR can export HR-ready records with day type and hours but without payroll calculations.
 - Every material action has an append-only audit record.
+- `panuwee.w@garena.com` has OT Owner visibility across all named and aggregate OT data after server-side role resolution.
+- OT Owner access remains restricted to OT Request and does not widen permissions in other Workgrid modules.
+- An OT Owner approval or verification outside the normal assignment path requires an intervention reason and audit record.
 
 ### Insight
 
@@ -412,7 +424,8 @@ The module extends the existing Workgrid design rather than introducing a new vi
 ## 19. Verification strategy
 
 - Unit tests for duration, break, overnight, workweek split, projected total, actual replacement, thresholds, and status derivation.
-- SQL/RLS tests for employee, assigned approver, non-assigned approver, HR/Admin, and executive aggregate access.
+- SQL/RLS tests for employee, assigned approver, non-assigned approver, HR/Admin, OT Owner, and executive aggregate access.
+- Negative authorization tests proving the OT Owner role does not grant additional access to FlowMate, Marketing Plan, or Product Book data.
 - Workflow tests for self request, group event plan, rejection, revision, withdrawal, actual verification, compliance review, and export.
 - Idempotency tests for every workflow mutation.
 - Static-build tests confirming source and GitHub output stay synchronized.
