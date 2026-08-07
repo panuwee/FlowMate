@@ -468,6 +468,7 @@ function OtRequestForm({
     if (approverState.status === "error" && approverErrorRef.current) approverErrorRef.current.focus();
   }, [approverState.status]);
   function update(field, value) {
+    if (window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)) return;
     setForm(current => ({
       ...current,
       [field]: value
@@ -526,9 +527,9 @@ function OtRequestForm({
     };
   }
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
-  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
+  const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
     totalField: "plannedMinutes"
-  });
+  }) : [];
   const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
@@ -591,6 +592,9 @@ function OtRequestForm({
     className: "ot-form",
     onSubmit: submitRequest,
     noValidate: true
+  }, React.createElement("fieldset", {
+    className: "ot-form__fieldset",
+    disabled: window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)
   }, React.createElement("div", {
     className: "form-grid"
   }, React.createElement("label", {
@@ -794,14 +798,14 @@ function OtRequestForm({
     type: "button",
     className: "btn btn--secondary",
     onClick: weekSummaryState.retry
-  }, "Retry totals")), React.createElement(OtWeekProjection, {
+  }, "Retry totals")), weekSummaryState.status === "ready" && React.createElement(OtWeekProjection, {
     title: "Planned totals by affected week",
     rows: projections
   }), !preview.valid && React.createElement(OtWarning, {
     kind: "error",
     title: "Schedule needs attention",
     message: preview.message
-  }), overLimit && React.createElement(OtWarning, {
+  }), weekSummaryState.status === "ready" && overLimit && React.createElement(OtWarning, {
     kind: "critical",
     title: "Request blocked",
     message: `At least one affected week would exceed the 36-hour limit: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}.`
@@ -813,7 +817,7 @@ function OtRequestForm({
     onChange: event => update("consented", event.target.checked)
   }), React.createElement("span", null, "I consent to this overtime occurrence and confirm the planned date and time shown above.")), React.createElement("small", {
     className: "muted"
-  }, "Consent statement version ", OT_CONSENT_STATEMENT_VERSION), submitState.message && React.createElement("div", {
+  }, "Consent statement version ", OT_CONSENT_STATEMENT_VERSION)), submitState.message && React.createElement("div", {
     ref: errorRef,
     tabIndex: submitState.status === "error" ? "-1" : undefined
   }, React.createElement(OtWarning, {
@@ -845,10 +849,10 @@ function OtConsentPanel({
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
   const plannedSegments = getOtWeekSegments(request, "planned");
   const weekSummaryState = useOtWeekSummaries(plannedSegments);
-  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(plannedSegments, weekSummaryState.summaries, {
+  const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(plannedSegments, weekSummaryState.summaries, {
     totalField: "plannedMinutes",
     excludedSegments: plannedSegments
-  });
+  }) : [];
   const overLimit = projections.some(row => row.overLimit);
   const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const end = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
@@ -912,10 +916,10 @@ function OtConsentPanel({
     type: "button",
     className: "btn btn--secondary",
     onClick: weekSummaryState.retry
-  }, "Retry totals")), React.createElement(OtWeekProjection, {
+  }, "Retry totals")), weekSummaryState.status === "ready" && React.createElement(OtWeekProjection, {
     title: "Consent totals by affected week",
     rows: projections
-  }), overLimit && React.createElement(OtWarning, {
+  }), weekSummaryState.status === "ready" && overLimit && React.createElement(OtWarning, {
     kind: "critical",
     title: "Consent blocked",
     message: `At least one affected week would exceed 36 hours: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}. Contact the Event Lead because the server will not accept this planned occurrence.`
@@ -980,6 +984,7 @@ function OtActualConfirmationForm({
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
   function update(field, value) {
+    if (window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)) return;
     setForm(current => ({
       ...current,
       [field]: value
@@ -1035,10 +1040,10 @@ function OtActualConfirmationForm({
   const actualMinutes = preview.minutes;
   const varianceRequired = preview.valid && Math.abs(actualMinutes - plannedMinutes) > 30;
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
-  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
+  const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
     totalField: "actualMinutes",
     excludedSegments: existingActualSegments
-  });
+  }) : [];
   const complianceLikely = projections.some(row => row.overLimit);
   const canSubmit = preview.valid && (!varianceRequired || form.varianceReason.trim()) && submitState.status !== "submitting" && submitState.status !== "success";
   useEffectApp(() => {
@@ -1118,6 +1123,9 @@ function OtActualConfirmationForm({
     "data-testid": "ot-confirm-actual",
     onSubmit: submitActual,
     noValidate: true
+  }, React.createElement("fieldset", {
+    className: "ot-form__fieldset",
+    disabled: window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)
   }, React.createElement("p", {
     className: "muted"
   }, "The planned schedule is prefilled. Change it to the time actually worked. Offline and eSport venue work does not require GPS or clock data."), React.createElement("div", {
@@ -1214,29 +1222,29 @@ function OtActualConfirmationForm({
   }, React.createElement("div", null, React.createElement("span", null, "Planned"), React.createElement("strong", null, formatOtHours(plannedMinutes))), React.createElement("div", null, React.createElement("span", null, "Truthful actual"), React.createElement("strong", null, preview.valid ? formatOtHours(actualMinutes) : "—"))), weekSummaryState.status === "loading" && preview.valid && React.createElement("div", {
     className: "ot-state ot-state--compact",
     role: "status"
-  }, "Loading compliance previews for every affected week…"), weekSummaryState.status === "error" && React.createElement("div", {
+  }, "Compliance preview is loading. You can still submit now; the server will validate and save the truthful time."), weekSummaryState.status === "error" && React.createElement("div", {
     ref: summaryErrorRef,
     tabIndex: "-1"
   }, React.createElement(OtWarning, {
     kind: "error",
     title: "Compliance preview unavailable",
-    message: `${weekSummaryState.message} You can still submit the truthful actual time; the server will apply the authoritative compliance check.`
+    message: `${weekSummaryState.message} You can still submit the truthful actual time; the server will validate and save the truthful time.`
   }), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
     onClick: weekSummaryState.retry
-  }, "Retry preview")), React.createElement(OtWeekProjection, {
+  }, "Retry preview")), weekSummaryState.status === "ready" && React.createElement(OtWeekProjection, {
     title: "Actual totals by affected week",
     rows: projections
   }), !preview.valid && React.createElement(OtWarning, {
     kind: "error",
     title: "Actual schedule needs attention",
     message: preview.message
-  }), complianceLikely && React.createElement(OtWarning, {
+  }), weekSummaryState.status === "ready" && complianceLikely && React.createElement(OtWarning, {
     kind: "critical",
     title: "Compliance review expected",
     message: "Submit the truthful actual hours. They will be saved and routed for compliance review rather than blocked."
-  }), submitState.message && React.createElement("div", {
+  })), submitState.message && React.createElement("div", {
     ref: errorRef,
     tabIndex: submitState.status === "error" ? "-1" : undefined
   }, React.createElement(OtWarning, {

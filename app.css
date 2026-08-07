@@ -3800,6 +3800,7 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .ot-section-head h2 { margin: 0; font-size: 18px; }
 .ot-section-head > span { font-size: 12px; color: var(--garena-grey); }
 .ot-form { display: grid; gap: var(--s-4); }
+.ot-form__fieldset { border: 0; display: grid; gap: var(--s-4); margin: 0; min-width: 0; padding: 0; }
 .ot-preview,
 .ot-detail-grid {
   display: grid;

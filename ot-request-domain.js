@@ -128,6 +128,10 @@
     return { key: createKey(), attempted: false };
   }
 
+  function isSubmissionLocked(status) {
+    return status === "submitting";
+  }
+
   function dateTimeMs(dateKey, time) {
     const date = parseDateKey(dateKey);
     return date.getTime() + parseTime(time) * MINUTE;
@@ -364,6 +368,7 @@
     startPersonalWeekLoad,
     buildWeekProjections,
     resetIntentAfterEdit,
+    isSubmissionLocked,
     deriveRequestStatus,
     canViewRequest,
     buildRootCauseInsights,

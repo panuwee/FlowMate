@@ -372,6 +372,7 @@ function OtRequestForm({ weekStart, onSuccess }) {
   }, [approverState.status]);
 
   function update(field, value) {
+    if (window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)) return;
     setForm(current => ({ ...current, [field]: value }));
     if (intent.attempted) {
       setIntent(current => window.FlowMateOtRequestDomain.resetIntentAfterEdit(current, () => crypto.randomUUID()));
@@ -407,11 +408,13 @@ function OtRequestForm({ weekStart, onSuccess }) {
   }
 
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
-  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(
-    preview.valid ? preview.segments : [],
-    weekSummaryState.summaries,
-    { totalField: "plannedMinutes" },
-  );
+  const projections = weekSummaryState.status === "ready"
+    ? window.FlowMateOtRequestDomain.buildWeekProjections(
+      preview.valid ? preview.segments : [],
+      weekSummaryState.summaries,
+      { totalField: "plannedMinutes" },
+    )
+    : [];
   const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
@@ -468,7 +471,8 @@ function OtRequestForm({ weekStart, onSuccess }) {
 
   return (
     <form className="ot-form" onSubmit={submitRequest} noValidate>
-      <div className="form-grid">
+      <fieldset className="ot-form__fieldset" disabled={window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)}>
+        <div className="form-grid">
         <label className="field"><span className="field__label">Function *</span><select className="select" value={form.functionCode} onChange={event => update("functionCode", event.target.value)} required><option value="">Select Function</option><option value="gdve">GD/VE</option><option value="ops">Ops</option><option value="mkt">MKT</option><option value="esport">eSport</option></select></label>
         <label className="field"><span className="field__label">Assignment or event *</span><input className="input" value={form.title} onChange={event => update("title", event.target.value)} required /></label>
         <label className="field"><span className="field__label">Work date *</span><input className="input" type="date" min={weekStart} max={addOtDays(weekStart, 6)} value={form.workDate} onChange={event => update("workDate", event.target.value)} required /><span className="field__hint">Choose a date in the selected Bangkok week.</span></label>
@@ -482,19 +486,20 @@ function OtRequestForm({ weekStart, onSuccess }) {
         <label className="field"><span className="field__label">Reason *</span><select className="select" value={form.reasonCode} onChange={event => update("reasonCode", event.target.value)} required><option value="">Select reason</option>{window.FlowMateOtRequestDomain.REASON_OPTIONS.map(reason => <option key={reason.key} value={reason.key}>{reason.label}</option>)}</select></label>
         <label className="field"><span className="field__label">Assigned approver *</span><select className="select" aria-label="Assigned approver" value={form.approverUserId} onChange={event => update("approverUserId", event.target.value)} disabled={approverState.status !== "ready" || !approverState.rows.length} required><option value="">{approverState.status === "loading" ? "Loading approvers…" : approverState.rows.length ? "Select approver" : "No approver available"}</option>{approverState.rows.map(approver => <option key={approver.userId} value={approver.userId}>{approver.displayName || approver.email}{approver.displayName ? ` — ${approver.email}` : ""}</option>)}</select>{approverState.status === "error" && <span className="field__error" role="alert" tabIndex="-1" ref={approverErrorRef}>{approverState.message} <button type="button" className="ot-link-button" onClick={() => setApproverRetry(value => value + 1)}>Retry</button></span>}{approverState.status === "ready" && !approverState.rows.length && <span className="field__error">No active OT approver is available. Contact the OT Owner.</span>}</label>
         <label className="field field--full"><span className="field__label">Reason detail {detailRequired ? "*" : "(optional)"}</span><textarea className="textarea" value={form.reasonDetail} onChange={event => update("reasonDetail", event.target.value)} required={detailRequired} placeholder={detailRequired ? "Explain what happened and why OT is required" : "Add only information needed for approval"} /></label>
-      </div>
+        </div>
 
-      {weekSummaryState.status === "loading" && preview.valid && <div className="ot-state ot-state--compact" role="status">Loading every affected week's OT total…</div>}
-      {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Weekly totals unavailable" message={`${weekSummaryState.message} Submission remains blocked until the totals are refreshed.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry totals</button></div>}
-      <OtWeekProjection title="Planned totals by affected week" rows={projections} />
-      {!preview.valid && <OtWarning kind="error" title="Schedule needs attention" message={preview.message} />}
-      {overLimit && <OtWarning kind="critical" title="Request blocked" message={`At least one affected week would exceed the 36-hour limit: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}.`} />}
+        {weekSummaryState.status === "loading" && preview.valid && <div className="ot-state ot-state--compact" role="status">Loading every affected week's OT total…</div>}
+        {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Weekly totals unavailable" message={`${weekSummaryState.message} Submission remains blocked until the totals are refreshed.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry totals</button></div>}
+        {weekSummaryState.status === "ready" && <OtWeekProjection title="Planned totals by affected week" rows={projections} />}
+        {!preview.valid && <OtWarning kind="error" title="Schedule needs attention" message={preview.message} />}
+        {weekSummaryState.status === "ready" && overLimit && <OtWarning kind="critical" title="Request blocked" message={`At least one affected week would exceed the 36-hour limit: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}.`} />}
 
-      <label className="ot-consent">
-        <input type="checkbox" checked={form.consented} onChange={event => update("consented", event.target.checked)} />
-        <span>I consent to this overtime occurrence and confirm the planned date and time shown above.</span>
-      </label>
-      <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
+        <label className="ot-consent">
+          <input type="checkbox" checked={form.consented} onChange={event => update("consented", event.target.checked)} />
+          <span>I consent to this overtime occurrence and confirm the planned date and time shown above.</span>
+        </label>
+        <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
+      </fieldset>
       {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
       <div className="ot-form__actions"><button type="submit" className="btn btn--primary" disabled={!canSubmit}>{submitState.status === "submitting" ? "Submitting…" : "Submit OT request"}</button></div>
     </form>
@@ -510,11 +515,13 @@ function OtConsentPanel({ request, onSuccess }) {
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
   const plannedSegments = getOtWeekSegments(request, "planned");
   const weekSummaryState = useOtWeekSummaries(plannedSegments);
-  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(
-    plannedSegments,
-    weekSummaryState.summaries,
-    { totalField: "plannedMinutes", excludedSegments: plannedSegments },
-  );
+  const projections = weekSummaryState.status === "ready"
+    ? window.FlowMateOtRequestDomain.buildWeekProjections(
+      plannedSegments,
+      weekSummaryState.summaries,
+      { totalField: "plannedMinutes", excludedSegments: plannedSegments },
+    )
+    : [];
   const overLimit = projections.some(row => row.overLimit);
   const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const end = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
@@ -557,8 +564,8 @@ function OtConsentPanel({ request, onSuccess }) {
       </div>
       {weekSummaryState.status === "loading" && <div className="ot-state ot-state--compact" role="status">Loading every affected week's OT total…</div>}
       {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Weekly totals unavailable" message={`${weekSummaryState.message} Accepting is blocked until the totals are refreshed; declining remains available.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry totals</button></div>}
-      <OtWeekProjection title="Consent totals by affected week" rows={projections} />
-      {overLimit && <OtWarning kind="critical" title="Consent blocked" message={`At least one affected week would exceed 36 hours: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}. Contact the Event Lead because the server will not accept this planned occurrence.`} />}
+      {weekSummaryState.status === "ready" && <OtWeekProjection title="Consent totals by affected week" rows={projections} />}
+      {weekSummaryState.status === "ready" && overLimit && <OtWarning kind="critical" title="Consent blocked" message={`At least one affected week would exceed 36 hours: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}. Contact the Event Lead because the server will not accept this planned occurrence.`} />}
       <label className="ot-consent">
         <input type="checkbox" checked={accepted} onChange={event => setAccepted(event.target.checked)} />
         <span>I consent to this overtime occurrence and confirm the planned date and time shown above.</span>
@@ -598,6 +605,7 @@ function OtActualConfirmationForm({ request, onSuccess }) {
   }, [submitState.status]);
 
   function update(field, value) {
+    if (window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)) return;
     setForm(current => ({ ...current, [field]: value }));
     if (intent.attempted) {
       setIntent(current => window.FlowMateOtRequestDomain.resetIntentAfterEdit(current, () => crypto.randomUUID()));
@@ -632,11 +640,13 @@ function OtActualConfirmationForm({ request, onSuccess }) {
   const actualMinutes = preview.minutes;
   const varianceRequired = preview.valid && Math.abs(actualMinutes - plannedMinutes) > 30;
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
-  const projections = window.FlowMateOtRequestDomain.buildWeekProjections(
-    preview.valid ? preview.segments : [],
-    weekSummaryState.summaries,
-    { totalField: "actualMinutes", excludedSegments: existingActualSegments },
-  );
+  const projections = weekSummaryState.status === "ready"
+    ? window.FlowMateOtRequestDomain.buildWeekProjections(
+      preview.valid ? preview.segments : [],
+      weekSummaryState.summaries,
+      { totalField: "actualMinutes", excludedSegments: existingActualSegments },
+    )
+    : [];
   const complianceLikely = projections.some(row => row.overLimit);
   const canSubmit = preview.valid && (!varianceRequired || form.varianceReason.trim()) && submitState.status !== "submitting" && submitState.status !== "success";
 
@@ -686,8 +696,9 @@ function OtActualConfirmationForm({ request, onSuccess }) {
 
   return (
     <form className="ot-form" data-testid="ot-confirm-actual" onSubmit={submitActual} noValidate>
-      <p className="muted">The planned schedule is prefilled. Change it to the time actually worked. Offline and eSport venue work does not require GPS or clock data.</p>
-      <div className="form-grid">
+      <fieldset className="ot-form__fieldset" disabled={window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)}>
+        <p className="muted">The planned schedule is prefilled. Change it to the time actually worked. Offline and eSport venue work does not require GPS or clock data.</p>
+        <div className="form-grid">
         <label className="field"><span className="field__label">Actual start date *</span><input className="input" type="date" value={form.startDate} onChange={event => update("startDate", event.target.value)} required /></label>
         <label className="field"><span className="field__label">Actual start time *</span><input className="input" type="time" value={form.startTime} onChange={event => update("startTime", event.target.value)} required /></label>
         <label className="field"><span className="field__label">Actual end date *</span><input className="input" type="date" value={form.endDate} onChange={event => update("endDate", event.target.value)} required /></label>
@@ -695,13 +706,14 @@ function OtActualConfirmationForm({ request, onSuccess }) {
         <label className="field"><span className="field__label">Actual total break (minutes) *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutes} onChange={event => update("breakMinutes", event.target.value)} required /></label>
         {preview.crossesWeek && <><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[0]?.weekStart || window.FlowMateOtRequestDomain.getWeekStartKey(form.startDate))} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesBeforeBoundary} onChange={event => update("breakMinutesBeforeBoundary", event.target.value)} required /></label><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[1]?.weekStart || window.FlowMateOtRequestDomain.getWeekStartKey(form.endDate))} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesAfterBoundary} onChange={event => update("breakMinutesAfterBoundary", event.target.value)} required /></label></>}
         {varianceRequired && <label className="field field--full"><span className="field__label">Why actual time differs from plan *</span><textarea className="textarea" value={form.varianceReason} onChange={event => update("varianceReason", event.target.value)} placeholder="Explain the variance of more than 30 minutes" required /></label>}
-      </div>
-      <section className="ot-preview" aria-label="Actual occurrence total"><div><span>Planned</span><strong>{formatOtHours(plannedMinutes)}</strong></div><div><span>Truthful actual</span><strong>{preview.valid ? formatOtHours(actualMinutes) : "—"}</strong></div></section>
-      {weekSummaryState.status === "loading" && preview.valid && <div className="ot-state ot-state--compact" role="status">Loading compliance previews for every affected week…</div>}
-      {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Compliance preview unavailable" message={`${weekSummaryState.message} You can still submit the truthful actual time; the server will apply the authoritative compliance check.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry preview</button></div>}
-      <OtWeekProjection title="Actual totals by affected week" rows={projections} />
-      {!preview.valid && <OtWarning kind="error" title="Actual schedule needs attention" message={preview.message} />}
-      {complianceLikely && <OtWarning kind="critical" title="Compliance review expected" message="Submit the truthful actual hours. They will be saved and routed for compliance review rather than blocked." />}
+        </div>
+        <section className="ot-preview" aria-label="Actual occurrence total"><div><span>Planned</span><strong>{formatOtHours(plannedMinutes)}</strong></div><div><span>Truthful actual</span><strong>{preview.valid ? formatOtHours(actualMinutes) : "—"}</strong></div></section>
+        {weekSummaryState.status === "loading" && preview.valid && <div className="ot-state ot-state--compact" role="status">Compliance preview is loading. You can still submit now; the server will validate and save the truthful time.</div>}
+        {weekSummaryState.status === "error" && <div ref={summaryErrorRef} tabIndex="-1"><OtWarning kind="error" title="Compliance preview unavailable" message={`${weekSummaryState.message} You can still submit the truthful actual time; the server will validate and save the truthful time.`} /><button type="button" className="btn btn--secondary" onClick={weekSummaryState.retry}>Retry preview</button></div>}
+        {weekSummaryState.status === "ready" && <OtWeekProjection title="Actual totals by affected week" rows={projections} />}
+        {!preview.valid && <OtWarning kind="error" title="Actual schedule needs attention" message={preview.message} />}
+        {weekSummaryState.status === "ready" && complianceLikely && <OtWarning kind="critical" title="Compliance review expected" message="Submit the truthful actual hours. They will be saved and routed for compliance review rather than blocked." />}
+      </fieldset>
       {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
       <div className="ot-form__actions"><button type="submit" className="btn btn--primary" disabled={!canSubmit}>{submitState.status === "submitting" ? "Saving…" : "Submit truthful actual time"}</button></div>
     </form>

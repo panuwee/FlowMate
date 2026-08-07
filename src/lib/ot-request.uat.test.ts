@@ -164,9 +164,14 @@ describe("OT Request static module integration", () => {
     }
     expect(employee).not.toContain("loadOtManagerDashboard");
     expect(employee).toContain("const overLimit = projections.some(row => row.overLimit)");
+    const request = employee.slice(employee.indexOf("function OtRequestForm("), employee.indexOf("function OtConsentPanel("));
+    expect(request).toContain('<fieldset className="ot-form__fieldset" disabled={window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)}>');
     const actual = employee.slice(employee.indexOf("function OtActualConfirmationForm("), employee.indexOf("function OtMyRequestsTable("));
+    expect(actual).toContain('<fieldset className="ot-form__fieldset" disabled={window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)}>');
     expect(actual).toContain("const complianceLikely = projections.some(row => row.overLimit)");
     expect(actual).not.toContain("&& !complianceLikely");
+    expect(employee.match(/weekSummaryState.status === "ready"\s*\? window\.FlowMateOtRequestDomain\.buildWeekProjections/g)).toHaveLength(3);
+    expect(actual).toContain("server will validate and save the truthful time");
     expect(employee).toContain("Math.abs(actualMinutes - plannedMinutes) > 30");
     expect(employee).toContain('status === "compliance_review_required"');
     expect(employee).toContain("crypto.randomUUID()");

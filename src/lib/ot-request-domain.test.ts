@@ -48,6 +48,14 @@ describe("OT request domain", () => {
     expect(domain.resetIntentAfterEdit({ key: "intent-one", attempted: true }, () => "intent-two")).toEqual({ key: "intent-two", attempted: false });
   });
 
+  it("locks payload editing only while a submission is in flight", () => {
+    const domain = loadDomain();
+    expect(domain.isSubmissionLocked("submitting")).toBe(true);
+    expect(domain.isSubmissionLocked("idle")).toBe(false);
+    expect(domain.isSubmissionLocked("error")).toBe(false);
+    expect(domain.isSubmissionLocked("success")).toBe(false);
+  });
+
   it("calculates same-day and overnight minutes after break", () => {
     const domain = loadDomain();
     expect(domain.calculateDurationMinutes({ startTime: "18:00", endTime: "22:30", breakMinutes: 30 })).toBe(240);
