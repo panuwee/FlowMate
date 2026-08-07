@@ -252,12 +252,15 @@ begin
   ) then
     return pg_catalog.to_jsonb(v_request);
   end if;
-  if v_request.source <> 'event_plan' or v_request.status <> 'awaiting_consent' then
-    raise exception 'Consent is available only for an awaiting event occurrence';
+  if v_request.source <> 'event_plan'
+     or v_request.employee_consent is not null
+     or v_request.status not in ('awaiting_consent', 'pending_actual_verification', 'compliance_review_required') then
+    raise exception 'Consent is available only once for an unconsented event occurrence';
   end if;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
-  if v_request.status <> 'awaiting_consent' then
+  if v_request.employee_consent is not null
+     or v_request.status not in ('awaiting_consent', 'pending_actual_verification', 'compliance_review_required') then
     raise exception 'Consent state changed; reload this occurrence';
   end if;
   v_old_status := v_request.status;
@@ -265,7 +268,12 @@ begin
     perform public.ot_assert_planned_limit(v_request.employee_user_id, v_request.planned_week_segments, v_request.id);
     update public.ot_requests
     set employee_consent = 'accepted', employee_consented_at = now(),
-        status = 'approved', updated_at = now()
+        status = case
+          when actual_submitted_at is not null and compliance_required then 'compliance_review_required'
+          when actual_submitted_at is not null then 'pending_actual_verification'
+          else 'approved'
+        end,
+        updated_at = now()
     where id = p_request_id returning * into v_request;
   else
     update public.ot_requests
@@ -370,12 +378,16 @@ declare
   v_break_minutes integer;
   v_minutes integer;
   v_segments jsonb;
+  v_lock_segments jsonb;
   v_segment jsonb;
   v_week date;
   v_total integer;
   v_over_limit boolean := false;
 begin
   perform public.ot_lock_idempotency('submit_actual', p_idempotency_key);
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
+  );
   select * into v_request from public.ot_requests r where r.id = p_request_id;
   if not found or v_request.employee_user_id <> v_actor_id then
     raise exception 'Only the assigned employee can submit truthful actual OT';
@@ -387,8 +399,8 @@ begin
   ) then
     return pg_catalog.to_jsonb(v_request);
   end if;
-  if v_request.status in ('cancelled', 'exported') then
-    raise exception 'Actual OT cannot be changed after cancellation or export';
+  if v_request.status in ('cancelled', 'exported', 'hr_ready') then
+    raise exception 'Actual OT cannot be changed after cancellation, HR readiness, or export';
   end if;
   v_start_at := pg_catalog.coalesce(p_payload->>'actualStartAt', p_payload->>'actual_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'actualEndAt', p_payload->>'actual_end_at')::timestamptz;
@@ -398,10 +410,23 @@ begin
     v_start_at, v_end_at, v_break_minutes,
     pg_catalog.coalesce(p_payload->'actualWeekSegments', p_payload->'actual_week_segments')
   );
-  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_segments);
+  with affected_weeks as (
+    select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    from pg_catalog.jsonb_array_elements(pg_catalog.coalesce(v_request.actual_week_segments, '[]'::jsonb)) item
+    union
+    select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    from pg_catalog.jsonb_array_elements(v_segments) item
+  )
+  select pg_catalog.jsonb_agg(
+    pg_catalog.jsonb_build_object('weekStart', week_start, 'minutes', 1)
+    order by week_start
+  )
+  into v_lock_segments
+  from affected_weeks;
+  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
-  if v_request.status in ('cancelled', 'exported') then
-    raise exception 'Actual OT cannot be changed after cancellation or export';
+  if v_request.status in ('cancelled', 'exported', 'hr_ready') then
+    raise exception 'Actual OT cannot be changed after cancellation, HR readiness, or export';
   end if;
   for v_segment in select item from pg_catalog.jsonb_array_elements(v_segments) item
   loop
@@ -431,7 +456,10 @@ begin
       compliance_reviewed_by_user_id = null,
       compliance_reviewed_at = null,
       hr_ready_at = null,
-      status = case when v_over_limit then 'compliance_review_required' else 'pending_actual_verification' end,
+      status = case
+        when v_over_limit then 'compliance_review_required'
+        else 'pending_actual_verification'
+      end,
       updated_at = now()
   where id = p_request_id returning * into v_request;
   insert into public.ot_request_audit (
@@ -481,6 +509,13 @@ begin
   ) then
     return pg_catalog.to_jsonb(v_request);
   end if;
+  if v_request.status not in ('pending_actual_verification', 'compliance_review_required') then
+    raise exception 'Actual OT is not awaiting approver verification';
+  end if;
+  if v_request.source = 'event_plan'
+     and v_request.employee_consent is distinct from 'accepted' then
+    raise exception 'Employee consent must be accepted before actual OT verification';
+  end if;
   if v_request.actual_submitted_at is null or v_request.actual_week_segments is null then
     raise exception 'Actual OT must be submitted before verification';
   end if;
@@ -489,6 +524,13 @@ begin
   end if;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.actual_week_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
+  if v_request.status not in ('pending_actual_verification', 'compliance_review_required') then
+    raise exception 'Actual OT state changed and is no longer awaiting verification';
+  end if;
+  if v_request.source = 'event_plan'
+     and v_request.employee_consent is distinct from 'accepted' then
+    raise exception 'Employee consent state changed before actual OT verification';
+  end if;
   if v_request.actual_submitted_at is null or v_request.actual_week_segments is null then
     raise exception 'Actual OT state changed; reload this request';
   end if;
@@ -526,6 +568,26 @@ end
 $function$;
 
 
+create or replace function public.ot_user_is_approved_approver_identity(p_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $function$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = p_user_id
+      and u.is_active = true
+      and pg_catalog.lower(pg_catalog.btrim(u.email)) in (
+        'nithidol.k@garena.com',
+        'weerayut@garena.com',
+        'napol.a@garena.com'
+      )
+  );
+$function$;
+
 create or replace function public.ot_current_user_is_owner()
 returns boolean
 language sql
@@ -539,7 +601,7 @@ as $function$
     join public.ot_system_roles r on r.user_id = u.id
     where u.id = (select auth.uid())
       and u.is_active = true
-      and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com'
+      and pg_catalog.lower(pg_catalog.btrim(u.email)) = 'panuwee.w@garena.com'
       and r.role_code = 'owner'
       and r.active = true
   );
@@ -577,7 +639,11 @@ as $function$
     join public.ot_approvers a on a.user_id = u.id
     where u.id = (select auth.uid())
       and u.is_active = true
-      and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com'
+      and pg_catalog.lower(pg_catalog.btrim(u.email)) in (
+        'nithidol.k@garena.com',
+        'weerayut@garena.com',
+        'napol.a@garena.com'
+      )
       and a.active = true
   );
 $function$;
@@ -596,7 +662,10 @@ as $function$
     where r.id = p_request_id
       and (
         r.employee_user_id = (select auth.uid())
-        or r.approver_user_id = (select auth.uid())
+        or (
+          r.approver_user_id = (select auth.uid())
+          and (select public.ot_current_user_is_eligible_approver())
+        )
         or (select public.ot_current_user_is_owner())
         or (select public.ot_current_user_is_hr_admin())
       )
@@ -699,6 +768,55 @@ begin
 end
 $function$;
 
+create or replace function public.ot_lock_employee_week_keys(
+  p_keys jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_key jsonb;
+  v_employee_user_id uuid;
+  v_week date;
+begin
+  if p_keys is null or pg_catalog.jsonb_typeof(p_keys) <> 'array' then
+    raise exception 'Employee-week lock keys must be a JSON array';
+  end if;
+  for v_key in
+    select item
+    from pg_catalog.jsonb_array_elements(p_keys) item
+    order by item->>'employeeUserId', item->>'weekStart'
+  loop
+    v_employee_user_id := (v_key->>'employeeUserId')::uuid;
+    v_week := (v_key->>'weekStart')::date;
+    perform pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(v_employee_user_id::text || ':' || v_week::text, 0)
+    );
+  end loop;
+
+  perform 1
+  from public.ot_requests r
+  where r.status not in ('cancelled', 'rejected')
+    and exists (
+      select 1
+      from pg_catalog.jsonb_array_elements(p_keys) key
+      where (key->>'employeeUserId')::uuid = r.employee_user_id
+        and (
+          r.planned_week_segments @> pg_catalog.jsonb_build_array(
+            pg_catalog.jsonb_build_object('weekStart', (key->>'weekStart')::date)
+          )
+          or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(
+            pg_catalog.jsonb_build_object('weekStart', (key->>'weekStart')::date)
+          )
+        )
+    )
+  order by r.id
+  for update;
+end
+$function$;
+
 create or replace function public.ot_lock_employee_weeks(
   p_employee_user_id uuid,
   p_segments jsonb
@@ -709,27 +827,20 @@ security definer
 set search_path = ''
 as $function$
 declare
-  v_week date;
+  v_keys jsonb;
 begin
-  for v_week in
-    select distinct (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date
+  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+    pg_catalog.jsonb_build_object(
+      'employeeUserId', p_employee_user_id,
+      'weekStart', week_start
+    ) order by week_start
+  ), '[]'::jsonb)
+  into v_keys
+  from (
+    select distinct (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
     from pg_catalog.jsonb_array_elements(p_segments) item
-    order by 1
-  loop
-    perform pg_catalog.pg_advisory_xact_lock(
-      pg_catalog.hashtextextended(p_employee_user_id::text || ':' || v_week::text, 0)
-    );
-    perform 1
-    from public.ot_requests r
-    where r.employee_user_id = p_employee_user_id
-      and r.status not in ('cancelled', 'rejected')
-      and (
-        r.planned_week_segments @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', v_week))
-        or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', v_week))
-      )
-    order by r.id
-    for update;
-  end loop;
+  ) weeks;
+  perform public.ot_lock_employee_week_keys(v_keys);
 end
 $function$;
 
@@ -1014,7 +1125,13 @@ begin
   into v_result
   from public.ot_approvers a
   join public.users u on u.id = a.user_id
-  where a.active = true and u.is_active = true;
+  where a.active = true
+    and u.is_active = true
+    and pg_catalog.lower(pg_catalog.btrim(u.email)) in (
+      'nithidol.k@garena.com',
+      'weerayut@garena.com',
+      'napol.a@garena.com'
+    );
   return v_result;
 end
 $function$;
@@ -1081,7 +1198,8 @@ begin
   end if;
 
   v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
-  if not exists (
+  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
+     or not exists (
     select 1 from public.ot_approvers a join public.users u on u.id = a.user_id
     where a.user_id = v_approver_user_id and a.active = true and u.is_active = true
   ) then
@@ -1255,7 +1373,8 @@ begin
     pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid,
     v_actor_id
   );
-  if not exists (
+  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
+     or not exists (
     select 1 from public.ot_approvers a join public.users u on u.id = a.user_id
     where a.user_id = v_approver_user_id and a.active = true and u.is_active = true
   ) then
@@ -1503,6 +1622,7 @@ declare
   v_batch public.ot_export_batches;
   v_request public.ot_requests;
   v_request_id uuid;
+  v_lock_keys jsonb;
 begin
   if not public.ot_current_user_is_owner() and not public.ot_current_user_is_hr_admin() then
     raise exception 'OT Owner or HR/Admin access required';
@@ -1523,6 +1643,26 @@ begin
     return pg_catalog.to_jsonb(v_batch);
   end if;
 
+  with affected_keys as (
+    select distinct
+      r.employee_user_id,
+      (pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start'))::date as week_start
+    from public.ot_requests r
+    cross join lateral pg_catalog.jsonb_array_elements(
+      pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb)
+    ) segment
+    where r.id = any(p_request_ids)
+  )
+  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+    pg_catalog.jsonb_build_object(
+      'employeeUserId', employee_user_id,
+      'weekStart', week_start
+    ) order by employee_user_id, week_start
+  ), '[]'::jsonb)
+  into v_lock_keys
+  from affected_keys;
+  perform public.ot_lock_employee_week_keys(v_lock_keys);
+
   foreach v_request_id in array (
     select pg_catalog.array_agg(request_id order by request_id)
     from pg_catalog.unnest(p_request_ids) request_id
@@ -1533,7 +1673,6 @@ begin
        or (v_request.compliance_required and v_request.compliance_reviewed_at is null) then
       raise exception 'Request % is not eligible for HR export', v_request_id;
     end if;
-    perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.actual_week_segments);
     select * into v_request from public.ot_requests r where r.id = v_request_id for update;
     if v_request.status <> 'hr_ready' or v_request.hr_ready_at is null
        or (v_request.compliance_required and v_request.compliance_reviewed_at is null) then
@@ -1591,11 +1730,8 @@ begin
   if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_reason, ''))) = 0 then
     raise exception 'A non-empty reason is required';
   end if;
-  if not exists (
-    select 1 from public.users u where u.id = p_user_id and u.is_active = true
-      and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com'
-  ) then
-    raise exception 'Approver must be an active Garena Workgrid user';
+  if not public.ot_user_is_approved_approver_identity(p_user_id) then
+    raise exception 'Approver must be one of the three approved MVP identities';
   end if;
   perform public.ot_lock_idempotency('set_approver', p_idempotency_key);
   select a.changed_fields into v_result
@@ -1637,6 +1773,7 @@ declare
   v_actor_id uuid := public.ot_require_current_user();
   v_previous jsonb;
   v_result jsonb;
+  v_target_email text;
 begin
   if not public.ot_current_user_is_owner() then
     raise exception 'Only the OT Owner can manage OT system roles';
@@ -1650,11 +1787,16 @@ begin
   if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_reason, ''))) = 0 then
     raise exception 'A non-empty reason is required';
   end if;
-  if not exists (
-    select 1 from public.users u where u.id = p_user_id and u.is_active = true
-      and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com'
-  ) then
+  select pg_catalog.lower(pg_catalog.btrim(u.email))
+  into v_target_email
+  from public.users u
+  where u.id = p_user_id and u.is_active = true;
+  if not found or v_target_email not like '%@garena.com' then
     raise exception 'OT role holder must be an active Garena Workgrid user';
+  end if;
+  if p_role_code = 'owner'
+     and v_target_email <> 'panuwee.w@garena.com' then
+    raise exception 'The only approved OT Owner identity is panuwee.w@garena.com';
   end if;
   perform public.ot_lock_idempotency('set_system_role', p_idempotency_key);
   select a.changed_fields into v_result
@@ -1671,9 +1813,15 @@ begin
   on conflict (user_id) do update
   set role_code = excluded.role_code, active = excluded.active;
   if not exists (
-    select 1 from public.ot_system_roles r where r.role_code = 'owner' and r.active = true
+    select 1
+    from public.ot_system_roles r
+    join public.users owner_user on owner_user.id = r.user_id
+    where r.role_code = 'owner'
+      and r.active = true
+      and owner_user.is_active = true
+      and pg_catalog.lower(pg_catalog.btrim(owner_user.email)) = 'panuwee.w@garena.com'
   ) then
-    raise exception 'At least one active OT Owner is required';
+    raise exception 'At least one active approved OT Owner is required';
   end if;
   v_result := pg_catalog.jsonb_build_object(
     'userId', p_user_id, 'roleCode', p_role_code, 'active', p_active,
@@ -1723,8 +1871,10 @@ grant select on public.ot_requests to authenticated;
 revoke insert, update, delete on public.ot_request_audit from authenticated;
 
 revoke all on function public.ot_require_current_user() from public, anon, authenticated;
+revoke all on function public.ot_user_is_approved_approver_identity(uuid) from public, anon, authenticated;
 revoke all on function public.ot_week_start(timestamptz) from public, anon, authenticated;
 revoke all on function public.ot_build_week_segments(timestamptz, timestamptz, integer, jsonb) from public, anon, authenticated;
+revoke all on function public.ot_lock_employee_week_keys(jsonb) from public, anon, authenticated;
 revoke all on function public.ot_lock_employee_weeks(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.ot_projected_week_minutes_unchecked(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_actual_week_minutes(uuid, date, uuid) from public, anon, authenticated;
