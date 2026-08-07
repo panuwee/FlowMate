@@ -2,6 +2,15 @@
 
 This folder contains the SQL needed to prepare the Supabase backend for FlowMate.
 
+### OT Request MVP
+
+For an existing Workgrid database, run only:
+
+1. `supabase/ot_request.sql`
+2. `supabase/ot_request_verify.sql` (read-only; run last)
+
+Choose Run without RLS. The installer enables RLS, revokes direct writes, exposes authenticated RPCs, and seeds OT roles only for matching existing users. Production execution is a separate manual step and is not proven by local tests.
+
 ## Files
 
 | File | Purpose |
