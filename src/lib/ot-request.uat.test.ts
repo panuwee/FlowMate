@@ -157,7 +157,7 @@ describe("OT Request static module integration", () => {
 
   it("uses only personal OT RPCs for employee actions and preserves truthful over-limit actuals", () => {
     const screen = read("screens-ot.jsx");
-    const employee = screen.slice(screen.indexOf("function OtEmployeeDashboard("), screen.indexOf("function OtRequestShell("));
+    const employee = screen.slice(screen.indexOf("function OtEmployeeDashboard("), screen.indexOf("function OtManagerDashboard("));
 
     for (const api of ["loadMyOtDashboard", "loadMyOtRequests", "loadOtEligibleApprovers", "createOtRequest", "recordOtConsent", "submitOtActual"]) {
       expect(employee).toContain(`window.${api}`);
@@ -185,6 +185,59 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain("state.weekKey === weekKey");
     expect(employee).toContain("resetIntentAfterEdit(");
     expect(employee).toContain("window.recordOtConsent(request.id, choice, OT_CONSENT_STATEMENT_VERSION, key)");
+  });
+
+  it("implements the manager weekly operations hub without an OT leaderboard", () => {
+    const screen = read("screens-ot.jsx");
+    for (const component of ["OtManagerDashboard", "OtApprovalQueue", "OtEventPlanForm", "OtTeamWeekTable", "OtRootCausePanel"]) {
+      expect(screen).toContain(`function ${component}(`);
+    }
+    for (const label of ["Planned OT", "Confirmed", "Needs approval", "Near 36h limit", "OT by function", "Why OT happens"]) {
+      expect(screen).toContain(`"${label}"`);
+    }
+    expect(screen).toContain("Assigned teams/events only");
+    expect(screen).not.toMatch(/rank|top performer|commitment score/i);
+  });
+
+  it("keeps manager rows server-scoped and performs every bulk verification individually", () => {
+    const screen = read("screens-ot.jsx");
+    const manager = screen.slice(screen.indexOf("function OtManagerDashboard("), screen.indexOf("function OtRequestShell("));
+
+    for (const api of ["loadOtManagerDashboard", "loadOtPeopleForEvent", "loadOtEligibleApprovers", "reviewOtPlan", "verifyOtActual"]) {
+      expect(manager).toContain(`window.${api}`);
+    }
+    expect(manager).not.toMatch(/\.from\(["'`]ot_/);
+    expect(manager).toContain("for (const request of requestsToVerify)");
+    expect(manager).toContain("await window.verifyOtActual(");
+    expect(manager).toContain("crypto.randomUUID()");
+    expect(manager).toContain('decision !== "approved" && !note.trim()');
+    expect(manager).toContain('&& !otValue(request, "actualSubmittedAt", "actual_submitted_at")');
+    expect(manager).toContain("const historyEmployeeTotals = getOtManagerTotals(loadState.rows, true)");
+    expect(manager).toContain('["cancelled", "rejected"].includes(getOtRequestStatus(request))');
+  });
+
+  it("previews event plans per employee and excludes every over-limit occurrence", () => {
+    const screen = read("screens-ot.jsx");
+    const eventForm = screen.slice(screen.indexOf("function OtEventPlanForm("), screen.indexOf("function OtRootCausePanel("));
+
+    expect(eventForm).toContain("window.previewOtEventPlan(payload, form.employeeUserIds)");
+    expect(eventForm).toContain("employee.canCreate");
+    expect(eventForm).toContain("const eligibleEmployeeIds");
+    expect(eventForm).toContain("window.createOtEventPlan(payload, eligibleEmployeeIds, intent.key)");
+    expect(eventForm).toContain("This employee is excluded because at least one affected week would exceed 36h.");
+    expect(eventForm).toContain("Consent received");
+    expect(eventForm).toContain("Awaiting consent");
+  });
+
+  it("uses the approved deterministic root-cause rules only on authorized manager rows", () => {
+    const screen = read("screens-ot.jsx");
+    const rootCause = screen.slice(screen.indexOf("function OtRootCausePanel("), screen.indexOf("function OtRequestShell("));
+
+    expect(rootCause).toContain("OT Health & Root Cause");
+    expect(rootCause).toContain("window.FlowMateOtRequestDomain.buildRootCauseInsights(filteredRows");
+    expect(rootCause).toContain("View authorized rows");
+    expect(rootCause).toContain("Current filters stay applied");
+    expect(rootCause).not.toMatch(/performance|productivity|commitment|value score/i);
   });
 
   it("adds OT Request as the fourth product without changing the first three", () => {

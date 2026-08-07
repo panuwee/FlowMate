@@ -248,4 +248,15 @@ describe("OT request domain", () => {
     ], { currentWeekStart: "2026-08-03" });
     expect(insights.map((insight: { key: string }) => insight.key)).not.toContain("recurring_rework_or_scope_change");
   });
+
+  it("does not turn unverified operational records into root-cause signals", () => {
+    const domain = loadDomain();
+    const insights = domain.buildRootCauseInsights([
+      { id: "unverified-event", eventPlanId: "event", functionCode: "esport", workDate: "2026-08-03", plannedMinutes: 60, actualMinutes: 600, reasonCode: "live_incident" },
+      { id: "unverified-rework-one", functionCode: "esport", workDate: "2026-08-03", actualMinutes: 1200, reasonCode: "rework" },
+      { id: "unverified-rework-two", functionCode: "esport", workDate: "2026-07-27", actualMinutes: 1200, reasonCode: "scope_change" },
+    ], { currentWeekStart: "2026-08-03" });
+
+    expect(insights).toEqual([]);
+  });
 });

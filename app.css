@@ -3825,6 +3825,116 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .ot-status--revision_required { color: var(--garena-red); background: var(--garena-red-light-2); }
 .ot-link-button { padding: 0; border: 0; background: transparent; color: var(--garena-red); text-decoration: underline; }
 .ot-form__actions { justify-content: flex-end; }
+.ot-manager,
+.ot-root-cause { display: grid; gap: var(--s-5); margin-top: var(--s-5); }
+.ot-manager-scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  border-left: 3px solid var(--garena-red);
+  background: var(--garena-white);
+  color: var(--garena-iron);
+}
+.ot-manager-scope strong { color: var(--garena-black); }
+.ot-manager-filters {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr)) auto;
+  align-items: end;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--garena-white);
+}
+.ot-filter-check {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  gap: var(--s-2);
+  white-space: nowrap;
+}
+.ot-filter-check input,
+.ot-participant input { width: 16px; height: 16px; accent-color: var(--garena-red); }
+.ot-metric-grid--manager { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0; }
+.ot-manager-actions { display: flex; justify-content: flex-end; gap: var(--s-3); }
+.ot-queue-grid,
+.ot-root-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-4); }
+.ot-queue { min-width: 0; }
+.ot-queue h3,
+.ot-root-card h3,
+.ot-insights h3 { margin: 0 0 var(--s-3); font-size: 15px; }
+.ot-queue__head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin-bottom: var(--s-3); }
+.ot-queue__head h3 { margin: 0; }
+.ot-queue-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+  padding: var(--s-3);
+  border: var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--garena-bg);
+  text-align: left;
+}
+.ot-queue-item:hover { border-color: var(--garena-iron); }
+.ot-queue-item:focus-visible { outline: 0; box-shadow: var(--shadow-focus); }
+.ot-queue-item span:first-child,
+.ot-participant span,
+.ot-event-preview__row > div,
+.ot-insight > div,
+.ot-insight-row > div { min-width: 0; }
+.ot-queue-item strong,
+.ot-queue-item small,
+.ot-participant strong,
+.ot-participant small,
+.ot-event-preview__row strong,
+.ot-event-preview__row small,
+.ot-insight strong,
+.ot-insight small,
+.ot-insight-row strong,
+.ot-insight-row small { display: block; }
+.ot-queue-item small,
+.ot-participant small,
+.ot-event-preview__row small,
+.ot-insight small,
+.ot-insight-row small { margin-top: 3px; color: var(--garena-grey); }
+.ot-decision,
+.ot-manager-detail,
+.ot-root-card,
+.ot-insights {
+  padding: var(--s-4);
+  border: var(--border-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--garena-white);
+}
+.ot-decision { display: grid; gap: var(--s-4); margin-top: var(--s-4); }
+.ot-participants,
+.ot-event-preview { display: grid; gap: var(--s-3); }
+.ot-participant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); max-height: 300px; overflow-y: auto; }
+.ot-participant { display: flex; align-items: flex-start; gap: var(--s-2); padding: var(--s-3); border: var(--border-hairline); border-radius: var(--radius-sm); background: var(--garena-bg); }
+.ot-event-preview__row,
+.ot-insight,
+.ot-insight-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); padding: var(--s-3); border: var(--border-hairline); border-radius: var(--radius-sm); background: var(--garena-bg); }
+.ot-event-preview__row.is-blocked { border-left: 3px solid var(--garena-red); }
+.ot-event-preview__row > div:last-child { display: grid; justify-items: end; gap: 3px; font-size: 12px; color: var(--garena-iron); }
+.ot-team-table { min-width: 1180px; }
+.ot-team-table .ot-table-group th { background: var(--garena-badge-bg); color: var(--garena-black); text-transform: uppercase; letter-spacing: 0.04em; }
+.ot-team-table th[scope="row"] { min-width: 160px; text-align: left; vertical-align: top; }
+.ot-root-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-3); }
+.ot-root-summary > div { padding: var(--s-4); border: var(--border-hairline); border-radius: var(--radius-sm); background: var(--garena-white); }
+.ot-root-summary span { display: block; color: var(--garena-grey); font-size: 11px; }
+.ot-root-summary strong { display: block; margin-top: var(--s-2); color: var(--garena-black); font-size: 20px; }
+.ot-root-card { min-width: 0; }
+.ot-root-bar { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(80px, 2fr) auto; align-items: center; gap: var(--s-2); margin-top: var(--s-3); font-size: 12px; }
+.ot-root-bar > div { height: 7px; overflow: hidden; border-radius: 99px; background: var(--garena-light-grey); }
+.ot-root-bar i { display: block; height: 100%; border-radius: inherit; background: var(--garena-iron); }
+.ot-insights { display: grid; gap: var(--s-3); }
+.ot-insights .ot-section-head { margin-bottom: 0; }
+.ot-insight-row { margin-top: var(--s-2); }
 
 @media (max-width: 760px) {
   .ot-shell {
@@ -3882,4 +3992,17 @@ html[data-theme="dark"] .product-book-cms__message--error {
   .ot-form .form-grid .field--full { grid-column: auto; }
   .ot-form__actions { align-items: stretch; flex-direction: column; }
   .ot-form__actions .btn { width: 100%; }
+  .ot-manager-scope { align-items: flex-start; flex-direction: column; }
+  .ot-manager-filters,
+  .ot-metric-grid--manager,
+  .ot-queue-grid,
+  .ot-root-grid,
+  .ot-root-summary,
+  .ot-participant-grid { grid-template-columns: 1fr; }
+  .ot-manager-actions { align-items: stretch; flex-direction: column; }
+  .ot-manager-actions .btn { width: 100%; }
+  .ot-queue__head,
+  .ot-event-preview__row,
+  .ot-insight { align-items: flex-start; flex-direction: column; }
+  .ot-event-preview__row > div:last-child { justify-items: start; }
 }
