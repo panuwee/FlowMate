@@ -63,7 +63,7 @@ describe("Product Book Mini CMS", () => {
     for (const path of entryPaths) {
       const html = read(...path);
       expect(html).toContain('supabase-product-book.js?v=20260803-5');
-      expect(html).toContain('app.js?v=20260806-01');
+      expect(html).toContain('app.js?v=20260807-01');
       expect(html.indexOf("supabase-product-book.js")).toBeLessThan(html.indexOf("app.js"));
     }
     expect(app).toContain("getProductBookStaticPublishedPatches");

@@ -101,3 +101,42 @@ describe("OT Request backend contract", () => {
     expect(submit).toContain("public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments)");
   });
 });
+
+describe("OT Request static module integration", () => {
+  it("adds OT Request as the fourth product without changing the first three", () => {
+    const app = read("app.jsx");
+
+    expect(app).toContain('const OT_REQUEST_PRODUCT_KEY = "ot-request"');
+    expect(app).toContain("function chooseOtRequestProduct()");
+    const productChoice = app.slice(app.indexOf("function ProductChoiceScreen"), app.indexOf("function normalizeProductBookArrayInput"));
+    expect(productChoice.indexOf('"FlowMate"')).toBeLessThan(productChoice.indexOf('"Marketing Plan"'));
+    expect(productChoice.indexOf('"Marketing Plan"')).toBeLessThan(productChoice.indexOf('"Product Book"'));
+    expect(productChoice.indexOf('"Product Book"')).toBeLessThan(productChoice.indexOf('"OT Request"'));
+
+    const screen = read("screens-ot.jsx");
+    expect(screen).toContain("function OtRequestShell(");
+    expect(screen).toContain("window.OtRequestShell = OtRequestShell");
+    expect(screen).toContain('"ot-request/manager"');
+    expect(screen).toContain('"ot-request/root-causes"');
+    expect(screen).toContain("access.isEligibleApprover");
+    expect(screen).toContain('if (access.status === "loading") return;');
+    expect(screen).toContain('const visibleView = canOpenOtRequestView(activeView, access) ? activeView : "overview";');
+  });
+
+  it("loads OT runtime files before the application on every tracked entry", () => {
+    for (const entry of [["index.html"], ["home", "index.html"], ["product-book", "index.html"]]) {
+      const html = read(...entry);
+      expect(html).toContain("ot-request-domain.js?v=20260807-01");
+      expect(html).toContain("supabase-ot-request.js?v=20260807-01");
+      expect(html).toContain("screens-ot.js?v=20260807-01");
+      expect(html.indexOf("ot-request-domain.js")).toBeLessThan(html.indexOf("screens-ot.js"));
+      expect(html.indexOf("supabase-ot-request.js")).toBeLessThan(html.indexOf("screens-ot.js"));
+      expect(html.indexOf("screens-ot.js")).toBeLessThan(html.indexOf("app.js"));
+    }
+  });
+
+  it("compiles the OT screen before the application bundle", () => {
+    const build = read("build-github.cjs");
+    expect(build).toContain('"screens-c.jsx", "screens-ot.jsx", "app.jsx"');
+  });
+});

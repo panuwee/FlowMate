@@ -21,6 +21,7 @@ function getFlowMateAppVersion() {
 }
 const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
+const OT_REQUEST_PRODUCT_KEY = "ot-request";
 const FLOWMATE_APPEARANCE_KEY = "flowmate:appearance:v1";
 const FLOWMATE_ACTIVE_TEAM_KEY = "flowmate:activeTeam:v1";
 const FLOWMATE_TEAM_WORKSPACES = [{
@@ -161,7 +162,8 @@ const TITLE_MAP = {
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
-const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY]);
+const OT_REQUEST_HASH_KEYS = new Set([OT_REQUEST_PRODUCT_KEY]);
+const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY, OT_REQUEST_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
   const routeKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
   return routeKey === "queue" ? "attention" : routeKey;
@@ -173,6 +175,7 @@ function getProductFromHashRouteKey(hashValue) {
   const hashKey = getFlowMateHashRouteKey(hashValue);
   if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
   if (PRODUCT_BOOK_HASH_KEYS.has(hashKey)) return PRODUCT_BOOK_PRODUCT_KEY;
+  if (OT_REQUEST_HASH_KEYS.has(hashKey)) return OT_REQUEST_PRODUCT_KEY;
   if (TITLE_MAP[hashKey]) return "flowmate";
   return "";
 }
@@ -411,6 +414,11 @@ function App() {
         try {
           sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
         } catch (e) {}
+      } else if (OT_REQUEST_HASH_KEYS.has(r)) {
+        setActiveProduct(OT_REQUEST_PRODUCT_KEY);
+        try {
+          sessionStorage.setItem("flowmate:activeProduct", OT_REQUEST_PRODUCT_KEY);
+        } catch (e) {}
       } else if (TITLE_MAP[r]) {
         setActiveProduct("flowmate");
         try {
@@ -549,7 +557,7 @@ function App() {
     try {
       sessionStorage.setItem("flowmate:activeProduct", "flowmate");
     } catch (e) {}
-    if (MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey())) {
+    if (MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey()) || OT_REQUEST_HASH_KEYS.has(getFlowMateHashRouteKey())) {
       window.location.hash = route && TITLE_MAP[route] ? route : "my-work";
     }
   }
@@ -568,6 +576,15 @@ function App() {
       sessionStorage.setItem("flowmate:activeProduct", PRODUCT_BOOK_PRODUCT_KEY);
     } catch (e) {}
     window.location.hash = "product-book";
+  }
+  function chooseOtRequestProduct() {
+    setActiveProduct(OT_REQUEST_PRODUCT_KEY);
+    try {
+      sessionStorage.setItem("flowmate:activeProduct", OT_REQUEST_PRODUCT_KEY);
+    } catch (e) {}
+    if (!OT_REQUEST_HASH_KEYS.has(getFlowMateHashRouteKey())) {
+      window.location.hash = OT_REQUEST_PRODUCT_KEY;
+    }
   }
   useEffectApp(() => {
     function onSwitchFlowMateProduct(event) {
@@ -785,6 +802,7 @@ function App() {
       onChooseFlowMate: chooseFlowMateProduct,
       onChooseMarketingPlan: chooseMarketingPlanProduct,
       onChooseProductBook: chooseProductBookProduct,
+      onChooseOtRequest: chooseOtRequestProduct,
       onSignOut: handleSignOut
     });
   }
@@ -798,6 +816,7 @@ function App() {
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
       onSwitchProductBook: chooseProductBookProduct,
+      onSwitchOtRequest: chooseOtRequestProduct,
       onSignOut: handleSignOut
     });
   }
@@ -811,6 +830,21 @@ function App() {
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
       onSwitchProductBook: chooseProductBookProduct,
+      onSwitchOtRequest: chooseOtRequestProduct,
+      onSignOut: handleSignOut
+    });
+  }
+  if (activeProduct === OT_REQUEST_PRODUCT_KEY) {
+    return React.createElement(window.OtRequestShell, {
+      user: user,
+      currentUserName: currentUserName,
+      currentUserEmail: currentUserEmail,
+      avatarMemberId: avatarMemberId,
+      onHome: returnToProductHome,
+      onSwitchFlowMate: chooseFlowMateProduct,
+      onSwitchMarketingPlan: chooseMarketingPlanProduct,
+      onSwitchProductBook: chooseProductBookProduct,
+      onSwitchOtRequest: chooseOtRequestProduct,
       onSignOut: handleSignOut
     });
   }
@@ -834,7 +868,8 @@ function App() {
     activeProduct: "flowmate",
     onSwitchFlowMate: chooseFlowMateProduct,
     onSwitchMarketingPlan: chooseMarketingPlanProduct,
-    onSwitchProductBook: chooseProductBookProduct
+    onSwitchProductBook: chooseProductBookProduct,
+    onSwitchOtRequest: chooseOtRequestProduct
   }), React.createElement(TeamWorkspaceSelector, {
     teams: accessibleTeams,
     activeTeamKey: activeTeamKey,
@@ -1020,7 +1055,8 @@ function ProductSwitch({
   activeProduct,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
-  onSwitchProductBook
+  onSwitchProductBook,
+  onSwitchOtRequest
 }) {
   return React.createElement("div", {
     className: "row",
@@ -1045,7 +1081,12 @@ function ProductSwitch({
     className: `btn btn--xs ${activeProduct === PRODUCT_BOOK_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchProductBook,
     "data-testid": "product-switch-product-book"
-  }, "Product Book"));
+  }, "Product Book"), React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${activeProduct === OT_REQUEST_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
+    onClick: onSwitchOtRequest,
+    "data-testid": "product-switch-ot-request"
+  }, "OT Request"));
 }
 function HomeButton({
   onHome
@@ -1117,6 +1158,7 @@ function ProductChoiceScreen({
   onChooseFlowMate,
   onChooseMarketingPlan,
   onChooseProductBook,
+  onChooseOtRequest,
   onSignOut
 }) {
   const pageStyle = {
@@ -1200,7 +1242,7 @@ function ProductChoiceScreen({
       margin: 0,
       maxWidth: 620
     }
-  }, "FlowMate handles task execution. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team."), React.createElement("div", {
+  }, "FlowMate handles task execution. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team. OT Request coordinates overtime workflows."), React.createElement("div", {
     style: gridStyle
   }, React.createElement("button", {
     type: "button",
@@ -1277,7 +1319,32 @@ function ProductChoiceScreen({
     style: {
       lineHeight: 1.55
     }
-  }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")))));
+  }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")), React.createElement("button", {
+    type: "button",
+    style: cardStyle,
+    onClick: onChooseOtRequest
+  }, React.createElement("div", {
+    className: "row",
+    style: {
+      justifyContent: "space-between",
+      alignItems: "flex-start"
+    }
+  }, React.createElement("span", {
+    className: "badge badge--system"
+  }, "Workforce"), React.createElement(Icon, {
+    name: "calendar",
+    size: 18
+  })), React.createElement("h2", {
+    style: {
+      fontSize: 22,
+      margin: "18px 0 8px"
+    }
+  }, "OT Request"), React.createElement("p", {
+    className: "muted",
+    style: {
+      lineHeight: 1.55
+    }
+  }, "Plan overtime, collect employee consent, confirm actual hours, and monitor weekly team workload.")))));
 }
 function normalizeProductBookArrayInput(value) {
   return Array.from(new Set(String(value || "").split(/[\n,]/).map(item => item.trim()).filter(Boolean)));
@@ -1377,6 +1444,7 @@ function ProductBookShell({
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
+  onSwitchOtRequest,
   onSignOut
 }) {
   const staticPatches = useMemoApp(() => getProductBookStaticPublishedPatches(), []);
@@ -1463,7 +1531,8 @@ function ProductBookShell({
     activeProduct: PRODUCT_BOOK_PRODUCT_KEY,
     onSwitchFlowMate: onSwitchFlowMate,
     onSwitchMarketingPlan: onSwitchMarketingPlan,
-    onSwitchProductBook: onSwitchProductBook
+    onSwitchProductBook: onSwitchProductBook,
+    onSwitchOtRequest: onSwitchOtRequest
   }), React.createElement("span", {
     className: "topbar__spacer"
   }), React.createElement(ThemeToggle, null), React.createElement("div", {
@@ -6310,6 +6379,7 @@ function MarketingPlanShell({
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
+  onSwitchOtRequest,
   onSignOut
 }) {
   const isAdminUser = user.role === "admin";
@@ -6387,7 +6457,8 @@ function MarketingPlanShell({
     activeProduct: "marketing-plan",
     onSwitchFlowMate: onSwitchFlowMate,
     onSwitchMarketingPlan: onSwitchMarketingPlan,
-    onSwitchProductBook: onSwitchProductBook
+    onSwitchProductBook: onSwitchProductBook,
+    onSwitchOtRequest: onSwitchOtRequest
   }), React.createElement("span", {
     className: "topbar__spacer"
   }), React.createElement(ThemeToggle, null), React.createElement("div", {

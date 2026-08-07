@@ -3684,3 +3684,98 @@ html[data-theme="dark"] .product-book-cms__message--error {
 
 /* SVG icon helper */
 .icon { display: inline-block; vertical-align: middle; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- OT Request shell ---------- */
+.ot-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: 56px minmax(0, 1fr);
+  height: 100vh;
+  min-height: 720px;
+  background: var(--garena-white);
+}
+.ot-sidebar {
+  grid-column: 1;
+  grid-row: 2;
+  overflow-y: auto;
+  padding: var(--s-3) 0 var(--s-5);
+  border-right: var(--border-hairline);
+  background: var(--garena-white);
+}
+.ot-main {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--s-5) var(--s-6) var(--s-7);
+  background: var(--garena-bg);
+}
+.ot-main > div:not(.ot-warning) { max-width: 1360px; }
+.ot-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+}
+.ot-metric-grid .stat { min-width: 0; }
+.ot-metric-grid .stat strong { overflow-wrap: anywhere; }
+.ot-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin-bottom: var(--s-4);
+  padding: var(--s-3) var(--s-4);
+  border: var(--border-hairline);
+  border-left: 4px solid var(--garena-orange);
+  border-radius: var(--radius-sm);
+  background: var(--garena-white);
+  color: var(--garena-iron);
+}
+.ot-warning--error {
+  border-left-color: var(--garena-red);
+  font-weight: var(--weight-bold);
+}
+
+@media (max-width: 760px) {
+  .ot-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    min-height: 100vh;
+    height: auto;
+  }
+  .ot-shell > .app__brand {
+    grid-column: 1;
+    grid-row: 1;
+    min-height: 48px;
+    border-right: 0;
+  }
+  .ot-shell > .app__topbar {
+    grid-column: 1;
+    grid-row: 2;
+    min-height: 48px;
+    padding: var(--s-2) var(--s-3);
+    overflow-x: auto;
+  }
+  .ot-sidebar {
+    grid-column: 1;
+    grid-row: 3;
+    display: flex;
+    gap: var(--s-2);
+    padding: var(--s-2) var(--s-3);
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: var(--border-hairline);
+  }
+  .ot-sidebar .nav-section { display: none; }
+  .ot-sidebar .nav-item {
+    flex: 0 0 auto;
+    width: auto;
+    margin: 0;
+  }
+  .ot-main {
+    grid-column: 1;
+    grid-row: 4;
+    padding: var(--s-4) var(--s-3) var(--s-6);
+  }
+  .ot-metric-grid { grid-template-columns: 1fr; }
+}
