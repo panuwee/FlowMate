@@ -3960,6 +3960,12 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appCss).toMatch(/\.team-schedule__timeline \.gantt__month-scale\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*100%;/);
   });
 
+  it("draws one Team Schedule separator per day without repeating the month grid inside every day", () => {
+    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
+
+    expect(appCss).toMatch(/\.team-schedule__timeline \.gantt__lane\s*\{[^}]*background-size:\s*auto;/);
+  });
+
   it("keeps the Gantt owner column above horizontally scrolling task bars", () => {
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
 
