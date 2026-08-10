@@ -225,6 +225,19 @@ describe("OT Request backend contract", () => {
     }
   });
 
+  it("uses submitted actual segments for late consent and planned segments before actual submission", () => {
+    const consent = functionSql(sql, "ot_record_consent");
+
+    expect(consent).toContain("v_counted_segments jsonb");
+    expect(consent).toMatch(
+      /v_counted_segments := case\s+when v_request\.actual_submitted_at is not null and v_request\.actual_week_segments is not null\s+then v_request\.actual_week_segments\s+else v_request\.planned_week_segments\s+end/,
+    );
+    expect(consent).toContain("public.ot_lock_employee_weeks(v_request.employee_user_id, v_counted_segments)");
+    expect(consent).toContain(
+      "public.ot_assert_planned_limit(v_request.employee_user_id, v_counted_segments, v_request.id)",
+    );
+  });
+
   it("checks a replacement actual against canonical history while all affected weeks are locked", () => {
     const submit = functionSql(sql, "ot_submit_actual");
 

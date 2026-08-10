@@ -245,6 +245,7 @@ declare
   v_actor_id uuid := public.ot_require_current_user();
   v_request public.ot_requests;
   v_old_status text;
+  v_counted_segments jsonb;
   v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
 begin
   perform public.ot_lock_idempotency('record_consent', p_idempotency_key);
@@ -270,7 +271,12 @@ begin
      or v_request.status not in ('awaiting_consent', 'pending_actual_verification', 'compliance_review_required') then
     raise exception 'Consent is available only once for an unconsented event occurrence';
   end if;
-  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
+  v_counted_segments := case
+    when v_request.actual_submitted_at is not null and v_request.actual_week_segments is not null
+      then v_request.actual_week_segments
+    else v_request.planned_week_segments
+  end;
+  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_counted_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
   if v_request.employee_consent is not null
      or v_request.status not in ('awaiting_consent', 'pending_actual_verification', 'compliance_review_required') then
@@ -278,7 +284,7 @@ begin
   end if;
   v_old_status := v_request.status;
   if p_accept then
-    perform public.ot_assert_planned_limit(v_request.employee_user_id, v_request.planned_week_segments, v_request.id);
+    perform public.ot_assert_planned_limit(v_request.employee_user_id, v_counted_segments, v_request.id);
     update public.ot_requests
     set employee_consent = 'accepted',
         consent_statement_version = v_consent_statement_version,
