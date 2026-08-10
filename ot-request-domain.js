@@ -355,6 +355,62 @@
       .map(recordWeek)).size;
   }
 
+  function buildOtWeeklyTrend(records, weekStarts) {
+    const orderedWeeks = Array.from(new Set(Array.isArray(weekStarts) ? weekStarts.filter(Boolean) : [])).sort();
+    const totals = new Map(orderedWeeks.map(weekStart => [weekStart, 0]));
+    (Array.isArray(records) ? records : []).forEach(record => {
+      if (!isConfirmedActual(record)) return;
+      const weekStart = recordWeek(record);
+      if (!totals.has(weekStart)) return;
+      totals.set(weekStart, totals.get(weekStart) + recordMinutes(record, "actualMinutes", "actual_minutes"));
+    });
+    return orderedWeeks.map(weekStart => ({ weekStart, actualMinutes: totals.get(weekStart) }));
+  }
+
+  function stableConcentrationRows(totals, totalMinutes, withLabel) {
+    if (totalMinutes <= 0) return [];
+    return Array.from(totals.values())
+      .filter(row => row.actualMinutes > 0)
+      .sort((left, right) => right.actualMinutes - left.actualMinutes || (left.key < right.key ? -1 : left.key > right.key ? 1 : 0))
+      .map(row => withLabel
+        ? { key: row.key, label: row.label, actualMinutes: row.actualMinutes, share: row.actualMinutes / totalMinutes }
+        : { key: row.key, actualMinutes: row.actualMinutes, share: row.actualMinutes / totalMinutes });
+  }
+
+  function buildOtWorkloadConcentration(records) {
+    const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmedActual);
+    const byFunctionTotals = new Map();
+    const byAssignmentTotals = new Map();
+    let totalMinutes = 0;
+
+    confirmed.forEach(record => {
+      const actualMinutes = recordMinutes(record, "actualMinutes", "actual_minutes");
+      if (actualMinutes <= 0) return;
+      totalMinutes += actualMinutes;
+
+      const functionKey = String(valueOf(record, "functionCode", "function_code") || "unassigned").trim().toLowerCase() || "unassigned";
+      const functionRow = byFunctionTotals.get(functionKey) || { key: functionKey, actualMinutes: 0 };
+      functionRow.actualMinutes += actualMinutes;
+      byFunctionTotals.set(functionKey, functionRow);
+
+      const eventPlanId = String(valueOf(record, "eventPlanId", "event_plan_id") || "").trim();
+      const title = String(valueOf(record, "title", "title") || "").trim();
+      const assignmentLabel = title || (eventPlanId ? `Event ${eventPlanId}` : "Unassigned assignment");
+      const assignmentKey = eventPlanId
+        ? `event:${eventPlanId}`
+        : `assignment:${(title || "unassigned").toLowerCase()}`;
+      const assignmentRow = byAssignmentTotals.get(assignmentKey) || { key: assignmentKey, label: assignmentLabel, actualMinutes: 0 };
+      assignmentRow.actualMinutes += actualMinutes;
+      if (assignmentLabel < assignmentRow.label) assignmentRow.label = assignmentLabel;
+      byAssignmentTotals.set(assignmentKey, assignmentRow);
+    });
+
+    return {
+      byFunction: stableConcentrationRows(byFunctionTotals, totalMinutes, false),
+      byAssignment: stableConcentrationRows(byAssignmentTotals, totalMinutes, true),
+    };
+  }
+
   function buildRootCauseInsights(records, options) {
     const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmedActual);
     if (!confirmed.length) return [];
@@ -462,6 +518,8 @@
     getActualVerificationEligibility,
     formatSignedHours,
     countWeeksWithActualMinutes,
+    buildOtWeeklyTrend,
+    buildOtWorkloadConcentration,
     buildRootCauseInsights,
   });
 });

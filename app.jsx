@@ -1075,21 +1075,25 @@ function ProductSwitch({
     type: "button",
     className: `btn btn--xs ${activeProduct === "flowmate" ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchFlowMate,
+    "aria-pressed": activeProduct === "flowmate",
     "data-testid": "product-switch-flowmate"
   }, "FlowMate"), React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === "marketing-plan" ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchMarketingPlan,
+    "aria-pressed": activeProduct === "marketing-plan",
     "data-testid": "product-switch-marketing-plan"
   }, "Marketing Plan"), React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === PRODUCT_BOOK_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchProductBook,
+    "aria-pressed": activeProduct === PRODUCT_BOOK_PRODUCT_KEY,
     "data-testid": "product-switch-product-book"
   }, "Product Book"), React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === OT_REQUEST_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchOtRequest,
+    "aria-pressed": activeProduct === OT_REQUEST_PRODUCT_KEY,
     "data-testid": "product-switch-ot-request"
   }, "OT Request"));
 }

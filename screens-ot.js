@@ -1484,6 +1484,7 @@ function OtManagerDashboard({
   });
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
+    queryKey: "",
     rows: [],
     peopleById: {},
     message: ""
@@ -1492,15 +1493,26 @@ function OtManagerDashboard({
   const [showEventForm, setShowEventForm] = useStateApp(false);
   const [selectedRow, setSelectedRow] = useStateApp(null);
   const errorRef = useRefApp(null);
+  const managerWeeks = rootCauseOnly ? [0, -7, -14, -21, -28].map(offset => addOtDays(weekStart, offset)) : [weekStart];
+  const managerLoadKey = `${rootCauseOnly ? "root" : "manager"}:${weekStart}:${functionFilter}:${refreshKey}:${refreshToken}`;
+  const activeLoadState = loadState.queryKey === managerLoadKey ? loadState : {
+    status: "loading",
+    queryKey: managerLoadKey,
+    rows: [],
+    peopleById: {},
+    message: ""
+  };
   useEffectApp(() => {
     let alive = true;
-    const weeks = rootCauseOnly ? [0, -7, -14, -21, -28].map(offset => addOtDays(weekStart, offset)) : [weekStart];
-    setLoadState(current => ({
-      ...current,
+    const weeks = managerWeeks;
+    setLoadState({
       status: "loading",
+      queryKey: managerLoadKey,
+      rows: [],
+      peopleById: {},
       message: ""
-    }));
-    Promise.all([Promise.all(weeks.map(managerWeek => window.loadOtManagerDashboard(managerWeek, functionFilter || null))), window.loadOtPeopleForEvent()]).then(([dashboards, people]) => {
+    });
+    Promise.all([Promise.all(weeks.map(managerWeek => window.loadOtManagerDashboard(managerWeek, functionFilter || null))), rootCauseOnly ? Promise.resolve([]) : window.loadOtPeopleForEvent()]).then(([dashboards, people]) => {
       if (!alive) return;
       const rows = dashboards.flatMap((dashboard, index) => {
         const managerWeek = weeks[index];
@@ -1513,24 +1525,27 @@ function OtManagerDashboard({
       }, {});
       setLoadState({
         status: "ready",
+        queryKey: managerLoadKey,
         rows,
         peopleById,
         message: ""
       });
     }).catch(error => {
-      if (alive) setLoadState(current => ({
-        ...current,
+      if (alive) setLoadState({
         status: "error",
+        queryKey: managerLoadKey,
+        rows: [],
+        peopleById: {},
         message: error.message || "Assigned OT could not be loaded."
-      }));
+      });
     });
     return () => {
       alive = false;
     };
   }, [weekStart, functionFilter, refreshKey, refreshToken, rootCauseOnly]);
   useEffectApp(() => {
-    if (loadState.status === "error" && errorRef.current) errorRef.current.focus();
-  }, [loadState.status]);
+    if (activeLoadState.status === "error" && errorRef.current) errorRef.current.focus();
+  }, [activeLoadState.status]);
   function updateFilter(field, value) {
     setFilters(current => ({
       ...current,
@@ -1538,11 +1553,11 @@ function OtManagerDashboard({
     }));
     setSelectedRow(null);
   }
-  const currentRows = loadState.rows.filter(request => request.weekStart === weekStart);
+  const currentRows = activeLoadState.rows.filter(request => request.weekStart === weekStart);
   const currentEmployeeTotals = getOtManagerTotals(currentRows);
-  const historyEmployeeTotals = getOtManagerTotals(loadState.rows, true);
+  const historyEmployeeTotals = getOtManagerTotals(activeLoadState.rows, true);
   const filteredCurrentRows = applyOtManagerFilters(currentRows, filters, currentEmployeeTotals);
-  const filteredRows = applyOtManagerFilters(loadState.rows, filters, historyEmployeeTotals);
+  const filteredRows = applyOtManagerFilters(activeLoadState.rows, filters, historyEmployeeTotals);
   const eventOptions = Array.from(new Map(currentRows.filter(request => otValue(request, "eventPlanId", "event_plan_id")).map(request => [otValue(request, "eventPlanId", "event_plan_id"), request.title])).entries());
   const statusOptions = Array.from(new Set(currentRows.map(getOtRequestStatus))).sort();
   const plannedMinutes = filteredCurrentRows.filter(request => !["cancelled", "rejected"].includes(getOtRequestStatus(request))).reduce((sum, request) => sum + Number(request.plannedMinutes || 0), 0);
@@ -1551,19 +1566,19 @@ function OtManagerDashboard({
   const nearLimit = new Set(filteredCurrentRows.filter(request => (currentEmployeeTotals[getOtManagerEmployeeId(request)]?.countedMinutes || 0) >= 30 * 60).map(getOtManagerEmployeeId)).size;
   const metricValues = [formatOtHours(plannedMinutes), formatOtHours(confirmedMinutes), String(needsApproval), String(nearLimit)];
   const hasFullScope = Boolean(access.isOwner || access.isHrAdmin);
-  if (loadState.status === "loading" && !loadState.rows.length) {
+  if (activeLoadState.status === "loading") {
     return React.createElement("div", {
       className: "ot-state",
       role: "status"
     }, "Loading assigned OT operations…");
   }
-  if (loadState.status === "error" && !loadState.rows.length) {
+  if (activeLoadState.status === "error") {
     return React.createElement("div", {
       className: "ot-state",
       role: "alert",
       tabIndex: "-1",
       ref: errorRef
-    }, React.createElement("strong", null, "Assigned OT could not be loaded."), React.createElement("span", null, loadState.message), React.createElement("button", {
+    }, React.createElement("strong", null, "Assigned OT could not be loaded."), React.createElement("span", null, activeLoadState.message), React.createElement("button", {
       type: "button",
       className: "btn btn--secondary",
       onClick: () => setRefreshKey(value => value + 1)
@@ -1646,21 +1661,10 @@ function OtManagerDashboard({
     type: "checkbox",
     checked: filters.nearLimit,
     onChange: event => updateFilter("nearLimit", event.target.checked)
-  }), React.createElement("span", null, "Near limit only"))), loadState.status === "error" && React.createElement("div", {
-    ref: errorRef,
-    tabIndex: "-1"
-  }, React.createElement(OtWarning, {
-    kind: "error",
-    title: "Refresh failed",
-    message: `${loadState.message} Existing server-scoped rows remain visible.`
-  }), React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary",
-    onClick: () => setRefreshKey(value => value + 1)
-  }, "Retry refresh")), rootCauseOnly ? React.createElement(OtRootCausePanel, {
+  }), React.createElement("span", null, "Near limit only"))), rootCauseOnly ? React.createElement(OtRootCausePanel, {
     filteredRows: filteredRows,
     currentWeekStart: weekStart,
-    peopleById: loadState.peopleById
+    weekStarts: managerWeeks
   }) : React.createElement(React.Fragment, null, React.createElement("section", {
     className: "ot-metric-grid ot-metric-grid--manager",
     "aria-label": "Assigned weekly OT summary"
@@ -1689,12 +1693,12 @@ function OtManagerDashboard({
     requests: filteredCurrentRows,
     allRequests: currentRows,
     weekStart: weekStart,
-    peopleById: loadState.peopleById,
+    peopleById: activeLoadState.peopleById,
     onChanged: () => setRefreshKey(value => value + 1)
   }), React.createElement(OtTeamWeekTable, {
     requests: filteredCurrentRows,
     allRequests: currentRows,
-    peopleById: loadState.peopleById,
+    peopleById: activeLoadState.peopleById,
     onOpenRequest: setSelectedRow
   }), selectedRow && React.createElement("section", {
     className: "ot-manager-detail",
@@ -1707,7 +1711,7 @@ function OtManagerDashboard({
     onClick: () => setSelectedRow(null)
   }, "Close")), React.createElement("div", {
     className: "ot-detail-grid"
-  }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, loadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))), React.createElement(OtActualAmendmentAction, {
+  }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, activeLoadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))), React.createElement(OtActualAmendmentAction, {
     key: getOtManagerRequestId(selectedRow),
     access: access,
     request: selectedRow,
@@ -2602,30 +2606,40 @@ function buildOtInsightRows(rows, recordIds) {
     const requestId = getOtManagerRequestId(request);
     if (!allowedIds.has(requestId)) return;
     const current = rowsByRequestId.get(requestId) || {
-      ...request,
       id: requestId,
       requestId,
+      title: String(request.title || "Untitled assignment"),
+      functionCode: otValue(request, "functionCode", "function_code") || "unassigned",
+      reasonCode: otValue(request, "reasonCode", "reason_code") || "other",
       plannedMinutes: 0,
-      actualMinutes: 0
+      actualMinutes: 0,
+      weekStarts: []
     };
     rowsByRequestId.set(requestId, {
       ...current,
       plannedMinutes: current.plannedMinutes + Number(request.plannedMinutes || 0),
-      actualMinutes: current.actualMinutes + Number(request.actualMinutes || 0)
+      actualMinutes: current.actualMinutes + Number(request.actualMinutes || 0),
+      weekStarts: Array.from(new Set(current.weekStarts.concat(request.weekStart).filter(Boolean))).sort()
     });
   });
-  return Array.from(rowsByRequestId.values());
+  return Array.from(rowsByRequestId.values()).sort((left, right) => left.requestId.localeCompare(right.requestId));
 }
 function OtRootCausePanel({
   filteredRows,
   currentWeekStart,
-  peopleById
+  weekStarts
 }) {
   const [selectedInsight, setSelectedInsight] = useStateApp(null);
   const confirmedRows = filteredRows.filter(isOtActualConfirmed);
   const insights = window.FlowMateOtRequestDomain.buildRootCauseInsights(filteredRows, {
     currentWeekStart
   });
+  const weeklyTrend = window.FlowMateOtRequestDomain.buildOtWeeklyTrend(filteredRows, weekStarts);
+  const concentration = window.FlowMateOtRequestDomain.buildOtWorkloadConcentration(filteredRows);
+  const analytics = {
+    weeklyTrend,
+    ...concentration
+  };
   const functionTotals = confirmedRows.reduce((totals, request) => {
     const key = otValue(request, "functionCode", "function_code") || "unassigned";
     totals[key] = (totals[key] || 0) + Number(request.actualMinutes || 0);
@@ -2643,7 +2657,7 @@ function OtRootCausePanel({
   const recurringWeeks = window.FlowMateOtRequestDomain.countWeeksWithActualMinutes(confirmedRows);
   const insightCopy = {
     function_confirmed_ot_change: "Function confirmed OT changed at least 25% against the prior four-week average.",
-    recurring_employee_high_ot: "A named employee in the authorized scope crossed the advisory threshold for two consecutive weeks.",
+    recurring_employee_high_ot: "An authorized workload safety pattern crossed the advisory threshold for two consecutive weeks.",
     event_actual_exceeds_plan: "A shared event's actual OT exceeded its plan by at least 20%.",
     emergency_ot_share: "Emergency OT represents at least 30% of confirmed OT for a Function.",
     recurring_rework_or_scope_change: "Rework or scope change appeared at least three times within four weeks."
@@ -2661,6 +2675,77 @@ function OtRootCausePanel({
   }, "Operational patterns by reason, Function, event, and week. Current filters stay applied to every drill-down.")), React.createElement("span", null, confirmedRows.length, " confirmed rows")), !confirmedRows.length ? React.createElement("div", {
     className: "ot-state"
   }, "No confirmed OT rows match the current authorized filters.") : React.createElement(React.Fragment, null, React.createElement("section", {
+    className: "ot-analytics-grid",
+    "aria-label": "Confirmed OT operational analytics"
+  }, React.createElement("article", {
+    className: "ot-analytics-card",
+    "aria-labelledby": "ot-weekly-trend-title"
+  }, React.createElement("h3", {
+    id: "ot-weekly-trend-title"
+  }, "Confirmed OT trend — latest 5 Bangkok weeks"), React.createElement("p", {
+    className: "muted"
+  }, "Approved Actual time only. Zero-minute weeks remain visible for an honest five-week comparison."), React.createElement("div", {
+    className: "ot-table-wrap"
+  }, React.createElement("table", {
+    className: "ot-analytics-table"
+  }, React.createElement("caption", null, "Approved Actual hours by Bangkok week"), React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
+    scope: "col"
+  }, "Bangkok week"), React.createElement("th", {
+    scope: "col"
+  }, "Confirmed Actual"))), React.createElement("tbody", null, analytics.weeklyTrend.map(row => React.createElement("tr", {
+    key: row.weekStart
+  }, React.createElement("th", {
+    scope: "row"
+  }, formatOtDate(row.weekStart)), React.createElement("td", null, formatOtHours(row.actualMinutes)))))))), React.createElement("article", {
+    className: "ot-analytics-card",
+    "aria-labelledby": "ot-workload-concentration-title"
+  }, React.createElement("h3", {
+    id: "ot-workload-concentration-title"
+  }, "Workload concentration by Function / assignment"), React.createElement("p", {
+    className: "muted"
+  }, "Operational workload only—this view never evaluates or compares people."), React.createElement("div", {
+    className: "ot-concentration-grid"
+  }, React.createElement("section", {
+    "aria-labelledby": "ot-function-concentration-title"
+  }, React.createElement("h4", {
+    id: "ot-function-concentration-title"
+  }, "By Function"), React.createElement("div", {
+    className: "ot-table-wrap"
+  }, React.createElement("table", {
+    className: "ot-analytics-table"
+  }, React.createElement("caption", null, "Approved Actual workload share by Function"), React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
+    scope: "col"
+  }, "Function"), React.createElement("th", {
+    scope: "col"
+  }, "Hours"), React.createElement("th", {
+    scope: "col"
+  }, "Share"))), React.createElement("tbody", null, analytics.byFunction.length ? analytics.byFunction.map(row => React.createElement("tr", {
+    key: row.key
+  }, React.createElement("th", {
+    scope: "row"
+  }, OT_FUNCTIONS.find(option => option.value === row.key)?.label || row.key.toUpperCase()), React.createElement("td", null, formatOtHours(row.actualMinutes)), React.createElement("td", null, Math.round(row.share * 100), "%"))) : React.createElement("tr", null, React.createElement("td", {
+    colSpan: "3"
+  }, "No approved Actual workload.")))))), React.createElement("section", {
+    "aria-labelledby": "ot-assignment-concentration-title"
+  }, React.createElement("h4", {
+    id: "ot-assignment-concentration-title"
+  }, "By assignment / event"), React.createElement("div", {
+    className: "ot-table-wrap"
+  }, React.createElement("table", {
+    className: "ot-analytics-table"
+  }, React.createElement("caption", null, "Approved Actual workload share by operational assignment or event"), React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
+    scope: "col"
+  }, "Assignment / event"), React.createElement("th", {
+    scope: "col"
+  }, "Hours"), React.createElement("th", {
+    scope: "col"
+  }, "Share"))), React.createElement("tbody", null, analytics.byAssignment.length ? analytics.byAssignment.map(row => React.createElement("tr", {
+    key: row.key
+  }, React.createElement("th", {
+    scope: "row"
+  }, row.label), React.createElement("td", null, formatOtHours(row.actualMinutes)), React.createElement("td", null, Math.round(row.share * 100), "%"))) : React.createElement("tr", null, React.createElement("td", {
+    colSpan: "3"
+  }, "No approved Actual workload."))))))))), React.createElement("section", {
     className: "ot-root-summary",
     "aria-label": "Root cause summary"
   }, React.createElement("div", null, React.createElement("span", null, "Planned share"), React.createElement("strong", null, totalActual ? `${Math.round(plannedMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Emergency share"), React.createElement("strong", null, totalActual ? `${Math.round(emergencyMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Plan / actual variance"), React.createElement("strong", null, window.FlowMateOtRequestDomain.formatSignedHours(totalActual - totalPlanned))), React.createElement("div", null, React.createElement("span", null, "Recurring weeks"), React.createElement("strong", null, recurringWeeks))), React.createElement("section", {
@@ -2702,16 +2787,16 @@ function OtRootCausePanel({
     "aria-label": "Authorized root cause drill-down"
   }, React.createElement("div", {
     className: "ot-section-head"
-  }, React.createElement("h3", null, "Authorized rows behind this signal"), React.createElement("button", {
+  }, React.createElement("h3", null, "Authorized operational rows behind this signal"), React.createElement("button", {
     type: "button",
     className: "btn btn--ghost",
     onClick: () => setSelectedInsight(null)
   }, "Close")), React.createElement("p", {
     className: "muted"
-  }, "Current filters stay applied. Only rows already returned by the assigned-scope manager RPC are shown."), selectedRows.map(request => React.createElement("article", {
+  }, "Current filters stay applied. Only operational facts already returned by the assigned-scope manager RPC are shown; employee identities are omitted."), selectedRows.map(request => React.createElement("article", {
     className: "ot-insight-row",
     key: request.id
-  }, React.createElement("div", null, React.createElement("strong", null, getOtManagerEmployeeName(request, peopleById)), React.createElement("small", null, request.title, " · ", String(otValue(request, "functionCode", "function_code") || "").toUpperCase())), React.createElement("span", null, formatOtHours(request.actualMinutes))))));
+  }, React.createElement("div", null, React.createElement("strong", null, request.title), React.createElement("small", null, String(request.functionCode || "unassigned").toUpperCase(), " · ", getOtStatusLabel(request.reasonCode), " · ", request.weekStarts.map(formatOtDate).join(", "))), React.createElement("span", null, formatOtHours(request.actualMinutes))))));
 }
 function formatOtDateTime(value) {
   if (!value) return "—";

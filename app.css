@@ -3906,6 +3906,7 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .ot-insight-row small { margin-top: 3px; color: var(--garena-grey); }
 .ot-decision,
 .ot-manager-detail,
+.ot-analytics-card,
 .ot-root-card,
 .ot-insights {
   padding: var(--s-4);
@@ -3935,6 +3936,23 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .ot-team-table { min-width: 1180px; }
 .ot-team-table .ot-table-group th { background: var(--garena-badge-bg); color: var(--garena-black); text-transform: uppercase; letter-spacing: 0.04em; }
 .ot-team-table th[scope="row"] { min-width: 160px; text-align: left; vertical-align: top; }
+.ot-analytics-grid { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr); gap: var(--s-4); }
+.ot-analytics-card { min-width: 0; }
+.ot-analytics-card h3,
+.ot-analytics-card h4 { margin: 0; color: var(--garena-black); }
+.ot-analytics-card h3 { font-size: 15px; }
+.ot-analytics-card h4 { font-size: 13px; }
+.ot-analytics-card > p { margin: var(--s-2) 0 var(--s-3); }
+.ot-concentration-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-4); }
+.ot-concentration-grid > section { min-width: 0; }
+.ot-analytics-table { width: 100%; min-width: 300px; border-collapse: collapse; color: var(--garena-iron); font-size: 12px; }
+.ot-analytics-table caption { padding: var(--s-2) 0; color: var(--garena-grey); text-align: left; }
+.ot-analytics-table th,
+.ot-analytics-table td { padding: var(--s-2); border-bottom: var(--border-hairline); text-align: right; vertical-align: top; }
+.ot-analytics-table thead th { color: var(--garena-grey); font-size: 11px; font-weight: 700; }
+.ot-analytics-table th:first-child,
+.ot-analytics-table td:first-child { text-align: left; }
+.ot-analytics-table tbody th { color: var(--garena-black); font-weight: 600; }
 .ot-root-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-3); }
 .ot-root-summary > div { padding: var(--s-4); border: var(--border-hairline); border-radius: var(--radius-sm); background: var(--garena-white); }
 .ot-root-summary span { display: block; color: var(--garena-grey); font-size: 11px; }
@@ -4054,6 +4072,8 @@ html[data-theme="dark"] .product-book-cms__message--error {
   .ot-manager-filters,
   .ot-metric-grid--manager,
   .ot-queue-grid,
+  .ot-analytics-grid,
+  .ot-concentration-grid,
   .ot-root-grid,
   .ot-root-summary,
   .ot-participant-grid,

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 const read = (...parts: string[]) => readFileSync(join(process.cwd(), ...parts), "utf8");
@@ -8,6 +9,32 @@ function functionSql(sql: string, name: string) {
   const match = sql.match(new RegExp(`create or replace function public\\.${name}\\b[\\s\\S]*?\\$function\\$;`));
   if (!match) throw new Error(`Missing SQL function: ${name}`);
   return match[0];
+}
+
+function renderProductSwitch(activeProduct: string) {
+  const app = read("app.jsx");
+  const source = app.slice(app.indexOf("function ProductSwitch("), app.indexOf("function HomeButton("));
+  const sandbox: any = {
+    React: {
+      createElement(type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) {
+        return { type, props: props || {}, children };
+      },
+    },
+    props: {
+      activeProduct,
+      onSwitchFlowMate() {},
+      onSwitchMarketingPlan() {},
+      onSwitchProductBook() {},
+      onSwitchOtRequest() {},
+    },
+  };
+  runInNewContext(`
+    const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
+    const OT_REQUEST_PRODUCT_KEY = "ot-request";
+    ${source}
+    globalThis.result = ProductSwitch(globalThis.props);
+  `, sandbox);
+  return sandbox.result;
 }
 
 describe("OT Request backend contract", () => {
@@ -801,7 +828,7 @@ describe("OT Request static module integration", () => {
     expect(manager).toContain("crypto.randomUUID()");
     expect(manager).toContain('decision !== "approved" && !note.trim()');
     expect(manager).toContain('&& !otValue(request, "actualSubmittedAt", "actual_submitted_at")');
-    expect(manager).toContain("const historyEmployeeTotals = getOtManagerTotals(loadState.rows, true)");
+    expect(manager).toContain("const historyEmployeeTotals = getOtManagerTotals(activeLoadState.rows, true)");
     expect(manager).toContain('["cancelled", "rejected"].includes(getOtRequestStatus(request))');
   });
 
@@ -893,6 +920,43 @@ describe("OT Request static module integration", () => {
     expect(rootCause).toContain("actualMinutes: current.actualMinutes + Number(request.actualMinutes || 0)");
     expect(panel).toContain("window.FlowMateOtRequestDomain.countWeeksWithActualMinutes(confirmedRows)");
     expect(panel).toContain("buildOtInsightRows(filteredRows, selectedInsight.recordIds)");
+  });
+
+  it("builds operational trend and concentration views only from the five server-scoped manager responses", () => {
+    const screen = read("screens-ot.jsx");
+    const manager = screen.slice(screen.indexOf("function OtManagerDashboard("), screen.indexOf("function OtApprovalQueue("));
+    const panel = screen.slice(screen.indexOf("function OtRootCausePanel("), screen.indexOf("function OtRequestShell("));
+
+    expect(manager).toContain("[0, -7, -14, -21, -28]");
+    expect(manager).toContain("weeks.map(managerWeek => window.loadOtManagerDashboard(managerWeek, functionFilter || null))");
+    expect(manager).toContain("<OtRootCausePanel filteredRows={filteredRows} currentWeekStart={weekStart} weekStarts={managerWeeks}");
+    expect(panel).toContain("window.FlowMateOtRequestDomain.buildOtWeeklyTrend(filteredRows, weekStarts)");
+    expect(panel).toContain("window.FlowMateOtRequestDomain.buildOtWorkloadConcentration(filteredRows)");
+    expect(manager).not.toMatch(/\.from\(["'`]ot_/);
+  });
+
+  it("renders explicit accessible OT trend and operational concentration tables without person output", () => {
+    const screen = read("screens-ot.jsx");
+    const panel = screen.slice(screen.indexOf("function OtRootCausePanel("), screen.indexOf("function formatOtDateTime("));
+
+    expect(panel).toContain("Confirmed OT trend — latest 5 Bangkok weeks");
+    expect(panel).toContain("Workload concentration by Function / assignment");
+    expect(panel.match(/<table className="ot-analytics-table">/g)).toHaveLength(3);
+    expect(panel).toContain('<th scope="col">Bangkok week</th>');
+    expect(panel).toContain('<th scope="row">{formatOtDate(row.weekStart)}</th>');
+    expect(panel).toContain("formatOtHours(row.actualMinutes)");
+    expect(panel).not.toContain("getOtManagerEmployeeName");
+    expect(panel).not.toMatch(/performance|productivity|rank|top performer|value score/i);
+  });
+
+  it("invalidates prior manager analytics immediately across loading, error, and retry query identities", () => {
+    const screen = read("screens-ot.jsx");
+    const manager = screen.slice(screen.indexOf("function OtManagerDashboard("), screen.indexOf("function OtApprovalQueue("));
+
+    expect(manager).toContain("managerLoadKey");
+    expect(manager).toContain("loadState.queryKey === managerLoadKey");
+    expect(manager).toContain('setLoadState({ status: "loading", queryKey: managerLoadKey, rows: [], peopleById: {}, message: "" })');
+    expect(manager).toContain('setLoadState({ status: "error", queryKey: managerLoadKey, rows: [], peopleById: {}, message: error.message || "Assigned OT could not be loaded." })');
   });
 
   it("renders owner, compliance, audit, access, and HR export only from server access capabilities", () => {
@@ -1078,6 +1142,19 @@ describe("OT Request static module integration", () => {
 
     expect(productSwitch).toContain('role: "group"');
     expect(productSwitch).toContain('"aria-label": "Product switch"');
+  });
+
+  it("exposes the current module as aria-pressed on every ProductSwitch button", () => {
+    const productKeys = ["flowmate", "marketing-plan", "product-book", "ot-request"];
+
+    for (const activeProduct of productKeys) {
+      const rendered = renderProductSwitch(activeProduct);
+      const buttons = rendered.children;
+      expect(buttons).toHaveLength(4);
+      expect(buttons.map((button: any) => button.props["aria-pressed"])).toEqual(
+        productKeys.map(productKey => productKey === activeProduct),
+      );
+    }
   });
 
   it("keeps OT tables contained and keyboard focus visible across themes and viewports", () => {

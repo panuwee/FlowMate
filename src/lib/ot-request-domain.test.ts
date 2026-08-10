@@ -426,4 +426,79 @@ describe("OT request domain", () => {
       { requestId: "worked-b", weekStart: "2026-08-03", plannedMinutes: 60, actualMinutes: 30 },
     ])).toBe(1);
   });
+
+  it("builds five oldest-to-newest Bangkok week buckets and assigns cross-week Actual minutes to the right week", () => {
+    const domain = loadDomain();
+    const weeklyTrend = domain.buildOtWeeklyTrend([
+      { requestId: "cross-week", weekStart: "2026-07-27", actualMinutes: 90, actualDecision: "approved" },
+      { requestId: "cross-week", weekStart: "2026-08-03", actualMinutes: 120, actualDecision: "approved" },
+      { requestId: "ready", weekStart: "2026-08-10", actualMinutes: 60, status: "hr_ready" },
+      { requestId: "planned-only", weekStart: "2026-07-13", plannedMinutes: 300, actualMinutes: 0 },
+      { requestId: "rejected", weekStart: "2026-07-20", actualMinutes: 480, actualDecision: "rejected", status: "rejected" },
+      { requestId: "revision", weekStart: "2026-07-20", actualMinutes: 480, actualDecision: "revision_required", status: "revision_required" },
+      { requestId: "cancelled", weekStart: "2026-07-20", actualMinutes: 480, actualDecision: "approved", status: "cancelled" },
+      { requestId: "invalid-export", weekStart: "2026-07-20", actualMinutes: 480, actualDecision: "rejected", status: "exported" },
+    ], ["2026-08-10", "2026-07-13", "2026-08-03", "2026-07-20", "2026-07-27"]);
+
+    expect(weeklyTrend).toEqual([
+      { weekStart: "2026-07-13", actualMinutes: 0 },
+      { weekStart: "2026-07-20", actualMinutes: 0 },
+      { weekStart: "2026-07-27", actualMinutes: 90 },
+      { weekStart: "2026-08-03", actualMinutes: 120 },
+      { weekStart: "2026-08-10", actualMinutes: 60 },
+    ]);
+  });
+
+  it("aggregates approved Actual workload by Function and operational assignment without employee output", () => {
+    const domain = loadDomain();
+    const rows = [
+      { requestId: "cross-week", employeeUserId: "employee-a", employeeDisplayName: "Alice", functionCode: "ops", title: "Launch support", weekStart: "2026-07-27", actualMinutes: 60, actualDecision: "approved" },
+      { requestId: "cross-week", employeeUserId: "employee-a", employeeDisplayName: "Alice", functionCode: "ops", title: "Launch support", weekStart: "2026-08-03", actualMinutes: 60, actualDecision: "approved" },
+      { requestId: "event-one", employeeUserId: "employee-b", employeeDisplayName: "Bob", functionCode: "ops", eventPlanId: "event-1", title: "Championship final", weekStart: "2026-08-03", actualMinutes: 60, actualDecision: "approved" },
+      { requestId: "event-two", employeeUserId: "employee-c", employeeDisplayName: "Carol", functionCode: "ops", eventPlanId: "event-1", title: "Championship final", weekStart: "2026-08-03", actualMinutes: 60, status: "hr_ready" },
+      { requestId: "localization", employeeUserId: "employee-d", employeeDisplayName: "Dana", functionCode: "mkt", title: "Localization", weekStart: "2026-08-10", actualMinutes: 60, status: "exported" },
+      { requestId: "excluded", employeeUserId: "employee-e", employeeDisplayName: "Eve", functionCode: "mkt", title: "Rejected launch", weekStart: "2026-08-10", actualMinutes: 900, actualDecision: "rejected", status: "exported" },
+    ];
+
+    const concentration = domain.buildOtWorkloadConcentration(rows);
+
+    expect(concentration).toEqual({
+      byFunction: [
+        { key: "ops", actualMinutes: 240, share: 0.8 },
+        { key: "mkt", actualMinutes: 60, share: 0.2 },
+      ],
+      byAssignment: [
+        { key: "assignment:launch support", label: "Launch support", actualMinutes: 120, share: 0.4 },
+        { key: "event:event-1", label: "Championship final", actualMinutes: 120, share: 0.4 },
+        { key: "assignment:localization", label: "Localization", actualMinutes: 60, share: 0.2 },
+      ],
+    });
+    expect(JSON.stringify(concentration)).not.toMatch(/employee-[a-e]|"(?:Alice|Bob|Carol|Dana|Eve)"/i);
+  });
+
+  it("sorts concentration deterministically and returns empty zero-total shares", () => {
+    const domain = loadDomain();
+    const rows = [
+      { requestId: "zeta", functionCode: "ops", title: "Zeta", actualMinutes: 60, actualDecision: "approved" },
+      { requestId: "alpha", functionCode: "mkt", title: "Alpha", actualMinutes: 60, actualDecision: "approved" },
+    ];
+
+    const expected = {
+      byFunction: [
+        { key: "mkt", actualMinutes: 60, share: 0.5 },
+        { key: "ops", actualMinutes: 60, share: 0.5 },
+      ],
+      byAssignment: [
+        { key: "assignment:alpha", label: "Alpha", actualMinutes: 60, share: 0.5 },
+        { key: "assignment:zeta", label: "Zeta", actualMinutes: 60, share: 0.5 },
+      ],
+    };
+
+    expect(domain.buildOtWorkloadConcentration(rows)).toEqual(expected);
+    expect(domain.buildOtWorkloadConcentration(rows.slice().reverse())).toEqual(expected);
+    expect(domain.buildOtWorkloadConcentration([
+      { requestId: "zero", functionCode: "ops", title: "Zero", actualMinutes: 0, actualDecision: "approved" },
+      { requestId: "unverified", functionCode: "mkt", title: "Unverified", actualMinutes: 300 },
+    ])).toEqual({ byFunction: [], byAssignment: [] });
+  });
 });
