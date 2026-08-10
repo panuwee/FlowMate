@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-07
 
-**Status:** Design approved; ready for implementation planning after user review
+**Status:** Final-review corrections approved in principle; written-spec review required before implementation planning
 
 **Product:** Workgrid / Garena FCO Thailand
 
@@ -17,6 +17,7 @@ The system is an approval and time-record source for HR. It does not calculate O
 ## 2. Locked product decisions
 
 - Use a hybrid workflow: approve planned OT first, then confirm actual time after work ends.
+- Present this to employees as one `OT Request`, not as two separate requests. The pre-work fields are the requested schedule; the post-work confirmation adds the actual schedule to the same record.
 - Support both individual requests and Event Lead-created group plans.
 - Every employee in a group plan must consent individually for that occurrence.
 - Event Lead or head verifies actual time before HR receives the record.
@@ -33,6 +34,15 @@ The system is an approval and time-record source for HR. It does not calculate O
 - Do not provide an ordinary override that allows planned OT above 36 hours.
 - Employees see their own OT data only. Managers see assigned teams or events. HR/Admin can see all records. Executives see aggregate information by default.
 - OT is not an employee-performance score. Management analytics are labelled `OT Health & Root Cause`.
+
+### Final-review corrections approved on 2026-08-10
+
+- Do not remove the pre-work request. An employee must submit the requested schedule and receive the required consent and approval before starting OT, then confirm actual time after the work ends.
+- Use one canonical weekly counted-minutes rule. For each occurrence, count submitted actual minutes when actual time exists; otherwise count requested minutes. Never add both values for the same occurrence.
+- Accept actual confirmation only after the request is authorized, required employee consent is accepted, and both the requested and reported actual work periods have ended.
+- Permit an employee to correct actual time only when the assigned approver explicitly returns the actual record for revision. Once actual time is approved, the ordinary form is immutable; later corrections require a separate audited amendment action.
+- Enforce elevated identity allowlists inside every server authorization check. A legacy active role row alone must never grant Owner or HR/Admin visibility.
+- The sole initial OT Owner remains `panuwee.w@garena.com`. For this MVP, HR/Admin activation is limited to the fixed approved identities Big, Mac, and Pluem listed above. Their ordinary manager visibility remains assignment-based unless an allowed HR/Admin role is explicitly active.
 
 ## 3. MVP boundary
 
@@ -219,10 +229,13 @@ Every insight links to the filtered records the authorized viewer is allowed to 
 6. If projected total exceeds 36 hours, submission is blocked with an explanation.
 7. Request is submitted to one eligible approver.
 8. Approver approves, rejects, or returns it for revision.
-9. At the planned end time, Workgrid asks the employee to confirm actual start, end, and break.
-10. Workgrid calculates actual duration and revised weekly total.
-11. Approver verifies or returns the actual record.
-12. A compliant verified record becomes `HR ready`.
+9. A returned pre-work request leaves the approver queue until the employee edits and resubmits it; the schedule, consent, overlap, and weekly limit are revalidated.
+10. After the requested end time, Workgrid asks the employee to confirm actual start, end, and break.
+11. The server accepts the actual confirmation only when plan authorization and required consent are present, the work period has ended, and the actual record has not already been approved.
+12. Workgrid calculates actual duration and the canonical counted weekly total, replacing requested minutes for this occurrence with submitted actual minutes.
+13. Approver verifies or returns the actual record.
+14. An actual record returned for revision may be corrected and resubmitted. An approved actual record is locked from ordinary editing.
+15. A compliant verified record becomes `HR ready`.
 
 ## 11. Event group-plan workflow
 
@@ -247,8 +260,9 @@ Bulk approval must not bypass missing consent, limit errors, actual-time excepti
 | Pending approval | Employee consent is present and manager decision is required |
 | Approved | Planned OT is authorized |
 | Rejected | Planned OT was rejected with a reason |
-| Revision required | Employee must correct and resubmit |
+| Plan revision required | Employee must correct and resubmit the requested schedule; the request is not actionable by the approver until resubmitted |
 | Actual confirmation required | Planned end time passed and actual time is missing |
+| Actual revision required | Approver returned the submitted actual time; employee may correct and resubmit it |
 | Pending actual verification | Employee submitted actual time; approver must verify |
 | Compliance review required | Actual hours were truthfully recorded but the weekly total exceeds 36 hours |
 | HR ready | Verified and compliant record is ready for HR export |
@@ -261,7 +275,15 @@ The database stores consent, plan approval, actual verification, compliance revi
 
 The week boundary uses the organization's configured workweek and Bangkok time. For the MVP, the default is Monday 00:00 through Sunday 23:59 in `Asia/Bangkok`.
 
-Projected weekly hours include submitted planned hours from active requests. Once actual time is verified, actual hours replace planned hours for that request. Draft, rejected, and cancelled requests do not consume the projected total.
+Every request, consent, approval, actual-compliance check, preview, and dashboard uses the same canonical weekly counted-minutes calculation under the employee-week lock:
+
+1. Split each occurrence across Bangkok Monday-Sunday workweeks.
+2. If actual time has been submitted for an occurrence, count its actual segment minutes even while manager verification or compliance review is pending.
+3. Otherwise count its requested segment minutes.
+4. Never add requested and actual minutes for the same occurrence.
+5. Draft, rejected, and cancelled requests do not consume the projected total. Completed, HR-ready, and exported occurrences remain in historical weekly totals using actual minutes.
+
+This replacement happens when truthful actual time is submitted, rather than waiting for manager verification, so a pending actual cannot temporarily hide a weekly overage. For example, a submitted 20-hour actual plus another active 20-hour request counts as 40 hours and enters the compliance path.
 
 ### Request, consent, and approval
 
@@ -275,7 +297,7 @@ The error states exactly which week is affected, the current counted hours, requ
 
 ### Actual-time confirmation
 
-Actual time is always recordable. If it makes the weekly total exceed 36 hours:
+After authorized OT has occurred, truthful actual time is always recordable even when it exceeds the requested schedule or weekly limit. If it makes the weekly total exceed 36 hours:
 
 - Save the truthful actual time.
 - Display a critical alert to the employee and approver.
@@ -286,6 +308,16 @@ Actual time is always recordable. If it makes the weekly total exceed 36 hours:
 - Retain the original actual time; do not permit silent reduction to make the record fit the limit.
 
 HR review records the outcome and note. It does not rewrite the historic worked time.
+
+Truthful recording does not mean actual time may bypass authorization. The server rejects an ordinary actual submission unless all of these conditions are true:
+
+- The pre-work request was authorized by the assigned approver, or by the Event Lead's event-plan authorization.
+- Required per-occurrence employee consent is accepted.
+- The requested end time and supplied actual end time have passed in Bangkok time.
+- No actual approval is already recorded.
+- The request is awaiting its first actual confirmation, or the assigned approver explicitly returned the actual for revision.
+
+An approved actual is immutable through the normal employee RPC. A separate authorized amendment records the old value, new value, actor, immutable actor-email snapshot, reason, and timestamp; it must re-run weekly compliance and downstream HR/export checks rather than erase the prior decision.
 
 ## 14. Minimum data collected
 
@@ -351,6 +383,8 @@ Initial approvers are seeded in `ot_approvers`. A request or event plan explicit
 
 `panuwee.w@garena.com` is seeded as the active `owner` in `ot_system_roles`. OT Owner checks happen in Supabase authorization functions and RLS policies. The frontend must not hardcode a global-visibility bypass.
 
+Every Owner and HR/Admin authorization function validates the normalized signed-in email against the fixed server allowlist in addition to checking the active role row and active user account. This check applies to RPC access, RLS, compliance, audit, and export reads. The Owner may deactivate an unauthorized legacy role through an audited remediation path, but that legacy role receives no elevated access while remediation is pending.
+
 ## 16. Errors and edge cases
 
 - Overnight OT: allow end time on the next date and allocate the occurrence to the date on which OT started; show both dates clearly.
@@ -363,6 +397,9 @@ Initial approvers are seeded in `ot_approvers`. A request or event plan explicit
 - Employee withdraws before approval: mark cancelled and release projected hours.
 - Approved plan changes materially: invalidate prior consent when date, planned time, employee, or assignment changes; request new consent.
 - Actual time differs from plan: require a variance reason when difference exceeds 30 minutes.
+- Actual submitted before plan authorization, before required consent, or before work ends: reject server-side and keep the record unchanged.
+- Actual already approved: reject ordinary resubmission; use the audited amendment workflow instead.
+- Legacy Owner or HR/Admin role outside the fixed email allowlist: deny elevated authorization even when an old active role row exists; permit only the Owner's audited deactivation remediation.
 - Request crosses a week boundary: split calculated duration across the affected organization workweeks for limit checking and reporting.
 - Network failure: preserve the form locally in memory during the session and show a retry state; never claim submission succeeded without a server response.
 - Duplicate submission: use an idempotency key for create, consent, approval, actual confirmation, and export actions.
@@ -394,13 +431,14 @@ The module extends the existing Workgrid design rather than introducing a new vi
 
 - Employee sees only their own OT data.
 - Employee can create, consent to, track, and confirm an OT occurrence.
-- Employee sees planned, approved, actual, weekly total, and remaining hours without payroll amounts.
+- Employee sees requested, approved, actual, canonical counted weekly total, and remaining hours without payroll amounts.
 - Employee sees actionable warnings during request and actual confirmation.
+- Employee cannot submit actual time before authorization, consent, or the end of work, and cannot overwrite an approved actual through the ordinary form.
 
 ### Manager
 
 - Assigned approver sees only explicitly assigned requests and events.
-- Weekly dashboard groups employees by Function and shows planned, actual, total, remaining, and status.
+- Weekly dashboard groups employees by Function and shows requested, actual, canonical counted total, remaining, and status without double-counting an occurrence.
 - Approver can approve/reject planned OT and verify/return actual time with an audit note.
 - Group-plan actions never bypass individual consent or validation.
 
@@ -408,12 +446,15 @@ The module extends the existing Workgrid design rather than introducing a new vi
 
 - Server blocks request, consent, and plan approval when projected OT exceeds 36 hours for the affected week.
 - Server accepts truthful actual time above the limit and routes it to `Compliance review required`.
+- A submitted actual replaces requested minutes for the same occurrence in every weekly calculation, including while actual verification or compliance review is pending.
+- Mixed weeks count submitted actual minutes for completed occurrences plus requested minutes for occurrences without actual time; a 20-hour actual plus a 20-hour active request is treated as 40 hours.
 - Over-limit actual records cannot become `HR ready` or enter a normal export before HR review.
 - HR can export HR-ready records with day type and hours but without payroll calculations.
 - Every material action has an append-only audit record.
 - `panuwee.w@garena.com` has OT Owner visibility across all named and aggregate OT data after server-side role resolution.
 - OT Owner access remains restricted to OT Request and does not widen permissions in other Workgrid modules.
 - An OT Owner approval or verification outside the normal assignment path requires an intervention reason and audit record.
+- Owner and HR/Admin access requires both an active role and a normalized email in the fixed server allowlist; unauthorized legacy role rows receive no elevated data access.
 
 ### Insight
 
@@ -423,8 +464,9 @@ The module extends the existing Workgrid design rather than introducing a new vi
 
 ## 19. Verification strategy
 
-- Unit tests for duration, break, overnight, workweek split, projected total, actual replacement, thresholds, and status derivation.
+- Unit tests for duration, break, overnight, workweek split, projected total, actual replacement, mixed requested-plus-actual weeks, thresholds, and status derivation.
 - SQL/RLS tests for employee, assigned approver, non-assigned approver, HR/Admin, OT Owner, and executive aggregate access.
+- Executable disposable-Postgres tests for migration compilation, mixed requested-plus-actual accounting, actual state transitions and immutability, fixed role allowlists, locks, idempotency, and export gates. Source-text assertions alone are not sufficient evidence for these backend rules.
 - Negative authorization tests proving the OT Owner role does not grant additional access to FlowMate, Marketing Plan, or Product Book data.
 - Workflow tests for self request, group event plan, rejection, revision, withdrawal, actual verification, compliance review, and export.
 - Idempotency tests for every workflow mutation.
