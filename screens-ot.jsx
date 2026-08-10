@@ -1069,7 +1069,6 @@ function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged 
     if (decisionSubmissionRef.current || actionState.status === "submitting") return;
     setSelected({ kind, request });
     setBulkReview(null);
-    decisionIntentRef.current = window.FlowMateOtIntent.complete();
     setNote("");
     setActionState({ status: "idle", message: "" });
   }
@@ -1124,8 +1123,6 @@ function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged 
       return !canAct(request) || !checks.canBulkVerify;
     });
     setSelected(null);
-    decisionIntentRef.current = window.FlowMateOtIntent.complete();
-    bulkIntentsRef.current = {};
     setBulkReview({ requestsToVerify, excludedRequests });
     setActionState({ status: "idle", message: "" });
   }

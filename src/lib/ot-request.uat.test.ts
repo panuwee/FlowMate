@@ -87,6 +87,54 @@ function createOtRootCauseHarness() {
   };
 }
 
+function createOtApprovalQueueHarness() {
+  const stateSlots: unknown[] = [];
+  const refSlots: Array<{ current: unknown }> = [];
+  let stateIndex = 0;
+  let refIndex = 0;
+  let keySequence = 0;
+  const sandbox: any = {
+    React: {
+      Fragment: Symbol("Fragment"),
+      createElement(type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) {
+        return { type, props: props || {}, children };
+      },
+    },
+    useStateApp(initialValue: unknown) {
+      const index = stateIndex;
+      stateIndex += 1;
+      if (!(index in stateSlots)) stateSlots[index] = typeof initialValue === "function" ? (initialValue as () => unknown)() : initialValue;
+      return [stateSlots[index], (nextValue: unknown) => {
+        stateSlots[index] = typeof nextValue === "function" ? (nextValue as (current: unknown) => unknown)(stateSlots[index]) : nextValue;
+      }];
+    },
+    useEffectApp() {},
+    useRefApp(initialValue: unknown) {
+      const index = refIndex;
+      refIndex += 1;
+      if (!(index in refSlots)) refSlots[index] = { current: initialValue };
+      return refSlots[index];
+    },
+    useMemoApp(factory: () => unknown) { return factory(); },
+    crypto: { randomUUID: () => `intent-${++keySequence}` },
+    window: { location: { hash: "" } },
+  };
+  runInNewContext(read("supabase-ot-request.js"), sandbox);
+  sandbox.window.FlowMateOtRequestDomain = loadOtRequestDomain();
+  runInNewContext(`${read("screens-ot.js")}
+    globalThis.__OtApprovalQueue = OtApprovalQueue;
+  `, sandbox);
+
+  return {
+    window: sandbox.window,
+    render(props: Record<string, unknown>) {
+      stateIndex = 0;
+      refIndex = 0;
+      return sandbox.__OtApprovalQueue(props) as RenderedElement;
+    },
+  };
+}
+
 function findRenderedElements(node: unknown, predicate: (element: RenderedElement) => boolean): RenderedElement[] {
   if (Array.isArray(node)) return node.flatMap(child => findRenderedElements(child, predicate));
   if (!node || typeof node !== "object" || !("children" in node)) return [];
@@ -100,6 +148,19 @@ function renderedText(node: unknown): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (typeof node === "object" && "children" in node) return renderedText((node as RenderedElement).children);
   return "";
+}
+
+function renderedButton(node: unknown, label: string, exact = true) {
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  const button = findRenderedElements(node, element => (
+    element.type === "button"
+    && (exact ? normalize(renderedText(element)) === normalize(label) : normalize(renderedText(element)).includes(normalize(label)))
+  ))[0];
+  if (!button) {
+    const labels = findRenderedElements(node, element => element.type === "button").map(element => normalize(renderedText(element)));
+    throw new Error(`Missing rendered button: ${label}. Rendered buttons: ${labels.join(" | ")}`);
+  }
+  return button;
 }
 
 describe("OT Request backend contract", () => {
@@ -1023,6 +1084,121 @@ describe("OT Request static module integration", () => {
     expect(approval).toContain("bulkIntentsRef.current");
     expect(approval).not.toMatch(/(?:reviewOtPlan|verifyOtActual)\([^;]+crypto\.randomUUID\(\)/);
     expect(approval).toContain('disabled={actionState.status === "submitting"}');
+  });
+
+  it("retains a failed single-decision key after close and reopen while rotating for a different request", async () => {
+    const harness = createOtApprovalQueueHarness();
+    const keys: string[] = [];
+    harness.window.reviewOtPlan = async (_requestId: string, _decision: string, _note: string | null, key: string) => {
+      keys.push(key);
+      throw new Error("Ambiguous network failure");
+    };
+    const access = { isEligibleApprover: true, userId: "approver-1" };
+    const request = (id: string, title: string) => ({
+      id,
+      title,
+      source: "employee_request",
+      status: "pending_approval",
+      approverUserId: "approver-1",
+      employeeUserId: "employee-1",
+      plannedMinutes: 60,
+      actualMinutes: 0,
+    });
+    const requestA = request("request-a", "Request A");
+    const requestB = request("request-b", "Request B");
+    const propsFor = (row: Record<string, unknown>) => ({
+      access,
+      requests: [row],
+      allRequests: [row],
+      peopleById: new Map(),
+      onChanged() {},
+    });
+    let props = propsFor(requestA);
+    let rendered = harness.render(props);
+
+    renderedButton(rendered, "Request A", false).props.onClick();
+    rendered = harness.render(props);
+    const note = findRenderedElements(rendered, element => element.type === "textarea")[0];
+    note.props.onChange({ target: { value: "same note" } });
+    rendered = harness.render(props);
+    await renderedButton(rendered, "Approve plan").props.onClick();
+    rendered = harness.render(props);
+    renderedButton(rendered, "Close").props.onClick();
+    rendered = harness.render(props);
+    renderedButton(rendered, "Request A", false).props.onClick();
+    rendered = harness.render(props);
+    findRenderedElements(rendered, element => element.type === "textarea")[0].props.onChange({ target: { value: "same note" } });
+    rendered = harness.render(props);
+    await renderedButton(rendered, "Approve plan").props.onClick();
+
+    rendered = harness.render(props);
+    renderedButton(rendered, "Close").props.onClick();
+    props = propsFor(requestB);
+    rendered = harness.render(props);
+    renderedButton(rendered, "Request B", false).props.onClick();
+    rendered = harness.render(props);
+    findRenderedElements(rendered, element => element.type === "textarea")[0].props.onChange({ target: { value: "same note" } });
+    rendered = harness.render(props);
+    await renderedButton(rendered, "Approve plan").props.onClick();
+
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("retains each failed bulk key after close and reopen while rotating for a different included request", async () => {
+    const harness = createOtApprovalQueueHarness();
+    const keys: string[] = [];
+    harness.window.verifyOtActual = async (_requestId: string, _decision: string, _note: string | null, key: string) => {
+      keys.push(key);
+      throw new Error("Ambiguous network failure");
+    };
+    const access = { isEligibleApprover: true, userId: "approver-1" };
+    const request = (id: string, title: string) => ({
+      id,
+      title,
+      source: "employee_request",
+      status: "pending_actual_verification",
+      approverUserId: "approver-1",
+      employeeUserId: "employee-1",
+      plannedMinutes: 60,
+      actualMinutes: 60,
+      actualSubmittedAt: "2026-08-10T12:00:00Z",
+      actualWeekSegments: [{ weekStart: "2026-08-10", minutes: 60 }],
+    });
+    const requestA = request("actual-a", "Actual A");
+    const requestB = request("actual-b", "Actual B");
+    const propsFor = (row: Record<string, unknown>) => ({
+      access,
+      requests: [row],
+      allRequests: [row],
+      peopleById: new Map(),
+      onChanged() {},
+    });
+    let props = propsFor(requestA);
+    let rendered = harness.render(props);
+
+    renderedButton(rendered, "Review 1 eligible").props.onClick();
+    rendered = harness.render(props);
+    await renderedButton(rendered, "Confirm 1 verifications").props.onClick();
+    rendered = harness.render(props);
+    renderedButton(rendered, "Close").props.onClick();
+    rendered = harness.render(props);
+    renderedButton(rendered, "Review 1 eligible").props.onClick();
+    rendered = harness.render(props);
+    await renderedButton(rendered, "Confirm 1 verifications").props.onClick();
+
+    rendered = harness.render(props);
+    renderedButton(rendered, "Close").props.onClick();
+    props = propsFor(requestB);
+    rendered = harness.render(props);
+    renderedButton(rendered, "Review 1 eligible").props.onClick();
+    rendered = harness.render(props);
+    await renderedButton(rendered, "Confirm 1 verifications").props.onClick();
+
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[0]);
   });
 
   it("renders approved compliance rows as non-actionable while awaiting HR", () => {

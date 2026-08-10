@@ -1791,7 +1791,6 @@ function OtApprovalQueue({
       request
     });
     setBulkReview(null);
-    decisionIntentRef.current = window.FlowMateOtIntent.complete();
     setNote("");
     setActionState({
       status: "idle",
@@ -1865,8 +1864,6 @@ function OtApprovalQueue({
       return !canAct(request) || !checks.canBulkVerify;
     });
     setSelected(null);
-    decisionIntentRef.current = window.FlowMateOtIntent.complete();
-    bulkIntentsRef.current = {};
     setBulkReview({
       requestsToVerify,
       excludedRequests
