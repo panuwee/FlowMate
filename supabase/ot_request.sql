@@ -202,8 +202,7 @@ where pg_catalog.lower(pg_catalog.btrim(u.email)) in (
   'weerayut@garena.com',
   'napol.a@garena.com'
 )
-on conflict (user_id) do update
-set active = excluded.active;
+on conflict (user_id) do nothing;
 
 create or replace function public.ot_require_current_user()
 returns uuid
@@ -795,7 +794,7 @@ as $function$
     join public.ot_system_roles r on r.user_id = u.id
     where u.id = (select auth.uid())
       and u.is_active = true
-      and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com'
+      and public.ot_user_is_approved_approver_identity(u.id)
       and r.role_code = 'hr_admin'
       and r.active = true
   );

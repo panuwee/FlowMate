@@ -234,6 +234,50 @@ where n.nspname = 'public'
   and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, boolean, text, uuid';
 
 select
+  'OT HR Admin fixed helper contract (Expected = true)' as check_name,
+  (
+    pg_catalog.position('u.id = (select auth.uid())' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('u.is_active = true' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('public.ot_user_is_approved_approver_identity(u.id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('r.role_code = ''hr_admin''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('r.active = true' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('like ''%@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) = 0
+  ) as helper_matches_contract
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_current_user_is_hr_admin'
+  and pg_catalog.oidvectortypes(p.proargtypes) = '';
+
+select
+  'Legacy active HR Admin role does not satisfy fixed helper (Expected = true)' as check_name,
+  pg_catalog.position(
+    'public.ot_user_is_approved_approver_identity(u.id)'
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) > 0 as legacy_role_cannot_grant_hr_access
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_current_user_is_hr_admin'
+  and pg_catalog.oidvectortypes(p.proargtypes) = '';
+
+select
+  'OT HR Admin deactivation remediation contract (Expected = true)' as check_name,
+  (
+    pg_catalog.pg_get_functiondef(p.oid) ~
+      'if[[:space:]]+p_role_code = ''hr_admin''[[:space:]]+and p_active = true[[:space:]]+and not public[.]ot_user_is_approved_approver_identity[(]p_user_id[)][[:space:]]+then[[:space:]]+raise exception ''HR Admin must be one of the three approved MVP identities'';[[:space:]]+end if;'
+    and not pg_catalog.pg_get_functiondef(p.oid) ~
+      'if[[:space:]]+p_role_code = ''hr_admin''[[:space:]]+and p_active = false[[:space:]]+and not public[.]ot_user_is_approved_approver_identity[(]p_user_id[)][[:space:]]+then[[:space:]]+raise exception'
+    and pg_catalog.position('A non-empty reason is required' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''set_system_role''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+  ) as deactivation_remediation_matches_contract
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_set_system_role'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, boolean, text, uuid';
+
+select
   'Unauthorized active HR Admin assignments (Expected = 0)' as check_name,
   pg_catalog.count(*) as actual_count,
   pg_catalog.array_agg(

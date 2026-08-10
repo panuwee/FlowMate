@@ -44,6 +44,70 @@ describe("OT Request backend contract", () => {
     expect(verify).toContain("Unauthorized active HR Admin assignments (Expected = 0)");
   });
 
+  it("centralizes fixed HR Admin authorization across every full-scope path", () => {
+    const hrAdmin = functionSql(sql, "ot_current_user_is_hr_admin");
+    const canReadRequest = functionSql(sql, "ot_current_user_can_read_request");
+    const audit = functionSql(sql, "ot_list_request_audit");
+    const fullScopePolicy = sql.slice(
+      sql.indexOf('create policy "OT Owner and HR Admin can read all OT requests"'),
+      sql.indexOf("revoke all on table public.ot_system_roles"),
+    );
+
+    for (const contract of [
+      "u.id = (select auth.uid())",
+      "u.is_active = true",
+      "public.ot_user_is_approved_approver_identity(u.id)",
+      "r.role_code = 'hr_admin'",
+      "r.active = true",
+    ]) {
+      expect(hrAdmin).toContain(contract);
+    }
+    expect(hrAdmin).not.toContain("like '%@garena.com'");
+    for (const name of [
+      "ot_get_access_context",
+      "ot_get_manager_dashboard",
+      "ot_list_people_for_event",
+      "ot_list_compliance_queue",
+      "ot_review_compliance",
+      "ot_list_hr_ready",
+      "ot_mark_exported",
+    ]) {
+      expect(functionSql(sql, name)).toContain("public.ot_current_user_is_hr_admin()");
+    }
+    expect(canReadRequest).toContain("public.ot_current_user_is_hr_admin()");
+    expect(fullScopePolicy).toContain("public.ot_current_user_is_hr_admin()");
+    expect(audit).toContain("public.ot_current_user_can_read_request(p_request_id)");
+  });
+
+  it("preserves audited approver deactivation when the installer is rerun", () => {
+    const ownerSeed = sql.slice(
+      sql.indexOf("insert into public.ot_system_roles"),
+      sql.indexOf("insert into public.ot_approvers"),
+    );
+    const approverSeed = sql.slice(
+      sql.indexOf("insert into public.ot_approvers"),
+      sql.indexOf("create or replace function public.ot_require_current_user"),
+    );
+    const setRole = functionSql(sql, "ot_set_system_role");
+
+    expect(ownerSeed).toMatch(/on conflict \(user_id\) do update[\s\S]*active = excluded\.active/);
+    expect(approverSeed).toMatch(/on conflict \(user_id\) do nothing/);
+    expect(approverSeed).not.toMatch(/on conflict \(user_id\) do update/);
+    expect(setRole).toMatch(/p_role_code = 'hr_admin'[\s\S]*p_active = true[\s\S]*ot_user_is_approved_approver_identity\(p_user_id\)/);
+    expect(setRole).toMatch(/A non-empty reason is required[\s\S]*insert into public\.ot_system_roles[\s\S]*'set_system_role'/);
+  });
+
+  it("verifies the fixed HR helper and legacy-role remediation without mutations", () => {
+    expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
+    expect(verify).toContain("OT HR Admin fixed helper contract (Expected = true)");
+    expect(verify).toContain("public.ot_user_is_approved_approver_identity(u.id)");
+    expect(verify).toContain("as helper_matches_contract");
+    expect(verify).toContain("Legacy active HR Admin role does not satisfy fixed helper (Expected = true)");
+    expect(verify).toContain("as legacy_role_cannot_grant_hr_access");
+    expect(verify).toContain("OT HR Admin deactivation remediation contract (Expected = true)");
+    expect(verify).toContain("p_active = false");
+  });
+
   it("persists the consent statement version for individual and event occurrences", () => {
     const createRequest = functionSql(sql, "ot_create_request");
     const recordConsent = functionSql(sql, "ot_record_consent");
