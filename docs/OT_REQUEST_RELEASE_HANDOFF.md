@@ -2,8 +2,7 @@
 
 ## Local verification
 
-- Focused regression verification: `npm.cmd test -- src/lib/ot-request.uat.test.ts src/lib/workflow-mvp.uat.test.ts src/lib/product-book-cms.uat.test.ts src/lib/flowmate-board-integration.uat.test.ts` passed 67/67 tests across 4 files.
-- Full automated verification: `npm.cmd test` passed 492/492 tests across 16 files.
+- Full automated verification: `npm.cmd test` passed 493/493 tests across 16 files.
 - Next production build: `npm.cmd run build` completed successfully and generated all 4 static pages.
 - Static release generation: the first `npm.cmd run build:github` updated only `screens-ot.js` and `app.js`; both the immediate second run and the final rerun reported `No output changed.`
 - Secret scan: `npx.cmd secretlint "**/*"` exited successfully with no finding output.
