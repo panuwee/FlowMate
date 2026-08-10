@@ -56,6 +56,40 @@ where n.nspname = 'public'
   and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
 
 select
+  'Actual amendment RPC contract (Expected = valid)' as check_name,
+  pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
+  pg_catalog.pg_get_function_result(p.oid) as result_type,
+  p.prosecdef as security_definer,
+  pg_catalog.coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  (
+    pg_catalog.position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('public.ot_current_user_is_hr_admin()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('public.ot_user_is_approved_approver_identity(v_actor_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+  ) as approved_elevated_identity_guard,
+  pg_catalog.position('''request_actual_amendment''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_audit_action
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_request_actual_amendment'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, uuid';
+
+select
+  'Actual amendment RPC execute grants (Expected authenticated only)' as check_name,
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_request_actual_amendment(uuid, text, uuid)',
+    'EXECUTE'
+  ) as authenticated_execute,
+  not exists (
+    select 1
+    from information_schema.routine_privileges rp
+    where rp.specific_schema = 'public'
+      and rp.routine_name = 'ot_request_actual_amendment'
+      and rp.privilege_type = 'EXECUTE'
+      and rp.grantee in ('anon', 'PUBLIC')
+  ) as public_and_anon_revoked;
+
+select
   'Canonical OT counted-week helper (Expected = 1)' as check_name,
   'public.ot_counted_week_minutes_unchecked(uuid, date, uuid)' as expected_signature,
   pg_catalog.count(*) as actual_count
@@ -109,7 +143,7 @@ where n.nspname = 'public'
     'ot_get_manager_dashboard', 'ot_list_eligible_approvers',
     'ot_list_people_for_event', 'ot_create_request', 'ot_preview_event_plan',
     'ot_create_event_plan', 'ot_record_consent', 'ot_review_plan',
-    'ot_submit_actual', 'ot_verify_actual', 'ot_list_compliance_queue',
+    'ot_submit_actual', 'ot_request_actual_amendment', 'ot_verify_actual', 'ot_list_compliance_queue',
     'ot_review_compliance', 'ot_list_request_audit', 'ot_list_hr_ready',
     'ot_mark_exported', 'ot_set_approver', 'ot_set_system_role'
   )

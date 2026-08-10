@@ -469,8 +469,28 @@ begin
   from affected_weeks;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
-  if v_request.status in ('cancelled', 'exported', 'hr_ready') then
-    raise exception 'Actual OT cannot be changed after cancellation, HR readiness, or export';
+  if not (
+    (
+      (v_request.source = 'employee_request' and v_request.plan_decision = 'approved')
+      or
+      (v_request.source = 'event_plan' and v_request.employee_consent = 'accepted')
+    )
+    and v_request.planned_end_at <= now()
+    and v_end_at <= now()
+    and (
+      (
+        v_request.status in ('approved', 'actual_confirmation_required')
+        and v_request.actual_submitted_at is null
+        and v_request.actual_decision is null
+      )
+      or
+      (
+        v_request.status = 'revision_required'
+        and v_request.actual_decision = 'revision_required'
+      )
+    )
+  ) then
+    raise exception 'Actual OT can be submitted only after authorization and completed work, or after an audited revision request';
   end if;
   v_variance_minutes := pg_catalog.abs(v_minutes - v_request.planned_minutes);
   if v_variance_minutes > 30 and v_variance_reason is null then
@@ -613,6 +633,110 @@ begin
     v_old_status, v_request.status,
     pg_catalog.jsonb_build_object('decision', p_decision, 'complianceRequired', v_request.compliance_required),
     p_note, p_idempotency_key
+  );
+  return pg_catalog.to_jsonb(v_request);
+end
+$function$;
+
+create or replace function public.ot_request_actual_amendment(
+  p_request_id uuid,
+  p_reason text,
+  p_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_request public.ot_requests;
+  v_old_status text;
+  v_previous_actual_decision text;
+  v_previous_compliance_outcome text;
+  v_previous_hr_ready_at timestamptz;
+  v_reason text := pg_catalog.nullif(pg_catalog.btrim(p_reason), '');
+  v_replay_result jsonb;
+begin
+  if not public.ot_current_user_is_owner()
+     and not (
+       public.ot_current_user_is_hr_admin()
+       and public.ot_user_is_approved_approver_identity(v_actor_id)
+     ) then
+    raise exception 'Only the OT Owner or an approved active HR Admin can request an actual amendment';
+  end if;
+  if v_reason is null then
+    raise exception 'Actual amendment reason is required';
+  end if;
+  perform public.ot_lock_idempotency('request_actual_amendment', p_idempotency_key);
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
+  );
+  select * into v_request from public.ot_requests r where r.id = p_request_id;
+  if not found then
+    raise exception 'OT request not found';
+  end if;
+  select a.changed_fields->'result' into v_replay_result
+  from public.ot_request_audit a
+  where a.request_id = p_request_id
+    and a.actor_user_id = v_actor_id
+    and a.action = 'request_actual_amendment'
+    and a.idempotency_key = p_idempotency_key;
+  if found then
+    return v_replay_result;
+  end if;
+
+  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.actual_week_segments);
+  select * into v_request from public.ot_requests r where r.id = p_request_id for update;
+  if v_request.status = 'exported'
+     or v_request.exported_at is not null
+     or v_request.export_batch_id is not null then
+    raise exception 'Exported OT cannot be reopened for amendment';
+  end if;
+  if v_request.status = 'revision_required'
+     or v_request.actual_decision = 'revision_required' then
+    raise exception 'This OT request is already awaiting an actual revision';
+  end if;
+  if v_request.actual_submitted_at is null
+     or v_request.actual_week_segments is null
+     or v_request.actual_decision is distinct from 'approved'
+     or v_request.actual_verified_by_user_id is null
+     or v_request.actual_verified_at is null then
+    raise exception 'Only an already submitted and manager-approved actual can be amended';
+  end if;
+
+  v_old_status := v_request.status;
+  v_previous_actual_decision := v_request.actual_decision;
+  v_previous_compliance_outcome := v_request.compliance_outcome;
+  v_previous_hr_ready_at := v_request.hr_ready_at;
+  update public.ot_requests
+  set actual_decision = 'revision_required',
+      actual_decision_note = v_reason,
+      actual_verified_by_user_id = null,
+      actual_verified_at = null,
+      compliance_outcome = null,
+      compliance_note = null,
+      compliance_reviewed_by_user_id = null,
+      compliance_reviewed_at = null,
+      hr_ready_at = null,
+      status = 'revision_required',
+      updated_at = now()
+  where id = p_request_id returning * into v_request;
+  insert into public.ot_request_audit (
+    request_id, event_plan_id, actor_user_id, action, old_status, new_status,
+    changed_fields, note, idempotency_key
+  ) values (
+    v_request.id, v_request.event_plan_id, v_actor_id, 'request_actual_amendment',
+    v_old_status, v_request.status,
+    pg_catalog.jsonb_build_object(
+      'previousActualDecision', v_previous_actual_decision,
+      'previousComplianceOutcome', v_previous_compliance_outcome,
+      'previousHrReadyAt', v_previous_hr_ready_at,
+      'requesterUserId', v_actor_id,
+      'reason', v_reason,
+      'result', pg_catalog.to_jsonb(v_request)
+    ),
+    v_reason, p_idempotency_key
   );
   return pg_catalog.to_jsonb(v_request);
 end
@@ -2019,6 +2143,7 @@ revoke all on function public.ot_create_event_plan(jsonb, uuid[], uuid) from pub
 revoke all on function public.ot_record_consent(uuid, boolean, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_review_plan(uuid, text, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_submit_actual(uuid, jsonb, uuid) from public, anon, authenticated;
+revoke all on function public.ot_request_actual_amendment(uuid, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_verify_actual(uuid, text, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_list_compliance_queue(date) from public, anon, authenticated;
 revoke all on function public.ot_review_compliance(uuid, text, text, uuid) from public, anon, authenticated;
@@ -2045,6 +2170,7 @@ grant execute on function public.ot_create_event_plan(jsonb, uuid[], uuid) to au
 grant execute on function public.ot_record_consent(uuid, boolean, text, uuid) to authenticated;
 grant execute on function public.ot_review_plan(uuid, text, text, uuid) to authenticated;
 grant execute on function public.ot_submit_actual(uuid, jsonb, uuid) to authenticated;
+grant execute on function public.ot_request_actual_amendment(uuid, text, uuid) to authenticated;
 grant execute on function public.ot_verify_actual(uuid, text, text, uuid) to authenticated;
 grant execute on function public.ot_list_compliance_queue(date) to authenticated;
 grant execute on function public.ot_review_compliance(uuid, text, text, uuid) to authenticated;

@@ -133,6 +133,102 @@ describe("OT Request backend contract", () => {
     expect(verifyActual.lastIndexOf(stateGuard)).toBeGreaterThan(verifyActual.indexOf("for update"));
   });
 
+  it("authorizes actual submission only through the locked request state machine", () => {
+    const submit = functionSql(sql, "ot_submit_actual");
+    const employeeWeekLock = "public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments)";
+    const rowLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update";
+    const update = "update public.ot_requests";
+    const rowLockIndex = submit.indexOf(rowLock);
+    const lockedState = submit.slice(rowLockIndex, submit.indexOf(update, rowLockIndex));
+
+    expect(submit.indexOf(employeeWeekLock)).toBeLessThan(rowLockIndex);
+    expect(lockedState).toMatch(
+      /\(v_request\.source = 'employee_request' and v_request\.plan_decision = 'approved'\)\s+or\s+\(v_request\.source = 'event_plan' and v_request\.employee_consent = 'accepted'\)/,
+    );
+    expect(lockedState).toContain("v_request.planned_end_at <= now()");
+    expect(lockedState).toContain("v_end_at <= now()");
+    expect(lockedState).toMatch(
+      /v_request\.status in \('approved', 'actual_confirmation_required'\)\s+and v_request\.actual_submitted_at is null\s+and v_request\.actual_decision is null/,
+    );
+    expect(lockedState).toMatch(
+      /v_request\.status = 'revision_required'\s+and v_request\.actual_decision = 'revision_required'/,
+    );
+    for (const finalizedFact of [
+      "actual_decision = 'approved'",
+      "compliance_reviewed_at is not null",
+      "hr_ready_at is not null",
+      "status = 'exported'",
+    ]) {
+      expect(lockedState).not.toContain(finalizedFact);
+    }
+  });
+
+  it("adds an authorized and idempotent actual-amendment state transition", () => {
+    const amendment = functionSql(sql, "ot_request_actual_amendment");
+    const requestLock = "pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)";
+    const employeeWeekLock = "public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.actual_week_segments)";
+    const rowLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update";
+    const updateStart = amendment.indexOf("update public.ot_requests");
+    const updateEnd = amendment.indexOf("where id = p_request_id", updateStart);
+    const updateClause = amendment.slice(updateStart, updateEnd);
+
+    expect(amendment).toContain("returns jsonb");
+    expect(amendment).toContain("security definer");
+    expect(amendment).toContain("set search_path = ''");
+    expect(amendment).toMatch(
+      /ot_current_user_is_owner\(\)[\s\S]*ot_current_user_is_hr_admin\(\)[\s\S]*ot_user_is_approved_approver_identity\(v_actor_id\)[\s\S]*raise exception/,
+    );
+    expect(amendment).toMatch(/nullif\(pg_catalog\.btrim\(p_reason\), ''\)[\s\S]*reason is required/i);
+    expect(amendment).toContain("public.ot_lock_idempotency('request_actual_amendment', p_idempotency_key)");
+    expect(amendment.indexOf(requestLock)).toBeLessThan(amendment.indexOf(employeeWeekLock));
+    expect(amendment.indexOf(employeeWeekLock)).toBeLessThan(amendment.indexOf(rowLock));
+    expect(amendment).toMatch(/status = 'exported'[\s\S]*raise exception/);
+    expect(amendment).toMatch(/status = 'revision_required'[\s\S]*actual_decision = 'revision_required'[\s\S]*raise exception/);
+    expect(amendment).toMatch(
+      /actual_submitted_at is null[\s\S]*actual_decision is distinct from 'approved'[\s\S]*actual_verified_by_user_id is null[\s\S]*actual_verified_at is null[\s\S]*raise exception/,
+    );
+    expect(updateClause).toContain("actual_decision = 'revision_required'");
+    expect(updateClause).toContain("actual_decision_note = v_reason");
+    expect(updateClause).toContain("actual_verified_by_user_id = null");
+    expect(updateClause).toContain("actual_verified_at = null");
+    expect(updateClause).toContain("compliance_outcome = null");
+    expect(updateClause).toContain("compliance_reviewed_at = null");
+    expect(updateClause).toContain("hr_ready_at = null");
+    expect(updateClause).toContain("status = 'revision_required'");
+    for (const preservedFact of [
+      "actual_start_at =",
+      "actual_end_at =",
+      "actual_break_minutes =",
+      "actual_minutes =",
+      "actual_week_segments =",
+      "actual_submitted_at =",
+      "compliance_required =",
+      "exported_at =",
+      "export_batch_id =",
+    ]) {
+      expect(updateClause).not.toContain(preservedFact);
+    }
+    expect(amendment).toMatch(/action = 'request_actual_amendment'[\s\S]*idempotency_key = p_idempotency_key[\s\S]*return v_replay_result/);
+    expect(amendment).toMatch(/'request_actual_amendment'[\s\S]*'previousActualDecision'[\s\S]*'previousComplianceOutcome'[\s\S]*'previousHrReadyAt'[\s\S]*'requesterUserId'[\s\S]*'reason'[\s\S]*'result'/);
+  });
+
+  it("exposes only the authenticated amendment RPC and verifies it read-only", () => {
+    const signature = "public.ot_request_actual_amendment(uuid, text, uuid)";
+
+    expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+    expect(sql).toContain(`grant execute on function ${signature} to authenticated`);
+    expect(sql).not.toMatch(/grant\s+(insert|update|delete)\s+on\s+public\.ot_requests\s+to\s+authenticated/i);
+    expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
+    expect(verify).toContain("Actual amendment RPC contract (Expected = valid)");
+    expect(verify).toContain("ot_request_actual_amendment");
+    expect(verify).toContain("uuid, text, uuid");
+    expect(verify).toContain("security_definer");
+    expect(verify).toContain("fixed_search_path");
+    expect(verify).toContain("approved_elevated_identity_guard");
+    expect(verify).toContain("request_actual_amendment");
+    expect(verify).toContain("Actual amendment RPC execute grants (Expected authenticated only)");
+  });
+
   it("enforces the fixed MVP owner and approver identity allowlists", () => {
     const owner = functionSql(sql, "ot_current_user_is_owner");
     const eligibleApprover = functionSql(sql, "ot_current_user_is_eligible_approver");

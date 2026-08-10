@@ -21,6 +21,12 @@ window.createOtEventPlan = (payload, employeeUserIds, key) => callOtRequestRpc("
 window.recordOtConsent = (requestId, accepted, consentStatementVersion, key) => callOtRequestRpc("ot_record_consent", { p_request_id: requestId, p_accept: accepted, p_consent_statement_version: consentStatementVersion, p_idempotency_key: key }, "OT consent could not be recorded.");
 window.reviewOtPlan = (requestId, decision, note, key) => callOtRequestRpc("ot_review_plan", { p_request_id: requestId, p_decision: decision, p_note: note, p_idempotency_key: key }, "OT plan could not be reviewed.");
 window.submitOtActual = (requestId, payload, key) => callOtRequestRpc("ot_submit_actual", { p_request_id: requestId, p_payload: payload, p_idempotency_key: key }, "OT actuals could not be submitted.");
+window.requestOtActualAmendment = (requestId, reason, key) =>
+  callOtRequestRpc("ot_request_actual_amendment", {
+    p_request_id: requestId,
+    p_reason: reason,
+    p_idempotency_key: key,
+  }, "OT actual amendment could not be requested.");
 window.verifyOtActual = (requestId, decision, note, key) => callOtRequestRpc("ot_verify_actual", { p_request_id: requestId, p_decision: decision, p_note: note, p_idempotency_key: key }, "OT actuals could not be verified.");
 window.loadOtComplianceQueue = weekStart => callOtRequestRpc("ot_list_compliance_queue", { p_week_start: weekStart || null }, "OT compliance queue could not be loaded.");
 window.reviewOtCompliance = (requestId, outcome, note, key) => callOtRequestRpc("ot_review_compliance", { p_request_id: requestId, p_outcome: outcome, p_note: note, p_idempotency_key: key }, "OT compliance review could not be saved.");
