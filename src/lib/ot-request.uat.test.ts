@@ -35,6 +35,8 @@ describe("OT Request backend contract", () => {
     expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
     expect(verify).toContain("Expected OT Owner seed count = 1");
     expect(verify).toContain("Expected active approver seed count = 3");
+    expect(verify).toContain("OT HR Admin assignment allowlist guard (Expected = true)");
+    expect(verify).toContain("Unauthorized active HR Admin assignments (Expected = 0)");
   });
 
   it("persists the consent statement version for individual and event occurrences", () => {
@@ -141,6 +143,17 @@ describe("OT Request backend contract", () => {
     expect(setApprover).toContain("public.ot_user_is_approved_approver_identity(p_user_id)");
     expect(setRole).toMatch(/p_role_code = 'owner'[\s\S]*panuwee\.w@garena\.com[\s\S]*raise exception/);
     expect(setRole).toMatch(/if not exists \([\s\S]*join public\.users owner_user[\s\S]*panuwee\.w@garena\.com[\s\S]*At least one active approved OT Owner/);
+  });
+
+  it("rejects HR admin role assignment outside the approved MVP identities", () => {
+    const setRole = functionSql(sql, "ot_set_system_role");
+
+    expect(setRole).toMatch(
+      /p_role_code = 'hr_admin'[\s\S]*not public\.ot_user_is_approved_approver_identity\(p_user_id\)[\s\S]*raise exception 'HR Admin must be one of the three approved MVP identities'/,
+    );
+    expect(setRole.indexOf("p_role_code = 'hr_admin'")).toBeLessThan(
+      setRole.indexOf("public.ot_lock_idempotency('set_system_role', p_idempotency_key)"),
+    );
   });
 
   it("acquires export employee-week locks in one global order before row locks", () => {

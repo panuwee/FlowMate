@@ -152,6 +152,36 @@ where a.active = true
   );
 
 select
+  'OT HR Admin assignment allowlist guard (Expected = true)' as check_name,
+  pg_catalog.position(
+    'ot_user_is_approved_approver_identity(p_user_id)'
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) > 0 as has_approved_identity_guard
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_set_system_role'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, boolean, text, uuid';
+
+select
+  'Unauthorized active HR Admin assignments (Expected = 0)' as check_name,
+  pg_catalog.count(*) as actual_count,
+  pg_catalog.array_agg(
+    pg_catalog.lower(pg_catalog.btrim(u.email))
+    order by pg_catalog.lower(pg_catalog.btrim(u.email))
+  ) as violating_emails
+from public.ot_system_roles r
+join public.users u on u.id = r.user_id
+where r.role_code = 'hr_admin'
+  and r.active = true
+  and (
+    u.is_active is distinct from true
+    or pg_catalog.lower(pg_catalog.btrim(u.email)) not in (
+      'nithidol.k@garena.com', 'weerayut@garena.com', 'napol.a@garena.com'
+    )
+  );
+
+select
   'Missing approved OT identities (Expected = 0 after user provisioning)' as check_name,
   expected.email as missing_email
 from (values
