@@ -22,7 +22,7 @@ describe("OT request domain", () => {
     });
   });
 
-  it("projects every affected week independently and excludes the replaced occurrence", () => {
+  it("projects every affected week from canonical counted minutes and excludes only the replaced occurrence", () => {
     const domain = loadDomain();
     const rows = domain.buildWeekProjections(
       [
@@ -30,10 +30,10 @@ describe("OT request domain", () => {
         { weekStart: "2026-08-10", minutes: 20 },
       ],
       {
-        "2026-08-03": { plannedMinutes: 2130, actualMinutes: 2110 },
-        "2026-08-10": { plannedMinutes: 2160, actualMinutes: 2155 },
+        "2026-08-03": { plannedMinutes: 300, actualMinutes: 2110, countedMinutes: 2130 },
+        "2026-08-10": { plannedMinutes: 400, actualMinutes: 2155, countedMinutes: 2160 },
       },
-      { totalField: "plannedMinutes", excludedSegments: [{ weekStart: "2026-08-03", minutes: 30 }, { weekStart: "2026-08-10", minutes: 10 }] },
+      { excludedSegments: [{ weekStart: "2026-08-03", minutes: 30 }, { weekStart: "2026-08-10", minutes: 10 }] },
     );
     expect(rows).toEqual([
       { weekStart: "2026-08-03", currentMinutes: 2100, addedMinutes: 30, projectedMinutes: 2130, remainingMinutes: 30, overLimit: false },
@@ -45,8 +45,7 @@ describe("OT request domain", () => {
     const domain = loadDomain();
     const rows = domain.buildWeekProjections(
       [{ weekStart: "2026-08-10", minutes: 100 }],
-      { "2026-08-10": { plannedMinutes: 2100 } },
-      { totalField: "plannedMinutes" },
+      { "2026-08-10": { plannedMinutes: 200, countedMinutes: 2100 } },
     );
 
     expect(rows).toEqual([{
@@ -57,6 +56,54 @@ describe("OT request domain", () => {
       remainingMinutes: 0,
       overLimit: true,
     }]);
+  });
+
+  it("mirrors the SQL included-state rule when choosing the current occurrence's canonical segments", () => {
+    const domain = loadDomain();
+    const planned = [{ weekStart: "2026-08-03", minutes: 90 }];
+    const actual = [{ weekStart: "2026-08-03", minutes: 120 }];
+
+    expect(domain.getCanonicalCountedSegments({ status: "awaiting_consent", plannedWeekSegments: planned })).toEqual(planned);
+    expect(domain.getCanonicalCountedSegments({
+      status: "pending_actual_verification",
+      actualSubmittedAt: "2026-08-03T15:00:00Z",
+      plannedWeekSegments: planned,
+      actualWeekSegments: actual,
+    })).toEqual(actual);
+    expect(domain.getCanonicalCountedSegments({ status: "draft", plannedWeekSegments: planned })).toEqual([]);
+    expect(domain.getCanonicalCountedSegments({ status: "rejected", plannedWeekSegments: planned })).toEqual([]);
+    expect(domain.getCanonicalCountedSegments({ status: "cancelled", plannedWeekSegments: planned })).toEqual([]);
+    expect(domain.getCanonicalCountedSegments({
+      status: "revision_required",
+      actualSubmittedAt: null,
+      plannedWeekSegments: planned,
+    })).toEqual([]);
+    expect(domain.getCanonicalCountedSegments({
+      status: "revision_required",
+      actualSubmittedAt: "2026-08-03T15:00:00Z",
+      plannedWeekSegments: planned,
+      actualWeekSegments: actual,
+    })).toEqual(actual);
+  });
+
+  it("aggregates manager totals with Actual replacing Requested and keeps cross-week canonical totals independent", () => {
+    const domain = loadDomain();
+    const rows = [
+      { employeeUserId: "employee-a", weekStart: "2026-08-03", status: "pending_approval", plannedMinutes: 600, actualMinutes: 0 },
+      { employeeUserId: "employee-a", weekStart: "2026-08-03", status: "pending_actual_verification", actualSubmittedAt: "2026-08-03T15:00:00Z", actualWeekSegments: [], plannedMinutes: 600, actualMinutes: 0 },
+      { employeeUserId: "employee-a", weekStart: "2026-08-03", status: "revision_required", actualSubmittedAt: null, plannedMinutes: 900, actualMinutes: 0 },
+      { employeeUserId: "employee-a", weekStart: "2026-08-10", status: "revision_required", actualSubmittedAt: "2026-08-10T15:00:00Z", actualWeekSegments: [], plannedMinutes: 180, actualMinutes: 120 },
+      { employeeUserId: "employee-a", weekStart: "2026-08-10", status: "draft", plannedMinutes: 900, actualMinutes: 0 },
+      { employeeUserId: "employee-a", weekStart: "2026-08-10", status: "rejected", plannedMinutes: 900, actualMinutes: 900 },
+    ];
+
+    expect(domain.buildOtManagerTotals(rows)).toEqual({
+      "employee-a": { plannedMinutes: 1380, actualMinutes: 120, countedMinutes: 720 },
+    });
+    expect(domain.buildOtManagerTotals(rows, true)).toEqual({
+      "employee-a:2026-08-03": { plannedMinutes: 1200, actualMinutes: 0, countedMinutes: 600 },
+      "employee-a:2026-08-10": { plannedMinutes: 180, actualMinutes: 120, countedMinutes: 120 },
+    });
   });
 
   it("rotates an idempotency intent only after an attempted payload is edited", () => {
@@ -78,6 +125,15 @@ describe("OT request domain", () => {
     const domain = loadDomain();
     expect(domain.calculateDurationMinutes({ startTime: "18:00", endTime: "22:30", breakMinutes: 30 })).toBe(240);
     expect(domain.calculateDurationMinutes({ startTime: "22:00", endTime: "02:00", breakMinutes: 30 })).toBe(210);
+  });
+
+  it("requires a Bangkok-local planned start to be strictly after the current instant", () => {
+    const domain = loadDomain();
+    const now = "2026-08-10T03:00:00.000Z";
+
+    expect(domain.isBangkokPlannedStartFuture("2026-08-10", "09:59", now)).toBe(false);
+    expect(domain.isBangkokPlannedStartFuture("2026-08-10", "10:00", now)).toBe(false);
+    expect(domain.isBangkokPlannedStartFuture("2026-08-10", "10:01", now)).toBe(true);
   });
 
   it("uses Monday as the Bangkok workweek start", () => {

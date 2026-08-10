@@ -6,6 +6,16 @@
   const LIMIT_MINUTES = 36 * 60;
   const ADVISORY_MINUTES = 24 * 60;
   const HIGH_RISK_MINUTES = 30 * 60;
+  const COUNTED_REQUEST_STATUSES = Object.freeze([
+    "pending_approval",
+    "awaiting_consent",
+    "approved",
+    "actual_confirmation_required",
+    "pending_actual_verification",
+    "compliance_review_required",
+    "hr_ready",
+    "exported",
+  ]);
   const REASON_OPTIONS = Object.freeze([
     { key: "offline_event", label: "Offline Event / Tournament Operation" },
     { key: "campaign_launch", label: "Campaign or Patch Launch" },
@@ -100,16 +110,29 @@
     }, {});
   }
 
+  function isCountedOtRequest(request) {
+    const status = valueOf(request, "status", "status");
+    if (COUNTED_REQUEST_STATUSES.includes(status)) return true;
+    return status === "revision_required" && Boolean(valueOf(request, "actualSubmittedAt", "actual_submitted_at"));
+  }
+
+  function getCanonicalCountedSegments(request) {
+    if (!isCountedOtRequest(request)) return [];
+    const actualSegments = valueOf(request, "actualWeekSegments", "actual_week_segments");
+    const hasActual = Boolean(valueOf(request, "actualSubmittedAt", "actual_submitted_at")) && Array.isArray(actualSegments);
+    const segments = hasActual ? actualSegments : valueOf(request, "plannedWeekSegments", "planned_week_segments");
+    return Array.isArray(segments) ? segments : [];
+  }
+
   function buildWeekProjections(segments, summariesByWeek, options) {
     const config = options || {};
-    const totalField = config.totalField || "plannedMinutes";
     const addedByWeek = collectSegmentMinutes(segments);
     const excludedByWeek = collectSegmentMinutes(config.excludedSegments);
     const summaries = summariesByWeek || {};
 
     return Object.keys(addedByWeek).sort().map(weekStart => {
       const summary = summaries[weekStart] || {};
-      const currentMinutes = Math.max(0, asMinutes(summary[totalField]) - (excludedByWeek[weekStart] || 0));
+      const currentMinutes = Math.max(0, asMinutes(summary.countedMinutes) - (excludedByWeek[weekStart] || 0));
       const addedMinutes = addedByWeek[weekStart];
       const projectedMinutes = currentMinutes + addedMinutes;
       return {
@@ -135,6 +158,15 @@
   function dateTimeMs(dateKey, time) {
     const date = parseDateKey(dateKey);
     return date.getTime() + parseTime(time) * MINUTE;
+  }
+
+  function isBangkokPlannedStartFuture(dateKey, time, reference) {
+    parseDateKey(dateKey);
+    parseTime(time);
+    const plannedStart = new Date(`${dateKey}T${time}:00+07:00`).getTime();
+    const now = reference === undefined ? Date.now() : getReferenceTimestamp(reference);
+    if (!Number.isFinite(plannedStart) || now === null) throw new Error("A valid planned start and reference time are required.");
+    return plannedStart > now;
   }
 
   function splitMinutesByWeek(input) {
@@ -321,6 +353,25 @@
     };
   }
 
+  function buildOtManagerTotals(records, byWeek) {
+    return (Array.isArray(records) ? records : []).reduce((totals, request) => {
+      if (!isCountedOtRequest(request)) return totals;
+      const employeeId = valueOf(request, "employeeUserId", "employee_user_id") || "unknown";
+      const weekStart = valueOf(request, "weekStart", "week_start");
+      const key = byWeek ? `${employeeId}:${weekStart}` : employeeId;
+      const current = totals[key] || { plannedMinutes: 0, actualMinutes: 0, countedMinutes: 0 };
+      const plannedMinutes = asMinutes(valueOf(request, "plannedMinutes", "planned_minutes"));
+      const actualMinutes = asMinutes(valueOf(request, "actualMinutes", "actual_minutes"));
+      const actualSegments = valueOf(request, "actualWeekSegments", "actual_week_segments");
+      const hasActual = Boolean(valueOf(request, "actualSubmittedAt", "actual_submitted_at")) && Array.isArray(actualSegments);
+      current.plannedMinutes += plannedMinutes;
+      current.actualMinutes += actualMinutes;
+      current.countedMinutes += hasActual ? actualMinutes : plannedMinutes;
+      totals[key] = current;
+      return totals;
+    }, {});
+  }
+
   function formatSignedHours(minutes) {
     const total = Math.round(Number(minutes || 0));
     if (!Number.isFinite(total)) throw new Error("Minutes must be numeric.");
@@ -484,9 +535,12 @@
     splitMinutesByWeek,
     getLimitState,
     startPersonalWeekLoad,
+    isCountedOtRequest,
+    getCanonicalCountedSegments,
     buildWeekProjections,
     resetIntentAfterEdit,
     isSubmissionLocked,
+    isBangkokPlannedStartFuture,
     deriveRequestStatus,
     canViewRequest,
     canActOnAssignedRequest,
@@ -494,6 +548,7 @@
     canRequestActualAmendment,
     isConfirmedActual,
     getActualVerificationEligibility,
+    buildOtManagerTotals,
     formatSignedHours,
     countWeeksWithActualMinutes,
     buildOtWeeklyTrend,

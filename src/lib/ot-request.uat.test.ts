@@ -917,8 +917,8 @@ describe("OT Request static module integration", () => {
     expect(requestForm).toContain('function OtRequestForm({ mode = "create", request = null');
     expect(requestForm).toContain('const isRevision = mode === "revision"');
     for (const field of ["functionCode", "title", "workDate", "startTime", "endTime", "dayType", "workLocationType", "venue", "reasonCode", "reasonDetail", "approverUserId"]) expect(requestForm).toContain(field);
-    expect(requestForm).toContain('{ totalField: "plannedMinutes" }');
-    expect(requestForm).not.toContain("excludedSegments");
+    expect(requestForm).toContain("getCanonicalCountedSegments(request)");
+    expect(requestForm).toContain("excludedSegments");
     expect(requestForm).toContain("window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key)");
     expect(requestForm).toContain("Edit and resubmit request");
     expect(requestForm).toContain("Resubmit corrected request");
@@ -936,6 +936,31 @@ describe("OT Request static module integration", () => {
     expect(requestForm).toContain('type="date" min={isRevision ? undefined : weekStart} max={isRevision ? undefined : addOtDays(weekStart, 6)}');
     expect(requestForm).toContain("useOtWeekSummaries(preview.valid ? preview.segments : [])");
     expect(requestForm).toContain("plannedWeekSegments: preview.segments");
+  });
+
+  it("wires canonical counted totals and current-occurrence replacement through every policy-facing UI", () => {
+    const screen = read("screens-ot.jsx");
+    const employee = screen.slice(screen.indexOf("function OtEmployeeDashboard("), screen.indexOf("const OT_MANAGER_METRIC_LABELS"));
+    const managerHelpers = screen.slice(screen.indexOf("function getOtManagerRequestId("), screen.indexOf("function OtManagerDashboard("));
+
+    expect(employee).toContain("const countedMinutes = Number(dashboard.countedMinutes || 0)");
+    expect(employee).toContain("remainingMinutes: Math.max(0, OT_LIMIT_MINUTES - countedMinutes)");
+    expect(employee.match(/getCanonicalCountedSegments\(request\)/g)).toHaveLength(3);
+    expect(employee).not.toMatch(/totalField:\s*"(?:plannedMinutes|actualMinutes)"/);
+    expect(managerHelpers).toContain("window.FlowMateOtRequestDomain.buildOtManagerTotals(rows, byWeek)");
+    expect(managerHelpers).not.toContain("actualMinutes || plannedMinutes");
+  });
+
+  it("rechecks Bangkok-local future starts before individual submission, event preview, and event creation", () => {
+    const screen = read("screens-ot.jsx");
+    const requestForm = screen.slice(screen.indexOf("function OtRequestForm("), screen.indexOf("function OtConsentPanel("));
+    const eventForm = screen.slice(screen.indexOf("function OtEventPlanForm("), screen.indexOf("function OtTeamWeekTable("));
+    const message = "Request must be submitted before OT starts.";
+
+    expect(requestForm.match(/isBangkokPlannedStartFuture\(form\.workDate, form\.startTime\)/g)).toHaveLength(2);
+    expect(eventForm.match(/isBangkokPlannedStartFuture\(form\.startDate, form\.startTime\)/g)).toHaveLength(3);
+    expect(requestForm).toContain(message);
+    expect(eventForm).toContain(message);
   });
 
   it("implements the manager weekly operations hub without an OT leaderboard", () => {
@@ -960,7 +985,7 @@ describe("OT Request static module integration", () => {
     expect(manager).not.toMatch(/\.from\(["'`]ot_/);
     expect(manager).toContain("for (const request of requestsToVerify)");
     expect(manager).toContain("await window.verifyOtActual(");
-    expect(manager).toContain("crypto.randomUUID()");
+    expect(manager).toContain("window.FlowMateOtIntent.establish(");
     expect(manager).toContain('decision !== "approved" && !note.trim()');
     expect(manager).toContain('&& !otValue(request, "actualSubmittedAt", "actual_submitted_at")');
     expect(manager).toContain("const historyEmployeeTotals = getOtManagerTotals(activeLoadState.rows, true)");
@@ -985,6 +1010,19 @@ describe("OT Request static module integration", () => {
     expect(approval).toContain("window.FlowMateOtRequestDomain.canActOnAssignedRequest(access, request)");
     expect(approval).toContain("Read only — assigned approver action");
     expect(approval).toContain("window.FlowMateOtRequestDomain.formatSignedHours(");
+  });
+
+  it("keeps manager decision intent keys stable for unchanged Plan, Actual, and bulk retry payloads", () => {
+    const screen = read("screens-ot.jsx");
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+
+    expect(approval).toContain("decisionSubmissionRef.current");
+    expect(approval).toContain("window.FlowMateOtIntent.signature([requestId, selected.kind, decision, normalizedNote])");
+    expect(approval).toContain("window.FlowMateOtIntent.establish(decisionIntentRef.current, signature, () => crypto.randomUUID())");
+    expect(approval).toContain("currentIntent.key");
+    expect(approval).toContain("bulkIntentsRef.current");
+    expect(approval).not.toMatch(/(?:reviewOtPlan|verifyOtActual)\([^;]+crypto\.randomUUID\(\)/);
+    expect(approval).toContain('disabled={actionState.status === "submitting"}');
   });
 
   it("renders approved compliance rows as non-actionable while awaiting HR", () => {
@@ -1253,7 +1291,13 @@ describe("OT Request static module integration", () => {
     expect(admin).toContain("window.setOtSystemRole(");
     expect(admin).toContain("if (!reason.trim())");
     expect(admin).toContain("window.FlowMateOtIntent.establish(");
-    expect(admin).toContain("OT_APPROVED_APPROVER_EMAILS");
+    expect(admin).toContain("OT_APPROVER_DISPLAY_DIRECTORY");
+    expect(admin).toContain("display-only");
+    expect(admin).toContain("server validates");
+    expect(screen).not.toContain("OT_APPROVED_APPROVER_EMAILS");
+    for (const email of ["nithidol.k@garena.com", "weerayut@garena.com", "napol.a@garena.com"]) {
+      expect(screen.match(new RegExp(email.replaceAll(".", "\\."), "g"))).toHaveLength(1);
+    }
     expect(admin).not.toMatch(/setOt(?:Approver|SystemRole)\([^;]+crypto\.randomUUID\(\)/);
     expect(admin).not.toMatch(/\.from\s*\(/);
     expect(admin).not.toContain("currentUserEmail");

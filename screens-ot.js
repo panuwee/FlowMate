@@ -25,7 +25,16 @@ function canOpenOtRequestView(view, access) {
 const OT_LIMIT_MINUTES = 36 * 60;
 const OT_CONSENT_STATEMENT_VERSION = "2026-08-07";
 const OT_DETAIL_REQUIRED_REASONS = new Set(["other", "live_incident", "rework", "scope_change"]);
-const OT_APPROVED_APPROVER_EMAILS = new Set(["nithidol.k@garena.com", "weerayut@garena.com", "napol.a@garena.com"]);
+const OT_APPROVER_DISPLAY_DIRECTORY = Object.freeze([{
+  email: "nithidol.k@garena.com",
+  label: "Big"
+}, {
+  email: "weerayut@garena.com",
+  label: "Mac"
+}, {
+  email: "napol.a@garena.com",
+  label: "Pluem"
+}]);
 function otValue(record, camel, snake) {
   return record && (record[camel] !== undefined ? record[camel] : record[snake]);
 }
@@ -317,13 +326,14 @@ function OtEmployeeDashboard({
   }
   const dashboard = loadState.dashboard || {};
   const requests = loadState.requests;
+  const countedMinutes = Number(dashboard.countedMinutes || 0);
   const plannedMinutes = Number(dashboard.plannedMinutes || 0);
   const confirmedMinutes = Number(dashboard.actualMinutes || 0);
   const summary = {
-    countedMinutes: plannedMinutes,
+    countedMinutes,
     plannedMinutes,
     confirmedMinutes,
-    remainingMinutes: Math.max(0, OT_LIMIT_MINUTES - plannedMinutes)
+    remainingMinutes: Math.max(0, OT_LIMIT_MINUTES - countedMinutes)
   };
   const consentRequests = requests.filter(request => getOtRequestStatus(request) === "awaiting_consent" && !otValue(request, "employeeConsent", "employee_consent"));
   const planRevisionRequests = requests.filter(request => window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "plan");
@@ -602,19 +612,27 @@ function OtRequestForm({
   }
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
   const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
-    totalField: "plannedMinutes"
+    excludedSegments: window.FlowMateOtRequestDomain.getCanonicalCountedSegments(request)
   }) : [];
   const overLimit = projections.some(row => row.overLimit);
+  const plannedStartIsFuture = preview.valid && window.FlowMateOtRequestDomain.isBangkokPlannedStartFuture(form.workDate, form.startTime);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
   const approverUnavailable = approverState.status !== "ready" || approverState.rows.length === 0;
   const selectedApproverAvailable = approverState.rows.some(approver => approver.userId === form.approverUserId);
-  const canSubmit = preview.valid && !overLimit && form.functionCode && form.title.trim() && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && selectedApproverAvailable && form.consented && !approverUnavailable && weekSummaryState.status === "ready" && submitState.status !== "submitting";
+  const canSubmit = preview.valid && plannedStartIsFuture && !overLimit && form.functionCode && form.title.trim() && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && selectedApproverAvailable && form.consented && !approverUnavailable && weekSummaryState.status === "ready" && submitState.status !== "submitting";
   useEffectApp(() => {
     if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
   }, [weekSummaryState.status]);
   async function submitRequest(event) {
     event.preventDefault();
+    if (preview.valid && !window.FlowMateOtRequestDomain.isBangkokPlannedStartFuture(form.workDate, form.startTime)) {
+      setSubmitState({
+        status: "error",
+        message: "Request must be submitted before OT starts."
+      });
+      return;
+    }
     if (!canSubmit) {
       setSubmitState({
         status: "error",
@@ -886,6 +904,10 @@ function OtRequestForm({
     kind: "error",
     title: "Schedule needs attention",
     message: preview.message
+  }), preview.valid && !plannedStartIsFuture && React.createElement(OtWarning, {
+    kind: "error",
+    title: "Start time needs attention",
+    message: "Request must be submitted before OT starts."
   }), weekSummaryState.status === "ready" && overLimit && React.createElement(OtWarning, {
     kind: "critical",
     title: "Request blocked",
@@ -933,8 +955,7 @@ function OtConsentPanel({
   const plannedSegments = getOtWeekSegments(request, "planned");
   const weekSummaryState = useOtWeekSummaries(plannedSegments);
   const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(plannedSegments, weekSummaryState.summaries, {
-    totalField: "plannedMinutes",
-    excludedSegments: plannedSegments
+    excludedSegments: window.FlowMateOtRequestDomain.getCanonicalCountedSegments(request)
   }) : [];
   const overLimit = projections.some(row => row.overLimit);
   const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
@@ -1044,7 +1065,6 @@ function OtActualConfirmationForm({
   const plannedStart = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const plannedEnd = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-  const existingActualSegments = getOtWeekSegments(request, "actual");
   const [form, setForm] = useStateApp({
     startDate: plannedStart.date,
     startTime: plannedStart.time,
@@ -1127,8 +1147,7 @@ function OtActualConfirmationForm({
   const varianceRequired = preview.valid && Math.abs(actualMinutes - plannedMinutes) > 30;
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
   const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
-    totalField: "actualMinutes",
-    excludedSegments: existingActualSegments
+    excludedSegments: window.FlowMateOtRequestDomain.getCanonicalCountedSegments(request)
   }) : [];
   const complianceLikely = projections.some(row => row.overLimit);
   const canSubmit = preview.valid && (!varianceRequired || form.varianceReason.trim()) && submitState.status !== "submitting" && submitState.status !== "success";
@@ -1438,23 +1457,7 @@ function getOtManagerEmployeeName(request, peopleById) {
   return otValue(request, "employeeDisplayName", "employee_display_name") || person && (person.displayName || person.email) || `Employee ${String(employeeId).slice(0, 8)}`;
 }
 function getOtManagerTotals(rows, byWeek = false) {
-  return rows.reduce((totals, request) => {
-    if (["cancelled", "rejected"].includes(getOtRequestStatus(request))) return totals;
-    const employeeId = getOtManagerEmployeeId(request);
-    const key = byWeek ? `${employeeId}:${request.weekStart}` : employeeId;
-    const current = totals[key] || {
-      plannedMinutes: 0,
-      actualMinutes: 0,
-      countedMinutes: 0
-    };
-    const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
-    const actualMinutes = Number(otValue(request, "actualMinutes", "actual_minutes") || 0);
-    current.plannedMinutes += plannedMinutes;
-    current.actualMinutes += actualMinutes;
-    current.countedMinutes += actualMinutes || plannedMinutes;
-    totals[key] = current;
-    return totals;
-  }, {});
+  return window.FlowMateOtRequestDomain.buildOtManagerTotals(rows, byWeek);
 }
 function isOtActualConfirmed(request) {
   return window.FlowMateOtRequestDomain.isConfirmedActual(request);
@@ -1741,6 +1744,9 @@ function OtApprovalQueue({
     status: "idle",
     message: ""
   });
+  const decisionIntentRef = useRefApp(null);
+  const bulkIntentsRef = useRefApp({});
+  const decisionSubmissionRef = useRefApp(false);
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request" && !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval");
   const actualRequests = requests.filter(request => ["pending_actual_verification", "compliance_review_required"].includes(getOtRequestStatus(request)));
@@ -1779,11 +1785,13 @@ function OtApprovalQueue({
   }
   function openDecision(kind, request) {
     if (!canTakeAction(kind, request)) return;
+    if (decisionSubmissionRef.current || actionState.status === "submitting") return;
     setSelected({
       kind,
       request
     });
     setBulkReview(null);
+    decisionIntentRef.current = window.FlowMateOtIntent.complete();
     setNote("");
     setActionState({
       status: "idle",
@@ -1791,7 +1799,7 @@ function OtApprovalQueue({
     });
   }
   async function decide(decision) {
-    if (!selected || !canTakeAction(selected.kind, selected.request) || actionState.status === "submitting") return;
+    if (!selected || !canTakeAction(selected.kind, selected.request) || decisionSubmissionRef.current || actionState.status === "submitting") return;
     if (decision !== "approved" && !note.trim()) {
       setActionState({
         status: "error",
@@ -1813,16 +1821,23 @@ function OtApprovalQueue({
       });
       return;
     }
+    const requestId = getOtManagerRequestId(selected.request);
+    const normalizedNote = note.trim() || null;
+    const signature = window.FlowMateOtIntent.signature([requestId, selected.kind, decision, normalizedNote]);
+    const currentIntent = window.FlowMateOtIntent.establish(decisionIntentRef.current, signature, () => crypto.randomUUID());
+    decisionIntentRef.current = currentIntent;
+    decisionSubmissionRef.current = true;
     setActionState({
       status: "submitting",
       message: "Saving the audited decision…"
     });
     try {
       if (selected.kind === "plan") {
-        await window.reviewOtPlan(getOtManagerRequestId(selected.request), decision, note.trim() || null, crypto.randomUUID());
+        await window.reviewOtPlan(requestId, decision, normalizedNote, currentIntent.key);
       } else {
-        await window.verifyOtActual(getOtManagerRequestId(selected.request), decision, note.trim() || null, crypto.randomUUID());
+        await window.verifyOtActual(requestId, decision, normalizedNote, currentIntent.key);
       }
+      decisionIntentRef.current = window.FlowMateOtIntent.complete();
       setActionState({
         status: "success",
         message: "Decision saved to the request audit."
@@ -1835,10 +1850,12 @@ function OtApprovalQueue({
         status: "error",
         message: error.message || "The decision could not be saved."
       });
+    } finally {
+      decisionSubmissionRef.current = false;
     }
   }
   function openBulkReview() {
-    if (actionState.status === "submitting") return;
+    if (decisionSubmissionRef.current || actionState.status === "submitting") return;
     const requestsToVerify = actualRequests.filter(request => {
       const checks = getActualChecks(request);
       return canAct(request) && checks.canBulkVerify;
@@ -1848,6 +1865,8 @@ function OtApprovalQueue({
       return !canAct(request) || !checks.canBulkVerify;
     });
     setSelected(null);
+    decisionIntentRef.current = window.FlowMateOtIntent.complete();
+    bulkIntentsRef.current = {};
     setBulkReview({
       requestsToVerify,
       excludedRequests
@@ -1859,17 +1878,26 @@ function OtApprovalQueue({
   }
   async function confirmBulkVerification() {
     const requestsToVerify = bulkReview?.requestsToVerify || [];
-    if (!requestsToVerify.length || actionState.status === "submitting") return;
+    if (!requestsToVerify.length || decisionSubmissionRef.current || actionState.status === "submitting") return;
+    decisionSubmissionRef.current = true;
     setActionState({
       status: "submitting",
       message: `Verifying ${requestsToVerify.length} eligible actual occurrence(s) individually…`
     });
     let completed = 0;
+    const nextBulkIntents = bulkIntentsRef.current;
+    const bulkNote = "Bulk verified after individual checks.";
     try {
       for (const request of requestsToVerify) {
-        await window.verifyOtActual(getOtManagerRequestId(request), "approved", "Bulk verified after individual checks.", crypto.randomUUID());
+        const requestId = getOtManagerRequestId(request);
+        const signature = window.FlowMateOtIntent.signature([requestId, "actual", "approved", bulkNote]);
+        const currentIntent = window.FlowMateOtIntent.establish(nextBulkIntents[requestId], signature, () => crypto.randomUUID());
+        nextBulkIntents[requestId] = currentIntent;
+        await window.verifyOtActual(requestId, "approved", bulkNote, currentIntent.key);
+        delete nextBulkIntents[requestId];
         completed += 1;
       }
+      bulkIntentsRef.current = {};
       setActionState({
         status: "success",
         message: `${completed} actual occurrence(s) verified individually and audited.`
@@ -1877,11 +1905,17 @@ function OtApprovalQueue({
       setBulkReview(null);
       onChanged();
     } catch (error) {
+      setBulkReview(current => current ? {
+        ...current,
+        requestsToVerify: requestsToVerify.slice(completed)
+      } : current);
       setActionState({
         status: "error",
         message: `${completed} verified. Bulk action stopped at the first server error: ${error.message || "Verification failed."}`
       });
       onChanged();
+    } finally {
+      decisionSubmissionRef.current = false;
     }
   }
   const selectedChecks = selected?.kind === "actual" ? getActualChecks(selected.request) : null;
@@ -1896,6 +1930,7 @@ function OtApprovalQueue({
       key: request.id,
       type: "button",
       className: "ot-queue-item",
+      disabled: actionState.status === "submitting",
       onClick: () => openDecision(kind, request)
     }, content) : React.createElement("div", {
       key: request.id,
@@ -1917,6 +1952,7 @@ function OtApprovalQueue({
   }, "Confirm only after reviewing each included occurrence. Writes run sequentially and stop at the first server error.")), React.createElement("button", {
     type: "button",
     className: "btn btn--ghost",
+    disabled: actionState.status === "submitting",
     onClick: () => setBulkReview(null)
   }, "Close")), React.createElement("div", {
     className: "ot-bulk-list"
@@ -1955,6 +1991,7 @@ function OtApprovalQueue({
   }, React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
+    disabled: actionState.status === "submitting",
     onClick: () => setBulkReview(null)
   }, "Cancel"), React.createElement("button", {
     type: "button",
@@ -1994,6 +2031,7 @@ function OtApprovalQueue({
   }, React.createElement("h3", null, "Review before decision"), React.createElement("button", {
     type: "button",
     className: "btn btn--ghost",
+    disabled: actionState.status === "submitting",
     onClick: () => setSelected(null)
   }, "Close")), React.createElement("div", {
     className: "ot-detail-grid"
@@ -2024,6 +2062,7 @@ function OtApprovalQueue({
   }, "Decision note ", selected.kind === "plan" ? "(required for reject or revision)" : selectedChecks?.complianceRequired ? "(required for return or required for compliance approval)" : "(required for return)"), React.createElement("textarea", {
     className: "textarea",
     value: note,
+    disabled: actionState.status === "submitting",
     onChange: event => setNote(event.target.value),
     placeholder: "Add the operational decision context"
   })), React.createElement("p", {
@@ -2184,7 +2223,8 @@ function OtEventPlanForm({
   }
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
-  const baseComplete = schedule.valid && form.title.trim() && form.functionCode && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && form.employeeUserIds.length > 0 && directoryState.status === "ready";
+  const plannedStartIsFuture = schedule.valid && window.FlowMateOtRequestDomain.isBangkokPlannedStartFuture(form.startDate, form.startTime);
+  const baseComplete = schedule.valid && form.title.trim() && form.functionCode && form.reasonCode && plannedStartIsFuture && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && form.employeeUserIds.length > 0 && directoryState.status === "ready";
   function buildEventPayload() {
     return {
       title: form.title.trim(),
@@ -2202,6 +2242,15 @@ function OtEventPlanForm({
     };
   }
   async function previewPlan() {
+    if (schedule.valid && !window.FlowMateOtRequestDomain.isBangkokPlannedStartFuture(form.startDate, form.startTime)) {
+      setPreviewState({
+        status: "error",
+        result: null,
+        payload: null,
+        message: "Request must be submitted before OT starts."
+      });
+      return;
+    }
     if (!baseComplete) {
       setPreviewState({
         status: "error",
@@ -2241,6 +2290,14 @@ function OtEventPlanForm({
   const canCreate = previewState.status === "ready" && eligibleEmployeeIds.length > 0 && submitState.status !== "submitting" && submitState.status !== "success";
   async function createPlan(event) {
     event.preventDefault();
+    if (schedule.valid && !window.FlowMateOtRequestDomain.isBangkokPlannedStartFuture(form.startDate, form.startTime)) {
+      setSubmitState({
+        status: "error",
+        message: "Request must be submitted before OT starts.",
+        result: null
+      });
+      return;
+    }
     if (!canCreate || !previewState.payload) {
       setSubmitState({
         status: "error",
@@ -2493,6 +2550,10 @@ function OtEventPlanForm({
     kind: "error",
     title: "Schedule needs attention",
     message: schedule.message
+  }), schedule.valid && !plannedStartIsFuture && React.createElement(OtWarning, {
+    kind: "error",
+    title: "Start time needs attention",
+    message: "Request must be submitted before OT starts."
   }), React.createElement("div", {
     className: "ot-form__actions"
   }, React.createElement("button", {
@@ -3570,10 +3631,17 @@ function OtAccessAdminPanel({
   const accessSubmissionRef = useRefApp(false);
   async function loadOtAccessDirectory() {
     const [people, approvers] = await Promise.all([window.loadOtPeopleForEvent(), window.loadOtEligibleApprovers()]);
-    const approvedPeople = (Array.isArray(people) ? people : []).filter(person => OT_APPROVED_APPROVER_EMAILS.has(String(person.email || "").trim().toLowerCase()));
+    const displayByEmail = new Map(OT_APPROVER_DISPLAY_DIRECTORY.map(entry => [entry.email, entry]));
+    const displayPeople = (Array.isArray(people) ? people : []).flatMap(person => {
+      const displayEntry = displayByEmail.get(String(person.email || "").trim().toLowerCase());
+      return displayEntry ? [{
+        ...person,
+        displayLabel: displayEntry.label
+      }] : [];
+    });
     return {
       status: "ready",
-      people: approvedPeople,
+      people: displayPeople,
       activeApproverIds: new Set((Array.isArray(approvers) ? approvers : []).map(person => person.userId)),
       message: ""
     };
@@ -3787,7 +3855,7 @@ function OtAccessAdminPanel({
     className: "ot-section-head"
   }, React.createElement("div", null, React.createElement("h2", null, "OT access administration"), React.createElement("p", {
     className: "muted"
-  }, "This panel is limited to the server-approved identities. It cannot add arbitrary users or widen permissions outside OT Request.")), React.createElement("span", null, "Owner only")), React.createElement("article", {
+  }, "This display-only MVP directory labels candidate identities; the server validates every access change and remains the authorization authority.")), React.createElement("span", null, "Owner only")), React.createElement("article", {
     className: "ot-access__owner"
   }, React.createElement("div", null, React.createElement("strong", null, "Sole OT Owner"), React.createElement("small", null, "Identity resolved by the server access context · User ", access.userId)), React.createElement("span", {
     className: "ot-status"
@@ -3870,7 +3938,7 @@ function OtAccessAdminPanel({
     return React.createElement("article", {
       key: person.userId,
       className: "ot-access__row"
-    }, React.createElement("div", null, React.createElement("strong", null, person.displayName || person.email), React.createElement("small", null, person.email, " · Approved MVP identity")), React.createElement("div", {
+    }, React.createElement("div", null, React.createElement("strong", null, person.displayLabel || person.displayName || person.email), React.createElement("small", null, person.email, " · Display candidate; server-authorized state: ", isApprover ? "active" : "inactive")), React.createElement("div", {
       className: "ot-access__actions"
     }, React.createElement("button", {
       type: "button",
