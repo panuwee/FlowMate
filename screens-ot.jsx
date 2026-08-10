@@ -1066,6 +1066,10 @@ function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged 
       setActionState({ status: "error", message: "A note is required when rejecting or returning OT." });
       return;
     }
+    if (selected.kind === "actual" && decision === "approved" && selectedChecks?.complianceRequired && !note.trim()) {
+      setActionState({ status: "error", message: "A note is required for a compliance-required actual approval." });
+      return;
+    }
     if (selected.kind === "actual" && decision === "approved" && !getActualChecks(selected.request).canVerifyIndividually) {
       setActionState({ status: "error", message: "This actual record cannot be verified until consent, submitted actual time, and variance checks are complete." });
       return;
@@ -1154,9 +1158,9 @@ function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged 
         {selectedChecks && !selectedChecks.consentAccepted && <OtWarning kind="critical" title="Consent missing" message="Individual employee consent must be accepted before actual verification." />}
         {selectedChecks?.varianceNeedsReason && !selectedChecks.varianceHasReason && <OtWarning kind="critical" title="Variance reason missing" message="A change above 30 minutes needs an employee reason before verification." />}
         {selectedChecks?.complianceRequired && <OtWarning kind="critical" title="Compliance review required" message="The assigned approver may verify truthful actual time individually. The server retains the compliance gate after approval." />}
-        <label className="field"><span className="field__label">Decision note {selected.kind === "plan" ? "(required for reject)" : "(required for return)"}</span><textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} placeholder="Add the operational decision context" /></label>
+        <label className="field"><span className="field__label">Decision note {selected.kind === "plan" ? "(required for reject or revision)" : selectedChecks?.complianceRequired ? "(required for return or required for compliance approval)" : "(required for return)"}</span><textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} placeholder="Add the operational decision context" /></label>
         <p className="muted">Every decision is saved through the assigned-request RPC and recorded in the audit trail.</p>
-        <div className="ot-form__actions">{selected.kind === "plan" ? <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("rejected")}>Reject plan</button><button type="button" className="btn btn--primary" disabled={selectedTotal > OT_LIMIT_MINUTES || actionState.status === "submitting"} onClick={() => decide("approved")}>Approve plan</button></> : <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("revision_required")}>Return actual</button><button type="button" className="btn btn--primary" disabled={!selectedChecks?.canVerifyIndividually || actionState.status === "submitting"} onClick={() => decide("approved")}>Verify actual</button></>}</div>
+        <div className="ot-form__actions">{selected.kind === "plan" ? <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("rejected")}>Reject plan</button><button type="button" className="btn btn--primary" disabled={selectedTotal > OT_LIMIT_MINUTES || actionState.status === "submitting"} onClick={() => decide("approved")}>Approve plan</button></> : <><button type="button" className="btn btn--secondary" disabled={!note.trim() || actionState.status === "submitting"} onClick={() => decide("revision_required")}>Return actual</button><button type="button" className="btn btn--primary" disabled={!selectedChecks?.canVerifyIndividually || (selectedChecks?.complianceRequired && !note.trim()) || actionState.status === "submitting"} onClick={() => decide("approved")}>Verify actual</button></>}</div>
       </section>}
       {actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}
     </section>
@@ -1766,43 +1770,140 @@ function OtAccessAdminPanel({ access }) {
   const [directoryState, setDirectoryState] = useStateApp({ status: "loading", people: [], activeApproverIds: new Set(), message: "" });
   const [reason, setReason] = useStateApp("");
   const [intent, setIntent] = useStateApp(null);
+  const [deactivationPlan, setDeactivationPlan] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
   const accessSubmissionRef = useRefApp(false);
+
+  async function loadOtAccessDirectory() {
+    const [people, approvers] = await Promise.all([window.loadOtPeopleForEvent(), window.loadOtEligibleApprovers()]);
+    const approvedPeople = (Array.isArray(people) ? people : []).filter(person => OT_APPROVED_APPROVER_EMAILS.has(String(person.email || "").trim().toLowerCase()));
+    return {
+      status: "ready",
+      people: approvedPeople,
+      activeApproverIds: new Set((Array.isArray(approvers) ? approvers : []).map(person => person.userId)),
+      message: "",
+    };
+  }
 
   useEffectApp(() => {
     if (!access.isOwner) return undefined;
     let alive = true;
     setDirectoryState(current => ({ ...current, status: "loading", message: "" }));
-    Promise.all([window.loadOtPeopleForEvent(), window.loadOtEligibleApprovers()]).then(([people, approvers]) => {
-      if (!alive) return;
-      const approvedPeople = (Array.isArray(people) ? people : []).filter(person => OT_APPROVED_APPROVER_EMAILS.has(String(person.email || "").trim().toLowerCase()));
-      setDirectoryState({ status: "ready", people: approvedPeople, activeApproverIds: new Set((Array.isArray(approvers) ? approvers : []).map(person => person.userId)), message: "" });
+    loadOtAccessDirectory().then(nextDirectory => {
+      if (alive) setDirectoryState(nextDirectory);
     }).catch(error => {
       if (alive) setDirectoryState({ status: "error", people: [], activeApproverIds: new Set(), message: error.message || "OT access directory could not be loaded." });
     });
     return () => { alive = false; };
   }, [access.isOwner, refreshKey]);
 
-  async function applyApproverAccess(person, active) {
+  function beginApproverDeactivation(person) {
+    if (accessSubmissionRef.current || actionState.status === "submitting") return;
+    setDeactivationPlan({ sourceUserId: person.userId, destinationUserId: "", ready: false, movedCount: null });
+    setActionState({ status: "idle", message: "" });
+    setIntent(window.FlowMateOtIntent.complete());
+  }
+
+  async function reassignPendingApproverWork() {
+    if (accessSubmissionRef.current || actionState.status === "submitting") return;
+    if (!reason.trim()) {
+      setActionState({ status: "error", message: "A written reason is required before pending work can be reassigned." });
+      return;
+    }
+    if (!deactivationPlan?.sourceUserId || !deactivationPlan.destinationUserId) {
+      setActionState({ status: "error", message: "Choose an active reassignment destination before continuing." });
+      return;
+    }
+    const normalizedReason = reason.trim();
+    const signature = window.FlowMateOtIntent.signature([
+      deactivationPlan.sourceUserId,
+      deactivationPlan.destinationUserId,
+      "reassign_pending_approver",
+      normalizedReason,
+    ]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    accessSubmissionRef.current = true;
+    setActionState({ status: "submitting", message: "Atomically reassigning pending OT work…" });
+    try {
+      const result = await window.reassignPendingOtApprover(
+        deactivationPlan.sourceUserId,
+        deactivationPlan.destinationUserId,
+        normalizedReason,
+        currentIntent.key,
+      );
+      let refreshedDirectory;
+      try {
+        refreshedDirectory = await loadOtAccessDirectory();
+      } catch (refreshError) {
+        throw new Error(`The server reassignment completed atomically, but the access refresh failed. Retry the unchanged reassignment to replay it safely. ${refreshError.message || ""}`.trim());
+      }
+      setDirectoryState(refreshedDirectory);
+      setIntent(window.FlowMateOtIntent.complete());
+      setDeactivationPlan(current => ({
+        ...current,
+        ready: true,
+        movedCount: Number(result?.movedCount ?? result?.moved_count ?? 0),
+      }));
+      setActionState({
+        status: "success",
+        message: "The server reassignment is atomic. The approver remains active because the reassignment and deactivation browser calls are not atomic together. Review the refreshed list, then run the separate deactivation call.",
+      });
+    } catch (error) {
+      setActionState({ status: "error", message: error.message || "Pending OT work could not be reassigned." });
+    } finally {
+      accessSubmissionRef.current = false;
+    }
+  }
+
+  async function deactivateApprover(person) {
+    if (accessSubmissionRef.current || actionState.status === "submitting") return;
+    if (!deactivationPlan?.ready || deactivationPlan.sourceUserId !== person.userId) return;
+    if (!reason.trim()) {
+      setActionState({ status: "error", message: "A written reason is required for approver deactivation." });
+      return;
+    }
+    const normalizedReason = reason.trim();
+    const signature = window.FlowMateOtIntent.signature([person.userId, "set_approver:false", normalizedReason]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    accessSubmissionRef.current = true;
+    setActionState({ status: "submitting", message: "Running the separate audited deactivation call…" });
+    try {
+      await window.setOtApprover(person.userId, false, normalizedReason, currentIntent.key);
+      const refreshedDirectory = await loadOtAccessDirectory();
+      setDirectoryState(refreshedDirectory);
+      setIntent(window.FlowMateOtIntent.complete());
+      setDeactivationPlan(null);
+      setReason("");
+      setActionState({ status: "success", message: "Approver deactivated after the refreshed pending-work check." });
+    } catch (error) {
+      setActionState({ status: "error", message: error.message || "Approver deactivation could not be completed. New pending work may require another reassignment." });
+    } finally {
+      accessSubmissionRef.current = false;
+    }
+  }
+
+  async function enableApprover(person) {
     if (accessSubmissionRef.current || actionState.status === "submitting") return;
     if (!reason.trim()) {
       setActionState({ status: "error", message: "A written reason is required for every approver change." });
       return;
     }
     const normalizedReason = reason.trim();
-    const signature = window.FlowMateOtIntent.signature([person.userId, `set_approver:${active}`, normalizedReason]);
+    const signature = window.FlowMateOtIntent.signature([person.userId, "set_approver:true", normalizedReason]);
     const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
     setIntent(currentIntent);
     accessSubmissionRef.current = true;
-    setActionState({ status: "submitting", message: "Saving the audited approver change…" });
+    setActionState({ status: "submitting", message: "Saving the audited approver activation…" });
     try {
-      await window.setOtApprover(person.userId, active, normalizedReason, currentIntent.key);
+      await window.setOtApprover(person.userId, true, normalizedReason, currentIntent.key);
       setIntent(window.FlowMateOtIntent.complete());
-      setActionState({ status: "success", message: "Approver access changed and audited." });
+      setActionState({ status: "success", message: "Approver access activated and audited." });
       setReason("");
       setRefreshKey(value => value + 1);
     } catch (error) {
-      setActionState({ status: "error", message: error.message || "Approver access could not be changed." });
+      setActionState({ status: "error", message: error.message || "Approver access could not be activated." });
     } finally {
       accessSubmissionRef.current = false;
     }
@@ -1833,8 +1934,31 @@ function OtAccessAdminPanel({ access }) {
   }
 
   if (!access.isOwner) return null;
+  const deactivationPerson = directoryState.people.find(person => person.userId === deactivationPlan?.sourceUserId) || null;
+  const destinationPeople = directoryState.people.filter(person => (
+    person.userId !== deactivationPlan?.sourceUserId
+    && directoryState.activeApproverIds.has(person.userId)
+  ));
   return (
-    <section className="ot-access ot-list" aria-label="OT access administration"><div className="ot-section-head"><div><h2>OT access administration</h2><p className="muted">This panel is limited to the server-approved identities. It cannot add arbitrary users or widen permissions outside OT Request.</p></div><span>Owner only</span></div><article className="ot-access__owner"><div><strong>Sole OT Owner</strong><small>Identity resolved by the server access context · User {access.userId}</small></div><span className="ot-status">Protected active</span></article><label className="field"><span className="field__label">Required reason for the next change *</span><textarea className="textarea" value={reason} disabled={actionState.status === "submitting"} onChange={event => setReason(event.target.value)} placeholder="Explain the operational or compliance reason." /></label>{directoryState.status === "loading" && <div className="ot-state" role="status">Loading the fixed OT access list…</div>}{directoryState.status === "error" && <OtWarning kind="error" message={directoryState.message} />}{directoryState.status === "ready" && <div className="ot-access__list">{directoryState.people.map(person => { const isApprover = directoryState.activeApproverIds.has(person.userId); return <article key={person.userId} className="ot-access__row"><div><strong>{person.displayName || person.email}</strong><small>{person.email} · Approved MVP identity</small></div><div className="ot-access__actions"><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => applyApproverAccess(person, !isApprover)}>{isApprover ? "Disable approver" : "Enable approver"}</button><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => applyHrRole(person, true)}>Grant HR/Admin</button><button type="button" className="btn btn--sm btn--ghost" disabled={actionState.status === "submitting"} onClick={() => applyHrRole(person, false)}>Remove HR/Admin</button></div></article>; })}</div>}{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}<p className="muted">Normal plan and actual decisions remain assigned-approver only. This panel never impersonates an assigned approver.</p></section>
+    <section className="ot-access ot-list" aria-label="OT access administration">
+      <div className="ot-section-head"><div><h2>OT access administration</h2><p className="muted">This panel is limited to the server-approved identities. It cannot add arbitrary users or widen permissions outside OT Request.</p></div><span>Owner only</span></div>
+      <article className="ot-access__owner"><div><strong>Sole OT Owner</strong><small>Identity resolved by the server access context · User {access.userId}</small></div><span className="ot-status">Protected active</span></article>
+      <fieldset className="ot-form__fieldset" disabled={actionState.status === "submitting"}>
+        <label className="field"><span className="field__label">Required reason for the next change *</span><textarea className="textarea" value={reason} onChange={event => setReason(event.target.value)} placeholder="Explain the operational or compliance reason." /></label>
+        {deactivationPerson && <section className="ot-workflow" aria-label="Approver reassignment before deactivation">
+          <div className="ot-section-head"><div><h3>Prepare deactivation</h3><p className="muted">Reassign all non-final requested and Actual workflow records from {deactivationPerson.displayName || deactivationPerson.email} before disabling access.</p></div><button type="button" className="btn btn--ghost" disabled={actionState.status === "submitting"} onClick={() => { setDeactivationPlan(null); setIntent(window.FlowMateOtIntent.complete()); setActionState({ status: "idle", message: "" }); }}>Cancel</button></div>
+          <label className="field"><span className="field__label">Reassignment destination *</span><select className="select" value={deactivationPlan.destinationUserId} disabled={actionState.status === "submitting"} onChange={event => setDeactivationPlan(current => ({ ...current, destinationUserId: event.target.value, ready: false, movedCount: null }))}><option value="">Select an active approver</option>{destinationPeople.map(person => <option key={person.userId} value={person.userId}>{person.displayName || person.email}</option>)}</select></label>
+          <p className="muted">The server reassignment is atomic. However, the reassignment and deactivation browser calls are not atomic together, so the server rechecks pending work during the separate deactivation call.</p>
+          <div className="ot-form__actions"><button type="button" className="btn btn--secondary" disabled={!reason.trim() || !deactivationPlan.destinationUserId || actionState.status === "submitting"} onClick={reassignPendingApproverWork}>Reassign pending work</button>{deactivationPlan.ready && <button type="button" className="btn btn--primary" disabled={!reason.trim() || actionState.status === "submitting"} onClick={() => deactivateApprover(deactivationPerson)}>Deactivate approver</button>}</div>
+          {deactivationPlan.ready && <p className="muted">Refreshed after moving {deactivationPlan.movedCount} non-final request{deactivationPlan.movedCount === 1 ? "" : "s"}. Deactivation remains a separate server call.</p>}
+        </section>}
+      </fieldset>
+      {directoryState.status === "loading" && <div className="ot-state" role="status">Loading the fixed OT access list…</div>}
+      {directoryState.status === "error" && <OtWarning kind="error" message={directoryState.message} />}
+      {directoryState.status === "ready" && <div className="ot-access__list">{directoryState.people.map(person => { const isApprover = directoryState.activeApproverIds.has(person.userId); return <article key={person.userId} className="ot-access__row"><div><strong>{person.displayName || person.email}</strong><small>{person.email} · Approved MVP identity</small></div><div className="ot-access__actions"><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => isApprover ? beginApproverDeactivation(person) : enableApprover(person)}>{isApprover ? "Prepare deactivation" : "Enable approver"}</button><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => applyHrRole(person, true)}>Grant HR/Admin</button><button type="button" className="btn btn--sm btn--ghost" disabled={actionState.status === "submitting"} onClick={() => applyHrRole(person, false)}>Remove HR/Admin</button></div></article>; })}</div>}
+      {actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}
+      <p className="muted">Normal plan and actual decisions remain assigned-approver only. This panel never impersonates an assigned approver.</p>
+    </section>
   );
 }
 

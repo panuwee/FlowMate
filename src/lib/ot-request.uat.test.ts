@@ -125,6 +125,34 @@ describe("OT Request backend contract", () => {
     expect(sql).toContain("grant execute on function public.ot_record_consent(uuid, boolean, text, uuid) to authenticated");
   });
 
+  it("enforces the fixed reason vocabulary, required detail, and exact consent statement version at every write boundary", () => {
+    const assertReason = functionSql(sql, "ot_assert_reason");
+    const assertConsent = functionSql(sql, "ot_assert_consent_version");
+    const createRequest = functionSql(sql, "ot_create_request");
+    const resubmitPlan = functionSql(sql, "ot_resubmit_plan");
+    const createEvent = functionSql(sql, "ot_create_event_plan");
+    const recordConsent = functionSql(sql, "ot_record_consent");
+    const submitActual = functionSql(sql, "ot_submit_actual");
+
+    for (const reasonCode of [
+      "offline_event", "campaign_launch", "live_incident", "capacity",
+      "external_schedule", "rework", "scope_change", "travel_offsite", "other",
+    ]) expect(assertReason).toContain(`'${reasonCode}'`);
+    for (const detailRequired of ["other", "live_incident", "rework", "scope_change"]) {
+      expect(assertReason).toContain(`'${detailRequired}'`);
+    }
+    expect(assertReason).toMatch(/reason code[^']*invalid|invalid[^']*reason code/i);
+    expect(assertReason).toMatch(/reason detail[^']*required|required[^']*reason detail/i);
+    expect(assertConsent).toContain("'2026-08-07'");
+    expect(assertConsent).toMatch(/consent statement version[^']*2026-08-07/i);
+    for (const caller of [createRequest, resubmitPlan, createEvent, submitActual]) {
+      expect(caller).toContain("public.ot_assert_reason(");
+    }
+    for (const caller of [createRequest, resubmitPlan, recordConsent, submitActual]) {
+      expect(caller).toContain("public.ot_assert_consent_version(");
+    }
+  });
+
   it("requires and persists a reason when actual net minutes vary by more than 30", () => {
     const submit = functionSql(sql, "ot_submit_actual");
 
@@ -559,6 +587,97 @@ describe("OT Request backend contract", () => {
     for (const fact of ["ot_resubmit_plan", "uuid, jsonb, text, uuid", "security_definer", "fixed_search_path", "employee_state_guard", "request_lock", "week_union_lock", "resubmit_plan", "ot_assert_no_employee_overlap"]) expect(verify).toContain(fact);
     expect(verify).toContain("Plan resubmission RPC execute grants (Expected authenticated only)");
   });
+
+  it("checks individual, event, revised, and actual intervals for overlap only after ordered employee-week locks", () => {
+    const createRequest = functionSql(sql, "ot_create_request");
+    const createEvent = functionSql(sql, "ot_create_event_plan");
+    const resubmitPlan = functionSql(sql, "ot_resubmit_plan");
+    const submitActual = functionSql(sql, "ot_submit_actual");
+    const overlapCall = "public.ot_assert_no_employee_overlap(";
+
+    for (const caller of [createRequest, createEvent, resubmitPlan, submitActual]) {
+      expect(caller).toContain(overlapCall);
+      const lockIndex = Math.max(
+        caller.lastIndexOf("public.ot_lock_employee_weeks(", caller.indexOf(overlapCall)),
+        caller.lastIndexOf("public.ot_assert_planned_limit(", caller.indexOf(overlapCall)),
+      );
+      expect(lockIndex).toBeGreaterThan(-1);
+      expect(lockIndex).toBeLessThan(caller.indexOf(overlapCall));
+    }
+    expect(submitActual).toContain("public.ot_assert_no_employee_overlap(v_request.employee_user_id, v_start_at, v_end_at, p_request_id)");
+  });
+
+  it("normalizes manager decision notes once and requires evidence for negative and compliance approvals", () => {
+    const reviewPlan = functionSql(sql, "ot_review_plan");
+    const verifyActual = functionSql(sql, "ot_verify_actual");
+
+    for (const decision of [reviewPlan, verifyActual]) {
+      expect(decision).toMatch(/v_note text := pg_catalog\.nullif\(pg_catalog\.btrim\(pg_catalog\.coalesce\(p_note, ''\)\), ''\)/);
+      expect(decision).toMatch(/note, idempotency_key[\s\S]*v_note, p_idempotency_key/);
+      expect(decision).not.toMatch(/note, idempotency_key[\s\S]*p_note, p_idempotency_key/);
+    }
+    expect(reviewPlan).toMatch(/p_decision in \('rejected', 'revision_required'\)[\s\S]*v_note is null[\s\S]*note is required/i);
+    expect(verifyActual).toMatch(/p_decision in \('rejected', 'revision_required'\)[\s\S]*v_note is null[\s\S]*note is required/i);
+    expect(verifyActual).toMatch(/p_decision = 'approved'[\s\S]*v_request\.compliance_required[\s\S]*v_note is null[\s\S]*note is required/i);
+  });
+
+  it("backfills immutable normalized audit actor email and derives every inserted snapshot in a trigger", () => {
+    const snapshotTrigger = functionSql(sql, "ot_set_audit_actor_email_snapshot");
+
+    expect(sql).toContain("actor_email_snapshot text");
+    expect(sql).toContain("add column if not exists actor_email_snapshot text");
+    expect(sql).toMatch(/update public\.ot_request_audit a[\s\S]*actor_email_snapshot = pg_catalog\.nullif\(pg_catalog\.lower\(pg_catalog\.btrim\(u\.email\)\), ''\)[\s\S]*from public\.users u[\s\S]*u\.id = a\.actor_user_id[\s\S]*a\.actor_email_snapshot is null/);
+    expect(sql).toMatch(/alter table public\.ot_request_audit[\s\S]*alter column actor_email_snapshot set not null/);
+    expect(snapshotTrigger).toMatch(/select pg_catalog\.nullif\(pg_catalog\.lower\(pg_catalog\.btrim\(u\.email\)\), ''\)[\s\S]*into v_actor_email[\s\S]*u\.id = new\.actor_user_id/);
+    expect(snapshotTrigger).toMatch(/if v_actor_email is null[\s\S]*raise exception[\s\S]*new\.actor_email_snapshot := v_actor_email/);
+    expect(sql).toMatch(/create trigger ot_request_audit_actor_email_snapshot[\s\S]*before insert on public\.ot_request_audit/);
+    expect(sql).toContain("revoke all on function public.ot_set_audit_actor_email_snapshot() from public, anon, authenticated");
+    expect(verify).toContain("OT audit actor email snapshot column (Expected = NOT NULL)");
+    expect(verify).toContain("OT audit actor email snapshot trigger (Expected = enabled)");
+    expect(verify).toContain("Invalid OT audit actor email snapshots (Expected = 0)");
+  });
+
+  it("reassigns every non-final approver workflow atomically and blocks unsafe deactivation", () => {
+    const reassign = functionSql(sql, "ot_reassign_pending_approver");
+    const setApprover = functionSql(sql, "ot_set_approver");
+    const pendingStatuses = [
+      "pending_approval", "awaiting_consent", "approved", "revision_required",
+      "actual_confirmation_required", "pending_actual_verification", "compliance_review_required",
+    ];
+
+    expect(reassign).toContain("public.ot_current_user_is_owner()");
+    expect(reassign).toContain("public.ot_user_is_approved_approver_identity(p_to_user_id)");
+    expect(reassign).toMatch(/p_from_user_id = p_to_user_id[\s\S]*raise exception/);
+    expect(reassign).toMatch(/from public\.ot_approvers a[\s\S]*a\.user_id in \(p_from_user_id, p_to_user_id\)[\s\S]*order by a\.user_id[\s\S]*for update/);
+    expect(reassign).toMatch(/p_to_user_id[\s\S]*a\.active = true[\s\S]*u\.is_active = true/);
+    for (const status of pendingStatuses) {
+      expect(reassign).toContain(`'${status}'`);
+      expect(setApprover).toContain(`'${status}'`);
+    }
+    const updateStart = reassign.indexOf("for v_request in");
+    const updateEnd = reassign.indexOf("end loop", updateStart);
+    for (const finalStatus of ["draft", "rejected", "hr_ready", "exported", "cancelled"]) {
+      expect(reassign.slice(updateStart, updateEnd)).not.toContain(`'${finalStatus}'`);
+    }
+    expect(reassign).toMatch(/order by r\.id[\s\S]*for update of r/);
+    expect(reassign).toMatch(/update public\.ot_requests[\s\S]*approver_user_id = p_to_user_id/);
+    expect(reassign).toContain("'reassign_pending_approver'");
+    expect(reassign).toContain("'reassign_pending_approver_admin'");
+    expect(reassign).toMatch(/changed_fields->'result'[\s\S]*return v_replay_result/);
+    expect(setApprover).toMatch(/if not p_active[\s\S]*exists \([\s\S]*from public\.ot_requests r[\s\S]*pending approver work/i);
+  });
+
+  it("keeps reassignment least-privilege and exposes read-only staging checks", () => {
+    const signature = "public.ot_reassign_pending_approver(uuid, uuid, text, uuid)";
+
+    expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+    expect(sql).toContain(`grant execute on function ${signature} to authenticated`);
+    expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
+    expect(verify).toContain("OT pending approver reassignment RPC contract (Expected = valid)");
+    expect(verify).toContain("OT pending approver reassignment execute grants (Expected authenticated only)");
+    expect(verify).toContain("OT unsafe approver deactivation guard (Expected = true)");
+    expect(read("supabase", "README.md")).toContain("the server reassignment RPC is atomic, but reassignment and deactivation are two separate browser calls");
+  });
 });
 
 describe("OT Request static module integration", () => {
@@ -836,6 +955,36 @@ describe("OT Request static module integration", () => {
     expect(admin).not.toMatch(/setOt(?:Approver|SystemRole)\([^;]+crypto\.randomUUID\(\)/);
     expect(admin).not.toMatch(/\.from\s*\(/);
     expect(admin).not.toContain("currentUserEmail");
+  });
+
+  it("requires compliance approval evidence in the manager decision UI", () => {
+    const screen = read("screens-ot.jsx");
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+
+    expect(approval).toMatch(/decision !== "approved"[\s\S]*selectedChecks\?\.complianceRequired[\s\S]*!note\.trim\(\)/);
+    expect(approval).toContain("A note is required for a compliance-required actual approval.");
+    expect(approval).toMatch(/selectedChecks\?\.complianceRequired && !note\.trim\(\)[\s\S]*actionState\.status === "submitting"/);
+    expect(approval).toContain("required for compliance approval");
+  });
+
+  it("reassigns through an explicit refreshed Owner step before a separate deactivation call", () => {
+    const screen = read("screens-ot.jsx");
+    const admin = screen.slice(screen.indexOf("function OtAccessAdminPanel("), screen.indexOf("function OtOwnerDashboard("));
+
+    expect(admin).toContain("Prepare deactivation");
+    expect(admin).toContain("Reassignment destination *");
+    expect(admin).toContain("window.reassignPendingOtApprover(");
+    expect(admin).toContain("await loadOtAccessDirectory()");
+    expect(admin.indexOf("window.reassignPendingOtApprover(")).toBeLessThan(admin.indexOf("window.setOtApprover("));
+    expect(admin).toContain("Deactivate approver");
+    expect(admin).toContain("The server reassignment is atomic");
+    expect(admin).toContain("the reassignment and deactivation browser calls are not atomic together");
+    expect(admin).toContain("window.FlowMateOtIntent.establish(");
+    expect(admin).toContain("actionState.status === \"submitting\"");
+    expect(admin).toMatch(/disabled=\{[^}]*actionState\.status === "submitting"[^}]*\}/);
+    expect(admin).not.toMatch(/reassignPendingOtApprover\([^;]+crypto\.randomUUID\(\)/);
+    expect(admin).not.toMatch(/setOtApprover\([^;]+crypto\.randomUUID\(\)/);
+    expect(admin).not.toMatch(/\.from\s*\(/);
   });
 
   it("adds OT Request as the fourth product without changing the first three", () => {

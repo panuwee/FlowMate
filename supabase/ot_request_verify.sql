@@ -56,6 +56,101 @@ where n.nspname = 'public'
   and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
 
 select
+  'OT audit actor email snapshot column (Expected = NOT NULL)' as check_name,
+  c.data_type,
+  c.is_nullable
+from information_schema.columns c
+where c.table_schema = 'public'
+  and c.table_name = 'ot_request_audit'
+  and c.column_name = 'actor_email_snapshot';
+
+select
+  'OT audit actor email snapshot trigger (Expected = enabled)' as check_name,
+  t.tgenabled,
+  pg_catalog.pg_get_triggerdef(t.oid) as trigger_definition
+from pg_catalog.pg_trigger t
+where t.tgrelid = 'public.ot_request_audit'::pg_catalog.regclass
+  and t.tgname = 'ot_request_audit_actor_email_snapshot'
+  and not t.tgisinternal;
+
+select
+  'Invalid OT audit actor email snapshots (Expected = 0)' as check_name,
+  pg_catalog.count(*) as actual_count
+from public.ot_request_audit a
+where a.actor_email_snapshot is null
+   or pg_catalog.length(a.actor_email_snapshot) = 0
+   or a.actor_email_snapshot <> pg_catalog.lower(pg_catalog.btrim(a.actor_email_snapshot));
+
+select
+  'OT reason and consent validation helper contracts (Expected = 2)' as check_name,
+  pg_catalog.count(*) as actual_count,
+  pg_catalog.array_agg(p.proname order by p.proname) as found_helpers
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and (
+    (
+      p.proname = 'ot_assert_reason'
+      and pg_catalog.oidvectortypes(p.proargtypes) = 'text, text'
+      and pg_catalog.position('''offline_event''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+      and pg_catalog.position('''scope_change''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    )
+    or (
+      p.proname = 'ot_assert_consent_version'
+      and pg_catalog.oidvectortypes(p.proargtypes) = 'text'
+      and pg_catalog.position('''2026-08-07''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    )
+  );
+
+select
+  'OT pending approver reassignment RPC contract (Expected = valid)' as check_name,
+  pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
+  pg_catalog.pg_get_function_result(p.oid) as result_type,
+  p.prosecdef as security_definer,
+  pg_catalog.coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  pg_catalog.position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as owner_guard,
+  pg_catalog.position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as destination_allowlist,
+  pg_catalog.position('order by a.user_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as approver_lock_order,
+  pg_catalog.position('order by r.id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as request_lock_order,
+  pg_catalog.position('''reassign_pending_approver_admin''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as administration_audit,
+  pg_catalog.position('changed_fields->''result''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as stable_replay
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_reassign_pending_approver'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, uuid, text, uuid';
+
+select
+  'OT pending approver reassignment execute grants (Expected authenticated only)' as check_name,
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_reassign_pending_approver(uuid, uuid, text, uuid)',
+    'EXECUTE'
+  ) as authenticated_execute,
+  not exists (
+    select 1
+    from information_schema.routine_privileges rp
+    where rp.specific_schema = 'public'
+      and rp.routine_name = 'ot_reassign_pending_approver'
+      and rp.privilege_type = 'EXECUTE'
+      and rp.grantee in ('anon', 'PUBLIC')
+  ) as public_and_anon_revoked;
+
+select
+  'OT unsafe approver deactivation guard (Expected = true)' as check_name,
+  (
+    pg_catalog.position('if not p_active and exists (' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('pending approver work' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''pending_actual_verification''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''compliance_review_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+  ) as pending_work_guard
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_set_approver'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
+
+select
   'Actual amendment RPC contract (Expected = valid)' as check_name,
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
   pg_catalog.pg_get_function_result(p.oid) as result_type,
@@ -194,7 +289,7 @@ where n.nspname = 'public'
     'ot_create_event_plan', 'ot_record_consent', 'ot_review_plan',
     'ot_submit_actual', 'ot_request_actual_amendment', 'ot_verify_actual', 'ot_list_compliance_queue',
     'ot_review_compliance', 'ot_list_request_audit', 'ot_list_hr_ready',
-    'ot_mark_exported', 'ot_set_approver', 'ot_set_system_role'
+    'ot_mark_exported', 'ot_reassign_pending_approver', 'ot_set_approver', 'ot_set_system_role'
   )
 order by p.proname, pg_catalog.pg_get_function_identity_arguments(p.oid);
 

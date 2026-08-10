@@ -7,7 +7,7 @@ const clientPath = join(process.cwd(), "supabase-ot-request.js");
 const requestId = "11111111-1111-4111-8111-111111111111";
 const employeeId = "22222222-2222-4222-8222-222222222222";
 const idempotencyKey = "33333333-3333-4333-8333-333333333333";
-const consentStatementVersion = "ot-consent-v1";
+const consentStatementVersion = "2026-08-07";
 
 function loadClient(rpc: (name: string, params: unknown) => Promise<{ data: unknown; error: unknown }>, options: { userError?: (error: unknown, fallback: string) => string } = {}) {
   const sandbox: { window: Record<string, unknown> } = {
@@ -51,6 +51,7 @@ describe("OT request browser client", () => {
       { wrapper: "loadOtRequestAudit", args: [requestId], name: "ot_list_request_audit", params: { p_request_id: requestId } },
       { wrapper: "loadOtHrReady", args: [], name: "ot_list_hr_ready", params: { p_week_start: null } },
       { wrapper: "markOtExported", args: [[requestId], "August payroll", idempotencyKey], name: "ot_mark_exported", params: { p_request_ids: [requestId], p_batch_name: "August payroll", p_idempotency_key: idempotencyKey } },
+      { wrapper: "reassignPendingOtApprover", args: [employeeId, requestId, "Coverage handoff", idempotencyKey], name: "ot_reassign_pending_approver", params: { p_from_user_id: employeeId, p_to_user_id: requestId, p_reason: "Coverage handoff", p_idempotency_key: idempotencyKey } },
       { wrapper: "setOtApprover", args: [employeeId, true, "Coverage update", idempotencyKey], name: "ot_set_approver", params: { p_user_id: employeeId, p_active: true, p_reason: "Coverage update", p_idempotency_key: idempotencyKey } },
       { wrapper: "setOtSystemRole", args: [employeeId, "owner", true, "Ownership transfer", idempotencyKey], name: "ot_set_system_role", params: { p_user_id: employeeId, p_role_code: "owner", p_active: true, p_reason: "Ownership transfer", p_idempotency_key: idempotencyKey } },
     ];
@@ -110,6 +111,7 @@ describe("OT request browser client", () => {
   it("does not expose a direct table client for OT mutations", () => {
     const source = readFileSync(clientPath, "utf8");
     expect(source).not.toMatch(/\.from\s*\(/);
+    expect(source).not.toMatch(/p_actor(?:_user)?_id/);
   });
 
   it("builds the exact HR-ready CSV contract and escapes spreadsheet control characters", () => {

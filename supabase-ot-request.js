@@ -40,6 +40,13 @@ window.reviewOtCompliance = (requestId, outcome, note, key) => callOtRequestRpc(
 window.loadOtRequestAudit = requestId => callOtRequestRpc("ot_list_request_audit", { p_request_id: requestId }, "OT request audit could not be loaded.");
 window.loadOtHrReady = weekStart => callOtRequestRpc("ot_list_hr_ready", { p_week_start: weekStart || null }, "HR-ready OT requests could not be loaded.");
 window.markOtExported = (requestIds, batchName, key) => callOtRequestRpc("ot_mark_exported", { p_request_ids: requestIds, p_batch_name: batchName, p_idempotency_key: key }, "OT export could not be marked.");
+window.reassignPendingOtApprover = (fromUserId, toUserId, reason, key) =>
+  callOtRequestRpc("ot_reassign_pending_approver", {
+    p_from_user_id: fromUserId,
+    p_to_user_id: toUserId,
+    p_reason: reason,
+    p_idempotency_key: key,
+  }, "Pending OT approver work could not be reassigned.");
 window.setOtApprover = (userId, active, reason, key) => callOtRequestRpc("ot_set_approver", { p_user_id: userId, p_active: active, p_reason: reason, p_idempotency_key: key }, "OT approver could not be updated.");
 window.setOtSystemRole = (userId, roleCode, active, reason, key) => callOtRequestRpc("ot_set_system_role", { p_user_id: userId, p_role_code: roleCode, p_active: active, p_reason: reason, p_idempotency_key: key }, "OT system role could not be updated.");
 

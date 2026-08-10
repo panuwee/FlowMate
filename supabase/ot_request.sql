@@ -124,6 +124,7 @@ create table if not exists public.ot_request_audit (
   request_id uuid references public.ot_requests(id) on delete restrict,
   event_plan_id uuid references public.ot_event_plans(id) on delete restrict,
   actor_user_id uuid not null references public.users(id) on delete restrict,
+  actor_email_snapshot text,
   action text not null,
   old_status text,
   new_status text,
@@ -133,6 +134,77 @@ create table if not exists public.ot_request_audit (
   created_at timestamptz not null default now(),
   constraint ot_request_audit_action_required check (pg_catalog.length(pg_catalog.btrim(action)) > 0)
 );
+
+-- Existing installations already have the append-only trigger. Remove it only
+-- inside this migration transaction so the one-time nullable-column backfill
+-- can run; it is recreated before any OT RPC definitions below.
+drop trigger if exists ot_request_audit_append_only on public.ot_request_audit;
+
+alter table public.ot_request_audit
+  add column if not exists actor_email_snapshot text;
+
+update public.ot_request_audit a
+set actor_email_snapshot = pg_catalog.nullif(pg_catalog.lower(pg_catalog.btrim(u.email)), '')
+from public.users u
+where u.id = a.actor_user_id
+  and a.actor_email_snapshot is null;
+
+do $block$
+begin
+  if exists (
+    select 1
+    from public.ot_request_audit a
+    where a.actor_email_snapshot is null
+  ) then
+    raise exception 'OT audit actor email backfill requires a resolvable non-empty historical user email';
+  end if;
+end
+$block$;
+
+alter table public.ot_request_audit
+  alter column actor_email_snapshot set not null;
+
+create or replace function public.ot_set_audit_actor_email_snapshot()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_email text;
+begin
+  select pg_catalog.nullif(pg_catalog.lower(pg_catalog.btrim(u.email)), '')
+  into v_actor_email
+  from public.users u
+  where u.id = new.actor_user_id;
+
+  if v_actor_email is null then
+    raise exception 'OT audit actor requires a resolvable non-empty historical user email';
+  end if;
+
+  new.actor_email_snapshot := v_actor_email;
+  return new;
+end
+$function$;
+
+drop trigger if exists ot_request_audit_actor_email_snapshot on public.ot_request_audit;
+create trigger ot_request_audit_actor_email_snapshot
+before insert on public.ot_request_audit
+for each row execute function public.ot_set_audit_actor_email_snapshot();
+
+create or replace function public.ot_guard_audit_append_only()
+returns trigger
+language plpgsql
+set search_path = ''
+as $function$
+begin
+  raise exception 'OT request audit is append-only';
+end
+$function$;
+
+create trigger ot_request_audit_append_only
+before update or delete on public.ot_request_audit
+for each row execute function public.ot_guard_audit_append_only();
 
 create table if not exists public.ot_export_batches (
   id uuid primary key default gen_random_uuid(),
@@ -227,6 +299,49 @@ begin
 end
 $function$;
 
+create or replace function public.ot_assert_reason(
+  p_reason_code text,
+  p_reason_detail text
+)
+returns void
+language plpgsql
+immutable
+security definer
+set search_path = ''
+as $function$
+declare
+  v_reason_code text := pg_catalog.nullif(pg_catalog.btrim(p_reason_code), '');
+  v_reason_detail text := pg_catalog.nullif(pg_catalog.btrim(p_reason_detail), '');
+begin
+  if v_reason_code is null or v_reason_code not in (
+    'offline_event', 'campaign_launch', 'live_incident', 'capacity',
+    'external_schedule', 'rework', 'scope_change', 'travel_offsite', 'other'
+  ) then
+    raise exception 'OT reason code is invalid';
+  end if;
+  if v_reason_code in ('other', 'live_incident', 'rework', 'scope_change')
+     and v_reason_detail is null then
+    raise exception 'OT reason detail is required for the selected reason code';
+  end if;
+end
+$function$;
+
+create or replace function public.ot_assert_consent_version(
+  p_consent_statement_version text
+)
+returns void
+language plpgsql
+immutable
+security definer
+set search_path = ''
+as $function$
+begin
+  if pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '') is distinct from '2026-08-07' then
+    raise exception 'Consent statement version must be 2026-08-07';
+  end if;
+end
+$function$;
+
 drop function if exists public.ot_record_consent(uuid, boolean, uuid);
 
 create or replace function public.ot_record_consent(
@@ -257,6 +372,7 @@ begin
   if v_consent_statement_version is null then
     raise exception 'Consent statement version is required';
   end if;
+  perform public.ot_assert_consent_version(v_consent_statement_version);
   select * into v_request from public.ot_requests r where r.id = p_request_id;
   if not found or v_request.employee_user_id <> v_actor_id then
     raise exception 'Only the assigned employee can record consent for this occurrence';
@@ -343,6 +459,7 @@ declare
   v_request public.ot_requests;
   v_old_status text;
   v_new_status text;
+  v_note text := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_note, '')), '');
 begin
   perform public.ot_lock_idempotency('review_plan', p_idempotency_key);
   select * into v_request from public.ot_requests r where r.id = p_request_id;
@@ -362,6 +479,9 @@ begin
   if p_decision not in ('approved', 'rejected', 'revision_required') then
     raise exception 'Plan decision must be approved, rejected, or revision_required';
   end if;
+  if p_decision in ('rejected', 'revision_required') and v_note is null then
+    raise exception 'Plan decision note is required for rejection or revision';
+  end if;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
   if v_request.status <> 'pending_approval' then
@@ -376,7 +496,7 @@ begin
   v_old_status := v_request.status;
   update public.ot_requests
   set plan_decision = p_decision,
-      plan_decision_note = pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_note, '')), ''),
+      plan_decision_note = v_note,
       plan_reviewed_by_user_id = v_actor_id,
       plan_reviewed_at = now(),
       status = v_new_status,
@@ -386,7 +506,7 @@ begin
     request_id, actor_user_id, action, old_status, new_status, changed_fields, note, idempotency_key
   ) values (
     v_request.id, v_actor_id, 'review_plan', v_old_status, v_request.status,
-    pg_catalog.jsonb_build_object('decision', p_decision), p_note, p_idempotency_key
+    pg_catalog.jsonb_build_object('decision', p_decision), v_note, p_idempotency_key
   );
   return pg_catalog.to_jsonb(v_request);
 end
@@ -491,6 +611,9 @@ begin
   ) then
     raise exception 'Actual OT can be submitted only after authorization and completed work, or after an audited revision request';
   end if;
+  perform public.ot_assert_reason(v_request.reason_code, v_request.reason_detail);
+  perform public.ot_assert_consent_version(v_request.consent_statement_version);
+  perform public.ot_assert_no_employee_overlap(v_request.employee_user_id, v_start_at, v_end_at, p_request_id);
   v_variance_minutes := pg_catalog.abs(v_minutes - v_request.planned_minutes);
   if v_variance_minutes > 30 and v_variance_reason is null then
     raise exception 'Actual variance reason is required when actual net minutes differ from planned net minutes by more than 30';
@@ -566,6 +689,7 @@ declare
   v_request public.ot_requests;
   v_old_status text;
   v_new_status text;
+  v_note text := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_note, '')), '');
 begin
   perform public.ot_lock_idempotency('verify_actual', p_idempotency_key);
   select * into v_request from public.ot_requests r where r.id = p_request_id;
@@ -604,6 +728,12 @@ begin
   if v_request.actual_submitted_at is null or v_request.actual_week_segments is null then
     raise exception 'Actual OT state changed; reload this request';
   end if;
+  if p_decision in ('rejected', 'revision_required') and v_note is null then
+    raise exception 'Actual decision note is required for rejection or revision';
+  end if;
+  if p_decision = 'approved' and v_request.compliance_required and v_note is null then
+    raise exception 'Actual decision note is required for a compliance-required approval';
+  end if;
   if p_decision = 'approved' then
     v_new_status := case
       when not v_request.compliance_required then 'hr_ready'
@@ -617,7 +747,7 @@ begin
   v_old_status := v_request.status;
   update public.ot_requests
   set actual_decision = p_decision,
-      actual_decision_note = pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_note, '')), ''),
+      actual_decision_note = v_note,
       actual_verified_by_user_id = v_actor_id,
       actual_verified_at = now(),
       hr_ready_at = case when v_new_status = 'hr_ready' then now() else null end,
@@ -631,7 +761,7 @@ begin
     v_request.id, v_request.event_plan_id, v_actor_id, 'verify_actual',
     v_old_status, v_request.status,
     pg_catalog.jsonb_build_object('decision', p_decision, 'complianceRequired', v_request.compliance_required),
-    p_note, p_idempotency_key
+    v_note, p_idempotency_key
   );
   return pg_catalog.to_jsonb(v_request);
 end
@@ -1201,21 +1331,6 @@ begin
 end
 $function$;
 
-create or replace function public.ot_guard_audit_append_only()
-returns trigger
-language plpgsql
-set search_path = ''
-as $function$
-begin
-  raise exception 'OT request audit is append-only';
-end
-$function$;
-
-drop trigger if exists ot_request_audit_append_only on public.ot_request_audit;
-create trigger ot_request_audit_append_only
-before update or delete on public.ot_request_audit
-for each row execute function public.ot_guard_audit_append_only();
-
 create or replace function public.ot_lock_idempotency(
   p_action text,
   p_idempotency_key uuid
@@ -1440,6 +1555,8 @@ declare
   v_minutes integer;
   v_segments jsonb;
   v_consent_statement_version text;
+  v_reason_code text;
+  v_reason_detail text;
   v_request public.ot_requests;
 begin
   perform public.ot_lock_idempotency('create_request', p_idempotency_key);
@@ -1459,8 +1576,13 @@ begin
   if v_consent_statement_version is null then
     raise exception 'Consent statement version is required';
   end if;
+  perform public.ot_assert_consent_version(v_consent_statement_version);
 
   v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
+  perform 1
+  from public.ot_approvers a
+  where a.user_id = v_approver_user_id
+  for key share of a;
   if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
      or not exists (
     select 1 from public.ot_approvers a join public.users u on u.id = a.user_id
@@ -1468,6 +1590,13 @@ begin
   ) then
     raise exception 'An active approved OT approver is required';
   end if;
+  v_reason_code := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'reasonCode', p_payload->>'reason_code'
+  )), '');
+  v_reason_detail := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'reasonDetail', p_payload->>'reason_detail'
+  )), '');
+  perform public.ot_assert_reason(v_reason_code, v_reason_detail);
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
@@ -1479,6 +1608,7 @@ begin
     pg_catalog.coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
   );
   perform public.ot_assert_planned_limit(v_actor_id, v_segments, null);
+  perform public.ot_assert_no_employee_overlap(v_actor_id, v_start_at, v_end_at, null);
 
   insert into public.ot_requests (
     employee_user_id, approver_user_id, created_by_user_id, source, request_type,
@@ -1497,8 +1627,8 @@ begin
     pg_catalog.coalesce(p_payload->>'dayType', p_payload->>'day_type'),
     pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
     pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
-    pg_catalog.coalesce(p_payload->>'reasonCode', p_payload->>'reason_code'),
-    pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_payload->>'reasonDetail', p_payload->>'reason_detail')), ''),
+    v_reason_code,
+    v_reason_detail,
     v_start_at, v_end_at, v_break_minutes, v_minutes, v_segments,
     'pending_approval', 'accepted', v_consent_statement_version,
     now(), now(), p_idempotency_key
@@ -1544,6 +1674,8 @@ declare
   v_segments jsonb;
   v_lock_segments jsonb;
   v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
+  v_reason_code text;
+  v_reason_detail text;
   v_old_status text;
   v_old_plan jsonb;
   v_old_approver_user_id uuid;
@@ -1583,8 +1715,31 @@ begin
   if v_consent_statement_version is null then
     raise exception 'Consent statement version is required';
   end if;
+  perform public.ot_assert_consent_version(v_consent_statement_version);
 
   v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
+  perform 1
+  from public.ot_approvers a
+  where a.user_id = v_approver_user_id
+  for key share of a;
+  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
+     or not exists (
+       select 1
+       from public.ot_approvers a
+       join public.users u on u.id = a.user_id
+       where a.user_id = v_approver_user_id
+         and a.active = true
+         and u.is_active = true
+     ) then
+    raise exception 'An active approved OT approver is required';
+  end if;
+  v_reason_code := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'reasonCode', p_payload->>'reason_code'
+  )), '');
+  v_reason_detail := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'reasonDetail', p_payload->>'reason_detail'
+  )), '');
+  perform public.ot_assert_reason(v_reason_code, v_reason_detail);
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   v_break_minutes := pg_catalog.coalesce(
@@ -1621,18 +1776,6 @@ begin
      or v_request.plan_decision is distinct from 'revision_required' then
     raise exception 'Plan revision state changed; reload this request';
   end if;
-  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
-     or not exists (
-       select 1
-       from public.ot_approvers a
-       join public.users u on u.id = a.user_id
-       where a.user_id = v_approver_user_id
-         and a.active = true
-         and u.is_active = true
-     ) then
-    raise exception 'An active approved OT approver is required';
-  end if;
-
   perform public.ot_assert_planned_limit(v_actor_id, v_segments, p_request_id);
   perform public.ot_assert_no_employee_overlap(v_actor_id, v_start_at, v_end_at, p_request_id);
 
@@ -1659,8 +1802,8 @@ begin
       day_type = pg_catalog.coalesce(p_payload->>'dayType', p_payload->>'day_type'),
       work_location_type = pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
       venue = pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
-      reason_code = pg_catalog.coalesce(p_payload->>'reasonCode', p_payload->>'reason_code'),
-      reason_detail = pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_payload->>'reasonDetail', p_payload->>'reason_detail')), ''),
+      reason_code = v_reason_code,
+      reason_detail = v_reason_detail,
       planned_start_at = v_start_at,
       planned_end_at = v_end_at,
       planned_break_minutes = v_break_minutes,
@@ -1811,6 +1954,8 @@ declare
   v_break_minutes integer;
   v_minutes integer;
   v_segments jsonb;
+  v_reason_code text;
+  v_reason_detail text;
   v_employee_user_id uuid;
   v_plan public.ot_event_plans;
   v_request public.ot_requests;
@@ -1840,6 +1985,10 @@ begin
     pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid,
     v_actor_id
   );
+  perform 1
+  from public.ot_approvers a
+  where a.user_id = v_approver_user_id
+  for key share of a;
   if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
      or not exists (
     select 1 from public.ot_approvers a join public.users u on u.id = a.user_id
@@ -1850,6 +1999,13 @@ begin
   if v_approver_user_id <> v_actor_id then
     raise exception 'The assigned approver must personally authorize and create the event plan';
   end if;
+  v_reason_code := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'reasonCode', p_payload->>'reason_code'
+  )), '');
+  v_reason_detail := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+    p_payload->>'reasonDetail', p_payload->>'reason_detail'
+  )), '');
+  perform public.ot_assert_reason(v_reason_code, v_reason_detail);
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
@@ -1872,6 +2028,7 @@ begin
       raise exception 'Event employee % is not an active Garena Workgrid user', v_employee_user_id;
     end if;
     perform public.ot_assert_planned_limit(v_employee_user_id, v_segments, null);
+    perform public.ot_assert_no_employee_overlap(v_employee_user_id, v_start_at, v_end_at, null);
   end loop;
 
   insert into public.ot_event_plans (
@@ -1883,8 +2040,8 @@ begin
     pg_catalog.coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
     pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
     pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
-    pg_catalog.coalesce(p_payload->>'reasonCode', p_payload->>'reason_code'),
-    pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_payload->>'reasonDetail', p_payload->>'reason_detail')), ''),
+    v_reason_code,
+    v_reason_detail,
     v_start_at, v_end_at, v_break_minutes, v_approver_user_id, v_actor_id, p_idempotency_key
   ) returning * into v_plan;
 
@@ -2180,6 +2337,143 @@ begin
 end
 $function$;
 
+create or replace function public.ot_reassign_pending_approver(
+  p_from_user_id uuid,
+  p_to_user_id uuid,
+  p_reason text,
+  p_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_reason text := pg_catalog.nullif(pg_catalog.btrim(p_reason), '');
+  v_request public.ot_requests;
+  v_moved_request public.ot_requests;
+  v_moved_request_ids uuid[] := '{}'::uuid[];
+  v_replay_result jsonb;
+  v_result jsonb;
+begin
+  if not public.ot_current_user_is_owner() then
+    raise exception 'Only the OT Owner can reassign pending approver work';
+  end if;
+  if p_from_user_id is null or p_to_user_id is null then
+    raise exception 'Source and destination approvers are required';
+  end if;
+  if p_from_user_id = p_to_user_id then
+    raise exception 'Source and destination approvers must be different';
+  end if;
+  if v_reason is null then
+    raise exception 'A non-empty reassignment reason is required';
+  end if;
+  if not public.ot_user_is_approved_approver_identity(p_from_user_id) then
+    raise exception 'Source approver must be one of the three approved MVP identities';
+  end if;
+  if not public.ot_user_is_approved_approver_identity(p_to_user_id) then
+    raise exception 'Destination approver must be one of the three approved MVP identities';
+  end if;
+
+  perform public.ot_lock_idempotency('reassign_pending_approver', p_idempotency_key);
+  select a.changed_fields->'result'
+  into v_replay_result
+  from public.ot_request_audit a
+  where a.actor_user_id = v_actor_id
+    and a.action = 'reassign_pending_approver_admin'
+    and a.idempotency_key = p_idempotency_key;
+  if found then
+    if v_replay_result->>'fromUserId' is distinct from p_from_user_id::text
+       or v_replay_result->>'toUserId' is distinct from p_to_user_id::text
+       or v_replay_result->>'reason' is distinct from v_reason then
+      raise exception 'Idempotency key was already used for a different approver reassignment';
+    end if;
+    return v_replay_result;
+  end if;
+
+  -- Creation/resubmission RPCs take KEY SHARE on the assignee row before
+  -- employee-week/request locks. UPDATE here uses the same approver-first
+  -- order, preventing new assignment work from racing this atomic move.
+  perform 1
+  from public.ot_approvers a
+  where a.user_id in (p_from_user_id, p_to_user_id)
+  order by a.user_id
+  for update of a;
+
+  if not exists (
+    select 1 from public.ot_approvers a where a.user_id = p_from_user_id
+  ) then
+    raise exception 'Source approver is not configured';
+  end if;
+  if not exists (
+    select 1
+    from public.ot_approvers a
+    join public.users u on u.id = a.user_id
+    where a.user_id = p_to_user_id
+      and a.active = true
+      and u.is_active = true
+  ) then
+    raise exception 'Destination approver must be active';
+  end if;
+
+  for v_request in
+    select r.*
+    from public.ot_requests r
+    where r.approver_user_id = p_from_user_id
+      and r.status in (
+        'pending_approval', 'awaiting_consent', 'approved', 'revision_required',
+        'actual_confirmation_required', 'pending_actual_verification',
+        'compliance_review_required'
+      )
+    order by r.id
+    for update of r
+  loop
+    update public.ot_requests
+    set approver_user_id = p_to_user_id,
+        updated_at = now()
+    where id = v_request.id
+      and approver_user_id = p_from_user_id
+    returning * into v_moved_request;
+
+    if found then
+      v_moved_request_ids := pg_catalog.array_append(v_moved_request_ids, v_moved_request.id);
+      insert into public.ot_request_audit (
+        request_id, event_plan_id, actor_user_id, action, old_status, new_status,
+        changed_fields, note, idempotency_key
+      ) values (
+        v_moved_request.id, v_moved_request.event_plan_id, v_actor_id,
+        'reassign_pending_approver', v_request.status, v_moved_request.status,
+        pg_catalog.jsonb_build_object(
+          'oldApproverUserId', p_from_user_id,
+          'newApproverUserId', p_to_user_id
+        ),
+        v_reason,
+        p_idempotency_key
+      );
+    end if;
+  end loop;
+
+  v_result := pg_catalog.jsonb_build_object(
+    'fromUserId', p_from_user_id,
+    'toUserId', p_to_user_id,
+    'reason', v_reason,
+    'movedRequestIds', pg_catalog.to_jsonb(v_moved_request_ids),
+    'movedCount', pg_catalog.cardinality(v_moved_request_ids)
+  );
+  insert into public.ot_request_audit (
+    actor_user_id, action, changed_fields, note, idempotency_key
+  ) values (
+    v_actor_id,
+    'reassign_pending_approver_admin',
+    pg_catalog.jsonb_build_object('result', v_result),
+    v_reason,
+    p_idempotency_key
+  );
+  return v_result;
+end
+$function$;
+
 create or replace function public.ot_set_approver(
   p_user_id uuid,
   p_active boolean,
@@ -2217,6 +2511,18 @@ begin
     return v_result;
   end if;
   select a.active into v_previous from public.ot_approvers a where a.user_id = p_user_id for update;
+  if not p_active and exists (
+    select 1
+    from public.ot_requests r
+    where r.approver_user_id = p_user_id
+      and r.status in (
+        'pending_approval', 'awaiting_consent', 'approved', 'revision_required',
+        'actual_confirmation_required', 'pending_actual_verification',
+        'compliance_review_required'
+      )
+  ) then
+    raise exception 'Approver has pending approver work; reassign it before deactivation';
+  end if;
   insert into public.ot_approvers (user_id, active)
   values (p_user_id, p_active)
   on conflict (user_id) do update set active = excluded.active;
@@ -2363,6 +2669,9 @@ grant select on public.ot_requests to authenticated;
 revoke insert, update, delete on public.ot_request_audit from authenticated;
 
 revoke all on function public.ot_require_current_user() from public, anon, authenticated;
+revoke all on function public.ot_assert_reason(text, text) from public, anon, authenticated;
+revoke all on function public.ot_assert_consent_version(text) from public, anon, authenticated;
+revoke all on function public.ot_set_audit_actor_email_snapshot() from public, anon, authenticated;
 revoke all on function public.ot_user_is_approved_approver_identity(uuid) from public, anon, authenticated;
 revoke all on function public.ot_week_start(timestamptz) from public, anon, authenticated;
 revoke all on function public.ot_build_week_segments(timestamptz, timestamptz, integer, jsonb) from public, anon, authenticated;
@@ -2402,6 +2711,7 @@ revoke all on function public.ot_review_compliance(uuid, text, text, uuid) from 
 revoke all on function public.ot_list_request_audit(uuid) from public, anon, authenticated;
 revoke all on function public.ot_list_hr_ready(date) from public, anon, authenticated;
 revoke all on function public.ot_mark_exported(uuid[], text, uuid) from public, anon, authenticated;
+revoke all on function public.ot_reassign_pending_approver(uuid, uuid, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_set_approver(uuid, boolean, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_set_system_role(uuid, text, boolean, text, uuid) from public, anon, authenticated;
 
@@ -2430,6 +2740,7 @@ grant execute on function public.ot_review_compliance(uuid, text, text, uuid) to
 grant execute on function public.ot_list_request_audit(uuid) to authenticated;
 grant execute on function public.ot_list_hr_ready(date) to authenticated;
 grant execute on function public.ot_mark_exported(uuid[], text, uuid) to authenticated;
+grant execute on function public.ot_reassign_pending_approver(uuid, uuid, text, uuid) to authenticated;
 grant execute on function public.ot_set_approver(uuid, boolean, text, uuid) to authenticated;
 grant execute on function public.ot_set_system_role(uuid, text, boolean, text, uuid) to authenticated;
 
