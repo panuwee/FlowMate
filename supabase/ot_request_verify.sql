@@ -150,6 +150,41 @@ where n.nspname = 'public'
   and p.proname = 'ot_set_approver'
   and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
 
+with decision_functions as (
+  select
+    p.proname,
+    pg_catalog.pg_get_functiondef(p.oid) as definition
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in ('ot_review_plan', 'ot_verify_actual')
+    and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, uuid'
+)
+select
+  'OT decision authority serialization contract (Expected = valid)' as check_name,
+  d.proname,
+  pg_catalog.position('for key share of a' in d.definition) > 0 as actor_approver_lock,
+  pg_catalog.position('for key share of a' in d.definition)
+    < pg_catalog.position('public.ot_lock_employee_weeks' in d.definition) as approver_before_week_lock,
+  pg_catalog.position('public.ot_lock_employee_weeks' in d.definition)
+    < pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition) as week_before_request_lock,
+  pg_catalog.position(
+    'v_request.approver_user_id <> v_actor_id'
+    in pg_catalog.substring(
+      d.definition
+      from pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
+    )
+  ) > 0 as refreshed_assignment_guard,
+  pg_catalog.position(
+    'not public.ot_current_user_is_eligible_approver()'
+    in pg_catalog.substring(
+      d.definition
+      from pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
+    )
+  ) > 0 as refreshed_eligibility_guard
+from decision_functions d
+order by d.proname;
+
 select
   'Actual amendment RPC contract (Expected = valid)' as check_name,
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,

@@ -482,8 +482,16 @@ begin
   if p_decision in ('rejected', 'revision_required') and v_note is null then
     raise exception 'Plan decision note is required for rejection or revision';
   end if;
+  perform 1
+  from public.ot_approvers a
+  where a.user_id = v_actor_id
+  for key share of a;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
+  if v_request.approver_user_id <> v_actor_id
+     or not public.ot_current_user_is_eligible_approver() then
+    raise exception 'Plan assignment or approver access changed; reload this request';
+  end if;
   if v_request.status <> 'pending_approval' then
     raise exception 'Plan state changed; reload this request';
   end if;
@@ -716,8 +724,16 @@ begin
   if p_decision not in ('approved', 'rejected', 'revision_required') then
     raise exception 'Actual decision must be approved, rejected, or revision_required';
   end if;
+  perform 1
+  from public.ot_approvers a
+  where a.user_id = v_actor_id
+  for key share of a;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.actual_week_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
+  if v_request.approver_user_id <> v_actor_id
+     or not public.ot_current_user_is_eligible_approver() then
+    raise exception 'Actual OT assignment or approver access changed; reload this request';
+  end if;
   if v_request.status not in ('pending_actual_verification', 'compliance_review_required') then
     raise exception 'Actual OT state changed and is no longer awaiting verification';
   end if;

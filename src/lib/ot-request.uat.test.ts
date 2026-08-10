@@ -621,6 +621,28 @@ describe("OT Request backend contract", () => {
     expect(verifyActual).toMatch(/p_decision = 'approved'[\s\S]*v_request\.compliance_required[\s\S]*v_note is null[\s\S]*note is required/i);
   });
 
+  it("serializes approver authority before week locks and rechecks it after the request row lock", () => {
+    for (const name of ["ot_review_plan", "ot_verify_actual"]) {
+      const decision = functionSql(sql, name);
+      const authorityLock = "for key share of a";
+      const weekLock = "perform public.ot_lock_employee_weeks(";
+      const requestLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update;";
+
+      expect(decision).toContain(authorityLock);
+      expect(decision.indexOf(authorityLock)).toBeLessThan(decision.indexOf(weekLock));
+      expect(decision.indexOf(weekLock)).toBeLessThan(decision.indexOf(requestLock));
+
+      const afterRequestLock = decision.slice(decision.indexOf(requestLock) + requestLock.length);
+      expect(afterRequestLock).toMatch(/v_request\.approver_user_id <> v_actor_id/);
+      expect(afterRequestLock).toMatch(/not public\.ot_current_user_is_eligible_approver\(\)/);
+    }
+
+    expect(verify).toContain("OT decision authority serialization contract (Expected = valid)");
+    expect(verify).toContain("refreshed_assignment_guard");
+    expect(verify).toContain("refreshed_eligibility_guard");
+    expect(read("supabase", "README.md")).toContain("there must be no decision audit by a no-longer-assigned or inactive approver and no deadlock");
+  });
+
   it("backfills immutable normalized audit actor email and derives every inserted snapshot in a trigger", () => {
     const snapshotTrigger = functionSql(sql, "ot_set_audit_actor_email_snapshot");
 
