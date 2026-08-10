@@ -326,7 +326,8 @@ function OtEmployeeDashboard({
     remainingMinutes: Math.max(0, OT_LIMIT_MINUTES - plannedMinutes)
   };
   const consentRequests = requests.filter(request => getOtRequestStatus(request) === "awaiting_consent" && !otValue(request, "employeeConsent", "employee_consent"));
-  const actualRequests = requests.filter(request => getOtRequestStatus(request) === "actual_confirmation_required" || otValue(request, "actualDecision", "actual_decision") === "revision_required");
+  const planRevisionRequests = requests.filter(request => window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "plan");
+  const actualRequests = requests.filter(request => getOtRequestStatus(request) === "actual_confirmation_required" || window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "actual");
   return React.createElement("div", {
     className: "ot-employee"
   }, React.createElement("div", {
@@ -374,7 +375,7 @@ function OtEmployeeDashboard({
     className: "ot-metric"
   }, React.createElement("span", null, "Remaining"), React.createElement("strong", null, formatOtHours(summary.remainingMinutes))), React.createElement("section", {
     className: "ot-metric"
-  }, React.createElement("span", null, "Actions"), React.createElement("strong", null, consentRequests.length + actualRequests.length), React.createElement("small", null, consentRequests.length, " consent · ", actualRequests.length, " actual"))), React.createElement("section", {
+  }, React.createElement("span", null, "Actions"), React.createElement("strong", null, consentRequests.length + planRevisionRequests.length + actualRequests.length), React.createElement("small", null, consentRequests.length, " consent · ", planRevisionRequests.length, " plan · ", actualRequests.length, " actual"))), React.createElement("section", {
     className: "ot-actions",
     "aria-label": "Your required OT actions"
   }, consentRequests.map(request => React.createElement("button", {
@@ -386,7 +387,16 @@ function OtEmployeeDashboard({
       type: "consent",
       request
     })
-  }, React.createElement("strong", null, "Consent required"), React.createElement("span", null, request.title), React.createElement("small", null, "Review the occurrence and weekly total"))), actualRequests.map(request => React.createElement("button", {
+  }, React.createElement("strong", null, "Consent required"), React.createElement("span", null, request.title), React.createElement("small", null, "Review the occurrence and weekly total"))), planRevisionRequests.map(request => React.createElement("button", {
+    key: request.id,
+    type: "button",
+    className: "ot-action-card",
+    "data-testid": "ot-plan-revision-required",
+    onClick: () => setAction({
+      type: "revision",
+      request
+    })
+  }, React.createElement("strong", null, "Edit and resubmit request"), React.createElement("span", null, request.title), React.createElement("small", null, "Correct the plan before it returns to the approval queue"))), actualRequests.map(request => React.createElement("button", {
     key: request.id,
     type: "button",
     className: "ot-action-card",
@@ -395,18 +405,23 @@ function OtEmployeeDashboard({
       type: "actual",
       request
     })
-  }, React.createElement("strong", null, "Confirm actual time"), React.createElement("span", null, request.title), React.createElement("small", null, "Record the hours you actually worked"))), !consentRequests.length && !actualRequests.length && React.createElement("div", {
+  }, React.createElement("strong", null, "Confirm actual time"), React.createElement("span", null, request.title), React.createElement("small", null, "Record the hours you actually worked"))), !consentRequests.length && !planRevisionRequests.length && !actualRequests.length && React.createElement("div", {
     className: "ot-state ot-state--compact"
   }, "No OT actions are waiting for you."))), action && React.createElement("section", {
     className: "ot-workflow",
     "aria-label": "OT action"
   }, React.createElement("div", {
     className: "ot-workflow__head"
-  }, React.createElement("h2", null, action.type === "new" ? "New OT request" : action.type === "consent" ? "Event consent" : "Confirm actual time"), React.createElement("button", {
+  }, React.createElement("h2", null, action.type === "new" ? "New OT request" : action.type === "revision" ? "Edit and resubmit request" : action.type === "consent" ? "Event consent" : "Confirm actual time"), React.createElement("button", {
     type: "button",
     className: "btn btn--ghost",
     onClick: () => setAction(null)
   }, "Close")), action.type === "new" && React.createElement(OtRequestForm, {
+    weekStart: weekStart,
+    onSuccess: refreshAfterAction
+  }), action.type === "revision" && React.createElement(OtRequestForm, {
+    mode: "revision",
+    request: action.request,
     weekStart: weekStart,
     onSuccess: refreshAfterAction
   }), action.type === "consent" && React.createElement(OtConsentPanel, {
@@ -423,29 +438,62 @@ function OtEmployeeDashboard({
     })
   }));
 }
+function getOtPlanRevisionBreakAllocation(request, segments) {
+  if (!request || !Array.isArray(segments) || segments.length !== 2) {
+    return {
+      breakMinutesBeforeBoundary: "",
+      breakMinutesAfterBoundary: ""
+    };
+  }
+  const startAt = new Date(otValue(request, "plannedStartAt", "planned_start_at"));
+  const endAt = new Date(otValue(request, "plannedEndAt", "planned_end_at"));
+  const boundary = new Date(`${segments[1].weekStart}T00:00:00+07:00`);
+  const firstGross = Math.floor((boundary.getTime() - startAt.getTime()) / 60000);
+  const lastGross = Math.floor((endAt.getTime() - boundary.getTime()) / 60000);
+  const firstBreak = firstGross - Number(segments[0].minutes || 0);
+  const lastBreak = lastGross - Number(segments[1].minutes || 0);
+  if (firstBreak < 0 || lastBreak < 0 || !Number.isFinite(firstBreak) || !Number.isFinite(lastBreak)) {
+    return {
+      breakMinutesBeforeBoundary: "",
+      breakMinutesAfterBoundary: ""
+    };
+  }
+  return {
+    breakMinutesBeforeBoundary: String(firstBreak),
+    breakMinutesAfterBoundary: String(lastBreak)
+  };
+}
 function OtRequestForm({
-  weekStart,
+  mode = "create",
+  request = null,
+  weekStart: requestedWeekStart = getCurrentOtWeekStart(),
   onSuccess
 }) {
+  const isRevision = mode === "revision";
+  const plannedStart = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
+  const plannedEnd = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
+  const existingPlannedSegments = isRevision ? getOtWeekSegments(request, "planned") : [];
+  const revisionBreaks = getOtPlanRevisionBreakAllocation(request, existingPlannedSegments);
+  const weekStart = isRevision && plannedStart.date ? window.FlowMateOtRequestDomain.getWeekStartKey(plannedStart.date) : requestedWeekStart;
   const today = getBangkokDateKey();
-  const initialWorkDate = window.FlowMateOtRequestDomain.getWeekStartKey(today) === weekStart ? today : weekStart;
-  const [form, setForm] = useStateApp({
-    functionCode: "",
-    title: "",
+  const initialWorkDate = isRevision && plannedStart.date ? plannedStart.date : window.FlowMateOtRequestDomain.getWeekStartKey(today) === weekStart ? today : weekStart;
+  const [form, setForm] = useStateApp(() => ({
+    functionCode: isRevision ? String(otValue(request, "functionCode", "function_code") || "") : "",
+    title: isRevision ? String(otValue(request, "title", "title") || "") : "",
     workDate: initialWorkDate,
-    startTime: "18:00",
-    endTime: "20:00",
-    breakMinutes: "0",
-    breakMinutesBeforeBoundary: "",
-    breakMinutesAfterBoundary: "",
-    dayType: "working_day",
-    workLocationType: "office",
-    venue: "",
-    reasonCode: "",
-    reasonDetail: "",
-    approverUserId: "",
+    startTime: isRevision ? plannedStart.time : "18:00",
+    endTime: isRevision ? plannedEnd.time : "20:00",
+    breakMinutes: String(isRevision ? otValue(request, "plannedBreakMinutes", "planned_break_minutes") || 0 : 0),
+    breakMinutesBeforeBoundary: isRevision ? revisionBreaks.breakMinutesBeforeBoundary : "",
+    breakMinutesAfterBoundary: isRevision ? revisionBreaks.breakMinutesAfterBoundary : "",
+    dayType: isRevision ? String(otValue(request, "dayType", "day_type") || "working_day") : "working_day",
+    workLocationType: isRevision ? String(otValue(request, "workLocationType", "work_location_type") || "office") : "office",
+    venue: isRevision ? String(otValue(request, "venue", "venue") || "") : "",
+    reasonCode: isRevision ? String(otValue(request, "reasonCode", "reason_code") || "") : "",
+    reasonDetail: isRevision ? String(otValue(request, "reasonDetail", "reason_detail") || "") : "",
+    approverUserId: isRevision ? String(otValue(request, "approverUserId", "approver_user_id") || "") : "",
     consented: false
-  });
+  }));
   const [approverState, setApproverState] = useStateApp({
     status: "loading",
     rows: []
@@ -553,13 +601,15 @@ function OtRequestForm({
   }
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
   const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
-    totalField: "plannedMinutes"
+    totalField: "plannedMinutes",
+    excludedSegments: isRevision ? existingPlannedSegments : []
   }) : [];
   const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
   const approverUnavailable = approverState.status !== "ready" || approverState.rows.length === 0;
-  const canSubmit = preview.valid && !overLimit && form.functionCode && form.title.trim() && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && form.consented && !approverUnavailable && weekSummaryState.status === "ready" && submitState.status !== "submitting";
+  const selectedApproverAvailable = approverState.rows.some(approver => approver.userId === form.approverUserId);
+  const canSubmit = preview.valid && !overLimit && form.functionCode && form.title.trim() && form.reasonCode && (!detailRequired || form.reasonDetail.trim()) && (!venueRequired || form.venue.trim()) && form.approverUserId && selectedApproverAvailable && form.consented && !approverUnavailable && weekSummaryState.status === "ready" && submitState.status !== "submitting";
   useEffectApp(() => {
     if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
   }, [weekSummaryState.status]);
@@ -578,7 +628,7 @@ function OtRequestForm({
     }));
     setSubmitState({
       status: "submitting",
-      message: "Submitting your request…"
+      message: isRevision ? "Resubmitting your corrected request…" : "Submitting your request…"
     });
     const payload = {
       functionCode: form.functionCode,
@@ -596,10 +646,14 @@ function OtRequestForm({
       consentStatementVersion: OT_CONSENT_STATEMENT_VERSION
     };
     try {
-      await window.createOtRequest(payload, intent.key);
+      if (isRevision) {
+        await window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key);
+      } else {
+        await window.createOtRequest(payload, intent.key);
+      }
       setSubmitState({
         status: "success",
-        message: "Your OT request was submitted for approval."
+        message: isRevision ? "Your corrected OT request was resubmitted for approval." : "Your OT request was submitted for approval."
       });
       setIntent({
         key: crypto.randomUUID(),
@@ -609,7 +663,7 @@ function OtRequestForm({
     } catch (error) {
       setSubmitState({
         status: "error",
-        message: error.message || "Your OT request could not be submitted. Retry uses the same request key."
+        message: error.message || `${isRevision ? "Your corrected OT request could not be resubmitted" : "Your OT request could not be submitted"}. Retry uses the same request key.`
       });
     }
   }
@@ -620,7 +674,9 @@ function OtRequestForm({
   }, React.createElement("fieldset", {
     className: "ot-form__fieldset",
     disabled: window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)
-  }, React.createElement("div", {
+  }, isRevision && React.createElement(React.Fragment, null, React.createElement("h3", null, "Edit and resubmit request"), React.createElement("p", {
+    className: "muted"
+  }, "Correct the requested schedule and approver, then renew consent before resubmitting.")), React.createElement("div", {
     className: "form-grid"
   }, React.createElement("label", {
     className: "field"
@@ -856,7 +912,7 @@ function OtRequestForm({
     className: "btn btn--primary",
     ...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message)),
     disabled: !canSubmit
-  }, submitState.status === "submitting" ? "Submitting…" : "Submit OT request")));
+  }, submitState.status === "submitting" ? isRevision ? "Resubmitting…" : "Submitting…" : isRevision ? "Resubmit corrected request" : "Submit OT request")));
 }
 function OtConsentPanel({
   request,
@@ -1315,7 +1371,9 @@ function OtMyRequestsTable({
     const status = getOtRequestStatus(request);
     const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
     const canConsent = status === "awaiting_consent" && !otValue(request, "employeeConsent", "employee_consent");
-    const canConfirm = status === "actual_confirmation_required" || otValue(request, "actualDecision", "actual_decision") === "revision_required";
+    const revisionWorkflow = window.FlowMateOtRequestDomain.getRevisionWorkflow(request);
+    const canRevise = revisionWorkflow === "plan";
+    const canConfirm = status === "actual_confirmation_required" || revisionWorkflow === "actual";
     return React.createElement("tr", {
       key: request.id
     }, React.createElement("td", null, formatOtDate(start.date)), React.createElement("td", null, React.createElement("strong", null, request.title), React.createElement("small", null, String(otValue(request, "functionCode", "function_code") || "").toUpperCase())), React.createElement("td", null, formatOtHours(otValue(request, "plannedMinutes", "planned_minutes"))), React.createElement("td", null, otValue(request, "actualMinutes", "actual_minutes") ? formatOtHours(otValue(request, "actualMinutes", "actual_minutes")) : "—"), React.createElement("td", null, React.createElement("span", {
@@ -1324,7 +1382,11 @@ function OtMyRequestsTable({
       type: "button",
       className: "btn btn--sm btn--secondary",
       onClick: () => onAction("consent", request)
-    }, "Review consent") : canConfirm ? React.createElement("button", {
+    }, "Review consent") : canRevise ? React.createElement("button", {
+      type: "button",
+      className: "btn btn--sm btn--secondary",
+      onClick: () => onAction("revision", request)
+    }, "Edit and resubmit request") : canConfirm ? React.createElement("button", {
       type: "button",
       className: "btn btn--sm btn--secondary",
       onClick: () => onAction("actual", request)
@@ -1485,7 +1547,7 @@ function OtManagerDashboard({
   const statusOptions = Array.from(new Set(currentRows.map(getOtRequestStatus))).sort();
   const plannedMinutes = filteredCurrentRows.filter(request => !["cancelled", "rejected"].includes(getOtRequestStatus(request))).reduce((sum, request) => sum + Number(request.plannedMinutes || 0), 0);
   const confirmedMinutes = filteredCurrentRows.filter(isOtActualConfirmed).reduce((sum, request) => sum + Number(request.actualMinutes || 0), 0);
-  const needsApproval = filteredCurrentRows.filter(request => !otValue(request, "actualSubmittedAt", "actual_submitted_at") && ["pending_approval", "revision_required"].includes(getOtRequestStatus(request))).length;
+  const needsApproval = filteredCurrentRows.filter(request => !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval").length;
   const nearLimit = new Set(filteredCurrentRows.filter(request => (currentEmployeeTotals[getOtManagerEmployeeId(request)]?.countedMinutes || 0) >= 30 * 60).map(getOtManagerEmployeeId)).size;
   const metricValues = [formatOtHours(plannedMinutes), formatOtHours(confirmedMinutes), String(needsApproval), String(nearLimit)];
   const hasFullScope = Boolean(access.isOwner || access.isHrAdmin);
@@ -1645,7 +1707,14 @@ function OtManagerDashboard({
     onClick: () => setSelectedRow(null)
   }, "Close")), React.createElement("div", {
     className: "ot-detail-grid"
-  }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, loadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))))));
+  }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, loadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))), React.createElement(OtActualAmendmentAction, {
+    access: access,
+    request: selectedRow,
+    onChanged: () => {
+      setSelectedRow(null);
+      setRefreshKey(value => value + 1);
+    }
+  }))));
 }
 function OtApprovalQueue({
   access,
@@ -1662,7 +1731,7 @@ function OtApprovalQueue({
     message: ""
   });
   const employeeTotals = getOtManagerTotals(allRequests);
-  const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request" && !otValue(request, "actualSubmittedAt", "actual_submitted_at") && ["pending_approval", "revision_required"].includes(getOtRequestStatus(request)));
+  const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request" && !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval");
   const actualRequests = requests.filter(request => ["pending_actual_verification", "compliance_review_required"].includes(getOtRequestStatus(request)));
   function canAct(request) {
     return window.FlowMateOtRequestDomain.canActOnAssignedRequest(access, request);
@@ -2644,6 +2713,96 @@ function formatOtDateTime(value) {
     timeStyle: "short"
   }).format(new Date(value));
 }
+function OtActualAmendmentAction({
+  access,
+  request,
+  onChanged
+}) {
+  const [reason, setReason] = useStateApp("");
+  const [intent, setIntent] = useStateApp(null);
+  const [actionState, setActionState] = useStateApp({
+    status: "idle",
+    message: ""
+  });
+  const submissionRef = useRefApp(false);
+  const canAmend = window.FlowMateOtRequestDomain.canRequestActualAmendment(access, request);
+  const requestId = request ? getOtManagerRequestId(request) : "";
+  function updateReason(value) {
+    if (submissionRef.current || actionState.status === "submitting") return;
+    setReason(value);
+    if (actionState.status !== "idle") setActionState({
+      status: "idle",
+      message: ""
+    });
+  }
+  async function requestCorrection(event) {
+    event.preventDefault();
+    if (!canAmend || submissionRef.current || actionState.status === "submitting") return;
+    if (!reason.trim()) {
+      setActionState({
+        status: "error",
+        message: "A correction reason is required."
+      });
+      return;
+    }
+    const normalizedReason = reason.trim();
+    const signature = window.FlowMateOtIntent.signature([requestId, normalizedReason]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    submissionRef.current = true;
+    setActionState({
+      status: "submitting",
+      message: "Requesting an audited actual correction…"
+    });
+    try {
+      await window.requestOtActualAmendment(requestId, normalizedReason, currentIntent.key);
+      setIntent(window.FlowMateOtIntent.complete());
+      setReason("");
+      setActionState({
+        status: "success",
+        message: "Actual correction requested. The employee can now submit corrected actual time."
+      });
+      if (onChanged) onChanged();
+    } catch (error) {
+      setActionState({
+        status: "error",
+        message: error.message || "Actual correction could not be requested. Retry uses the same action key."
+      });
+    } finally {
+      submissionRef.current = false;
+    }
+  }
+  if (!canAmend) return null;
+  return React.createElement("form", {
+    className: "ot-workflow",
+    "aria-label": "Request actual correction",
+    onSubmit: requestCorrection
+  }, React.createElement("fieldset", {
+    className: "ot-form__fieldset",
+    disabled: actionState.status === "submitting"
+  }, React.createElement("h3", null, "Request correction of approved actual"), React.createElement("p", {
+    className: "muted"
+  }, "The existing actual time remains in audit until the employee submits a correction."), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Correction reason *"), React.createElement("textarea", {
+    className: "textarea",
+    value: reason,
+    onChange: event => updateReason(event.target.value),
+    required: true,
+    placeholder: "Explain why the approved actual needs correction."
+  })), React.createElement("div", {
+    className: "ot-form__actions"
+  }, React.createElement("button", {
+    type: "submit",
+    className: "btn btn--secondary",
+    disabled: !reason.trim() || actionState.status === "submitting"
+  }, actionState.status === "submitting" ? "Requesting correction…" : "Request actual correction"))), actionState.message && React.createElement(OtWarning, {
+    kind: actionState.status === "error" ? "error" : "info",
+    message: actionState.message
+  }));
+}
 function OtAuditTimeline({
   requestId: providedRequestId = "",
   refreshKey = 0
@@ -2791,6 +2950,7 @@ function OtAuditTimeline({
   }, "→"), React.createElement("span", null, getOtStatusLabel(row.newStatus))), React.createElement("dl", null, React.createElement("div", null, React.createElement("dt", null, "Changed fields"), React.createElement("dd", null, Object.keys(row.changedFields).length ? JSON.stringify(row.changedFields) : "No field payload")), React.createElement("div", null, React.createElement("dt", null, "Reason / note"), React.createElement("dd", null, row.note)))))));
 }
 function OtComplianceQueue({
+  access,
   refreshKey = 0,
   onChanged
 }) {
@@ -3035,7 +3195,15 @@ function OtComplianceQueue({
   }), React.createElement(OtAuditTimeline, {
     requestId: selected.id,
     refreshKey: localRefreshKey + refreshKey
-  })));
+  })), selected && React.createElement(OtActualAmendmentAction, {
+    access: access,
+    request: selected,
+    onChanged: () => {
+      setSelected(null);
+      setLocalRefreshKey(value => value + 1);
+      if (onChanged) onChanged();
+    }
+  }));
 }
 function downloadOtHrCsv(csv, batchName) {
   const safeName = String(batchName || "ot-hr-export").trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "ot-hr-export";
@@ -3761,6 +3929,7 @@ function OtRequestShell({
     onOpenView: openView,
     refreshKey: operationsRefreshKey
   }), access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "compliance" && React.createElement(OtComplianceQueue, {
+    access: access,
     refreshKey: operationsRefreshKey,
     onChanged: () => setOperationsRefreshKey(value => value + 1)
   }), access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "audit" && React.createElement(OtAuditTimeline, {

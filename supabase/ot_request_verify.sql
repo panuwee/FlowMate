@@ -90,6 +90,55 @@ select
   ) as public_and_anon_revoked;
 
 select
+  'Plan resubmission RPC contract (Expected = valid)' as check_name,
+  pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
+  pg_catalog.pg_get_function_result(p.oid) as result_type,
+  p.prosecdef as security_definer,
+  pg_catalog.coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  (
+    pg_catalog.position('v_request.employee_user_id <> v_actor_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('v_request.source <> ''employee_request''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('v_request.status <> ''revision_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('v_request.actual_submitted_at is not null' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('v_request.plan_decision is distinct from ''revision_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+  ) as employee_state_guard,
+  pg_catalog.position('ot-request:' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as request_lock,
+  (
+    pg_catalog.position('v_request.planned_week_segments || v_segments' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('order by week_start' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('public.ot_lock_employee_weeks' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+  ) as week_union_lock,
+  pg_catalog.position('public.ot_assert_planned_limit' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as canonical_limit_check,
+  pg_catalog.position('public.ot_assert_no_employee_overlap' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as overlap_check,
+  pg_catalog.position('''resubmit_plan''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_audit_action
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_resubmit_plan'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, jsonb, text, uuid';
+
+select
+  'Plan resubmission RPC execute grants (Expected authenticated only)' as check_name,
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_resubmit_plan(uuid, jsonb, text, uuid)',
+    'EXECUTE'
+  ) as authenticated_execute,
+  not exists (
+    select 1
+    from information_schema.routine_privileges rp
+    where rp.specific_schema = 'public'
+      and rp.routine_name = 'ot_resubmit_plan'
+      and rp.privilege_type = 'EXECUTE'
+      and rp.grantee in ('anon', 'PUBLIC')
+  ) as public_and_anon_revoked,
+  not pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_assert_no_employee_overlap(uuid, timestamptz, timestamptz, uuid)',
+    'EXECUTE'
+  ) as overlap_helper_private;
+
+select
   'Canonical OT counted-week helper (Expected = 1)' as check_name,
   'public.ot_counted_week_minutes_unchecked(uuid, date, uuid)' as expected_signature,
   pg_catalog.count(*) as actual_count
@@ -141,7 +190,7 @@ where n.nspname = 'public'
     'ot_counted_week_minutes_unchecked',
     'ot_get_access_context', 'ot_get_my_dashboard', 'ot_list_my_requests',
     'ot_get_manager_dashboard', 'ot_list_eligible_approvers',
-    'ot_list_people_for_event', 'ot_create_request', 'ot_preview_event_plan',
+    'ot_list_people_for_event', 'ot_create_request', 'ot_resubmit_plan', 'ot_preview_event_plan',
     'ot_create_event_plan', 'ot_record_consent', 'ot_review_plan',
     'ot_submit_actual', 'ot_request_actual_amendment', 'ot_verify_actual', 'ot_list_compliance_queue',
     'ot_review_compliance', 'ot_list_request_audit', 'ot_list_hr_ready',

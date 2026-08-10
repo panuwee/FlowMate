@@ -281,7 +281,9 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
     remainingMinutes: Math.max(0, OT_LIMIT_MINUTES - plannedMinutes),
   };
   const consentRequests = requests.filter(request => getOtRequestStatus(request) === "awaiting_consent" && !otValue(request, "employeeConsent", "employee_consent"));
-  const actualRequests = requests.filter(request => getOtRequestStatus(request) === "actual_confirmation_required" || otValue(request, "actualDecision", "actual_decision") === "revision_required");
+  const planRevisionRequests = requests.filter(request => window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "plan");
+  const actualRequests = requests.filter(request => getOtRequestStatus(request) === "actual_confirmation_required"
+    || window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "actual");
 
   return (
     <div className="ot-employee">
@@ -311,7 +313,7 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
             <section className="ot-metric"><span>Planned</span><strong>{formatOtHours(summary.plannedMinutes)}</strong></section>
             <section className="ot-metric"><span>Confirmed actual</span><strong>{formatOtHours(summary.confirmedMinutes)}</strong></section>
             <section className="ot-metric"><span>Remaining</span><strong>{formatOtHours(summary.remainingMinutes)}</strong></section>
-            <section className="ot-metric"><span>Actions</span><strong>{consentRequests.length + actualRequests.length}</strong><small>{consentRequests.length} consent · {actualRequests.length} actual</small></section>
+            <section className="ot-metric"><span>Actions</span><strong>{consentRequests.length + planRevisionRequests.length + actualRequests.length}</strong><small>{consentRequests.length} consent · {planRevisionRequests.length} plan · {actualRequests.length} actual</small></section>
           </section>
 
           <section className="ot-actions" aria-label="Your required OT actions">
@@ -320,12 +322,17 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
                 <strong>Consent required</strong><span>{request.title}</span><small>Review the occurrence and weekly total</small>
               </button>
             ))}
+            {planRevisionRequests.map(request => (
+              <button key={request.id} type="button" className="ot-action-card" data-testid="ot-plan-revision-required" onClick={() => setAction({ type: "revision", request })}>
+                <strong>Edit and resubmit request</strong><span>{request.title}</span><small>Correct the plan before it returns to the approval queue</small>
+              </button>
+            ))}
             {actualRequests.map(request => (
               <button key={request.id} type="button" className="ot-action-card" data-testid="ot-confirm-actual" onClick={() => setAction({ type: "actual", request })}>
                 <strong>Confirm actual time</strong><span>{request.title}</span><small>Record the hours you actually worked</small>
               </button>
             ))}
-            {!consentRequests.length && !actualRequests.length && <div className="ot-state ot-state--compact">No OT actions are waiting for you.</div>}
+            {!consentRequests.length && !planRevisionRequests.length && !actualRequests.length && <div className="ot-state ot-state--compact">No OT actions are waiting for you.</div>}
           </section>
         </>
       )}
@@ -333,10 +340,11 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
       {action && (
         <section className="ot-workflow" aria-label="OT action">
           <div className="ot-workflow__head">
-            <h2>{action.type === "new" ? "New OT request" : action.type === "consent" ? "Event consent" : "Confirm actual time"}</h2>
+            <h2>{action.type === "new" ? "New OT request" : action.type === "revision" ? "Edit and resubmit request" : action.type === "consent" ? "Event consent" : "Confirm actual time"}</h2>
             <button type="button" className="btn btn--ghost" onClick={() => setAction(null)}>Close</button>
           </div>
           {action.type === "new" && <OtRequestForm weekStart={weekStart} onSuccess={refreshAfterAction} />}
+          {action.type === "revision" && <OtRequestForm mode="revision" request={action.request} weekStart={weekStart} onSuccess={refreshAfterAction} />}
           {action.type === "consent" && <OtConsentPanel request={action.request} onSuccess={refreshAfterAction} />}
           {action.type === "actual" && <OtActualConfirmationForm request={action.request} onSuccess={refreshAfterAction} />}
         </section>
@@ -347,26 +355,56 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
   );
 }
 
-function OtRequestForm({ weekStart, onSuccess }) {
+function getOtPlanRevisionBreakAllocation(request, segments) {
+  if (!request || !Array.isArray(segments) || segments.length !== 2) {
+    return { breakMinutesBeforeBoundary: "", breakMinutesAfterBoundary: "" };
+  }
+  const startAt = new Date(otValue(request, "plannedStartAt", "planned_start_at"));
+  const endAt = new Date(otValue(request, "plannedEndAt", "planned_end_at"));
+  const boundary = new Date(`${segments[1].weekStart}T00:00:00+07:00`);
+  const firstGross = Math.floor((boundary.getTime() - startAt.getTime()) / 60000);
+  const lastGross = Math.floor((endAt.getTime() - boundary.getTime()) / 60000);
+  const firstBreak = firstGross - Number(segments[0].minutes || 0);
+  const lastBreak = lastGross - Number(segments[1].minutes || 0);
+  if (firstBreak < 0 || lastBreak < 0 || !Number.isFinite(firstBreak) || !Number.isFinite(lastBreak)) {
+    return { breakMinutesBeforeBoundary: "", breakMinutesAfterBoundary: "" };
+  }
+  return {
+    breakMinutesBeforeBoundary: String(firstBreak),
+    breakMinutesAfterBoundary: String(lastBreak),
+  };
+}
+
+function OtRequestForm({ mode = "create", request = null, weekStart: requestedWeekStart = getCurrentOtWeekStart(), onSuccess }) {
+  const isRevision = mode === "revision";
+  const plannedStart = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
+  const plannedEnd = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
+  const existingPlannedSegments = isRevision ? getOtWeekSegments(request, "planned") : [];
+  const revisionBreaks = getOtPlanRevisionBreakAllocation(request, existingPlannedSegments);
+  const weekStart = isRevision && plannedStart.date
+    ? window.FlowMateOtRequestDomain.getWeekStartKey(plannedStart.date)
+    : requestedWeekStart;
   const today = getBangkokDateKey();
-  const initialWorkDate = window.FlowMateOtRequestDomain.getWeekStartKey(today) === weekStart ? today : weekStart;
-  const [form, setForm] = useStateApp({
-    functionCode: "",
-    title: "",
+  const initialWorkDate = isRevision && plannedStart.date
+    ? plannedStart.date
+    : window.FlowMateOtRequestDomain.getWeekStartKey(today) === weekStart ? today : weekStart;
+  const [form, setForm] = useStateApp(() => ({
+    functionCode: isRevision ? String(otValue(request, "functionCode", "function_code") || "") : "",
+    title: isRevision ? String(otValue(request, "title", "title") || "") : "",
     workDate: initialWorkDate,
-    startTime: "18:00",
-    endTime: "20:00",
-    breakMinutes: "0",
-    breakMinutesBeforeBoundary: "",
-    breakMinutesAfterBoundary: "",
-    dayType: "working_day",
-    workLocationType: "office",
-    venue: "",
-    reasonCode: "",
-    reasonDetail: "",
-    approverUserId: "",
+    startTime: isRevision ? plannedStart.time : "18:00",
+    endTime: isRevision ? plannedEnd.time : "20:00",
+    breakMinutes: String(isRevision ? otValue(request, "plannedBreakMinutes", "planned_break_minutes") || 0 : 0),
+    breakMinutesBeforeBoundary: isRevision ? revisionBreaks.breakMinutesBeforeBoundary : "",
+    breakMinutesAfterBoundary: isRevision ? revisionBreaks.breakMinutesAfterBoundary : "",
+    dayType: isRevision ? String(otValue(request, "dayType", "day_type") || "working_day") : "working_day",
+    workLocationType: isRevision ? String(otValue(request, "workLocationType", "work_location_type") || "office") : "office",
+    venue: isRevision ? String(otValue(request, "venue", "venue") || "") : "",
+    reasonCode: isRevision ? String(otValue(request, "reasonCode", "reason_code") || "") : "",
+    reasonDetail: isRevision ? String(otValue(request, "reasonDetail", "reason_detail") || "") : "",
+    approverUserId: isRevision ? String(otValue(request, "approverUserId", "approver_user_id") || "") : "",
     consented: false,
-  });
+  }));
   const [approverState, setApproverState] = useStateApp({ status: "loading", rows: [] });
   const [approverRetry, setApproverRetry] = useStateApp(0);
   const [submitState, setSubmitState] = useStateApp({ status: "idle", message: "" });
@@ -436,13 +474,14 @@ function OtRequestForm({ weekStart, onSuccess }) {
     ? window.FlowMateOtRequestDomain.buildWeekProjections(
       preview.valid ? preview.segments : [],
       weekSummaryState.summaries,
-      { totalField: "plannedMinutes" },
+      { totalField: "plannedMinutes", excludedSegments: isRevision ? existingPlannedSegments : [] },
     )
     : [];
   const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
   const approverUnavailable = approverState.status !== "ready" || approverState.rows.length === 0;
+  const selectedApproverAvailable = approverState.rows.some(approver => approver.userId === form.approverUserId);
   const canSubmit = preview.valid
     && !overLimit
     && form.functionCode
@@ -451,6 +490,7 @@ function OtRequestForm({ weekStart, onSuccess }) {
     && (!detailRequired || form.reasonDetail.trim())
     && (!venueRequired || form.venue.trim())
     && form.approverUserId
+    && selectedApproverAvailable
     && form.consented
     && !approverUnavailable
     && weekSummaryState.status === "ready"
@@ -467,7 +507,7 @@ function OtRequestForm({ weekStart, onSuccess }) {
       return;
     }
     setIntent(current => ({ ...current, attempted: true }));
-    setSubmitState({ status: "submitting", message: "Submitting your request…" });
+    setSubmitState({ status: "submitting", message: isRevision ? "Resubmitting your corrected request…" : "Submitting your request…" });
     const payload = {
       functionCode: form.functionCode,
       title: form.title.trim(),
@@ -484,18 +524,23 @@ function OtRequestForm({ weekStart, onSuccess }) {
       consentStatementVersion: OT_CONSENT_STATEMENT_VERSION,
     };
     try {
-      await window.createOtRequest(payload, intent.key);
-      setSubmitState({ status: "success", message: "Your OT request was submitted for approval." });
+      if (isRevision) {
+        await window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key);
+      } else {
+        await window.createOtRequest(payload, intent.key);
+      }
+      setSubmitState({ status: "success", message: isRevision ? "Your corrected OT request was resubmitted for approval." : "Your OT request was submitted for approval." });
       setIntent({ key: crypto.randomUUID(), attempted: false });
       onSuccess();
     } catch (error) {
-      setSubmitState({ status: "error", message: error.message || "Your OT request could not be submitted. Retry uses the same request key." });
+      setSubmitState({ status: "error", message: error.message || `${isRevision ? "Your corrected OT request could not be resubmitted" : "Your OT request could not be submitted"}. Retry uses the same request key.` });
     }
   }
 
   return (
     <form className="ot-form" onSubmit={submitRequest} noValidate>
       <fieldset className="ot-form__fieldset" disabled={window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)}>
+        {isRevision && <><h3>Edit and resubmit request</h3><p className="muted">Correct the requested schedule and approver, then renew consent before resubmitting.</p></>}
         <div className="form-grid">
         <label className="field"><span className="field__label">Function *</span><select className="select" value={form.functionCode} onChange={event => update("functionCode", event.target.value)} required><option value="">Select Function</option><option value="gdve">GD/VE</option><option value="ops">Ops</option><option value="mkt">MKT</option><option value="esport">eSport</option></select></label>
         <label className="field"><span className="field__label">Assignment or event *</span><input className="input" value={form.title} onChange={event => update("title", event.target.value)} required /></label>
@@ -525,7 +570,7 @@ function OtRequestForm({ weekStart, onSuccess }) {
         <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
       </fieldset>
       {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning id="ot-request-submit-feedback" kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
-      <div className="ot-form__actions"><button type="submit" className="btn btn--primary" {...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))} disabled={!canSubmit}>{submitState.status === "submitting" ? "Submitting…" : "Submit OT request"}</button></div>
+      <div className="ot-form__actions"><button type="submit" className="btn btn--primary" {...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))} disabled={!canSubmit}>{submitState.status === "submitting" ? (isRevision ? "Resubmitting…" : "Submitting…") : (isRevision ? "Resubmit corrected request" : "Submit OT request")}</button></div>
     </form>
   );
 }
@@ -758,8 +803,10 @@ function OtMyRequestsTable({ requests, onAction }) {
             const status = getOtRequestStatus(request);
             const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
             const canConsent = status === "awaiting_consent" && !otValue(request, "employeeConsent", "employee_consent");
-            const canConfirm = status === "actual_confirmation_required" || otValue(request, "actualDecision", "actual_decision") === "revision_required";
-            return <tr key={request.id}><td>{formatOtDate(start.date)}</td><td><strong>{request.title}</strong><small>{String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</small></td><td>{formatOtHours(otValue(request, "plannedMinutes", "planned_minutes"))}</td><td>{otValue(request, "actualMinutes", "actual_minutes") ? formatOtHours(otValue(request, "actualMinutes", "actual_minutes")) : "—"}</td><td><span className={`ot-status ot-status--${status}`}>{getOtStatusLabel(status)}</span></td><td>{canConsent ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("consent", request)}>Review consent</button> : canConfirm ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("actual", request)}>Confirm actual</button> : <span className="muted">No action</span>}</td></tr>;
+            const revisionWorkflow = window.FlowMateOtRequestDomain.getRevisionWorkflow(request);
+            const canRevise = revisionWorkflow === "plan";
+            const canConfirm = status === "actual_confirmation_required" || revisionWorkflow === "actual";
+            return <tr key={request.id}><td>{formatOtDate(start.date)}</td><td><strong>{request.title}</strong><small>{String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</small></td><td>{formatOtHours(otValue(request, "plannedMinutes", "planned_minutes"))}</td><td>{otValue(request, "actualMinutes", "actual_minutes") ? formatOtHours(otValue(request, "actualMinutes", "actual_minutes")) : "—"}</td><td><span className={`ot-status ot-status--${status}`}>{getOtStatusLabel(status)}</span></td><td>{canConsent ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("consent", request)}>Review consent</button> : canRevise ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("revision", request)}>Edit and resubmit request</button> : canConfirm ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("actual", request)}>Confirm actual</button> : <span className="muted">No action</span>}</td></tr>;
           })}</tbody>
         </table>
       </div>
@@ -905,7 +952,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
     .filter(request => !["cancelled", "rejected"].includes(getOtRequestStatus(request)))
     .reduce((sum, request) => sum + Number(request.plannedMinutes || 0), 0);
   const confirmedMinutes = filteredCurrentRows.filter(isOtActualConfirmed).reduce((sum, request) => sum + Number(request.actualMinutes || 0), 0);
-  const needsApproval = filteredCurrentRows.filter(request => !otValue(request, "actualSubmittedAt", "actual_submitted_at") && ["pending_approval", "revision_required"].includes(getOtRequestStatus(request))).length;
+  const needsApproval = filteredCurrentRows.filter(request => !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval").length;
   const nearLimit = new Set(filteredCurrentRows
     .filter(request => (currentEmployeeTotals[getOtManagerEmployeeId(request)]?.countedMinutes || 0) >= 30 * 60)
     .map(getOtManagerEmployeeId)).size;
@@ -945,7 +992,11 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
           {showEventForm && <section className="ot-workflow"><div className="ot-workflow__head"><h2>Shared Event OT plan</h2></div><OtEventPlanForm access={access} onSuccess={() => setRefreshKey(value => value + 1)} /></section>}
           <OtApprovalQueue access={access} requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={loadState.peopleById} onChanged={() => setRefreshKey(value => value + 1)} />
           <OtTeamWeekTable requests={filteredCurrentRows} allRequests={currentRows} peopleById={loadState.peopleById} onOpenRequest={setSelectedRow} />
-          {selectedRow && <section className="ot-manager-detail" aria-label="Authorized OT details"><div className="ot-section-head"><h2>{selectedRow.title}</h2><button type="button" className="btn btn--ghost" onClick={() => setSelectedRow(null)}>Close</button></div><div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selectedRow, loadState.peopleById)}</strong></div><div><span>Function</span><strong>{String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase()}</strong></div><div><span>Reason</span><strong>{getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code"))}</strong></div><div><span>Status</span><strong>{getOtStatusLabel(getOtRequestStatus(selectedRow))}</strong></div></div></section>}
+          {selectedRow && <section className="ot-manager-detail" aria-label="Authorized OT details">
+            <div className="ot-section-head"><h2>{selectedRow.title}</h2><button type="button" className="btn btn--ghost" onClick={() => setSelectedRow(null)}>Close</button></div>
+            <div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selectedRow, loadState.peopleById)}</strong></div><div><span>Function</span><strong>{String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase()}</strong></div><div><span>Reason</span><strong>{getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code"))}</strong></div><div><span>Status</span><strong>{getOtStatusLabel(getOtRequestStatus(selectedRow))}</strong></div></div>
+            <OtActualAmendmentAction access={access} request={selectedRow} onChanged={() => { setSelectedRow(null); setRefreshKey(value => value + 1); }} />
+          </section>}
         </>
       )}
     </div>
@@ -960,7 +1011,7 @@ function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged 
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request"
     && !otValue(request, "actualSubmittedAt", "actual_submitted_at")
-    && ["pending_approval", "revision_required"].includes(getOtRequestStatus(request)));
+    && getOtRequestStatus(request) === "pending_approval");
   const actualRequests = requests.filter(request => ["pending_actual_verification", "compliance_review_required"].includes(getOtRequestStatus(request)));
 
   function canAct(request) {
@@ -1387,6 +1438,60 @@ function formatOtDateTime(value) {
   }).format(new Date(value));
 }
 
+function OtActualAmendmentAction({ access, request, onChanged }) {
+  const [reason, setReason] = useStateApp("");
+  const [intent, setIntent] = useStateApp(null);
+  const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
+  const submissionRef = useRefApp(false);
+  const canAmend = window.FlowMateOtRequestDomain.canRequestActualAmendment(access, request);
+  const requestId = request ? getOtManagerRequestId(request) : "";
+
+  function updateReason(value) {
+    if (submissionRef.current || actionState.status === "submitting") return;
+    setReason(value);
+    if (actionState.status !== "idle") setActionState({ status: "idle", message: "" });
+  }
+
+  async function requestCorrection(event) {
+    event.preventDefault();
+    if (!canAmend || submissionRef.current || actionState.status === "submitting") return;
+    if (!reason.trim()) {
+      setActionState({ status: "error", message: "A correction reason is required." });
+      return;
+    }
+    const normalizedReason = reason.trim();
+    const signature = window.FlowMateOtIntent.signature([requestId, normalizedReason]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    submissionRef.current = true;
+    setActionState({ status: "submitting", message: "Requesting an audited actual correction…" });
+    try {
+      await window.requestOtActualAmendment(requestId, normalizedReason, currentIntent.key);
+      setIntent(window.FlowMateOtIntent.complete());
+      setReason("");
+      setActionState({ status: "success", message: "Actual correction requested. The employee can now submit corrected actual time." });
+      if (onChanged) onChanged();
+    } catch (error) {
+      setActionState({ status: "error", message: error.message || "Actual correction could not be requested. Retry uses the same action key." });
+    } finally {
+      submissionRef.current = false;
+    }
+  }
+
+  if (!canAmend) return null;
+  return (
+    <form className="ot-workflow" aria-label="Request actual correction" onSubmit={requestCorrection}>
+      <fieldset className="ot-form__fieldset" disabled={actionState.status === "submitting"}>
+        <h3>Request correction of approved actual</h3>
+        <p className="muted">The existing actual time remains in audit until the employee submits a correction.</p>
+        <label className="field"><span className="field__label">Correction reason *</span><textarea className="textarea" value={reason} onChange={event => updateReason(event.target.value)} required placeholder="Explain why the approved actual needs correction." /></label>
+        <div className="ot-form__actions"><button type="submit" className="btn btn--secondary" disabled={!reason.trim() || actionState.status === "submitting"}>{actionState.status === "submitting" ? "Requesting correction…" : "Request actual correction"}</button></div>
+      </fieldset>
+      {actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}
+    </form>
+  );
+}
+
 function OtAuditTimeline({ requestId: providedRequestId = "", refreshKey = 0 }) {
   const [requestIdInput, setRequestIdInput] = useStateApp("");
   const [submittedRequestId, setSubmittedRequestId] = useStateApp("");
@@ -1445,7 +1550,7 @@ function OtAuditTimeline({ requestId: providedRequestId = "", refreshKey = 0 }) 
   );
 }
 
-function OtComplianceQueue({ refreshKey = 0, onChanged }) {
+function OtComplianceQueue({ access, refreshKey = 0, onChanged }) {
   const [weekStart, setWeekStart] = useStateApp("");
   const [localRefreshKey, setLocalRefreshKey] = useStateApp(0);
   const [loadState, setLoadState] = useStateApp({ status: "loading", rows: [], peopleById: {}, weeklyTotals: {}, message: "" });
@@ -1539,6 +1644,7 @@ function OtComplianceQueue({ refreshKey = 0, onChanged }) {
       <section className="ot-toolbar"><label className="field"><span className="field__label">Affected week (optional)</span><input className="input" type="date" value={weekStart} disabled={actionState.status === "submitting"} onChange={event => setWeekStart(event.target.value ? window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value) : "")} /></label><button type="button" className="btn btn--secondary" disabled={actionState.status === "submitting"} onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh compliance</button></section>
       <section className="ot-list" aria-label="Compliance review queue"><div className="ot-section-head"><div><h2>Compliance review</h2><p className="muted">Truthful actual time is read-only. Review records an outcome and note; it never rewrites worked hours.</p></div><span>{loadState.rows.length} case{loadState.rows.length === 1 ? "" : "s"}</span></div>{loadState.status === "loading" && <div className="ot-state" role="status">Loading compliance cases…</div>}{loadState.status === "error" && <OtWarning kind="error" message={loadState.message} />}{loadState.status === "ready" && !loadState.rows.length && <div className="ot-state">No records currently require compliance review.</div>}{loadState.status === "ready" && !!loadState.rows.length && <div className="ot-queue-list">{loadState.rows.map(request => <button key={request.id} type="button" className={`ot-queue-item ${selected?.id === request.id ? "is-selected" : ""}`} disabled={actionState.status === "submitting"} onClick={() => openReview(request)}><span><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, loadState.peopleById)} · {String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</small></span><span className="ot-status ot-status--compliance_review_required">Review</span></button>)}</div>}</section>
       {selected && <section className="ot-compliance__review ot-workflow" aria-label="Compliance evidence and decision"><div className="ot-section-head"><div><h2>{selected.title}</h2><p className="muted">Request {selected.id}</p></div><button type="button" className="btn btn--ghost" disabled={actionState.status === "submitting"} onClick={closeReview}>Close</button></div><div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selected, loadState.peopleById)}</strong></div><div><span>Plan</span><strong>{formatOtDateTime(plannedStartAt)} → {formatOtDateTime(plannedEndAt)}</strong><small>{formatOtHours(plannedMinutes)}</small></div><div><span>Truthful actual</span><strong>{formatOtDateTime(actualStartAt)} → {formatOtDateTime(actualEndAt)}</strong><small>{formatOtHours(actualMinutes)}</small></div><div><span>Signed variance</span><strong>{window.FlowMateOtRequestDomain.formatSignedHours(actualMinutes - plannedMinutes)}</strong></div><div><span>Employee explanation</span><strong>{actualVarianceReason || "Not provided"}</strong></div><div><span>Manager decision / note</span><strong>{getOtStatusLabel(actualDecision || "pending")} · {actualDecisionNote || "Not provided"}</strong></div></div><section className="ot-compliance__weeks" aria-label="Affected week totals"><h3>Affected week totals</h3>{weeklyTotals.map(row => <article key={row.weekStart}><div><strong>Week of {formatOtDate(row.weekStart)}</strong><small>This occurrence: {formatOtHours(row.occurrenceMinutes)}</small></div><div><strong>Actual {formatOtHours(row.actualMinutes)} / 36h</strong><small>Projected / counted: {formatOtHours(row.projectedMinutes)}</small><OtLimitProgress totalMinutes={row.actualMinutes} /></div></article>)}</section><OtWarning kind="critical" title="Actual hours are immutable" message="Record the compliance outcome against the truthful worked time. Do not ask the employee to reduce actual hours to fit the weekly limit." /><fieldset className="ot-form__fieldset" disabled={actionState.status === "submitting"}><div className="form-grid"><label className="field"><span className="field__label">Outcome *</span><select className="select" value={outcome} onChange={event => setOutcome(event.target.value)} required><option value="">Select outcome</option><option value="approved">Approved</option><option value="cleared">Cleared</option><option value="action_required">Action required</option><option value="rejected">Rejected</option></select></label><label className="field field--full"><span className="field__label">Compliance review note *</span><textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} required placeholder="Record the evidence, decision, and follow-up." /></label></div></fieldset><div className="ot-form__actions"><button type="button" className="btn btn--primary" disabled={!outcome || !note.trim() || actionState.status === "submitting"} onClick={submitReview}>{actionState.status === "submitting" ? "Saving review…" : "Save compliance review"}</button></div>{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}<OtAuditTimeline requestId={selected.id} refreshKey={localRefreshKey + refreshKey} /></section>}
+      {selected && <OtActualAmendmentAction access={access} request={selected} onChanged={() => { setSelected(null); setLocalRefreshKey(value => value + 1); if (onChanged) onChanged(); }} />}
     </div>
   );
 }
@@ -1939,7 +2045,7 @@ function OtRequestShell({
             {access.status === "ready" && visibleView === "manager" && <OtManagerDashboard access={access} refreshToken={operationsRefreshKey} />}
             {access.status === "ready" && visibleView === "root-causes" && <OtManagerDashboard access={access} rootCauseOnly refreshToken={operationsRefreshKey} />}
             {access.status === "ready" && access.isOwner && visibleView === "owner" && <OtOwnerDashboard access={access} onOpenView={openView} refreshKey={operationsRefreshKey} />}
-            {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "compliance" && <OtComplianceQueue refreshKey={operationsRefreshKey} onChanged={() => setOperationsRefreshKey(value => value + 1)} />}
+            {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "compliance" && <OtComplianceQueue access={access} refreshKey={operationsRefreshKey} onChanged={() => setOperationsRefreshKey(value => value + 1)} />}
             {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "audit" && <OtAuditTimeline refreshKey={operationsRefreshKey} />}
             {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "export" && <OtHrExportPanel refreshKey={operationsRefreshKey} onChanged={() => setOperationsRefreshKey(value => value + 1)} />}
             {access.status === "ready" && access.isOwner && visibleView === "access" && <OtAccessAdminPanel access={access} />}

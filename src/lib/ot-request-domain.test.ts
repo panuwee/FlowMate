@@ -259,6 +259,47 @@ describe("OT request domain", () => {
     expect(domain.canActOnAssignedRequest({ userId: "assigned-lead", isHrAdmin: true, isEligibleApprover: false }, request)).toBe(false);
   });
 
+  it("distinguishes an employee plan revision from an employee actual correction", () => {
+    const domain = loadDomain();
+
+    expect(domain.getRevisionWorkflow({
+      status: "revision_required",
+      planDecision: "revision_required",
+      actualSubmittedAt: null,
+      actualDecision: null,
+    })).toBe("plan");
+    expect(domain.getRevisionWorkflow({
+      status: "revision_required",
+      planDecision: "approved",
+      actualSubmittedAt: "2026-08-08T15:00:00Z",
+      actualDecision: "revision_required",
+    })).toBe("actual");
+    expect(domain.getRevisionWorkflow({
+      status: "revision_required",
+      planDecision: "revision_required",
+      actualSubmittedAt: "2026-08-08T15:00:00Z",
+      actualDecision: null,
+    })).toBeNull();
+  });
+
+  it("offers actual amendment only to elevated actors for approved non-exported actuals", () => {
+    const domain = loadDomain();
+    const approvedActual = {
+      status: "hr_ready",
+      actualSubmittedAt: "2026-08-08T15:00:00Z",
+      actualDecision: "approved",
+      actualVerifiedByUserId: "assigned-lead",
+      actualVerifiedAt: "2026-08-08T15:30:00Z",
+    };
+
+    expect(domain.canRequestActualAmendment({ isOwner: true }, approvedActual)).toBe(true);
+    expect(domain.canRequestActualAmendment({ isHrAdmin: true }, { ...approvedActual, status: "compliance_review_required" })).toBe(true);
+    expect(domain.canRequestActualAmendment({ isEligibleApprover: true }, approvedActual)).toBe(false);
+    expect(domain.canRequestActualAmendment({ isOwner: true }, { ...approvedActual, status: "exported", exportedAt: "2026-08-09T10:00:00Z" })).toBe(false);
+    expect(domain.canRequestActualAmendment({ isOwner: true }, { ...approvedActual, actualVerifiedByUserId: null })).toBe(false);
+    expect(domain.canRequestActualAmendment({ isOwner: true }, { ...approvedActual, actualDecision: "revision_required" })).toBe(false);
+  });
+
   it("formats positive, negative, and zero OT variance with an explicit sign", () => {
     const domain = loadDomain();
     expect(domain.formatSignedHours(90)).toBe("+1h 30m");

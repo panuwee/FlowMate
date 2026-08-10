@@ -490,6 +490,75 @@ describe("OT Request backend contract", () => {
     expect(verify).toContain("Authenticated projected-total execute access (Expected = false)");
     expect(verify).toContain("has_function_privilege(");
   });
+
+  it("keeps pre-work revisions out of the server plan-review transition", () => {
+    const reviewPlan = functionSql(sql, "ot_review_plan");
+    const firstGuard = reviewPlan.slice(0, reviewPlan.indexOf("public.ot_lock_employee_weeks"));
+    const lockedGuard = reviewPlan.slice(reviewPlan.indexOf("for update"), reviewPlan.indexOf("update public.ot_requests"));
+
+    expect(firstGuard).toContain("v_request.status <> 'pending_approval'");
+    expect(lockedGuard).toContain("v_request.status <> 'pending_approval'");
+    expect(reviewPlan).not.toMatch(/status not in \('pending_approval', 'revision_required'\)/);
+  });
+
+  it("resubmits only an employee-owned individual pre-work revision under ordered locks", () => {
+    const resubmit = functionSql(sql, "ot_resubmit_plan");
+    const requestLock = "pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)";
+    const unionLock = "public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments)";
+    const rowLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update";
+    const updateStart = resubmit.indexOf("update public.ot_requests");
+    const updateEnd = resubmit.indexOf("where id = p_request_id", updateStart);
+    const updateClause = resubmit.slice(updateStart, updateEnd);
+
+    expect(resubmit).toContain("returns jsonb");
+    expect(resubmit).toContain("security definer");
+    expect(resubmit).toContain("set search_path = ''");
+    expect(resubmit).toContain("public.ot_lock_idempotency('resubmit_plan', p_idempotency_key)");
+    expect(resubmit.indexOf(requestLock)).toBeLessThan(resubmit.indexOf(unionLock));
+    expect(resubmit.indexOf(unionLock)).toBeLessThan(resubmit.indexOf(rowLock));
+    expect(resubmit).toContain("v_request.planned_week_segments || v_segments");
+    expect(resubmit).toContain("select distinct pg_catalog.coalesce(item->>'weekStart', item->>'week_start')::date as week_start");
+    expect(resubmit).toContain("order by week_start");
+    expect(resubmit).toMatch(/employee_user_id <> v_actor_id[\s\S]*source <> 'employee_request'[\s\S]*raise exception/);
+    expect(resubmit).toMatch(/status <> 'revision_required'[\s\S]*actual_submitted_at is not null[\s\S]*plan_decision is distinct from 'revision_required'[\s\S]*raise exception/);
+    expect(resubmit).toContain("public.ot_assert_planned_limit(v_actor_id, v_segments, p_request_id)");
+    expect(resubmit).toContain("public.ot_assert_no_employee_overlap(v_actor_id, v_start_at, v_end_at, p_request_id)");
+    for (const reset of [
+      "status = 'pending_approval'",
+      "plan_decision = null",
+      "plan_decision_note = null",
+      "plan_reviewed_by_user_id = null",
+      "plan_reviewed_at = null",
+      "employee_consent = 'accepted'",
+      "consent_statement_version = v_consent_statement_version",
+      "employee_consented_at = now()",
+    ]) expect(updateClause).toContain(reset);
+    expect(resubmit).toMatch(/action = 'resubmit_plan'[\s\S]*idempotency_key = p_idempotency_key[\s\S]*return v_replay_result/);
+    expect(resubmit).toMatch(/'oldPlan'[\s\S]*'newPlan'[\s\S]*'oldApproverUserId'[\s\S]*'newApproverUserId'[\s\S]*'consentStatementVersion'[\s\S]*'result'/);
+  });
+
+  it("rejects overlap against another counted actual-or-requested occurrence", () => {
+    const overlap = functionSql(sql, "ot_assert_no_employee_overlap");
+
+    expect(overlap).toMatch(/actual_submitted_at is not null[\s\S]*actual_start_at[\s\S]*else r\.planned_start_at/);
+    expect(overlap).toMatch(/actual_submitted_at is not null[\s\S]*actual_end_at[\s\S]*else r\.planned_end_at/);
+    expect(overlap).toContain("p_exclude_request_id is null or r.id <> p_exclude_request_id");
+    expect(overlap).toMatch(/status in \([\s\S]*'pending_approval'[\s\S]*'exported'[\s\S]*\)[\s\S]*or \(r\.status = 'revision_required' and r\.actual_submitted_at is not null\)/);
+    for (const excluded of ["draft", "rejected", "cancelled"]) expect(overlap).not.toContain(`'${excluded}'`);
+    expect(overlap).toContain("raise exception 'OT occurrence overlaps another counted request'");
+  });
+
+  it("exposes and verifies only the authenticated plan-resubmission RPC", () => {
+    const signature = "public.ot_resubmit_plan(uuid, jsonb, text, uuid)";
+
+    expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+    expect(sql).toContain(`grant execute on function ${signature} to authenticated`);
+    expect(sql).toContain("revoke all on function public.ot_assert_no_employee_overlap(uuid, timestamptz, timestamptz, uuid) from public, anon, authenticated");
+    expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
+    expect(verify).toContain("Plan resubmission RPC contract (Expected = valid)");
+    for (const fact of ["ot_resubmit_plan", "uuid, jsonb, text, uuid", "security_definer", "fixed_search_path", "employee_state_guard", "request_lock", "week_union_lock", "resubmit_plan", "ot_assert_no_employee_overlap"]) expect(verify).toContain(fact);
+    expect(verify).toContain("Plan resubmission RPC execute grants (Expected authenticated only)");
+  });
 });
 
 describe("OT Request static module integration", () => {
@@ -535,6 +604,25 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain("state.weekKey === weekKey");
     expect(employee).toContain("resetIntentAfterEdit(");
     expect(employee).toContain("window.recordOtConsent(request.id, choice, OT_CONSENT_STATEMENT_VERSION, key)");
+  });
+
+  it("renders employee plan revision separately from actual correction", () => {
+    const screen = read("screens-ot.jsx");
+    const employee = screen.slice(screen.indexOf("function OtEmployeeDashboard("), screen.indexOf("const OT_MANAGER_METRIC_LABELS"));
+    const requestForm = employee.slice(employee.indexOf("function OtRequestForm("), employee.indexOf("function OtConsentPanel("));
+
+    expect(requestForm).toContain('function OtRequestForm({ mode = "create", request = null');
+    expect(requestForm).toContain('const isRevision = mode === "revision"');
+    for (const field of ["functionCode", "title", "workDate", "startTime", "endTime", "dayType", "workLocationType", "venue", "reasonCode", "reasonDetail", "approverUserId"]) expect(requestForm).toContain(field);
+    expect(requestForm).toContain('excludedSegments: isRevision ? existingPlannedSegments : []');
+    expect(requestForm).toContain("window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key)");
+    expect(requestForm).toContain("Edit and resubmit request");
+    expect(requestForm).toContain("Resubmit corrected request");
+    expect(requestForm).toContain("resetIntentAfterEdit(");
+    expect(employee).toContain('window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "plan"');
+    expect(employee).toContain('window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "actual"');
+    expect(employee).toContain('setAction({ type: "revision", request })');
+    expect(employee).toContain('<OtRequestForm mode="revision" request={action.request}');
   });
 
   it("implements the manager weekly operations hub without an OT leaderboard", () => {
@@ -594,6 +682,23 @@ describe("OT Request static module integration", () => {
     expect(approval).toContain("checks.awaitingHrCompliance");
     expect(approval).toContain("Awaiting HR compliance");
     expect(approval).toContain("if (!canTakeAction(kind, request)) return;");
+  });
+
+  it("keeps plan revisions out of the manager queue and shares audited amendment action", () => {
+    const screen = read("screens-ot.jsx");
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+    const amendment = screen.slice(screen.indexOf("function OtActualAmendmentAction("), screen.indexOf("function OtAuditTimeline("));
+
+    expect(screen).toContain('const needsApproval = filteredCurrentRows.filter(request => !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval").length;');
+    expect(approval).toContain('getOtRequestStatus(request) === "pending_approval"');
+    expect(approval).not.toContain('["pending_approval", "revision_required"]');
+    expect(amendment).toContain("window.FlowMateOtRequestDomain.canRequestActualAmendment(access, request)");
+    expect(amendment).toContain("if (!reason.trim())");
+    expect(amendment).toContain("window.FlowMateOtIntent.establish(");
+    expect(amendment).toContain("window.requestOtActualAmendment(requestId, normalizedReason, currentIntent.key)");
+    expect(amendment).toContain("The existing actual time remains in audit until the employee submits a correction.");
+    expect(amendment).toContain('disabled={actionState.status === "submitting"}');
+    expect(screen.match(/<OtActualAmendmentAction/g)).toHaveLength(2);
   });
 
   it("previews event plans per employee and excludes every over-limit occurrence", () => {

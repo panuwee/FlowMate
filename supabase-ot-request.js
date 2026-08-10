@@ -16,6 +16,13 @@ window.loadOtManagerDashboard = (weekStart, functionCode) => callOtRequestRpc("o
 window.loadOtEligibleApprovers = () => callOtRequestRpc("ot_list_eligible_approvers", {}, "OT approvers could not be loaded.");
 window.loadOtPeopleForEvent = () => callOtRequestRpc("ot_list_people_for_event", {}, "Event participants could not be loaded.");
 window.createOtRequest = (payload, key) => callOtRequestRpc("ot_create_request", { p_payload: payload, p_idempotency_key: key }, "OT request could not be submitted.");
+window.resubmitOtPlan = (requestId, payload, consentVersion, key) =>
+  callOtRequestRpc("ot_resubmit_plan", {
+    p_request_id: requestId,
+    p_payload: payload,
+    p_consent_statement_version: consentVersion,
+    p_idempotency_key: key,
+  }, "OT request revision could not be resubmitted.");
 window.previewOtEventPlan = (payload, employeeUserIds) => callOtRequestRpc("ot_preview_event_plan", { p_payload: payload, p_employee_user_ids: employeeUserIds }, "OT event plan could not be previewed.");
 window.createOtEventPlan = (payload, employeeUserIds, key) => callOtRequestRpc("ot_create_event_plan", { p_payload: payload, p_employee_user_ids: employeeUserIds, p_idempotency_key: key }, "OT event plan could not be created.");
 window.recordOtConsent = (requestId, accepted, consentStatementVersion, key) => callOtRequestRpc("ot_record_consent", { p_request_id: requestId, p_accept: accepted, p_consent_statement_version: consentStatementVersion, p_idempotency_key: key }, "OT consent could not be recorded.");

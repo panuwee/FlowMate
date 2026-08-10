@@ -356,7 +356,7 @@ begin
   ) then
     return pg_catalog.to_jsonb(v_request);
   end if;
-  if v_request.source <> 'employee_request' or v_request.status not in ('pending_approval', 'revision_required') then
+  if v_request.source <> 'employee_request' or v_request.status <> 'pending_approval' then
     raise exception 'This OT plan is not awaiting approver review';
   end if;
   if p_decision not in ('approved', 'rejected', 'revision_required') then
@@ -364,7 +364,7 @@ begin
   end if;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
   select * into v_request from public.ot_requests r where r.id = p_request_id for update;
-  if v_request.status not in ('pending_approval', 'revision_required') then
+  if v_request.status <> 'pending_approval' then
     raise exception 'Plan state changed; reload this request';
   end if;
   if p_decision = 'approved' then
@@ -1075,6 +1075,50 @@ as $function$
     and pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
 $function$;
 
+create or replace function public.ot_assert_no_employee_overlap(
+  p_employee_user_id uuid,
+  p_start_at timestamptz,
+  p_end_at timestamptz,
+  p_exclude_request_id uuid default null
+)
+returns void
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+begin
+  if exists (
+    select 1
+    from public.ot_requests r
+    where r.employee_user_id = p_employee_user_id
+      and (p_exclude_request_id is null or r.id <> p_exclude_request_id)
+      and (
+        r.status in (
+          'pending_approval', 'awaiting_consent', 'approved',
+          'actual_confirmation_required', 'pending_actual_verification',
+          'compliance_review_required', 'hr_ready', 'exported'
+        )
+        or (r.status = 'revision_required' and r.actual_submitted_at is not null)
+      )
+      and (
+        case
+          when r.actual_submitted_at is not null then r.actual_start_at
+          else r.planned_start_at
+        end
+      ) < p_end_at
+      and (
+        case
+          when r.actual_submitted_at is not null then r.actual_end_at
+          else r.planned_end_at
+        end
+      ) > p_start_at
+  ) then
+    raise exception 'OT occurrence overlaps another counted request';
+  end if;
+end
+$function$;
+
 create or replace function public.ot_projected_week_minutes(
   p_employee_user_id uuid,
   p_week_start date,
@@ -1472,6 +1516,201 @@ begin
       'consentStatementVersion', v_consent_statement_version,
       'employeeConsentedAt', v_request.employee_consented_at
     ),
+    p_idempotency_key
+  );
+  return pg_catalog.to_jsonb(v_request);
+end
+$function$;
+
+create or replace function public.ot_resubmit_plan(
+  p_request_id uuid,
+  p_payload jsonb,
+  p_consent_statement_version text,
+  p_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_request public.ot_requests;
+  v_approver_user_id uuid;
+  v_start_at timestamptz;
+  v_end_at timestamptz;
+  v_break_minutes integer;
+  v_minutes integer;
+  v_segments jsonb;
+  v_lock_segments jsonb;
+  v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
+  v_old_status text;
+  v_old_plan jsonb;
+  v_old_approver_user_id uuid;
+  v_replay_result jsonb;
+begin
+  perform public.ot_lock_idempotency('resubmit_plan', p_idempotency_key);
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
+  );
+
+  select * into v_request
+  from public.ot_requests r
+  where r.id = p_request_id;
+  if not found then
+    raise exception 'OT request not found';
+  end if;
+  if v_request.employee_user_id <> v_actor_id
+     or v_request.source <> 'employee_request' then
+    raise exception 'Only the employee who owns an individual OT request can resubmit its plan';
+  end if;
+
+  select a.changed_fields->'result' into v_replay_result
+  from public.ot_request_audit a
+  where a.request_id = p_request_id
+    and a.actor_user_id = v_actor_id
+    and a.action = 'resubmit_plan'
+    and a.idempotency_key = p_idempotency_key;
+  if found then
+    return v_replay_result;
+  end if;
+
+  if v_request.status <> 'revision_required'
+     or v_request.actual_submitted_at is not null
+     or v_request.plan_decision is distinct from 'revision_required' then
+    raise exception 'Only a pre-work plan revision can be resubmitted';
+  end if;
+  if v_consent_statement_version is null then
+    raise exception 'Consent statement version is required';
+  end if;
+
+  v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
+  v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
+  v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  v_break_minutes := pg_catalog.coalesce(
+    pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer,
+    0
+  );
+  v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
+  v_segments := public.ot_build_week_segments(
+    v_start_at,
+    v_end_at,
+    v_break_minutes,
+    pg_catalog.coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
+  );
+
+  select pg_catalog.coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object('weekStart', week_start, 'minutes', 0)
+      order by week_start
+    ),
+    '[]'::jsonb
+  )
+  into v_lock_segments
+  from (
+    select distinct pg_catalog.coalesce(item->>'weekStart', item->>'week_start')::date as week_start
+    from pg_catalog.jsonb_array_elements(v_request.planned_week_segments || v_segments) item
+  ) affected_weeks;
+
+  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments);
+  select * into v_request from public.ot_requests r where r.id = p_request_id for update;
+  if v_request.employee_user_id <> v_actor_id
+     or v_request.source <> 'employee_request'
+     or v_request.status <> 'revision_required'
+     or v_request.actual_submitted_at is not null
+     or v_request.plan_decision is distinct from 'revision_required' then
+    raise exception 'Plan revision state changed; reload this request';
+  end if;
+  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
+     or not exists (
+       select 1
+       from public.ot_approvers a
+       join public.users u on u.id = a.user_id
+       where a.user_id = v_approver_user_id
+         and a.active = true
+         and u.is_active = true
+     ) then
+    raise exception 'An active approved OT approver is required';
+  end if;
+
+  perform public.ot_assert_planned_limit(v_actor_id, v_segments, p_request_id);
+  perform public.ot_assert_no_employee_overlap(v_actor_id, v_start_at, v_end_at, p_request_id);
+
+  v_old_status := v_request.status;
+  v_old_approver_user_id := v_request.approver_user_id;
+  v_old_plan := pg_catalog.jsonb_build_object(
+    'functionCode', v_request.function_code,
+    'title', v_request.title,
+    'dayType', v_request.day_type,
+    'workLocationType', v_request.work_location_type,
+    'venue', v_request.venue,
+    'reasonCode', v_request.reason_code,
+    'reasonDetail', v_request.reason_detail,
+    'plannedStartAt', v_request.planned_start_at,
+    'plannedEndAt', v_request.planned_end_at,
+    'plannedBreakMinutes', v_request.planned_break_minutes,
+    'plannedMinutes', v_request.planned_minutes,
+    'plannedWeekSegments', v_request.planned_week_segments
+  );
+
+  update public.ot_requests
+  set function_code = pg_catalog.coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
+      title = pg_catalog.btrim(p_payload->>'title'),
+      day_type = pg_catalog.coalesce(p_payload->>'dayType', p_payload->>'day_type'),
+      work_location_type = pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
+      venue = pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
+      reason_code = pg_catalog.coalesce(p_payload->>'reasonCode', p_payload->>'reason_code'),
+      reason_detail = pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_payload->>'reasonDetail', p_payload->>'reason_detail')), ''),
+      planned_start_at = v_start_at,
+      planned_end_at = v_end_at,
+      planned_break_minutes = v_break_minutes,
+      planned_minutes = v_minutes,
+      planned_week_segments = v_segments,
+      approver_user_id = v_approver_user_id,
+      status = 'pending_approval',
+      plan_decision = null,
+      plan_decision_note = null,
+      plan_reviewed_by_user_id = null,
+      plan_reviewed_at = null,
+      employee_consent = 'accepted',
+      consent_statement_version = v_consent_statement_version,
+      employee_consented_at = now(),
+      employee_submitted_at = now(),
+      updated_at = now()
+  where id = p_request_id
+  returning * into v_request;
+
+  insert into public.ot_request_audit (
+    request_id, actor_user_id, action, old_status, new_status,
+    changed_fields, note, idempotency_key
+  ) values (
+    v_request.id,
+    v_actor_id,
+    'resubmit_plan',
+    v_old_status,
+    v_request.status,
+    pg_catalog.jsonb_build_object(
+      'oldPlan', v_old_plan,
+      'newPlan', pg_catalog.jsonb_build_object(
+        'functionCode', v_request.function_code,
+        'title', v_request.title,
+        'dayType', v_request.day_type,
+        'workLocationType', v_request.work_location_type,
+        'venue', v_request.venue,
+        'reasonCode', v_request.reason_code,
+        'reasonDetail', v_request.reason_detail,
+        'plannedStartAt', v_request.planned_start_at,
+        'plannedEndAt', v_request.planned_end_at,
+        'plannedBreakMinutes', v_request.planned_break_minutes,
+        'plannedMinutes', v_request.planned_minutes,
+        'plannedWeekSegments', v_request.planned_week_segments
+      ),
+      'oldApproverUserId', v_old_approver_user_id,
+      'newApproverUserId', v_request.approver_user_id,
+      'consentStatementVersion', v_consent_statement_version,
+      'result', pg_catalog.to_jsonb(v_request)
+    ),
+    'Employee corrected and resubmitted the OT plan',
     p_idempotency_key
   );
   return pg_catalog.to_jsonb(v_request);
@@ -2131,6 +2370,7 @@ revoke all on function public.ot_lock_employee_week_keys(jsonb) from public, ano
 revoke all on function public.ot_lock_employee_weeks(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.ot_projected_week_minutes_unchecked(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_counted_week_minutes_unchecked(uuid, date, uuid) from public, anon, authenticated;
+revoke all on function public.ot_assert_no_employee_overlap(uuid, timestamptz, timestamptz, uuid) from public, anon, authenticated;
 revoke all on function public.ot_actual_week_minutes(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_assert_planned_limit(uuid, jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_guard_audit_append_only() from public, anon, authenticated;
@@ -2149,6 +2389,7 @@ revoke all on function public.ot_get_manager_dashboard(date, text) from public, 
 revoke all on function public.ot_list_eligible_approvers() from public, anon, authenticated;
 revoke all on function public.ot_list_people_for_event() from public, anon, authenticated;
 revoke all on function public.ot_create_request(jsonb, uuid) from public, anon, authenticated;
+revoke all on function public.ot_resubmit_plan(uuid, jsonb, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_preview_event_plan(jsonb, uuid[]) from public, anon, authenticated;
 revoke all on function public.ot_create_event_plan(jsonb, uuid[], uuid) from public, anon, authenticated;
 revoke all on function public.ot_record_consent(uuid, boolean, text, uuid) from public, anon, authenticated;
@@ -2176,6 +2417,7 @@ grant execute on function public.ot_get_manager_dashboard(date, text) to authent
 grant execute on function public.ot_list_eligible_approvers() to authenticated;
 grant execute on function public.ot_list_people_for_event() to authenticated;
 grant execute on function public.ot_create_request(jsonb, uuid) to authenticated;
+grant execute on function public.ot_resubmit_plan(uuid, jsonb, text, uuid) to authenticated;
 grant execute on function public.ot_preview_event_plan(jsonb, uuid[]) to authenticated;
 grant execute on function public.ot_create_event_plan(jsonb, uuid[], uuid) to authenticated;
 grant execute on function public.ot_record_consent(uuid, boolean, text, uuid) to authenticated;

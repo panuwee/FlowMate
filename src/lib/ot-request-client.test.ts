@@ -38,6 +38,7 @@ describe("OT request browser client", () => {
       { wrapper: "loadOtEligibleApprovers", args: [], name: "ot_list_eligible_approvers", params: {} },
       { wrapper: "loadOtPeopleForEvent", args: [], name: "ot_list_people_for_event", params: {} },
       { wrapper: "createOtRequest", args: [payload, idempotencyKey], name: "ot_create_request", params: { p_payload: payload, p_idempotency_key: idempotencyKey } },
+      { wrapper: "resubmitOtPlan", args: [requestId, payload, consentStatementVersion, idempotencyKey], name: "ot_resubmit_plan", params: { p_request_id: requestId, p_payload: payload, p_consent_statement_version: consentStatementVersion, p_idempotency_key: idempotencyKey } },
       { wrapper: "previewOtEventPlan", args: [payload, [employeeId]], name: "ot_preview_event_plan", params: { p_payload: payload, p_employee_user_ids: [employeeId] } },
       { wrapper: "createOtEventPlan", args: [payload, [employeeId], idempotencyKey], name: "ot_create_event_plan", params: { p_payload: payload, p_employee_user_ids: [employeeId], p_idempotency_key: idempotencyKey } },
       { wrapper: "recordOtConsent", args: [requestId, true, consentStatementVersion, idempotencyKey], name: "ot_record_consent", params: { p_request_id: requestId, p_accept: true, p_consent_statement_version: consentStatementVersion, p_idempotency_key: idempotencyKey } },

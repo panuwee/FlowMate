@@ -257,6 +257,27 @@
     return Boolean(actorId) && actorId === valueOf(request, "approverUserId", "approver_user_id");
   }
 
+  function getRevisionWorkflow(request) {
+    if (!request || valueOf(request, "status", "status") !== "revision_required") return null;
+    const actualSubmittedAt = valueOf(request, "actualSubmittedAt", "actual_submitted_at");
+    const actualDecision = valueOf(request, "actualDecision", "actual_decision");
+    const planDecision = valueOf(request, "planDecision", "plan_decision");
+    if (actualSubmittedAt && actualDecision === "revision_required") return "actual";
+    if (!actualSubmittedAt && planDecision === "revision_required") return "plan";
+    return null;
+  }
+
+  function canRequestActualAmendment(actor, request) {
+    if (!actor || !request || (!actor.isOwner && !actor.isHrAdmin)) return false;
+    if (valueOf(request, "status", "status") === "exported"
+      || valueOf(request, "exportedAt", "exported_at")
+      || valueOf(request, "exportBatchId", "export_batch_id")) return false;
+    return Boolean(valueOf(request, "actualSubmittedAt", "actual_submitted_at"))
+      && valueOf(request, "actualDecision", "actual_decision") === "approved"
+      && Boolean(valueOf(request, "actualVerifiedByUserId", "actual_verified_by_user_id"))
+      && Boolean(valueOf(request, "actualVerifiedAt", "actual_verified_at"));
+  }
+
   function isConfirmedActual(record) {
     const status = valueOf(record, "status", "status");
     const decision = valueOf(record, "actualDecision", "actual_decision");
@@ -435,6 +456,8 @@
     deriveRequestStatus,
     canViewRequest,
     canActOnAssignedRequest,
+    getRevisionWorkflow,
+    canRequestActualAmendment,
     isConfirmedActual,
     getActualVerificationEligibility,
     formatSignedHours,
