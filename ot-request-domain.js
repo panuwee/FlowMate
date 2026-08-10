@@ -268,7 +268,7 @@
   }
 
   function canRequestActualAmendment(actor, request) {
-    if (!actor || !request || (!actor.isOwner && !actor.isHrAdmin)) return false;
+    if (!actor || !request || (!actor.isOwner && !(actor.isHrAdmin && actor.isEligibleApprover))) return false;
     if (valueOf(request, "status", "status") === "exported"
       || valueOf(request, "exportedAt", "exported_at")
       || valueOf(request, "exportBatchId", "export_batch_id")) return false;

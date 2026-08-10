@@ -293,7 +293,8 @@ describe("OT request domain", () => {
     };
 
     expect(domain.canRequestActualAmendment({ isOwner: true }, approvedActual)).toBe(true);
-    expect(domain.canRequestActualAmendment({ isHrAdmin: true }, { ...approvedActual, status: "compliance_review_required" })).toBe(true);
+    expect(domain.canRequestActualAmendment({ isHrAdmin: true, isEligibleApprover: true }, { ...approvedActual, status: "compliance_review_required" })).toBe(true);
+    expect(domain.canRequestActualAmendment({ isHrAdmin: true, isEligibleApprover: false }, approvedActual)).toBe(false);
     expect(domain.canRequestActualAmendment({ isEligibleApprover: true }, approvedActual)).toBe(false);
     expect(domain.canRequestActualAmendment({ isOwner: true }, { ...approvedActual, status: "exported", exportedAt: "2026-08-09T10:00:00Z" })).toBe(false);
     expect(domain.canRequestActualAmendment({ isOwner: true }, { ...approvedActual, actualVerifiedByUserId: null })).toBe(false);

@@ -597,7 +597,7 @@ describe("OT Request static module integration", () => {
     expect(employee).toContain('aria-label="Assigned approver"');
     expect(employee).toContain("approver.displayName || approver.email");
     expect(screen).toContain('storedStatus === "approved"');
-    expect(employee).toContain('min={weekStart} max={addOtDays(weekStart, 6)}');
+    expect(employee).toContain('min={isRevision ? undefined : weekStart} max={isRevision ? undefined : addOtDays(weekStart, 6)}');
     expect(employee).toContain("startPersonalWeekLoad(nextWeekStart)");
     expect(employee).toContain("setAction(null)");
     expect(employee).toContain("buildWeekProjections(");
@@ -622,7 +622,16 @@ describe("OT Request static module integration", () => {
     expect(employee).toContain('window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "plan"');
     expect(employee).toContain('window.FlowMateOtRequestDomain.getRevisionWorkflow(request) === "actual"');
     expect(employee).toContain('setAction({ type: "revision", request })');
-    expect(employee).toContain('<OtRequestForm mode="revision" request={action.request}');
+    expect(employee).toContain('<OtRequestForm key={action.request.id} mode="revision" request={action.request}');
+  });
+
+  it("lets a plan revision move to another Bangkok week and summarizes the edited segments", () => {
+    const screen = read("screens-ot.jsx");
+    const requestForm = screen.slice(screen.indexOf("function OtRequestForm("), screen.indexOf("function OtConsentPanel("));
+
+    expect(requestForm).toContain('type="date" min={isRevision ? undefined : weekStart} max={isRevision ? undefined : addOtDays(weekStart, 6)}');
+    expect(requestForm).toContain("useOtWeekSummaries(preview.valid ? preview.segments : [])");
+    expect(requestForm).toContain("plannedWeekSegments: preview.segments");
   });
 
   it("implements the manager weekly operations hub without an OT leaderboard", () => {
@@ -699,6 +708,13 @@ describe("OT Request static module integration", () => {
     expect(amendment).toContain("The existing actual time remains in audit until the employee submits a correction.");
     expect(amendment).toContain('disabled={actionState.status === "submitting"}');
     expect(screen.match(/<OtActualAmendmentAction/g)).toHaveLength(2);
+  });
+
+  it("remounts the shared actual amendment action for each loaded request", () => {
+    const screen = read("screens-ot.jsx");
+
+    expect(screen).toContain('<OtActualAmendmentAction key={getOtManagerRequestId(selectedRow)} access={access} request={selectedRow}');
+    expect(screen).toContain('<OtActualAmendmentAction key={getOtManagerRequestId(selected)} access={access} request={selected}');
   });
 
   it("previews event plans per employee and excludes every over-limit occurrence", () => {

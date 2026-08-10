@@ -420,6 +420,7 @@ function OtEmployeeDashboard({
     weekStart: weekStart,
     onSuccess: refreshAfterAction
   }), action.type === "revision" && React.createElement(OtRequestForm, {
+    key: action.request.id,
     mode: "revision",
     request: action.request,
     weekStart: weekStart,
@@ -713,14 +714,14 @@ function OtRequestForm({
   }, "Work date *"), React.createElement("input", {
     className: "input",
     type: "date",
-    min: weekStart,
-    max: addOtDays(weekStart, 6),
+    min: isRevision ? undefined : weekStart,
+    max: isRevision ? undefined : addOtDays(weekStart, 6),
     value: form.workDate,
     onChange: event => update("workDate", event.target.value),
     required: true
   }), React.createElement("span", {
     className: "field__hint"
-  }, "Choose a date in the selected Bangkok week.")), React.createElement("label", {
+  }, isRevision ? "Choose any Bangkok work date; weekly totals follow the corrected schedule." : "Choose a date in the selected Bangkok week.")), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
@@ -1708,6 +1709,7 @@ function OtManagerDashboard({
   }, "Close")), React.createElement("div", {
     className: "ot-detail-grid"
   }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, loadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))), React.createElement(OtActualAmendmentAction, {
+    key: getOtManagerRequestId(selectedRow),
     access: access,
     request: selectedRow,
     onChanged: () => {
@@ -3196,6 +3198,7 @@ function OtComplianceQueue({
     requestId: selected.id,
     refreshKey: localRefreshKey + refreshKey
   })), selected && React.createElement(OtActualAmendmentAction, {
+    key: getOtManagerRequestId(selected),
     access: access,
     request: selected,
     onChanged: () => {
