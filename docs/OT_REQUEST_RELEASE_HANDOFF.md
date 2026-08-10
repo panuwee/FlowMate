@@ -2,8 +2,8 @@
 
 ## Release status
 
-- Verification base: branch `version2.1`, HEAD `9f7c7455889c6d12b232e81913af7030db93cd18`, checked on 10 Aug 2026.
-- Local application tests, production build, isolated static generation, secret scan, and whitespace checks passed as recorded below.
+- Verification base: branch `version2.1`, required base HEAD `7c4f7f0aa827d5ce17b04d657b7dd24a4c1d9084`, checked on 10 Aug 2026.
+- Local application tests, production build, scoped source/bundle parity, secret scan, and whitespace checks passed as recorded below.
 - Rendered Browser QA is **BLOCKED BY AUTH**, not PASS. The local sign-in gate rendered, but no authenticated OT screen was reachable.
 - Local Supabase/pgTAP was **SKIPPED by explicit user environment constraint**, not PASS. Docker/local Supabase was not started and no SQL was executed.
 - Live Supabase, manual upload, staging/production UAT, push, and deployment were not executed. This handoff is not deployment approval.
@@ -21,31 +21,21 @@
 
 | Check | Exact result | Boundary |
 |---|---|---|
-| `npm.cmd test` | exit 0; 18/18 test files and 559/559 tests passed | Includes the protected concurrent untracked file `src/lib/flowmate-rls-performance.uat.test.ts` and its 5 tests; that file is not part of this handoff commit. |
+| `npm.cmd test` | exit 0; 18/18 test files and 570/570 tests passed | Includes the protected concurrent untracked file `src/lib/flowmate-rls-performance.uat.test.ts` and its 5 tests; that file is not part of this handoff commit. |
 | `npm.cmd run build` | exit 0; Next.js 14.2.35 compiled, linted/type-checked, and generated static pages 4/4 | Route summary listed `/` and `/_not-found` as static routes. |
-| Isolated static generator, first run | exit 0; `data.js`, `screens-ot.js`, and `app.js` unchanged; only out-of-scope `screens-a.js`, `screens-b.js`, and `screens-c.js` changed inside the temporary copy | The generator was not run against repository-root outputs and no temporary output was copied back. |
-| Isolated static generator, second run | exit 0; `No output changed.` | Temporary copy was removed after hash comparison. |
+| Final Remediation C static generator | **NOT RERUN**; an interrupted temporary-copy attempt produced no accepted evidence | Final Remediation C changes only entry HTML, mechanical token assertions, and this handoff. No root generator was run and no generated output was copied back. |
 | `npx.cmd secretlint "**/*"` | exit 0; no finding output | Local filesystem scan only. |
 | `git diff --check` | exit 0; no whitespace errors | Rerun after the final documentation edit before commit. |
 | `supabase/ot_request_verify.sql` inspection | 544 lines read; only `SELECT` statements and read-only CTE/catalog/data inspection were present; no DDL or DML | Source inspection only. The verifier was not executed and is not PostgreSQL runtime proof. |
 
-### Isolated generator parity and hashes
+### Current source/bundle scope parity
 
-All six copied JSX sources matched their root SHA-256 before generation. The allowed generated outputs below also matched the freshly generated temporary outputs after both runs:
+Final Remediation C did not change the OT/runtime source or generated bundles below; `git diff --name-only -- app.jsx app.js screens-ot.jsx screens-ot.js` returned no paths. These are current-file hashes, not a replacement for a fresh generator run:
 
-| Bundle | Root/copy source SHA-256 | Root/fresh generated SHA-256 | Match |
+| Pair | Current source SHA-256 | Current bundle SHA-256 | Changed by Final Remediation C |
 |---|---|---|---|
-| `data.jsx` -> `data.js` | `24d0daa96e7afe29c31acec8ec739f550504caaa556dd79d340448ff8d2a8a9d` | `50eed640210b68a80b13de93185aca8d13943495d29e7f954845e9a12544882f` | yes |
-| `screens-ot.jsx` -> `screens-ot.js` | `c8f81f18db0c7ebd4813cbed8ad77c5589dc0f70573b7307e67a7b8857810f32` | `53e0292552f9c6b586baacdd42df32329e81128d3e084a6f5d79e25206ceb86f` | yes |
-| `app.jsx` -> `app.js` | `f84945e754c8e4af1fb5c85818683d0cdd9e13bdadbd96da2b86858aa83cf5c2` | `dad80e9de2b339e4961e9176165a5923793a95946c281761a6104113f9ce2cf1` | yes |
-
-Fresh generation did not match the tracked root outputs for the protected, out-of-scope bundles below. They were not rewritten or staged:
-
-| Bundle | Root SHA-256 | Fresh temporary SHA-256 |
-|---|---|---|
-| `screens-a.js` | `73321f3e8ff5b862438cd4ae4883b0d5c7b15420ad40e22d2e74fd6bc7a5c3c9` | `df2c8e3c36a4581b586b9ea628c87363400efdd9e9873b3259e21f82e6cee776` |
-| `screens-b.js` | `44170de87ac4c04c3050c48ec238d5145e0a85077a630f62fa46423ac2392717` | `ef869614ced75cbe164937eb01247b6ed142d420fc06d018f0fe5e097a708176` |
-| `screens-c.js` | `9d138a09cee9dce2399fdeb1e2db8bc780bbe91fea253ee8a6d99ebd1039703a` | `f3b649c7e74e93451963a7e93daf023f1ad3283d91bf36f7265adfe13518382a` |
+| `screens-ot.jsx` -> `screens-ot.js` | `a2acf3c0d35d5d004b15944bb98e0b4a2cdfca6d0a622b70f495cb1680dd5313` | `fb39e6c30eb77c34bbd505028ce7eeaf2619483d4f1c9eba077661a8e3f53add` | no |
+| `app.jsx` -> `app.js` | `f84945e754c8e4af1fb5c85818683d0cdd9e13bdadbd96da2b86858aa83cf5c2` | `dad80e9de2b339e4961e9176165a5923793a95946c281761a6104113f9ce2cf1` | no |
 
 ### Worktree boundary
 
@@ -84,15 +74,20 @@ Local source-contract tests cannot replace these database-runtime checks. Before
 
 ## Safe release order and exact manifest
 
+### Combined frontend payload approval
+
+The current root `app.jsx` and `app.js` include both OT Request work and the separately committed FlowMate performance work from commit `3a94c353` (`perf: optimize FlowMate board data loading and transitions`). Uploading the current root payload is therefore a **combined release**, not an OT-only upload. Before upload, the operator must either obtain explicit approval for that combined payload or build and review a separate deployment package with an exact manifest; do not describe the current root payload as OT-only.
+
 1. Back up the approved staging database.
 2. Install `supabase/ot_request.sql` using **Run without RLS**.
 3. Run `supabase/ot_request_verify.sql` read-only and complete every staging gate above.
 4. Upload these non-entry runtime/source files to the approved staging/static host: `ot-request-domain.js`, `supabase-ot-request.js`, `screens-ot.jsx`, `screens-ot.js`, `app.jsx`, `app.js`, `app.css`, and `build-github.cjs`.
-5. Upload `index.html`, `home/index.html`, and `product-book/index.html` last. All three request release token `20260807-02` for `app.css`, `ot-request-domain.js`, `supabase-ot-request.js`, `screens-ot.js`, and `app.js`.
-6. Hard-refresh, prove the new token is served, and complete the staging Browser/UAT matrix.
-7. Review recorded staging evidence and make a separate production go/no-go decision. Repeat backup, SQL, verification, upload, and UAT controls in the approved production window only after approval.
+5. Upload `index.html`, `home/index.html`, and `product-book/index.html` last. All three request release token `20260810-01` for `app.css`, `ot-request-domain.js`, `supabase-ot-request.js`, `screens-ot.js`, and `app.js`.
+6. Hard-refresh and prove release token `20260810-01` is served for every locked asset on all three entry pages.
+7. Complete authenticated staging Browser/UAT for the required roles, viewports, themes, keyboard states, and workflows.
+8. Review recorded staging evidence and make a separate production go/no-go decision. Repeat backup, SQL, verification, upload, and UAT controls in the approved production window only after approval.
 
-Tests and this handoff are repository evidence, not deployed runtime files. No manual upload, push, production SQL, release, or deployment was performed in Task 8.
+Tests and this handoff are repository evidence, not deployed runtime files. No manual upload, push, production SQL, release, or deployment was performed during Final Remediation C.
 
 ## Rollback boundary
 
@@ -103,5 +98,5 @@ Tests and this handoff are repository evidence, not deployed runtime files. No m
 
 - **Staging database gate:** all PostgreSQL/RLS/grant/trigger/backfill/idempotency/concurrency checks above must pass with retained evidence.
 - **Staging Browser gate:** authenticated 1440px and 390px, light/dark, keyboard and role-based workflow UAT must pass with screenshots and console evidence.
-- **Manual-upload gate:** the exact 11-file static manifest must be uploaded in runtime-first/entry-last order and cache token `20260807-02` must be observed.
+- **Manual-upload gate:** after combined-payload approval, the exact 11-file static manifest must be uploaded in runtime-first/entry-last order and cache token `20260810-01` must be observed across all three entry pages.
 - **Production decision gate:** designated owners must review staging evidence, backup readiness, rollback ownership, and UAT results before authorizing production SQL or deployment.

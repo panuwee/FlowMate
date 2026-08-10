@@ -1737,11 +1737,11 @@ describe("OT Request static module integration", () => {
     const entries = [["index.html"], ["home", "index.html"], ["product-book", "index.html"]].map(parts => read(...parts));
 
     for (const html of entries) {
-      expect(html).toContain("ot-request-domain.js?v=20260807-02");
-      expect(html).toContain("supabase-ot-request.js?v=20260807-02");
-      expect(html).toContain("screens-ot.js?v=20260807-02");
-      expect(html).toContain("app.js?v=20260807-02");
-      expect(html).toContain("app.css?v=20260807-02");
+      expect(html).toContain("ot-request-domain.js?v=20260810-01");
+      expect(html).toContain("supabase-ot-request.js?v=20260810-01");
+      expect(html).toContain("screens-ot.js?v=20260810-01");
+      expect(html).toContain("app.js?v=20260810-01");
+      expect(html).toContain("app.css?v=20260810-01");
     }
   });
 
