@@ -1060,6 +1060,7 @@ function ProductSwitch({
 }) {
   return React.createElement("div", {
     className: "row",
+    role: "group",
     style: {
       gap: 6,
       marginRight: 14

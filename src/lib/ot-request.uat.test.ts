@@ -439,12 +439,48 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain('const visibleView = canOpenOtRequestView(activeView, access) ? activeView : "overview";');
   });
 
+  it("keeps active entry pages on one OT release version", () => {
+    const entries = [["index.html"], ["home", "index.html"], ["product-book", "index.html"]].map(parts => read(...parts));
+
+    for (const html of entries) {
+      expect(html).toContain("ot-request-domain.js?v=20260807-02");
+      expect(html).toContain("supabase-ot-request.js?v=20260807-02");
+      expect(html).toContain("screens-ot.js?v=20260807-02");
+      expect(html).toContain("app.js?v=20260807-02");
+      expect(html).toContain("app.css?v=20260807-02");
+    }
+  });
+
+  it("uses labelled warnings and accessible OT navigation state", () => {
+    const screen = read("screens-ot.jsx");
+
+    expect(screen).toContain('role: "alert"');
+    expect(screen).toContain('"aria-live": "polite"');
+    expect(screen).toContain('"aria-describedby"');
+    expect(screen).toContain('"aria-current": "page"');
+  });
+
+  it("exposes ProductSwitch as a labelled control group", () => {
+    const app = read("app.jsx");
+    const productSwitch = app.slice(app.indexOf("function ProductSwitch("), app.indexOf("function HomeButton("));
+
+    expect(productSwitch).toContain('role: "group"');
+    expect(productSwitch).toContain('"aria-label": "Product switch"');
+  });
+
+  it("keeps OT tables contained and keyboard focus visible across themes and viewports", () => {
+    const css = read("app.css");
+
+    expect(css).toContain(".ot-table-wrap { overflow-x: auto; }");
+    expect(css).toContain("html[data-theme=\"dark\"] {");
+    expect(css).toContain("@media (max-width: 900px)");
+    expect(css).toContain(".ot-sidebar .nav-item:focus-visible");
+    expect(css).toContain(".ot-link-button:focus-visible");
+  });
+
   it("loads OT runtime files before the application on every tracked entry", () => {
     for (const entry of [["index.html"], ["home", "index.html"], ["product-book", "index.html"]]) {
       const html = read(...entry);
-      expect(html).toContain("ot-request-domain.js?v=20260807-01");
-      expect(html).toContain("supabase-ot-request.js?v=20260807-01");
-      expect(html).toContain("screens-ot.js?v=20260807-01");
       expect(html.indexOf("ot-request-domain.js")).toBeLessThan(html.indexOf("screens-ot.js"));
       expect(html.indexOf("supabase-ot-request.js")).toBeLessThan(html.indexOf("screens-ot.js"));
       expect(html.indexOf("screens-ot.js")).toBeLessThan(html.indexOf("app.js"));

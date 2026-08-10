@@ -115,12 +115,27 @@ function getOtRequestStatus(request) {
   }
 }
 
-function OtWarning({ kind = "info", title, message, testId }) {
+function getOtAnnouncementProps(kind) {
+  return kind === "error" || kind === "critical"
+    ? { role: "alert" }
+    : { role: "status", "aria-live": "polite" };
+}
+
+function getOtDescribedActionProps(descriptionId, isDescribed) {
+  return isDescribed ? { "aria-describedby": descriptionId } : {};
+}
+
+function getOtCurrentPageProps(isCurrent) {
+  return isCurrent ? { "aria-current": "page" } : {};
+}
+
+function OtWarning({ id, kind = "info", title, message, testId }) {
   if (!message) return null;
+  const heading = title || (kind === "error" || kind === "critical" ? "Action needed" : "Update");
   return (
-    <div className={`ot-warning ${kind === "error" || kind === "critical" ? "ot-warning--error" : ""}`} role={kind === "error" || kind === "critical" ? "alert" : "status"} data-testid={testId}>
+    <div id={id} className={`ot-warning ${kind === "error" || kind === "critical" ? "ot-warning--error" : ""}`} {...getOtAnnouncementProps(kind)} data-testid={testId}>
       <span aria-hidden="true">{kind === "error" || kind === "critical" ? "⚠" : "ⓘ"}</span>
-      <span><strong>{title ? `${title}: ` : ""}</strong>{message}</span>
+      <span><strong>{heading}: </strong>{message}</span>
     </div>
   );
 }
@@ -513,8 +528,8 @@ function OtRequestForm({ weekStart, onSuccess }) {
         </label>
         <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
       </fieldset>
-      {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
-      <div className="ot-form__actions"><button type="submit" className="btn btn--primary" disabled={!canSubmit}>{submitState.status === "submitting" ? "Submitting…" : "Submit OT request"}</button></div>
+      {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning id="ot-request-submit-feedback" kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
+      <div className="ot-form__actions"><button type="submit" className="btn btn--primary" {...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))} disabled={!canSubmit}>{submitState.status === "submitting" ? "Submitting…" : "Submit OT request"}</button></div>
     </form>
   );
 }
@@ -584,10 +599,10 @@ function OtConsentPanel({ request, onSuccess }) {
         <span>I consent to this overtime occurrence and confirm the planned date and time shown above.</span>
       </label>
       <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
-      {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
+      {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning id="ot-consent-submit-feedback" kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
       <div className="ot-form__actions">
-        <button type="button" className="btn btn--primary" disabled={!accepted || overLimit || weekSummaryState.status !== "ready" || submitState.status === "submitting"} onClick={() => recordConsent(true)}>Accept occurrence</button>
-        <button type="button" className="btn btn--secondary" disabled={submitState.status === "submitting"} onClick={() => recordConsent(false)}>Decline occurrence</button>
+        <button type="button" className="btn btn--primary" {...getOtDescribedActionProps("ot-consent-submit-feedback", Boolean(submitState.message))} disabled={!accepted || overLimit || weekSummaryState.status !== "ready" || submitState.status === "submitting"} onClick={() => recordConsent(true)}>Accept occurrence</button>
+        <button type="button" className="btn btn--secondary" {...getOtDescribedActionProps("ot-consent-submit-feedback", Boolean(submitState.message))} disabled={submitState.status === "submitting"} onClick={() => recordConsent(false)}>Decline occurrence</button>
       </div>
     </div>
   );
@@ -727,8 +742,8 @@ function OtActualConfirmationForm({ request, onSuccess }) {
         {!preview.valid && <OtWarning kind="error" title="Actual schedule needs attention" message={preview.message} />}
         {weekSummaryState.status === "ready" && complianceLikely && <OtWarning kind="critical" title="Compliance review expected" message="Submit the truthful actual hours. They will be saved and routed for compliance review rather than blocked." />}
       </fieldset>
-      {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
-      <div className="ot-form__actions"><button type="submit" className="btn btn--primary" disabled={!canSubmit}>{submitState.status === "submitting" ? "Saving…" : "Submit truthful actual time"}</button></div>
+      {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning id="ot-actual-submit-feedback" kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
+      <div className="ot-form__actions"><button type="submit" className="btn btn--primary" {...getOtDescribedActionProps("ot-actual-submit-feedback", Boolean(submitState.message))} disabled={!canSubmit}>{submitState.status === "submitting" ? "Saving…" : "Submit truthful actual time"}</button></div>
     </form>
   );
 }
