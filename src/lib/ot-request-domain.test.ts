@@ -41,6 +41,24 @@ describe("OT request domain", () => {
     ]);
   });
 
+  it("blocks a same-week plan revision when its summary already excludes the pre-work revision", () => {
+    const domain = loadDomain();
+    const rows = domain.buildWeekProjections(
+      [{ weekStart: "2026-08-10", minutes: 100 }],
+      { "2026-08-10": { plannedMinutes: 2100 } },
+      { totalField: "plannedMinutes" },
+    );
+
+    expect(rows).toEqual([{
+      weekStart: "2026-08-10",
+      currentMinutes: 2100,
+      addedMinutes: 100,
+      projectedMinutes: 2200,
+      remainingMinutes: 0,
+      overLimit: true,
+    }]);
+  });
+
   it("rotates an idempotency intent only after an attempted payload is edited", () => {
     const domain = loadDomain();
     const unattempted = { key: "intent-one", attempted: false };

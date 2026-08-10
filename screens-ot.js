@@ -602,8 +602,7 @@ function OtRequestForm({
   }
   const weekSummaryState = useOtWeekSummaries(preview.valid ? preview.segments : []);
   const projections = weekSummaryState.status === "ready" ? window.FlowMateOtRequestDomain.buildWeekProjections(preview.valid ? preview.segments : [], weekSummaryState.summaries, {
-    totalField: "plannedMinutes",
-    excludedSegments: isRevision ? existingPlannedSegments : []
+    totalField: "plannedMinutes"
   }) : [];
   const overLimit = projections.some(row => row.overLimit);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);

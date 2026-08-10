@@ -614,7 +614,8 @@ describe("OT Request static module integration", () => {
     expect(requestForm).toContain('function OtRequestForm({ mode = "create", request = null');
     expect(requestForm).toContain('const isRevision = mode === "revision"');
     for (const field of ["functionCode", "title", "workDate", "startTime", "endTime", "dayType", "workLocationType", "venue", "reasonCode", "reasonDetail", "approverUserId"]) expect(requestForm).toContain(field);
-    expect(requestForm).toContain('excludedSegments: isRevision ? existingPlannedSegments : []');
+    expect(requestForm).toContain('{ totalField: "plannedMinutes" }');
+    expect(requestForm).not.toContain("excludedSegments");
     expect(requestForm).toContain("window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key)");
     expect(requestForm).toContain("Edit and resubmit request");
     expect(requestForm).toContain("Resubmit corrected request");
