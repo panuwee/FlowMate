@@ -249,6 +249,9 @@ declare
   v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
 begin
   perform public.ot_lock_idempotency('record_consent', p_idempotency_key);
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
+  );
   if p_accept is null then
     raise exception 'Consent choice is required';
   end if;

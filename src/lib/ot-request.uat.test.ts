@@ -238,6 +238,31 @@ describe("OT Request backend contract", () => {
     );
   });
 
+  it("serializes consent with actual submission before selecting counted segments", () => {
+    const consent = functionSql(sql, "ot_record_consent");
+    const submitActual = functionSql(sql, "ot_submit_actual");
+    const requestLock = "pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)";
+    const requestLockIndex = consent.indexOf(requestLock);
+    const firstRequestSelectIndex = consent.indexOf(
+      "select * into v_request from public.ot_requests r where r.id = p_request_id",
+    );
+    const segmentChoiceIndex = consent.indexOf("v_counted_segments := case");
+    const employeeWeekLockIndex = consent.indexOf(
+      "public.ot_lock_employee_weeks(v_request.employee_user_id, v_counted_segments)",
+    );
+    const rowLockIndex = consent.indexOf(
+      "select * into v_request from public.ot_requests r where r.id = p_request_id for update",
+    );
+
+    expect(submitActual).toContain(requestLock);
+    expect(requestLockIndex).toBeGreaterThan(-1);
+    expect(consent.indexOf("public.ot_lock_idempotency('record_consent', p_idempotency_key)")).toBeLessThan(requestLockIndex);
+    expect(requestLockIndex).toBeLessThan(firstRequestSelectIndex);
+    expect(firstRequestSelectIndex).toBeLessThan(segmentChoiceIndex);
+    expect(segmentChoiceIndex).toBeLessThan(employeeWeekLockIndex);
+    expect(employeeWeekLockIndex).toBeLessThan(rowLockIndex);
+  });
+
   it("checks a replacement actual against canonical history while all affected weeks are locked", () => {
     const submit = functionSql(sql, "ot_submit_actual");
 
