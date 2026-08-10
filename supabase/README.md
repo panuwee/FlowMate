@@ -19,6 +19,10 @@ The OT request installer stores the consent statement version on each occurrence
 
 `ot_list_hr_ready(date)` remains restricted to OT Owner or HR/Admin and keeps the existing HR-ready, compliance, and Bangkok-week filters. It returns each authorized row as JSON containing every `ot_requests` field plus normalized snake-case `employee_email` and `approver_email` keys for privacy-safe CSV export. No direct table-write permission is added.
 
+Weekly limit policy uses one canonical counted total: each included occurrence contributes submitted Actual segments when available, otherwise Requested segments, never both. Draft, rejected, cancelled, and pre-work `revision_required` occurrences are excluded; `revision_required` after Actual submission plus `hr_ready` and `exported` Actual history remain counted. Personal dashboards expose this authoritative value as `countedMinutes` while keeping `plannedMinutes` and `actualMinutes` as descriptive totals. The projected-total function and the unchecked counted helper are not executable by `authenticated`; weekly totals are available only through scoped dashboard and preview RPCs.
+
+Local Vitest checks validate source and application contracts only. Before UAT or deployment, an approved staging operator must run `supabase/ot_request.sql` followed by the read-only `supabase/ot_request_verify.sql` and validate PostgreSQL execution, RLS access, grants, and concurrent employee-week behavior. This staging SQL gate is mandatory because local source-contract tests are not database-runtime proof.
+
 ## Files
 
 | File | Purpose |

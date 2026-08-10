@@ -56,6 +56,42 @@ where n.nspname = 'public'
   and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
 
 select
+  'Canonical OT counted-week helper (Expected = 1)' as check_name,
+  'public.ot_counted_week_minutes_unchecked(uuid, date, uuid)' as expected_signature,
+  pg_catalog.count(*) as actual_count
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_counted_week_minutes_unchecked'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, date, uuid'
+  and pg_catalog.pg_get_function_result(p.oid) = 'integer';
+
+select
+  'Personal OT dashboard countedMinutes key (Expected = true)' as check_name,
+  pg_catalog.position('''countedMinutes''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_counted_minutes
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_get_my_dashboard'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'date';
+
+select
+  'Authenticated projected-total execute access (Expected = false)' as check_name,
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_projected_week_minutes(uuid, date, uuid)',
+    'EXECUTE'
+  ) as has_execute;
+
+select
+  'Authenticated unchecked counted-total execute access (Expected = false)' as check_name,
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_counted_week_minutes_unchecked(uuid, date, uuid)',
+    'EXECUTE'
+  ) as has_execute;
+
+select
   'OT RPC signatures' as check_name,
   p.proname as function_name,
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
@@ -68,6 +104,7 @@ where n.nspname = 'public'
     'ot_current_user_is_owner', 'ot_current_user_is_hr_admin',
     'ot_current_user_is_eligible_approver', 'ot_current_user_can_read_request',
     'ot_calculate_occurrence_minutes', 'ot_projected_week_minutes',
+    'ot_counted_week_minutes_unchecked',
     'ot_get_access_context', 'ot_get_my_dashboard', 'ot_list_my_requests',
     'ot_get_manager_dashboard', 'ot_list_eligible_approvers',
     'ot_list_people_for_event', 'ot_create_request', 'ot_preview_event_plan',

@@ -444,6 +444,9 @@ begin
   );
   with affected_weeks as (
     select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    from pg_catalog.jsonb_array_elements(v_request.planned_week_segments) item
+    union
+    select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
     from pg_catalog.jsonb_array_elements(pg_catalog.coalesce(v_request.actual_week_segments, '[]'::jsonb)) item
     union
     select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
@@ -467,7 +470,7 @@ begin
   for v_segment in select item from pg_catalog.jsonb_array_elements(v_segments) item
   loop
     v_week := (v_segment->>'weekStart')::date;
-    v_total := public.ot_actual_week_minutes(v_request.employee_user_id, v_week, v_request.id)
+    v_total := public.ot_counted_week_minutes_unchecked(v_request.employee_user_id, v_week, v_request.id)
       + (v_segment->>'minutes')::integer;
     if v_total > 2160 then
       v_over_limit := true;
@@ -907,6 +910,39 @@ as $function$
     and pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
 $function$;
 
+create or replace function public.ot_counted_week_minutes_unchecked(
+  p_employee_user_id uuid,
+  p_week_start date,
+  p_exclude_request_id uuid default null
+)
+returns integer
+language sql
+stable
+security definer
+set search_path = ''
+as $function$
+  select pg_catalog.coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
+  from public.ot_requests r
+  cross join lateral pg_catalog.jsonb_array_elements(
+    case
+      when r.actual_submitted_at is not null and r.actual_week_segments is not null
+        then r.actual_week_segments
+      else r.planned_week_segments
+    end
+  ) segment
+  where r.employee_user_id = p_employee_user_id
+    and (p_exclude_request_id is null or r.id <> p_exclude_request_id)
+    and (
+      r.status in (
+        'pending_approval', 'awaiting_consent', 'approved',
+        'actual_confirmation_required', 'pending_actual_verification',
+        'compliance_review_required', 'hr_ready', 'exported'
+      )
+      or (r.status = 'revision_required' and r.actual_submitted_at is not null)
+    )
+    and pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
+$function$;
+
 create or replace function public.ot_projected_week_minutes(
   p_employee_user_id uuid,
   p_week_start date,
@@ -979,7 +1015,7 @@ begin
   loop
     v_week := pg_catalog.coalesce(v_segment->>'weekStart', v_segment->>'week_start')::date;
     v_added := (v_segment->>'minutes')::integer;
-    v_current := public.ot_projected_week_minutes_unchecked(p_employee_user_id, v_week, p_exclude_request_id);
+    v_current := public.ot_counted_week_minutes_unchecked(p_employee_user_id, v_week, p_exclude_request_id);
     v_remaining := pg_catalog.greatest(0, 2160 - v_current);
     if v_current + v_added > 2160 then
       raise exception 'OT weekly limit exceeded: current=% minutes, added=% minutes, remaining=% minutes, affected_week=%',
@@ -1080,6 +1116,7 @@ declare
   v_rows jsonb;
   v_planned integer;
   v_actual integer;
+  v_counted integer;
 begin
   if p_week_start is null or pg_catalog.date_part('isodow', p_week_start)::integer <> 1 then
     raise exception 'Week start must be a Monday date in the Bangkok workweek';
@@ -1087,8 +1124,9 @@ begin
   select
     pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.planned_start_at, r.id), '[]'::jsonb),
     public.ot_projected_week_minutes(v_actor_id, p_week_start, null),
-    public.ot_actual_week_minutes(v_actor_id, p_week_start, null)
-  into v_rows, v_planned, v_actual
+    public.ot_actual_week_minutes(v_actor_id, p_week_start, null),
+    public.ot_counted_week_minutes_unchecked(v_actor_id, p_week_start, null)
+  into v_rows, v_planned, v_actual, v_counted
   from public.ot_requests r
   where r.employee_user_id = v_actor_id
     and (
@@ -1099,7 +1137,8 @@ begin
     'weekStart', p_week_start,
     'plannedMinutes', v_planned,
     'actualMinutes', v_actual,
-    'remainingPlannedMinutes', pg_catalog.greatest(0, 2160 - v_planned),
+    'countedMinutes', v_counted,
+    'remainingPlannedMinutes', pg_catalog.greatest(0, 2160 - v_counted),
     'requests', v_rows
   );
 end
@@ -1363,7 +1402,7 @@ begin
     loop
       v_week := (v_segment->>'weekStart')::date;
       v_added := (v_segment->>'minutes')::integer;
-      v_current := public.ot_projected_week_minutes_unchecked(v_employee_user_id, v_week, null);
+      v_current := public.ot_counted_week_minutes_unchecked(v_employee_user_id, v_week, null);
       v_checks := v_checks || pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object(
         'weekStart', v_week,
         'currentMinutes', v_current,
@@ -1947,6 +1986,7 @@ revoke all on function public.ot_build_week_segments(timestamptz, timestamptz, i
 revoke all on function public.ot_lock_employee_week_keys(jsonb) from public, anon, authenticated;
 revoke all on function public.ot_lock_employee_weeks(uuid, jsonb) from public, anon, authenticated;
 revoke all on function public.ot_projected_week_minutes_unchecked(uuid, date, uuid) from public, anon, authenticated;
+revoke all on function public.ot_counted_week_minutes_unchecked(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_actual_week_minutes(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_assert_planned_limit(uuid, jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_guard_audit_append_only() from public, anon, authenticated;
@@ -1984,7 +2024,6 @@ grant execute on function public.ot_current_user_is_hr_admin() to authenticated;
 grant execute on function public.ot_current_user_is_eligible_approver() to authenticated;
 grant execute on function public.ot_current_user_can_read_request(uuid) to authenticated;
 grant execute on function public.ot_calculate_occurrence_minutes(timestamptz, timestamptz, integer) to authenticated;
-grant execute on function public.ot_projected_week_minutes(uuid, date, uuid) to authenticated;
 grant execute on function public.ot_get_access_context() to authenticated;
 grant execute on function public.ot_get_my_dashboard(date) to authenticated;
 grant execute on function public.ot_list_my_requests(date) to authenticated;

@@ -190,8 +190,87 @@ describe("OT Request backend contract", () => {
     const submit = functionSql(sql, "ot_submit_actual");
 
     expect(submit).toContain("v_lock_segments");
-    expect(submit).toMatch(/actual_week_segments[\s\S]*v_segments[\s\S]*jsonb_agg/);
+    expect(submit).toMatch(/planned_week_segments[\s\S]*actual_week_segments[\s\S]*v_segments[\s\S]*jsonb_agg/);
     expect(submit).toContain("public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments)");
+  });
+
+  it("counts submitted actual segments or requested segments exactly once", () => {
+    const counted = functionSql(sql, "ot_counted_week_minutes_unchecked");
+
+    expect(counted).toContain("returns integer");
+    expect(counted).toMatch(
+      /jsonb_array_elements\(\s*case\s+when r\.actual_submitted_at is not null and r\.actual_week_segments is not null\s+then r\.actual_week_segments\s+else r\.planned_week_segments\s+end\s*\) segment/,
+    );
+    expect(counted).toMatch(
+      /r\.status in \([\s\S]*'pending_approval'[\s\S]*'hr_ready'[\s\S]*'exported'[\s\S]*\)\s+or \(r\.status = 'revision_required' and r\.actual_submitted_at is not null\)/,
+    );
+    for (const excluded of ["draft", "rejected", "cancelled"]) {
+      expect(counted).not.toContain(`'${excluded}'`);
+    }
+  });
+
+  it("routes every weekly policy decision through canonical counted minutes", () => {
+    const assertLimit = functionSql(sql, "ot_assert_planned_limit");
+    const previewEvent = functionSql(sql, "ot_preview_event_plan");
+    const submitActual = functionSql(sql, "ot_submit_actual");
+
+    expect(assertLimit).toContain("public.ot_counted_week_minutes_unchecked(");
+    expect(assertLimit).not.toContain("public.ot_projected_week_minutes_unchecked(");
+    expect(previewEvent).toContain("public.ot_counted_week_minutes_unchecked(");
+    expect(previewEvent).not.toContain("public.ot_projected_week_minutes_unchecked(");
+    expect(submitActual).toContain("public.ot_counted_week_minutes_unchecked(");
+    expect(submitActual).not.toContain("public.ot_actual_week_minutes(");
+    for (const caller of ["ot_create_request", "ot_create_event_plan", "ot_record_consent", "ot_review_plan"]) {
+      expect(functionSql(sql, caller)).toContain("public.ot_assert_planned_limit(");
+    }
+  });
+
+  it("checks a replacement actual against canonical history while all affected weeks are locked", () => {
+    const submit = functionSql(sql, "ot_submit_actual");
+
+    expect(submit).toMatch(
+      /planned_week_segments[\s\S]*actual_week_segments[\s\S]*jsonb_array_elements\(v_segments\)[\s\S]*jsonb_agg/,
+    );
+    expect(submit.indexOf("public.ot_lock_employee_weeks(v_request.employee_user_id, v_lock_segments)")).toBeLessThan(
+      submit.indexOf("public.ot_counted_week_minutes_unchecked("),
+    );
+    expect(submit).toMatch(
+      /public\.ot_counted_week_minutes_unchecked\(v_request\.employee_user_id, v_week, v_request\.id\)\s*\+ \(v_segment->>'minutes'\)::integer/,
+    );
+  });
+
+  it("returns canonical counted minutes beside descriptive dashboard totals", () => {
+    const dashboard = functionSql(sql, "ot_get_my_dashboard");
+
+    expect(dashboard).toContain("public.ot_projected_week_minutes(v_actor_id, p_week_start, null)");
+    expect(dashboard).toContain("public.ot_actual_week_minutes(v_actor_id, p_week_start, null)");
+    expect(dashboard).toContain("public.ot_counted_week_minutes_unchecked(v_actor_id, p_week_start, null)");
+    expect(dashboard).toMatch(/'plannedMinutes', v_planned[\s\S]*'actualMinutes', v_actual[\s\S]*'countedMinutes', v_counted/);
+    expect(dashboard).toContain("'remainingPlannedMinutes', pg_catalog.greatest(0, 2160 - v_counted)");
+  });
+
+  it("keeps weekly accounting helpers private", () => {
+    expect(sql).toContain(
+      "revoke all on function public.ot_projected_week_minutes(uuid, date, uuid) from public, anon, authenticated",
+    );
+    expect(sql).not.toContain(
+      "grant execute on function public.ot_projected_week_minutes(uuid, date, uuid) to authenticated",
+    );
+    expect(sql).toContain(
+      "revoke all on function public.ot_counted_week_minutes_unchecked(uuid, date, uuid) from public, anon, authenticated",
+    );
+    expect(sql).not.toContain(
+      "grant execute on function public.ot_counted_week_minutes_unchecked(uuid, date, uuid) to authenticated",
+    );
+  });
+
+  it("verifies canonical accounting metadata without database writes", () => {
+    expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
+    expect(verify).toContain("Canonical OT counted-week helper (Expected = 1)");
+    expect(verify).toContain("public.ot_counted_week_minutes_unchecked(uuid, date, uuid)");
+    expect(verify).toContain("Personal OT dashboard countedMinutes key (Expected = true)");
+    expect(verify).toContain("Authenticated projected-total execute access (Expected = false)");
+    expect(verify).toContain("has_function_privilege(");
   });
 });
 
