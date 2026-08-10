@@ -37,6 +37,71 @@ function renderProductSwitch(activeProduct: string) {
   return sandbox.result;
 }
 
+type RenderedElement = {
+  type: unknown;
+  props: Record<string, unknown>;
+  children: unknown[];
+};
+
+function loadOtRequestDomain() {
+  const sandbox = { window: {} as Record<string, unknown> };
+  runInNewContext(read("ot-request-domain.js"), sandbox);
+  return (sandbox.window as any).FlowMateOtRequestDomain;
+}
+
+function createOtRootCauseHarness() {
+  let initialized = false;
+  let state: unknown;
+  const domain = loadOtRequestDomain();
+  const sandbox: any = {
+    React: {
+      Fragment: Symbol("Fragment"),
+      createElement(type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) {
+        return { type, props: props || {}, children };
+      },
+    },
+    useStateApp(initialValue: unknown) {
+      if (!initialized) {
+        state = typeof initialValue === "function" ? (initialValue as () => unknown)() : initialValue;
+        initialized = true;
+      }
+      return [state, (nextValue: unknown) => {
+        state = typeof nextValue === "function" ? (nextValue as (current: unknown) => unknown)(state) : nextValue;
+      }];
+    },
+    useEffectApp() {},
+    useRefApp(initialValue: unknown) { return { current: initialValue }; },
+    useMemoApp(factory: () => unknown) { return factory(); },
+    window: { FlowMateOtRequestDomain: domain, location: { hash: "" } },
+  };
+  runInNewContext(`${read("screens-ot.js")}
+    globalThis.__OtRootCausePanel = OtRootCausePanel;
+    globalThis.__getOtManagerClientFilterKey = typeof getOtManagerClientFilterKey === "function" ? getOtManagerClientFilterKey : null;
+  `, sandbox);
+
+  return {
+    getClientFilterKey: sandbox.__getOtManagerClientFilterKey,
+    render(props: Record<string, unknown>) {
+      return sandbox.__OtRootCausePanel(props) as RenderedElement;
+    },
+  };
+}
+
+function findRenderedElements(node: unknown, predicate: (element: RenderedElement) => boolean): RenderedElement[] {
+  if (Array.isArray(node)) return node.flatMap(child => findRenderedElements(child, predicate));
+  if (!node || typeof node !== "object" || !("children" in node)) return [];
+  const element = node as RenderedElement;
+  return (predicate(element) ? [element] : []).concat(findRenderedElements(element.children, predicate));
+}
+
+function renderedText(node: unknown): string {
+  if (Array.isArray(node)) return node.map(renderedText).join(" ");
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (typeof node === "object" && "children" in node) return renderedText((node as RenderedElement).children);
+  return "";
+}
+
 describe("OT Request backend contract", () => {
   const sql = read("supabase", "ot_request.sql");
   const verify = read("supabase", "ot_request_verify.sql");
@@ -929,7 +994,7 @@ describe("OT Request static module integration", () => {
 
     expect(manager).toContain("[0, -7, -14, -21, -28]");
     expect(manager).toContain("weeks.map(managerWeek => window.loadOtManagerDashboard(managerWeek, functionFilter || null))");
-    expect(manager).toContain("<OtRootCausePanel filteredRows={filteredRows} currentWeekStart={weekStart} weekStarts={managerWeeks}");
+    expect(manager).toContain("<OtRootCausePanel key={clientFilterKey} filteredRows={filteredRows} currentWeekStart={weekStart} weekStarts={managerWeeks} filterKey={clientFilterKey}");
     expect(panel).toContain("window.FlowMateOtRequestDomain.buildOtWeeklyTrend(filteredRows, weekStarts)");
     expect(panel).toContain("window.FlowMateOtRequestDomain.buildOtWorkloadConcentration(filteredRows)");
     expect(manager).not.toMatch(/\.from\(["'`]ot_/);
@@ -947,6 +1012,87 @@ describe("OT Request static module integration", () => {
     expect(panel).toContain("formatOtHours(row.actualMinutes)");
     expect(panel).not.toContain("getOtManagerEmployeeName");
     expect(panel).not.toMatch(/performance|productivity|rank|top performer|value score/i);
+  });
+
+  it("renders all five dated zero-hour trend rows when no confirmed Actual rows exist", () => {
+    const harness = createOtRootCauseHarness();
+    const rendered = harness.render({
+      filteredRows: [],
+      currentWeekStart: "2026-08-03",
+      weekStarts: ["2026-08-03", "2026-07-27", "2026-07-20", "2026-07-13", "2026-07-06"],
+      filterKey: "|||0",
+    });
+    const trendTable = findRenderedElements(rendered, element => (
+      element.type === "table" && renderedText(element).includes("Approved Actual hours by Bangkok week")
+    ))[0];
+    const body = findRenderedElements(trendTable, element => element.type === "tbody")[0];
+    const rows = findRenderedElements(body, element => element.type === "tr");
+
+    expect(rows).toHaveLength(5);
+    expect(rows.map(renderedText)).toEqual([
+      expect.stringMatching(/Mon, 06 Jul 2026.*0h/),
+      expect.stringMatching(/Mon, 13 Jul 2026.*0h/),
+      expect.stringMatching(/Mon, 20 Jul 2026.*0h/),
+      expect.stringMatching(/Mon, 27 Jul 2026.*0h/),
+      expect.stringMatching(/Mon, 03 Aug 2026.*0h/),
+    ]);
+  });
+
+  it("never renders or opens an employee-derived recurring OT signal", () => {
+    const harness = createOtRootCauseHarness();
+    const rendered = harness.render({
+      filteredRows: [
+        { id: "week-one", employeeUserId: "employee", functionCode: "ops", workDate: "2026-07-06", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-07-06T20:00:00Z" },
+        { id: "week-two", employeeUserId: "employee", functionCode: "ops", workDate: "2026-07-13", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-07-13T20:00:00Z" },
+        { id: "week-three", employeeUserId: "employee", functionCode: "ops", workDate: "2026-07-20", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-07-20T20:00:00Z" },
+        { id: "week-four", employeeUserId: "employee", functionCode: "ops", workDate: "2026-07-27", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-07-27T20:00:00Z" },
+        { id: "week-five", employeeUserId: "employee", functionCode: "ops", workDate: "2026-08-03", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z" },
+      ],
+      currentWeekStart: "2026-08-03",
+      weekStarts: ["2026-08-03", "2026-07-27", "2026-07-20", "2026-07-13", "2026-07-06"],
+      filterKey: "|||0",
+    });
+    const text = renderedText(rendered);
+    const drilldownButtons = findRenderedElements(rendered, element => (
+      element.type === "button" && renderedText(element).includes("View authorized rows")
+    ));
+
+    expect(text).not.toMatch(/workload safety pattern|team member exceeded|recurring employee/i);
+    expect(drilldownButtons).toHaveLength(0);
+  });
+
+  it("closes an open drill-down when any complete client-filter identity field changes", () => {
+    const harness = createOtRootCauseHarness();
+    const baseFilters = { eventPlanId: "event-a", reasonCode: "capacity", status: "hr_ready", nearLimit: false };
+
+    expect(harness.getClientFilterKey).toEqual(expect.any(Function));
+    const baseKey = harness.getClientFilterKey(baseFilters);
+    for (const changedFilters of [
+      { ...baseFilters, eventPlanId: "event-b" },
+      { ...baseFilters, reasonCode: "live_incident" },
+      { ...baseFilters, status: "exported" },
+      { ...baseFilters, nearLimit: true },
+    ]) {
+      expect(harness.getClientFilterKey(changedFilters)).not.toBe(baseKey);
+    }
+
+    const props = {
+      filteredRows: [{ id: "event-row", eventPlanId: "event-a", functionCode: "ops", workDate: "2026-08-03", plannedMinutes: 100, actualMinutes: 130, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z" }],
+      currentWeekStart: "2026-08-03",
+      weekStarts: ["2026-08-03", "2026-07-27", "2026-07-20", "2026-07-13", "2026-07-06"],
+      filterKey: baseKey,
+    };
+    let rendered = harness.render(props);
+    const openButton = findRenderedElements(rendered, element => (
+      element.type === "button" && renderedText(element).includes("View authorized rows")
+    ))[0];
+    expect(openButton).toBeDefined();
+    (openButton.props.onClick as () => void)();
+    rendered = harness.render(props);
+    expect(renderedText(rendered)).toContain("Authorized operational rows behind this signal");
+
+    rendered = harness.render({ ...props, filterKey: harness.getClientFilterKey({ ...baseFilters, nearLimit: true }) });
+    expect(renderedText(rendered)).not.toContain("Authorized operational rows behind this signal");
   });
 
   it("invalidates prior manager analytics immediately across loading, error, and retry query identities", () => {

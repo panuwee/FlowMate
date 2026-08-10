@@ -1469,6 +1469,9 @@ function applyOtManagerFilters(rows, filters, employeeTotals) {
     return (!filters.eventPlanId || eventPlanId === filters.eventPlanId) && (!filters.reasonCode || reasonCode === filters.reasonCode) && (!filters.status || status === filters.status) && (!filters.nearLimit || total >= 30 * 60);
   });
 }
+function getOtManagerClientFilterKey(filters) {
+  return JSON.stringify([String(filters?.eventPlanId || ""), String(filters?.reasonCode || ""), String(filters?.status || ""), Boolean(filters?.nearLimit)]);
+}
 function OtManagerDashboard({
   access,
   rootCauseOnly = false,
@@ -1495,6 +1498,7 @@ function OtManagerDashboard({
   const errorRef = useRefApp(null);
   const managerWeeks = rootCauseOnly ? [0, -7, -14, -21, -28].map(offset => addOtDays(weekStart, offset)) : [weekStart];
   const managerLoadKey = `${rootCauseOnly ? "root" : "manager"}:${weekStart}:${functionFilter}:${refreshKey}:${refreshToken}`;
+  const clientFilterKey = getOtManagerClientFilterKey(filters);
   const activeLoadState = loadState.queryKey === managerLoadKey ? loadState : {
     status: "loading",
     queryKey: managerLoadKey,
@@ -1662,9 +1666,11 @@ function OtManagerDashboard({
     checked: filters.nearLimit,
     onChange: event => updateFilter("nearLimit", event.target.checked)
   }), React.createElement("span", null, "Near limit only"))), rootCauseOnly ? React.createElement(OtRootCausePanel, {
+    key: clientFilterKey,
     filteredRows: filteredRows,
     currentWeekStart: weekStart,
-    weekStarts: managerWeeks
+    weekStarts: managerWeeks,
+    filterKey: clientFilterKey
   }) : React.createElement(React.Fragment, null, React.createElement("section", {
     className: "ot-metric-grid ot-metric-grid--manager",
     "aria-label": "Assigned weekly OT summary"
@@ -2627,9 +2633,11 @@ function buildOtInsightRows(rows, recordIds) {
 function OtRootCausePanel({
   filteredRows,
   currentWeekStart,
-  weekStarts
+  weekStarts,
+  filterKey
 }) {
-  const [selectedInsight, setSelectedInsight] = useStateApp(null);
+  const [selectedInsightState, setSelectedInsightState] = useStateApp(null);
+  const selectedInsight = selectedInsightState?.filterKey === filterKey ? selectedInsightState.insight : null;
   const confirmedRows = filteredRows.filter(isOtActualConfirmed);
   const insights = window.FlowMateOtRequestDomain.buildRootCauseInsights(filteredRows, {
     currentWeekStart
@@ -2657,7 +2665,6 @@ function OtRootCausePanel({
   const recurringWeeks = window.FlowMateOtRequestDomain.countWeeksWithActualMinutes(confirmedRows);
   const insightCopy = {
     function_confirmed_ot_change: "Function confirmed OT changed at least 25% against the prior four-week average.",
-    recurring_employee_high_ot: "An authorized workload safety pattern crossed the advisory threshold for two consecutive weeks.",
     event_actual_exceeds_plan: "A shared event's actual OT exceeded its plan by at least 20%.",
     emergency_ot_share: "Emergency OT represents at least 30% of confirmed OT for a Function.",
     recurring_rework_or_scope_change: "Rework or scope change appeared at least three times within four weeks."
@@ -2672,9 +2679,7 @@ function OtRootCausePanel({
     id: "ot-root-cause-title"
   }, "OT Health & Root Cause"), React.createElement("p", {
     className: "muted"
-  }, "Operational patterns by reason, Function, event, and week. Current filters stay applied to every drill-down.")), React.createElement("span", null, confirmedRows.length, " confirmed rows")), !confirmedRows.length ? React.createElement("div", {
-    className: "ot-state"
-  }, "No confirmed OT rows match the current authorized filters.") : React.createElement(React.Fragment, null, React.createElement("section", {
+  }, "Operational patterns by reason, Function, event, and week. Current filters stay applied to every drill-down.")), React.createElement("span", null, confirmedRows.length, " confirmed rows")), React.createElement("section", {
     className: "ot-analytics-grid",
     "aria-label": "Confirmed OT operational analytics"
   }, React.createElement("article", {
@@ -2745,7 +2750,9 @@ function OtRootCausePanel({
     scope: "row"
   }, row.label), React.createElement("td", null, formatOtHours(row.actualMinutes)), React.createElement("td", null, Math.round(row.share * 100), "%"))) : React.createElement("tr", null, React.createElement("td", {
     colSpan: "3"
-  }, "No approved Actual workload."))))))))), React.createElement("section", {
+  }, "No approved Actual workload."))))))))), !confirmedRows.length ? React.createElement("div", {
+    className: "ot-state"
+  }, "No confirmed OT rows match the current authorized filters.") : React.createElement(React.Fragment, null, React.createElement("section", {
     className: "ot-root-summary",
     "aria-label": "Root cause summary"
   }, React.createElement("div", null, React.createElement("span", null, "Planned share"), React.createElement("strong", null, totalActual ? `${Math.round(plannedMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Emergency share"), React.createElement("strong", null, totalActual ? `${Math.round(emergencyMinutes / totalActual * 100)}%` : "0%")), React.createElement("div", null, React.createElement("span", null, "Plan / actual variance"), React.createElement("strong", null, window.FlowMateOtRequestDomain.formatSignedHours(totalActual - totalPlanned))), React.createElement("div", null, React.createElement("span", null, "Recurring weeks"), React.createElement("strong", null, recurringWeeks))), React.createElement("section", {
@@ -2773,7 +2780,7 @@ function OtRootCausePanel({
     "aria-label": "Deterministic OT insights"
   }, React.createElement("div", {
     className: "ot-section-head"
-  }, React.createElement("h3", null, "Five approved operational checks"), React.createElement("span", null, insights.length, " signal", insights.length === 1 ? "" : "s")), !insights.length ? React.createElement("div", {
+  }, React.createElement("h3", null, "Approved operational checks"), React.createElement("span", null, insights.length, " signal", insights.length === 1 ? "" : "s")), !insights.length ? React.createElement("div", {
     className: "ot-state ot-state--compact"
   }, "No deterministic rule is triggered by the confirmed rows in this scope.") : insights.map((insight, index) => React.createElement("article", {
     className: "ot-insight",
@@ -2781,7 +2788,10 @@ function OtRootCausePanel({
   }, React.createElement("div", null, React.createElement("strong", null, insightCopy[insight.key] || insight.message), React.createElement("small", null, insight.message)), React.createElement("button", {
     type: "button",
     className: "btn btn--sm btn--secondary",
-    onClick: () => setSelectedInsight(insight)
+    onClick: () => setSelectedInsightState({
+      filterKey,
+      insight
+    })
   }, "View authorized rows"))))), selectedInsight && React.createElement("section", {
     className: "ot-manager-detail",
     "aria-label": "Authorized root cause drill-down"
@@ -2790,7 +2800,7 @@ function OtRootCausePanel({
   }, React.createElement("h3", null, "Authorized operational rows behind this signal"), React.createElement("button", {
     type: "button",
     className: "btn btn--ghost",
-    onClick: () => setSelectedInsight(null)
+    onClick: () => setSelectedInsightState(null)
   }, "Close")), React.createElement("p", {
     className: "muted"
   }, "Current filters stay applied. Only operational facts already returned by the assigned-scope manager RPC are shown; employee identities are omitted."), selectedRows.map(request => React.createElement("article", {

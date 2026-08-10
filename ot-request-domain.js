@@ -438,28 +438,6 @@
       }
     });
 
-    const employeeWeeks = {};
-    inLastFiveWeeks.forEach(record => {
-      const employee = valueOf(record, "employeeUserId", "employee_user_id");
-      if (!employee) return;
-      const key = `${employee}:${recordWeek(record)}`;
-      if (!employeeWeeks[key]) employeeWeeks[key] = [];
-      employeeWeeks[key].push(record);
-    });
-    Object.keys(employeeWeeks).forEach(key => {
-      const separator = key.lastIndexOf(":");
-      const employee = key.slice(0, separator);
-      const weekStart = key.slice(separator + 1);
-      const previousWeek = addDays(weekStart, -7);
-      const thisWeek = employeeWeeks[key];
-      const priorWeek = employeeWeeks[`${employee}:${previousWeek}`];
-      const thisMinutes = thisWeek.reduce((total, record) => total + recordMinutes(record, "actualMinutes", "actual_minutes"), 0);
-      const priorMinutes = priorWeek ? priorWeek.reduce((total, record) => total + recordMinutes(record, "actualMinutes", "actual_minutes"), 0) : 0;
-      if (thisMinutes > ADVISORY_MINUTES && priorMinutes > ADVISORY_MINUTES) {
-        insights.push({ key: "recurring_employee_high_ot", weekStart, recordIds: collectIds((priorWeek || []).concat(thisWeek)), message: "A team member exceeded the advisory OT threshold for two consecutive weeks." });
-      }
-    });
-
     const eventRecords = {};
     inLastFiveWeeks.forEach(record => {
       const eventPlanId = valueOf(record, "eventPlanId", "event_plan_id");

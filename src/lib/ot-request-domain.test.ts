@@ -338,15 +338,16 @@ describe("OT request domain", () => {
     expect(insights).toContainEqual(expect.objectContaining({ key: "function_confirmed_ot_change", functionCode: "ops", weekStart: "2026-08-03" }));
   });
 
-  it("finds recurring high weekly OT without assigning employee value", () => {
+  it("suppresses employee-derived recurring OT signals, record IDs, and messages", () => {
     const domain = loadDomain();
     const insights = domain.buildRootCauseInsights([
       { id: "week-one", employeeUserId: "employee", workDate: "2026-07-27", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-07-27T20:00:00Z" },
       { id: "week-two", employeeUserId: "employee", workDate: "2026-08-03", actualMinutes: 1500, actualDecision: "approved", actualVerifiedAt: "2026-08-03T20:00:00Z" },
     ], { currentWeekStart: "2026-08-03" });
-    const recurring = insights.find((insight: { key: string }) => insight.key === "recurring_employee_high_ot");
-    expect(recurring).toEqual(expect.objectContaining({ weekStart: "2026-08-03", recordIds: ["week-one", "week-two"] }));
-    expect(JSON.stringify(recurring)).not.toMatch(/performance|productivity|commitment|value/i);
+    const serialized = JSON.stringify(insights);
+
+    expect(insights.map((insight: { key: string }) => insight.key)).not.toContain("recurring_employee_high_ot");
+    expect(serialized).not.toMatch(/team member|employee|two consecutive weeks/i);
   });
 
   it("finds event variance, emergency share, and recurring rework or scope change", () => {

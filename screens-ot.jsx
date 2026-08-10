@@ -895,6 +895,15 @@ function applyOtManagerFilters(rows, filters, employeeTotals) {
   });
 }
 
+function getOtManagerClientFilterKey(filters) {
+  return JSON.stringify([
+    String(filters?.eventPlanId || ""),
+    String(filters?.reasonCode || ""),
+    String(filters?.status || ""),
+    Boolean(filters?.nearLimit),
+  ]);
+}
+
 function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 }) {
   const [weekStart, setWeekStart] = useStateApp(getCurrentOtWeekStart);
   const [functionFilter, setFunctionFilter] = useStateApp("");
@@ -906,6 +915,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
   const errorRef = useRefApp(null);
   const managerWeeks = rootCauseOnly ? [0, -7, -14, -21, -28].map(offset => addOtDays(weekStart, offset)) : [weekStart];
   const managerLoadKey = `${rootCauseOnly ? "root" : "manager"}:${weekStart}:${functionFilter}:${refreshKey}:${refreshToken}`;
+  const clientFilterKey = getOtManagerClientFilterKey(filters);
   const activeLoadState = loadState.queryKey === managerLoadKey
     ? loadState
     : { status: "loading", queryKey: managerLoadKey, rows: [], peopleById: {}, message: "" };
@@ -984,7 +994,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
       </section>
 
       {rootCauseOnly ? (
-        <OtRootCausePanel filteredRows={filteredRows} currentWeekStart={weekStart} weekStarts={managerWeeks} />
+        <OtRootCausePanel key={clientFilterKey} filteredRows={filteredRows} currentWeekStart={weekStart} weekStarts={managerWeeks} filterKey={clientFilterKey} />
       ) : (
         <>
           <section className="ot-metric-grid ot-metric-grid--manager" aria-label="Assigned weekly OT summary">{OT_MANAGER_METRIC_LABELS.map((label, index) => <section className="ot-metric" key={label}><span>{label}</span><strong>{metricValues[index]}</strong></section>)}</section>
@@ -1405,8 +1415,9 @@ function buildOtInsightRows(rows, recordIds) {
   return Array.from(rowsByRequestId.values()).sort((left, right) => left.requestId.localeCompare(right.requestId));
 }
 
-function OtRootCausePanel({ filteredRows, currentWeekStart, weekStarts }) {
-  const [selectedInsight, setSelectedInsight] = useStateApp(null);
+function OtRootCausePanel({ filteredRows, currentWeekStart, weekStarts, filterKey }) {
+  const [selectedInsightState, setSelectedInsightState] = useStateApp(null);
+  const selectedInsight = selectedInsightState?.filterKey === filterKey ? selectedInsightState.insight : null;
   const confirmedRows = filteredRows.filter(isOtActualConfirmed);
   const insights = window.FlowMateOtRequestDomain.buildRootCauseInsights(filteredRows, { currentWeekStart });
   const weeklyTrend = window.FlowMateOtRequestDomain.buildOtWeeklyTrend(filteredRows, weekStarts);
@@ -1429,7 +1440,6 @@ function OtRootCausePanel({ filteredRows, currentWeekStart, weekStarts }) {
   const recurringWeeks = window.FlowMateOtRequestDomain.countWeeksWithActualMinutes(confirmedRows);
   const insightCopy = {
     function_confirmed_ot_change: "Function confirmed OT changed at least 25% against the prior four-week average.",
-    recurring_employee_high_ot: "An authorized workload safety pattern crossed the advisory threshold for two consecutive weeks.",
     event_actual_exceeds_plan: "A shared event's actual OT exceeded its plan by at least 20%.",
     emergency_ot_share: "Emergency OT represents at least 30% of confirmed OT for a Function.",
     recurring_rework_or_scope_change: "Rework or scope change appeared at least three times within four weeks.",
@@ -1439,27 +1449,27 @@ function OtRootCausePanel({ filteredRows, currentWeekStart, weekStarts }) {
   return (
     <section className="ot-root-cause" aria-labelledby="ot-root-cause-title">
       <div className="ot-section-head"><div><h2 id="ot-root-cause-title">OT Health & Root Cause</h2><p className="muted">Operational patterns by reason, Function, event, and week. Current filters stay applied to every drill-down.</p></div><span>{confirmedRows.length} confirmed rows</span></div>
+      <section className="ot-analytics-grid" aria-label="Confirmed OT operational analytics">
+        <article className="ot-analytics-card" aria-labelledby="ot-weekly-trend-title">
+          <h3 id="ot-weekly-trend-title">Confirmed OT trend — latest 5 Bangkok weeks</h3>
+          <p className="muted">Approved Actual time only. Zero-minute weeks remain visible for an honest five-week comparison.</p>
+          <div className="ot-table-wrap"><table className="ot-analytics-table"><caption>Approved Actual hours by Bangkok week</caption><thead><tr><th scope="col">Bangkok week</th><th scope="col">Confirmed Actual</th></tr></thead><tbody>{analytics.weeklyTrend.map(row => <tr key={row.weekStart}><th scope="row">{formatOtDate(row.weekStart)}</th><td>{formatOtHours(row.actualMinutes)}</td></tr>)}</tbody></table></div>
+        </article>
+        <article className="ot-analytics-card" aria-labelledby="ot-workload-concentration-title">
+          <h3 id="ot-workload-concentration-title">Workload concentration by Function / assignment</h3>
+          <p className="muted">Operational workload only—this view never evaluates or compares people.</p>
+          <div className="ot-concentration-grid">
+            <section aria-labelledby="ot-function-concentration-title"><h4 id="ot-function-concentration-title">By Function</h4><div className="ot-table-wrap"><table className="ot-analytics-table"><caption>Approved Actual workload share by Function</caption><thead><tr><th scope="col">Function</th><th scope="col">Hours</th><th scope="col">Share</th></tr></thead><tbody>{analytics.byFunction.length ? analytics.byFunction.map(row => <tr key={row.key}><th scope="row">{OT_FUNCTIONS.find(option => option.value === row.key)?.label || row.key.toUpperCase()}</th><td>{formatOtHours(row.actualMinutes)}</td><td>{Math.round(row.share * 100)}%</td></tr>) : <tr><td colSpan="3">No approved Actual workload.</td></tr>}</tbody></table></div></section>
+            <section aria-labelledby="ot-assignment-concentration-title"><h4 id="ot-assignment-concentration-title">By assignment / event</h4><div className="ot-table-wrap"><table className="ot-analytics-table"><caption>Approved Actual workload share by operational assignment or event</caption><thead><tr><th scope="col">Assignment / event</th><th scope="col">Hours</th><th scope="col">Share</th></tr></thead><tbody>{analytics.byAssignment.length ? analytics.byAssignment.map(row => <tr key={row.key}><th scope="row">{row.label}</th><td>{formatOtHours(row.actualMinutes)}</td><td>{Math.round(row.share * 100)}%</td></tr>) : <tr><td colSpan="3">No approved Actual workload.</td></tr>}</tbody></table></div></section>
+          </div>
+        </article>
+      </section>
       {!confirmedRows.length ? <div className="ot-state">No confirmed OT rows match the current authorized filters.</div> : <>
-        <section className="ot-analytics-grid" aria-label="Confirmed OT operational analytics">
-          <article className="ot-analytics-card" aria-labelledby="ot-weekly-trend-title">
-            <h3 id="ot-weekly-trend-title">Confirmed OT trend — latest 5 Bangkok weeks</h3>
-            <p className="muted">Approved Actual time only. Zero-minute weeks remain visible for an honest five-week comparison.</p>
-            <div className="ot-table-wrap"><table className="ot-analytics-table"><caption>Approved Actual hours by Bangkok week</caption><thead><tr><th scope="col">Bangkok week</th><th scope="col">Confirmed Actual</th></tr></thead><tbody>{analytics.weeklyTrend.map(row => <tr key={row.weekStart}><th scope="row">{formatOtDate(row.weekStart)}</th><td>{formatOtHours(row.actualMinutes)}</td></tr>)}</tbody></table></div>
-          </article>
-          <article className="ot-analytics-card" aria-labelledby="ot-workload-concentration-title">
-            <h3 id="ot-workload-concentration-title">Workload concentration by Function / assignment</h3>
-            <p className="muted">Operational workload only—this view never evaluates or compares people.</p>
-            <div className="ot-concentration-grid">
-              <section aria-labelledby="ot-function-concentration-title"><h4 id="ot-function-concentration-title">By Function</h4><div className="ot-table-wrap"><table className="ot-analytics-table"><caption>Approved Actual workload share by Function</caption><thead><tr><th scope="col">Function</th><th scope="col">Hours</th><th scope="col">Share</th></tr></thead><tbody>{analytics.byFunction.length ? analytics.byFunction.map(row => <tr key={row.key}><th scope="row">{OT_FUNCTIONS.find(option => option.value === row.key)?.label || row.key.toUpperCase()}</th><td>{formatOtHours(row.actualMinutes)}</td><td>{Math.round(row.share * 100)}%</td></tr>) : <tr><td colSpan="3">No approved Actual workload.</td></tr>}</tbody></table></div></section>
-              <section aria-labelledby="ot-assignment-concentration-title"><h4 id="ot-assignment-concentration-title">By assignment / event</h4><div className="ot-table-wrap"><table className="ot-analytics-table"><caption>Approved Actual workload share by operational assignment or event</caption><thead><tr><th scope="col">Assignment / event</th><th scope="col">Hours</th><th scope="col">Share</th></tr></thead><tbody>{analytics.byAssignment.length ? analytics.byAssignment.map(row => <tr key={row.key}><th scope="row">{row.label}</th><td>{formatOtHours(row.actualMinutes)}</td><td>{Math.round(row.share * 100)}%</td></tr>) : <tr><td colSpan="3">No approved Actual workload.</td></tr>}</tbody></table></div></section>
-            </div>
-          </article>
-        </section>
         <section className="ot-root-summary" aria-label="Root cause summary"><div><span>Planned share</span><strong>{totalActual ? `${Math.round((plannedMinutes / totalActual) * 100)}%` : "0%"}</strong></div><div><span>Emergency share</span><strong>{totalActual ? `${Math.round((emergencyMinutes / totalActual) * 100)}%` : "0%"}</strong></div><div><span>Plan / actual variance</span><strong>{window.FlowMateOtRequestDomain.formatSignedHours(totalActual - totalPlanned)}</strong></div><div><span>Recurring weeks</span><strong>{recurringWeeks}</strong></div></section>
         <section className="ot-root-grid"><article className="ot-root-card"><h3>{OT_ROOT_CAUSE_LABELS[0]}</h3>{Object.entries(functionTotals).sort((left, right) => left[0].localeCompare(right[0])).map(([functionCode, minutes]) => <div className="ot-root-bar" key={functionCode}><span>{OT_FUNCTIONS.find(option => option.value === functionCode)?.label || functionCode.toUpperCase()}</span><div><i style={{ width: `${totalActual ? Math.max(4, Math.round((minutes / totalActual) * 100)) : 0}%` }} /></div><strong>{formatOtHours(minutes)}</strong></div>)}</article><article className="ot-root-card"><h3>{OT_ROOT_CAUSE_LABELS[1]}</h3>{Object.entries(reasonTotals).sort((left, right) => right[1] - left[1]).map(([reasonCode, minutes]) => <div className="ot-root-bar" key={reasonCode}><span>{window.FlowMateOtRequestDomain.REASON_OPTIONS.find(reason => reason.key === reasonCode)?.label || getOtStatusLabel(reasonCode)}</span><div><i style={{ width: `${totalActual ? Math.max(4, Math.round((minutes / totalActual) * 100)) : 0}%` }} /></div><strong>{formatOtHours(minutes)}</strong></div>)}</article></section>
-        <section className="ot-insights" aria-label="Deterministic OT insights"><div className="ot-section-head"><h3>Five approved operational checks</h3><span>{insights.length} signal{insights.length === 1 ? "" : "s"}</span></div>{!insights.length ? <div className="ot-state ot-state--compact">No deterministic rule is triggered by the confirmed rows in this scope.</div> : insights.map((insight, index) => <article className="ot-insight" key={`${insight.key}:${index}`}><div><strong>{insightCopy[insight.key] || insight.message}</strong><small>{insight.message}</small></div><button type="button" className="btn btn--sm btn--secondary" onClick={() => setSelectedInsight(insight)}>View authorized rows</button></article>)}</section>
+        <section className="ot-insights" aria-label="Deterministic OT insights"><div className="ot-section-head"><h3>Approved operational checks</h3><span>{insights.length} signal{insights.length === 1 ? "" : "s"}</span></div>{!insights.length ? <div className="ot-state ot-state--compact">No deterministic rule is triggered by the confirmed rows in this scope.</div> : insights.map((insight, index) => <article className="ot-insight" key={`${insight.key}:${index}`}><div><strong>{insightCopy[insight.key] || insight.message}</strong><small>{insight.message}</small></div><button type="button" className="btn btn--sm btn--secondary" onClick={() => setSelectedInsightState({ filterKey, insight })}>View authorized rows</button></article>)}</section>
       </>}
-      {selectedInsight && <section className="ot-manager-detail" aria-label="Authorized root cause drill-down"><div className="ot-section-head"><h3>Authorized operational rows behind this signal</h3><button type="button" className="btn btn--ghost" onClick={() => setSelectedInsight(null)}>Close</button></div><p className="muted">Current filters stay applied. Only operational facts already returned by the assigned-scope manager RPC are shown; employee identities are omitted.</p>{selectedRows.map(request => <article className="ot-insight-row" key={request.id}><div><strong>{request.title}</strong><small>{String(request.functionCode || "unassigned").toUpperCase()} · {getOtStatusLabel(request.reasonCode)} · {request.weekStarts.map(formatOtDate).join(", ")}</small></div><span>{formatOtHours(request.actualMinutes)}</span></article>)}</section>}
+      {selectedInsight && <section className="ot-manager-detail" aria-label="Authorized root cause drill-down"><div className="ot-section-head"><h3>Authorized operational rows behind this signal</h3><button type="button" className="btn btn--ghost" onClick={() => setSelectedInsightState(null)}>Close</button></div><p className="muted">Current filters stay applied. Only operational facts already returned by the assigned-scope manager RPC are shown; employee identities are omitted.</p>{selectedRows.map(request => <article className="ot-insight-row" key={request.id}><div><strong>{request.title}</strong><small>{String(request.functionCode || "unassigned").toUpperCase()} · {getOtStatusLabel(request.reasonCode)} · {request.weekStarts.map(formatOtDate).join(", ")}</small></div><span>{formatOtHours(request.actualMinutes)}</span></article>)}</section>}
     </section>
   );
 }
