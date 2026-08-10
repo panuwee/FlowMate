@@ -11,7 +11,7 @@ For an existing Workgrid database, run only:
 
 Choose Run without RLS. The installer enables RLS, revokes direct writes, exposes authenticated RPCs, and seeds OT roles only for matching existing users. Production execution is a separate manual step and is not proven by local tests.
 
-`ot_set_system_role` keeps the sole OT Owner fixed to `panuwee.w@garena.com` and permits `hr_admin` assignment only for `nithidol.k@garena.com`, `weerayut@garena.com`, or `napol.a@garena.com`. The read-only verifier confirms that the deployed RPC contains this server-side guard and reports any active HR Admin role outside the approved MVP identities.
+`ot_set_system_role` keeps the sole OT Owner fixed to `panuwee.w@garena.com` and permits `hr_admin` activation only for `nithidol.k@garena.com`, `weerayut@garena.com`, or `napol.a@garena.com`. The Owner may deactivate an unauthorized currently assigned HR Admin through the same reason-required, audited RPC. The read-only verifier confirms that the deployed RPC contains the complete activation-only server guard and reports any active HR Admin role outside the approved MVP identities.
 
 The OT request installer stores the consent statement version on each occurrence. Employee-created requests require `consentStatementVersion` in `ot_create_request`; event consent uses `ot_record_consent(uuid, boolean, text, uuid)` and stores the version for either accept or decline. The installer removes the legacy three-argument consent signature so version capture cannot be bypassed.
 

@@ -1864,6 +1864,7 @@ begin
     raise exception 'The only approved OT Owner identity is panuwee.w@garena.com';
   end if;
   if p_role_code = 'hr_admin'
+     and p_active = true
      and not public.ot_user_is_approved_approver_identity(p_user_id) then
     raise exception 'HR Admin must be one of the three approved MVP identities';
   end if;

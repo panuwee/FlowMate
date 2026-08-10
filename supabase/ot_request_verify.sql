@@ -153,10 +153,9 @@ where a.active = true
 
 select
   'OT HR Admin assignment allowlist guard (Expected = true)' as check_name,
-  pg_catalog.position(
-    'ot_user_is_approved_approver_identity(p_user_id)'
-    in pg_catalog.pg_get_functiondef(p.oid)
-  ) > 0 as has_approved_identity_guard
+  pg_catalog.pg_get_functiondef(p.oid) ~
+    'if[[:space:]]+p_role_code = ''hr_admin''[[:space:]]+and p_active = true[[:space:]]+and not public[.]ot_user_is_approved_approver_identity[(]p_user_id[)][[:space:]]+then[[:space:]]+raise exception ''HR Admin must be one of the three approved MVP identities'';[[:space:]]+end if;'
+    as guard_matches_contract
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'

@@ -36,6 +36,11 @@ describe("OT Request backend contract", () => {
     expect(verify).toContain("Expected OT Owner seed count = 1");
     expect(verify).toContain("Expected active approver seed count = 3");
     expect(verify).toContain("OT HR Admin assignment allowlist guard (Expected = true)");
+    expect(verify).toContain("p_role_code = ''hr_admin''");
+    expect(verify).toContain("p_active = true");
+    expect(verify).toContain("not public[.]ot_user_is_approved_approver_identity[(]p_user_id[)]");
+    expect(verify).toContain("HR Admin must be one of the three approved MVP identities");
+    expect(verify).toContain("as guard_matches_contract");
     expect(verify).toContain("Unauthorized active HR Admin assignments (Expected = 0)");
   });
 
@@ -145,15 +150,30 @@ describe("OT Request backend contract", () => {
     expect(setRole).toMatch(/if not exists \([\s\S]*join public\.users owner_user[\s\S]*panuwee\.w@garena\.com[\s\S]*At least one active approved OT Owner/);
   });
 
-  it("rejects HR admin role assignment outside the approved MVP identities", () => {
+  it("rejects unauthorized HR admin activation at the server boundary", () => {
     const setRole = functionSql(sql, "ot_set_system_role");
 
     expect(setRole).toMatch(
-      /p_role_code = 'hr_admin'[\s\S]*not public\.ot_user_is_approved_approver_identity\(p_user_id\)[\s\S]*raise exception 'HR Admin must be one of the three approved MVP identities'/,
+      /if p_role_code = 'hr_admin'\s+and p_active = true\s+and not public\.ot_user_is_approved_approver_identity\(p_user_id\) then\s+raise exception 'HR Admin must be one of the three approved MVP identities'/,
     );
     expect(setRole.indexOf("p_role_code = 'hr_admin'")).toBeLessThan(
       setRole.indexOf("public.ot_lock_idempotency('set_system_role', p_idempotency_key)"),
     );
+  });
+
+  it("permits unauthorized HR admin deactivation through the audited role path", () => {
+    const setRole = functionSql(sql, "ot_set_system_role");
+
+    expect(setRole).toMatch(/if p_role_code = 'hr_admin'\s+and p_active = true\s+and not public\.ot_user_is_approved_approver_identity/);
+    expect(setRole).toMatch(/insert into public\.ot_system_roles[\s\S]*values \(p_user_id, p_role_code, p_active\)[\s\S]*v_actor_id, 'set_system_role', v_result, pg_catalog\.btrim\(p_reason\), p_idempotency_key/);
+  });
+
+  it("keeps approved HR admin activation and deactivation on the audited role path", () => {
+    const setRole = functionSql(sql, "ot_set_system_role");
+
+    expect(setRole).toMatch(/p_active = true\s+and not public\.ot_user_is_approved_approver_identity\(p_user_id\)/);
+    expect(setRole).toContain("'active', p_active");
+    expect(setRole).toContain("v_actor_id, 'set_system_role', v_result, pg_catalog.btrim(p_reason), p_idempotency_key");
   });
 
   it("acquires export employee-week locks in one global order before row locks", () => {
