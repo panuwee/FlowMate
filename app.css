@@ -3944,6 +3944,53 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .ot-insights { display: grid; gap: var(--s-3); }
 .ot-insights .ot-section-head { margin-bottom: 0; }
 .ot-insight-row { margin-top: var(--s-2); }
+.ot-owner,
+.ot-compliance,
+.ot-export { display: grid; gap: var(--s-5); margin-top: var(--s-5); }
+.ot-owner__destinations { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-3); }
+.ot-queue-list,
+.ot-compliance__weeks,
+.ot-audit__timeline,
+.ot-access__list,
+.ot-export__review { display: grid; gap: var(--s-3); }
+.ot-queue-item.is-selected { border-color: var(--garena-red); box-shadow: var(--shadow-focus); }
+.ot-compliance__review { display: grid; gap: var(--s-4); }
+.ot-compliance__weeks h3,
+.ot-export__review h3 { margin: 0; font-size: 15px; }
+.ot-compliance__weeks article,
+.ot-access__owner,
+.ot-access__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  border: var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--garena-bg);
+}
+.ot-compliance__weeks article > div:last-child { min-width: 190px; text-align: right; }
+.ot-compliance__weeks small,
+.ot-access__owner small,
+.ot-access__row small { display: block; margin-top: 3px; color: var(--garena-grey); }
+.ot-audit { display: grid; gap: var(--s-4); margin-top: var(--s-5); }
+.ot-audit__lookup,
+.ot-audit__filters { display: grid; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); align-items: end; gap: var(--s-3); }
+.ot-audit__timeline { margin: 0; padding: 0; list-style: none; }
+.ot-audit__timeline > li { padding: var(--s-4); border: var(--border-hairline); border-radius: var(--radius-sm); background: var(--garena-bg); }
+.ot-audit__timeline time { color: var(--garena-grey); font-size: 12px; }
+.ot-audit__timeline small { display: block; margin-top: 3px; color: var(--garena-grey); }
+.ot-audit__status { display: flex; align-items: center; gap: var(--s-2); margin: var(--s-3) 0; }
+.ot-audit__status span { padding: 3px 8px; border-radius: 99px; background: var(--garena-badge-bg); font-size: 11px; font-weight: var(--weight-bold); }
+.ot-audit__timeline dl { display: grid; gap: var(--s-2); margin: 0; }
+.ot-audit__timeline dl > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--s-3); }
+.ot-audit__timeline dt { color: var(--garena-grey); font-size: 11px; }
+.ot-audit__timeline dd { margin: 0; overflow-wrap: anywhere; }
+.ot-export__table { min-width: 1060px; }
+.ot-export__table input { width: 16px; height: 16px; accent-color: var(--garena-red); }
+.ot-export__review ul { margin: 0; padding-left: 20px; color: var(--garena-iron); }
+.ot-access { display: grid; gap: var(--s-4); margin-top: var(--s-5); }
+.ot-access__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--s-2); }
 
 @media (max-width: 760px) {
   .ot-shell {
@@ -4007,11 +4054,21 @@ html[data-theme="dark"] .product-book-cms__message--error {
   .ot-queue-grid,
   .ot-root-grid,
   .ot-root-summary,
-  .ot-participant-grid { grid-template-columns: 1fr; }
+  .ot-participant-grid,
+  .ot-owner__destinations,
+  .ot-audit__lookup,
+  .ot-audit__filters { grid-template-columns: 1fr; }
   .ot-manager-actions { align-items: stretch; flex-direction: column; }
   .ot-manager-actions .btn { width: 100%; }
   .ot-queue__head,
   .ot-event-preview__row,
   .ot-insight { align-items: flex-start; flex-direction: column; }
   .ot-event-preview__row > div:last-child { justify-items: start; }
+  .ot-compliance__weeks article,
+  .ot-access__owner,
+  .ot-access__row { align-items: flex-start; flex-direction: column; }
+  .ot-compliance__weeks article > div:last-child { min-width: 0; width: 100%; text-align: left; }
+  .ot-audit__timeline dl > div { grid-template-columns: 1fr; gap: 3px; }
+  .ot-access__actions { width: 100%; justify-content: stretch; }
+  .ot-access__actions .btn { flex: 1 1 150px; }
 }

@@ -3,6 +3,11 @@ const OT_REQUEST_VIEW_ROUTES = {
   "my-requests": "ot-request/my-requests",
   manager: "ot-request/manager",
   "root-causes": "ot-request/root-causes",
+  owner: "ot-request/owner",
+  compliance: "ot-request/compliance",
+  audit: "ot-request/audit",
+  access: "ot-request/access",
+  export: "ot-request/export",
 };
 
 function getOtRequestHashView() {
@@ -13,12 +18,20 @@ function getOtRequestHashView() {
 
 function canOpenOtRequestView(view, access) {
   if (view === "overview" || view === "my-requests") return true;
-  return Boolean(access && (access.isEligibleApprover || access.isOwner || access.isHrAdmin));
+  if (!access) return false;
+  if (view === "owner" || view === "access") return Boolean(access.isOwner);
+  if (view === "compliance" || view === "audit" || view === "export") return Boolean(access.isOwner || access.isHrAdmin);
+  return Boolean(access.isEligibleApprover || access.isOwner || access.isHrAdmin);
 }
 
 const OT_LIMIT_MINUTES = 36 * 60;
 const OT_CONSENT_STATEMENT_VERSION = "2026-08-07";
 const OT_DETAIL_REQUIRED_REASONS = new Set(["other", "live_incident", "rework", "scope_change"]);
+const OT_APPROVED_APPROVER_EMAILS = new Set([
+  "nithidol.k@garena.com",
+  "weerayut@garena.com",
+  "napol.a@garena.com",
+]);
 
 function otValue(record, camel, snake) {
   return record && (record[camel] !== undefined ? record[camel] : record[snake]);
@@ -824,7 +837,7 @@ function applyOtManagerFilters(rows, filters, employeeTotals) {
   });
 }
 
-function OtManagerDashboard({ access, rootCauseOnly = false }) {
+function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 }) {
   const [weekStart, setWeekStart] = useStateApp(getCurrentOtWeekStart);
   const [functionFilter, setFunctionFilter] = useStateApp("");
   const [filters, setFilters] = useStateApp({ eventPlanId: "", reasonCode: "", status: "", nearLimit: false });
@@ -857,7 +870,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false }) {
       if (alive) setLoadState(current => ({ ...current, status: "error", message: error.message || "Assigned OT could not be loaded." }));
     });
     return () => { alive = false; };
-  }, [weekStart, functionFilter, refreshKey, rootCauseOnly]);
+  }, [weekStart, functionFilter, refreshKey, refreshToken, rootCauseOnly]);
 
   useEffectApp(() => {
     if (loadState.status === "error" && errorRef.current) errorRef.current.focus();
@@ -886,6 +899,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false }) {
     .filter(request => (currentEmployeeTotals[getOtManagerEmployeeId(request)]?.countedMinutes || 0) >= 30 * 60)
     .map(getOtManagerEmployeeId)).size;
   const metricValues = [formatOtHours(plannedMinutes), formatOtHours(confirmedMinutes), String(needsApproval), String(nearLimit)];
+  const hasFullScope = Boolean(access.isOwner || access.isHrAdmin);
 
   if (loadState.status === "loading" && !loadState.rows.length) {
     return <div className="ot-state" role="status">Loading assigned OT operations…</div>;
@@ -896,10 +910,10 @@ function OtManagerDashboard({ access, rootCauseOnly = false }) {
 
   return (
     <div className="ot-manager">
-      <section className="ot-manager-scope" aria-label="Manager data scope"><strong>Assigned teams/events only</strong><span>Rows come from the server-authorized manager scope. Filters never widen access.</span></section>
+      <section className="ot-manager-scope" aria-label="Manager data scope"><strong>{hasFullScope ? "All Functions — server-authorized OT scope" : "Assigned teams/events only"}</strong><span>{hasFullScope ? "Named rows are returned by the OT Owner or HR/Admin server scope." : "Rows come from the server-authorized manager scope."} Filters never widen access.</span></section>
       <section className="ot-manager-filters" aria-label="OT filters">
         <label className="field"><span className="field__label">Week</span><input className="input" type="date" value={weekStart} onChange={event => setWeekStart(window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value))} /></label>
-        <label className="field"><span className="field__label">Function</span><select className="select" value={functionFilter} onChange={event => setFunctionFilter(event.target.value)}><option value="">All assigned Functions</option>{OT_FUNCTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+        <label className="field"><span className="field__label">Function</span><select className="select" value={functionFilter} onChange={event => setFunctionFilter(event.target.value)}><option value="">{hasFullScope ? "All Functions" : "All assigned Functions"}</option>{OT_FUNCTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         <label className="field"><span className="field__label">Event</span><select className="select" value={filters.eventPlanId} onChange={event => updateFilter("eventPlanId", event.target.value)}><option value="">All events / requests</option><option value="individual">Individual requests</option>{eventOptions.map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
         <label className="field"><span className="field__label">Reason</span><select className="select" value={filters.reasonCode} onChange={event => updateFilter("reasonCode", event.target.value)}><option value="">All reasons</option>{window.FlowMateOtRequestDomain.REASON_OPTIONS.map(reason => <option key={reason.key} value={reason.key}>{reason.label}</option>)}</select></label>
         <label className="field"><span className="field__label">Status</span><select className="select" value={filters.status} onChange={event => updateFilter("status", event.target.value)}><option value="">All statuses</option>{statusOptions.map(status => <option key={status} value={status}>{getOtStatusLabel(status)}</option>)}</select></label>
@@ -915,7 +929,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false }) {
           <section className="ot-metric-grid ot-metric-grid--manager" aria-label="Assigned weekly OT summary">{OT_MANAGER_METRIC_LABELS.map((label, index) => <section className="ot-metric" key={label}><span>{label}</span><strong>{metricValues[index]}</strong></section>)}</section>
           <div className="ot-manager-actions">
             {access.isEligibleApprover && <button type="button" className="btn btn--primary" onClick={() => setShowEventForm(value => !value)}>{showEventForm ? "Close event plan" : "Create Event OT plan"}</button>}
-            <button type="button" className="btn btn--secondary" onClick={() => setRefreshKey(value => value + 1)}>Refresh assigned scope</button>
+            <button type="button" className="btn btn--secondary" onClick={() => setRefreshKey(value => value + 1)}>Refresh {hasFullScope ? "OT scope" : "assigned scope"}</button>
           </div>
           {showEventForm && <section className="ot-workflow"><div className="ot-workflow__head"><h2>Shared Event OT plan</h2></div><OtEventPlanForm access={access} onSuccess={() => setRefreshKey(value => value + 1)} /></section>}
           <OtApprovalQueue access={access} requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={loadState.peopleById} onChanged={() => setRefreshKey(value => value + 1)} />
@@ -1353,6 +1367,325 @@ function OtRootCausePanel({ filteredRows, currentWeekStart, peopleById }) {
   );
 }
 
+function formatOtDateTime(value) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function OtAuditTimeline({ requestId: providedRequestId = "", refreshKey = 0 }) {
+  const [requestIdInput, setRequestIdInput] = useStateApp("");
+  const [submittedRequestId, setSubmittedRequestId] = useStateApp("");
+  const [filters, setFilters] = useStateApp({ query: "", action: "" });
+  const [loadState, setLoadState] = useStateApp({ status: "idle", rows: [], message: "" });
+  const requestId = providedRequestId || submittedRequestId;
+
+  useEffectApp(() => {
+    if (!requestId) {
+      setLoadState({ status: "idle", rows: [], message: "" });
+      return undefined;
+    }
+    let alive = true;
+    setLoadState(current => ({ ...current, status: "loading", message: "" }));
+    window.loadOtRequestAudit(requestId).then(rows => {
+      if (alive) setLoadState({ status: "ready", rows: Array.isArray(rows) ? rows : [], message: "" });
+    }).catch(error => {
+      if (alive) setLoadState({ status: "error", rows: [], message: error.message || "OT audit could not be loaded." });
+    });
+    return () => { alive = false; };
+  }, [requestId, refreshKey]);
+
+  const normalizedRows = loadState.rows.map(row => ({
+    ...row,
+    actorUserId: otValue(row, "actorUserId", "actor_user_id") || "Unknown actor",
+    action: otValue(row, "action", "action") || "unknown_action",
+    oldStatus: otValue(row, "oldStatus", "old_status") || "—",
+    newStatus: otValue(row, "newStatus", "new_status") || "—",
+    changedFields: otValue(row, "changedFields", "changed_fields") || {},
+    note: otValue(row, "note", "note") || "—",
+    createdAt: otValue(row, "createdAt", "created_at"),
+  }));
+  const actionOptions = Array.from(new Set(normalizedRows.map(row => row.action))).sort();
+  const query = filters.query.trim().toLowerCase();
+  const visibleRows = normalizedRows.filter(row => {
+    const haystack = [row.actorUserId, row.action, row.oldStatus, row.newStatus, row.note, row.createdAt, JSON.stringify(row.changedFields)].join(" ").toLowerCase();
+    return (!filters.action || row.action === filters.action) && (!query || haystack.includes(query));
+  });
+
+  function submitRequestId(event) {
+    event.preventDefault();
+    setSubmittedRequestId(requestIdInput.trim());
+  }
+
+  return (
+    <section className="ot-audit ot-list" aria-label="Read-only OT request audit">
+      <div className="ot-section-head"><div><h2>Immutable audit trail</h2><p className="muted">Read-only actor, action, status, field, reason, and timestamp history returned by the authorized audit RPC.</p></div>{requestId && <span>{requestId}</span>}</div>
+      {!providedRequestId && <form className="ot-audit__lookup" onSubmit={submitRequestId}><label className="field"><span className="field__label">Request ID</span><input className="input" value={requestIdInput} onChange={event => setRequestIdInput(event.target.value)} placeholder="Paste an authorized OT request ID" required /></label><button type="submit" className="btn btn--secondary">Load audit</button></form>}
+      {requestId && <section className="ot-audit__filters" aria-label="Audit filters"><label className="field"><span className="field__label">Search actor, reason, or changed field</span><input className="input" type="search" value={filters.query} onChange={event => setFilters(current => ({ ...current, query: event.target.value }))} /></label><label className="field"><span className="field__label">Action</span><select className="select" value={filters.action} onChange={event => setFilters(current => ({ ...current, action: event.target.value }))}><option value="">All actions</option>{actionOptions.map(action => <option key={action} value={action}>{getOtStatusLabel(action)}</option>)}</select></label></section>}
+      {loadState.status === "loading" && <div className="ot-state ot-state--compact" role="status">Loading immutable audit entries…</div>}
+      {loadState.status === "error" && <OtWarning kind="error" message={loadState.message} />}
+      {loadState.status === "idle" && <div className="ot-state ot-state--compact">Choose a request from compliance review, or enter an authorized request ID.</div>}
+      {loadState.status === "ready" && !visibleRows.length && <div className="ot-state ot-state--compact">No audit entries match the current filters.</div>}
+      {loadState.status === "ready" && !!visibleRows.length && <ol className="ot-audit__timeline">{visibleRows.map(row => <li key={row.id}><div className="ot-section-head"><div><strong>{getOtStatusLabel(row.action)}</strong><small>Actor {row.actorUserId}</small></div><time dateTime={row.createdAt}>{formatOtDateTime(row.createdAt)}</time></div><div className="ot-audit__status"><span>{getOtStatusLabel(row.oldStatus)}</span><b aria-hidden="true">→</b><span>{getOtStatusLabel(row.newStatus)}</span></div><dl><div><dt>Changed fields</dt><dd>{Object.keys(row.changedFields).length ? JSON.stringify(row.changedFields) : "No field payload"}</dd></div><div><dt>Reason / note</dt><dd>{row.note}</dd></div></dl></li>)}</ol>}
+    </section>
+  );
+}
+
+function OtComplianceQueue({ refreshKey = 0, onChanged }) {
+  const [weekStart, setWeekStart] = useStateApp("");
+  const [localRefreshKey, setLocalRefreshKey] = useStateApp(0);
+  const [loadState, setLoadState] = useStateApp({ status: "loading", rows: [], peopleById: {}, weeklyTotals: {}, message: "" });
+  const [selected, setSelected] = useStateApp(null);
+  const [outcome, setOutcome] = useStateApp("");
+  const [note, setNote] = useStateApp("");
+  const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
+
+  useEffectApp(() => {
+    let alive = true;
+    setLoadState(current => ({ ...current, status: "loading", message: "" }));
+    Promise.all([window.loadOtComplianceQueue(weekStart || null), window.loadOtPeopleForEvent()]).then(async ([queue, people]) => {
+      const rows = Array.isArray(queue) ? queue : [];
+      const weeks = Array.from(new Set(rows.flatMap(row => getOtWeekSegments(row, "actual").map(segment => segment.weekStart)).filter(Boolean))).sort();
+      const dashboards = await Promise.all(weeks.map(affectedWeek => window.loadOtManagerDashboard(affectedWeek, null)));
+      if (!alive) return;
+      const normalized = dashboards.flatMap((dashboard, index) => (Array.isArray(dashboard?.requests) ? dashboard.requests : []).map(row => normalizeOtManagerRow(row, weeks[index])));
+      const peopleById = (Array.isArray(people) ? people : []).reduce((lookup, person) => ({ ...lookup, [person.userId]: person }), {});
+      const weeklyTotals = getOtManagerTotals(normalized, true);
+      setLoadState({ status: "ready", rows, peopleById, weeklyTotals, message: "" });
+      setSelected(current => rows.find(row => row.id === current?.id) || null);
+    }).catch(error => {
+      if (alive) setLoadState(current => ({ ...current, status: "error", message: error.message || "Compliance queue could not be loaded." }));
+    });
+    return () => { alive = false; };
+  }, [weekStart, localRefreshKey, refreshKey]);
+
+  function openReview(request) {
+    setSelected(request);
+    setOutcome("");
+    setNote("");
+    setActionState({ status: "idle", message: "" });
+  }
+
+  async function submitReview() {
+    if (!selected || actionState.status === "submitting") return;
+    if (!outcome || !note.trim()) {
+      setActionState({ status: "error", message: "Outcome and review note are required." });
+      return;
+    }
+    setActionState({ status: "submitting", message: "Saving the compliance outcome and immutable audit entry…" });
+    try {
+      await window.reviewOtCompliance(selected.id, outcome, note.trim(), crypto.randomUUID());
+      setActionState({ status: "success", message: "Compliance review saved. Dashboard, audit, and HR-ready data are refreshing." });
+      setLocalRefreshKey(value => value + 1);
+      if (onChanged) onChanged();
+    } catch (error) {
+      setActionState({ status: "error", message: error.message || "Compliance review could not be saved." });
+    }
+  }
+
+  const actualStartAt = selected && otValue(selected, "actualStartAt", "actual_start_at");
+  const actualEndAt = selected && otValue(selected, "actualEndAt", "actual_end_at");
+  const plannedStartAt = selected && otValue(selected, "plannedStartAt", "planned_start_at");
+  const plannedEndAt = selected && otValue(selected, "plannedEndAt", "planned_end_at");
+  const actualMinutes = Number(selected && otValue(selected, "actualMinutes", "actual_minutes") || 0);
+  const plannedMinutes = Number(selected && otValue(selected, "plannedMinutes", "planned_minutes") || 0);
+  const actualWeekSegments = selected ? getOtWeekSegments(selected, "actual") : [];
+  const actualVarianceReason = selected && otValue(selected, "actualVarianceReason", "actual_variance_reason");
+  const actualDecision = selected && otValue(selected, "actualDecision", "actual_decision");
+  const actualDecisionNote = selected && otValue(selected, "actualDecisionNote", "actual_decision_note");
+  const selectedEmployeeId = selected && getOtManagerEmployeeId(selected);
+  const weeklyTotals = actualWeekSegments.map(segment => ({
+    weekStart: segment.weekStart,
+    occurrenceMinutes: Number(segment.minutes || 0),
+    actualMinutes: loadState.weeklyTotals[`${selectedEmployeeId}:${segment.weekStart}`]?.actualMinutes || 0,
+    projectedMinutes: loadState.weeklyTotals[`${selectedEmployeeId}:${segment.weekStart}`]?.countedMinutes || 0,
+  }));
+
+  return (
+    <div className="ot-compliance">
+      <section className="ot-toolbar"><label className="field"><span className="field__label">Affected week (optional)</span><input className="input" type="date" value={weekStart} onChange={event => setWeekStart(event.target.value ? window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value) : "")} /></label><button type="button" className="btn btn--secondary" onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh compliance</button></section>
+      <section className="ot-list" aria-label="Compliance review queue"><div className="ot-section-head"><div><h2>Compliance review</h2><p className="muted">Truthful actual time is read-only. Review records an outcome and note; it never rewrites worked hours.</p></div><span>{loadState.rows.length} case{loadState.rows.length === 1 ? "" : "s"}</span></div>{loadState.status === "loading" && <div className="ot-state" role="status">Loading compliance cases…</div>}{loadState.status === "error" && <OtWarning kind="error" message={loadState.message} />}{loadState.status === "ready" && !loadState.rows.length && <div className="ot-state">No records currently require compliance review.</div>}{loadState.status === "ready" && !!loadState.rows.length && <div className="ot-queue-list">{loadState.rows.map(request => <button key={request.id} type="button" className={`ot-queue-item ${selected?.id === request.id ? "is-selected" : ""}`} onClick={() => openReview(request)}><span><strong>{request.title}</strong><small>{getOtManagerEmployeeName(request, loadState.peopleById)} · {String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</small></span><span className="ot-status ot-status--compliance_review_required">Review</span></button>)}</div>}</section>
+      {selected && <section className="ot-compliance__review ot-workflow" aria-label="Compliance evidence and decision"><div className="ot-section-head"><div><h2>{selected.title}</h2><p className="muted">Request {selected.id}</p></div><button type="button" className="btn btn--ghost" onClick={() => setSelected(null)}>Close</button></div><div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selected, loadState.peopleById)}</strong></div><div><span>Plan</span><strong>{formatOtDateTime(plannedStartAt)} → {formatOtDateTime(plannedEndAt)}</strong><small>{formatOtHours(plannedMinutes)}</small></div><div><span>Truthful actual</span><strong>{formatOtDateTime(actualStartAt)} → {formatOtDateTime(actualEndAt)}</strong><small>{formatOtHours(actualMinutes)}</small></div><div><span>Signed variance</span><strong>{window.FlowMateOtRequestDomain.formatSignedHours(actualMinutes - plannedMinutes)}</strong></div><div><span>Employee explanation</span><strong>{actualVarianceReason || "Not provided"}</strong></div><div><span>Manager decision / note</span><strong>{getOtStatusLabel(actualDecision || "pending")} · {actualDecisionNote || "Not provided"}</strong></div></div><section className="ot-compliance__weeks" aria-label="Affected week totals"><h3>Affected week totals</h3>{weeklyTotals.map(row => <article key={row.weekStart}><div><strong>Week of {formatOtDate(row.weekStart)}</strong><small>This occurrence: {formatOtHours(row.occurrenceMinutes)}</small></div><div><strong>Actual {formatOtHours(row.actualMinutes)} / 36h</strong><small>Projected / counted: {formatOtHours(row.projectedMinutes)}</small><OtLimitProgress totalMinutes={row.actualMinutes} /></div></article>)}</section><OtWarning kind="critical" title="Actual hours are immutable" message="Record the compliance outcome against the truthful worked time. Do not ask the employee to reduce actual hours to fit the weekly limit." /><div className="form-grid"><label className="field"><span className="field__label">Outcome *</span><select className="select" value={outcome} onChange={event => setOutcome(event.target.value)} required><option value="">Select outcome</option><option value="approved">Approved</option><option value="cleared">Cleared</option><option value="action_required">Action required</option><option value="rejected">Rejected</option></select></label><label className="field field--full"><span className="field__label">Compliance review note *</span><textarea className="textarea" value={note} onChange={event => setNote(event.target.value)} required placeholder="Record the evidence, decision, and follow-up." /></label></div><div className="ot-form__actions"><button type="button" className="btn btn--primary" disabled={!outcome || !note.trim() || actionState.status === "submitting"} onClick={submitReview}>{actionState.status === "submitting" ? "Saving review…" : "Save compliance review"}</button></div>{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}<OtAuditTimeline requestId={selected.id} refreshKey={localRefreshKey + refreshKey} /></section>}
+    </div>
+  );
+}
+
+function downloadOtHrCsv(csv, batchName) {
+  const safeName = String(batchName || "ot-hr-export").trim().replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "ot-hr-export";
+  const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  try {
+    link.href = url;
+    link.download = `${safeName}.csv`;
+    link.hidden = true;
+    document.body.appendChild(link);
+    link.click();
+    return true;
+  } finally {
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+}
+
+function OtHrExportPanel({ refreshKey = 0, onChanged }) {
+  const [weekStart, setWeekStart] = useStateApp("");
+  const [localRefreshKey, setLocalRefreshKey] = useStateApp(0);
+  const [loadState, setLoadState] = useStateApp({ status: "loading", rows: [], message: "" });
+  const [selectedIds, setSelectedIds] = useStateApp([]);
+  const [batchName, setBatchName] = useStateApp("");
+  const [reviewing, setReviewing] = useStateApp(false);
+  const [confirmed, setConfirmed] = useStateApp(false);
+  const [intent, setIntent] = useStateApp(() => ({ key: crypto.randomUUID(), signature: "", downloaded: false }));
+  const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
+
+  useEffectApp(() => {
+    let alive = true;
+    setLoadState(current => ({ ...current, status: "loading", message: "" }));
+    window.loadOtHrReady(weekStart || null).then(rows => {
+      if (!alive) return;
+      const readyRows = Array.isArray(rows) ? rows : [];
+      const availableIds = new Set(readyRows.map(row => row.id));
+      setSelectedIds(current => current.filter(id => availableIds.has(id)));
+      setLoadState({ status: "ready", rows: readyRows, message: "" });
+    }).catch(error => {
+      if (alive) setLoadState({ status: "error", rows: [], message: error.message || "HR-ready OT could not be loaded." });
+    });
+    return () => { alive = false; };
+  }, [weekStart, localRefreshKey, refreshKey]);
+
+  function resetReview() {
+    setReviewing(false);
+    setConfirmed(false);
+    setIntent({ key: crypto.randomUUID(), signature: "", downloaded: false });
+    setActionState({ status: "idle", message: "" });
+  }
+
+  function toggleRequest(requestId) {
+    setSelectedIds(current => current.includes(requestId) ? current.filter(id => id !== requestId) : [...current, requestId]);
+    resetReview();
+  }
+
+  function changeBatchName(value) {
+    setBatchName(value);
+    resetReview();
+  }
+
+  const selectedRows = loadState.rows.filter(row => selectedIds.includes(row.id));
+  const selectionSignature = `${batchName.trim()}|${selectedIds.slice().sort().join("|")}`;
+
+  async function exportSelected() {
+    if (!confirmed || !batchName.trim() || !selectedRows.length || actionState.status === "submitting") return;
+    const currentIntent = intent.signature === selectionSignature
+      ? intent
+      : { key: crypto.randomUUID(), signature: selectionSignature, downloaded: false };
+    const intentKey = currentIntent.key;
+    setActionState({ status: "submitting", message: currentIntent.downloaded ? "Retrying the idempotent server export mark…" : "Creating the reviewed CSV…" });
+    let downloaded = currentIntent.downloaded;
+    if (!downloaded) {
+      const csv = window.FlowMateOtHrCsv.build(selectedRows);
+      downloaded = downloadOtHrCsv(csv, batchName.trim());
+      if (!downloaded) {
+        setActionState({ status: "error", message: "The browser did not create the local CSV. Server export status is unchanged." });
+        return;
+      }
+      setIntent({ ...currentIntent, downloaded: true });
+    }
+    try {
+      await window.markOtExported(selectedIds, batchName.trim(), intentKey);
+      setActionState({ status: "success", message: `${selectedIds.length} reviewed HR-ready record(s) were downloaded and marked exported.` });
+      setSelectedIds([]);
+      setBatchName("");
+      setReviewing(false);
+      setConfirmed(false);
+      setIntent({ key: crypto.randomUUID(), signature: "", downloaded: false });
+      setLocalRefreshKey(value => value + 1);
+      if (onChanged) onChanged();
+    } catch (error) {
+      setActionState({ status: "error", message: `The local CSV exists, but server export status remains unchanged. Retry the server mark with the same selection: ${error.message || "Export mark failed."}` });
+    }
+  }
+
+  return (
+    <div className="ot-export">
+      <section className="ot-toolbar"><label className="field"><span className="field__label">Affected week (optional)</span><input className="input" type="date" value={weekStart} onChange={event => { setWeekStart(event.target.value ? window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value) : ""); resetReview(); }} /></label><button type="button" className="btn btn--secondary" onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh HR-ready</button></section>
+      <section className="ot-list"><div className="ot-section-head"><div><h2>HR-ready export</h2><p className="muted">Select reviewed records explicitly. This export contains approved time facts only—no payroll calculation or rates.</p></div><span>{loadState.rows.length} ready</span></div>{loadState.status === "loading" && <div className="ot-state" role="status">Loading HR-ready records…</div>}{loadState.status === "error" && <OtWarning kind="error" message={loadState.message} />}{loadState.status === "ready" && !loadState.rows.length && <div className="ot-state">No records are currently HR-ready.</div>}{loadState.status === "ready" && !!loadState.rows.length && <div className="ot-table-wrap"><table className="tbl ot-table ot-export__table"><thead><tr><th scope="col">Select</th><th>Employee</th><th>Function</th><th>Assignment</th><th>Work date</th><th>Actual</th><th>Compliance</th></tr></thead><tbody>{loadState.rows.map(row => <tr key={row.id}><td><input type="checkbox" aria-label={`Select ${row.title}`} checked={selectedIds.includes(row.id)} onChange={() => toggleRequest(row.id)} /></td><td>{otValue(row, "employeeEmail", "employee_email")}</td><td>{String(otValue(row, "functionCode", "function_code") || "").toUpperCase()}</td><td><strong>{row.title}</strong><small>{row.id}</small></td><td>{formatOtDate(getOtBangkokParts(otValue(row, "actualStartAt", "actual_start_at")).date)}</td><td>{formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))}</td><td>{getOtStatusLabel(otValue(row, "complianceOutcome", "compliance_outcome") || "not_required")}</td></tr>)}</tbody></table></div>}</section>
+      <section className="ot-workflow" aria-label="HR export review"><div className="form-grid"><label className="field field--full"><span className="field__label">Export batch name *</span><input className="input" value={batchName} onChange={event => changeBatchName(event.target.value)} placeholder="Example: 2026-08 week 32 reviewed OT" /></label></div><p className="muted">{selectedIds.length} HR-ready record{selectedIds.length === 1 ? "" : "s"} selected.</p>{!reviewing ? <div className="ot-form__actions"><button type="button" className="btn btn--primary" disabled={!batchName.trim() || !selectedRows.length} onClick={() => setReviewing(true)}>Review export selection</button></div> : <section className="ot-export__review"><h3>Confirm reviewed selection</h3><ul>{selectedRows.map(row => <li key={row.id}>{otValue(row, "employeeEmail", "employee_email")} · {row.title} · {formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))}</li>)}</ul><label className="ot-consent"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span>I reviewed the exact records and understand they become immutable after the server marks this idempotent batch exported.</span></label><div className="ot-form__actions"><button type="button" className="btn btn--secondary" onClick={() => { setReviewing(false); setConfirmed(false); }}>Back</button><button type="button" className="btn btn--primary" disabled={!confirmed || actionState.status === "submitting"} onClick={exportSelected}>{intent.downloaded ? "Retry server export mark" : "Download CSV and mark exported"}</button></div></section>}{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}</section>
+    </div>
+  );
+}
+
+function OtAccessAdminPanel({ access }) {
+  const [refreshKey, setRefreshKey] = useStateApp(0);
+  const [directoryState, setDirectoryState] = useStateApp({ status: "loading", people: [], activeApproverIds: new Set(), message: "" });
+  const [reason, setReason] = useStateApp("");
+  const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
+
+  useEffectApp(() => {
+    if (!access.isOwner) return undefined;
+    let alive = true;
+    setDirectoryState(current => ({ ...current, status: "loading", message: "" }));
+    Promise.all([window.loadOtPeopleForEvent(), window.loadOtEligibleApprovers()]).then(([people, approvers]) => {
+      if (!alive) return;
+      const approvedPeople = (Array.isArray(people) ? people : []).filter(person => OT_APPROVED_APPROVER_EMAILS.has(String(person.email || "").trim().toLowerCase()));
+      setDirectoryState({ status: "ready", people: approvedPeople, activeApproverIds: new Set((Array.isArray(approvers) ? approvers : []).map(person => person.userId)), message: "" });
+    }).catch(error => {
+      if (alive) setDirectoryState({ status: "error", people: [], activeApproverIds: new Set(), message: error.message || "OT access directory could not be loaded." });
+    });
+    return () => { alive = false; };
+  }, [access.isOwner, refreshKey]);
+
+  async function applyApproverAccess(person, active) {
+    if (!reason.trim()) {
+      setActionState({ status: "error", message: "A written reason is required for every approver change." });
+      return;
+    }
+    setActionState({ status: "submitting", message: "Saving the audited approver change…" });
+    try {
+      await window.setOtApprover(person.userId, active, reason.trim(), crypto.randomUUID());
+      setActionState({ status: "success", message: "Approver access changed and audited." });
+      setReason("");
+      setRefreshKey(value => value + 1);
+    } catch (error) {
+      setActionState({ status: "error", message: error.message || "Approver access could not be changed." });
+    }
+  }
+
+  async function applyHrRole(person, active) {
+    if (!reason.trim()) {
+      setActionState({ status: "error", message: "A written reason is required for every HR/Admin role change." });
+      return;
+    }
+    setActionState({ status: "submitting", message: "Saving the audited OT role change…" });
+    try {
+      await window.setOtSystemRole(person.userId, "hr_admin", active, reason.trim(), crypto.randomUUID());
+      setActionState({ status: "success", message: "HR/Admin role instruction saved and audited. Refresh access context for the affected user." });
+      setReason("");
+    } catch (error) {
+      setActionState({ status: "error", message: error.message || "OT role could not be changed." });
+    }
+  }
+
+  if (!access.isOwner) return null;
+  return (
+    <section className="ot-access ot-list" aria-label="OT access administration"><div className="ot-section-head"><div><h2>OT access administration</h2><p className="muted">This panel is limited to the server-approved identities. It cannot add arbitrary users or widen permissions outside OT Request.</p></div><span>Owner only</span></div><article className="ot-access__owner"><div><strong>Sole OT Owner</strong><small>Identity resolved by the server access context · User {access.userId}</small></div><span className="ot-status">Protected active</span></article><label className="field"><span className="field__label">Required reason for the next change *</span><textarea className="textarea" value={reason} onChange={event => setReason(event.target.value)} placeholder="Explain the operational or compliance reason." /></label>{directoryState.status === "loading" && <div className="ot-state" role="status">Loading the fixed OT access list…</div>}{directoryState.status === "error" && <OtWarning kind="error" message={directoryState.message} />}{directoryState.status === "ready" && <div className="ot-access__list">{directoryState.people.map(person => { const isApprover = directoryState.activeApproverIds.has(person.userId); return <article key={person.userId} className="ot-access__row"><div><strong>{person.displayName || person.email}</strong><small>{person.email} · Approved MVP identity</small></div><div className="ot-access__actions"><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => applyApproverAccess(person, !isApprover)}>{isApprover ? "Disable approver" : "Enable approver"}</button><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => applyHrRole(person, true)}>Grant HR/Admin</button><button type="button" className="btn btn--sm btn--ghost" disabled={actionState.status === "submitting"} onClick={() => applyHrRole(person, false)}>Remove HR/Admin</button></div></article>; })}</div>}{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}<p className="muted">Normal plan and actual decisions remain assigned-approver only. This panel never impersonates an assigned approver.</p></section>
+  );
+}
+
+function OtOwnerDashboard({ access, onOpenView, refreshKey = 0 }) {
+  if (!access.isOwner) return null;
+  const destinations = [
+    { view: "compliance", label: "Compliance review", detail: "Review truthful over-limit actuals with an outcome and note." },
+    { view: "audit", label: "Audit search", detail: "Inspect immutable actor, change, reason, and status history." },
+    { view: "export", label: "HR-ready export", detail: "Review and export eligible non-payroll records." },
+    { view: "access", label: "Access administration", detail: "Manage only fixed OT identities with an audited reason." },
+  ];
+  return <div className="ot-owner"><section className="ot-manager-scope" aria-label="OT Owner data scope"><strong>OT Owner · All Functions and named OT records</strong><span>This full visibility comes from the server OT access context and does not widen any other Workgrid module.</span></section><section className="ot-owner__destinations" aria-label="OT Owner operations">{destinations.map(item => <button type="button" className="ot-action-card" key={item.view} onClick={() => onOpenView(item.view)}><strong>{item.label}</strong><small>{item.detail}</small></button>)}</section><OtManagerDashboard access={access} refreshToken={refreshKey} /></div>;
+}
+
 function OtRequestShell({
   user,
   currentUserName,
@@ -1367,6 +1700,7 @@ function OtRequestShell({
 }) {
   const [access, setAccess] = useStateApp({ status: "loading", canManage: false, canExport: false, isOwner: false });
   const [activeView, setActiveView] = useStateApp(getOtRequestHashView);
+  const [operationsRefreshKey, setOperationsRefreshKey] = useStateApp(0);
 
   useEffectApp(() => {
     let alive = true;
@@ -1435,6 +1769,31 @@ function OtRequestShell({
       title: "Root causes",
       detail: "Authorized managers can review structured overtime drivers here.",
     },
+    owner: {
+      eyebrow: "OT Owner",
+      title: "Owner operations",
+      detail: "Full named OT visibility across every Function, resolved and enforced by the OT server scope.",
+    },
+    compliance: {
+      eyebrow: "Compliance",
+      title: "Actual-hours compliance review",
+      detail: "Review truthful actual time and affected weekly totals without changing worked hours.",
+    },
+    audit: {
+      eyebrow: "Governance",
+      title: "OT request audit",
+      detail: "Filter immutable request history by actor, action, status, changed field, reason, and time.",
+    },
+    access: {
+      eyebrow: "Administration",
+      title: "OT access controls",
+      detail: "Manage the fixed OT access list through audited server actions.",
+    },
+    export: {
+      eyebrow: "HR operations",
+      title: "HR-ready OT export",
+      detail: "Review eligible records, download the exact CSV, and mark one idempotent batch exported.",
+    },
   }[visibleView] || null;
 
   return (
@@ -1481,6 +1840,31 @@ function OtRequestShell({
             </button>
           </>
         )}
+        {access.status === "ready" && (access.isOwner || access.isHrAdmin) && (
+          <>
+            <div className="nav-section">Compliance & HR</div>
+            <button type="button" className={`nav-item ${visibleView === "compliance" ? "is-active" : ""}`} aria-current={visibleView === "compliance" ? "page" : undefined} onClick={() => openView("compliance")}>
+              <Icon name="shield" size={16} /> Compliance
+            </button>
+            <button type="button" className={`nav-item ${visibleView === "audit" ? "is-active" : ""}`} aria-current={visibleView === "audit" ? "page" : undefined} onClick={() => openView("audit")}>
+              <Icon name="list" size={16} /> Audit
+            </button>
+            <button type="button" className={`nav-item ${visibleView === "export" ? "is-active" : ""}`} aria-current={visibleView === "export" ? "page" : undefined} onClick={() => openView("export")}>
+              <Icon name="download" size={16} /> HR export
+            </button>
+          </>
+        )}
+        {access.status === "ready" && access.isOwner && (
+          <>
+            <div className="nav-section">Owner</div>
+            <button type="button" className={`nav-item ${visibleView === "owner" ? "is-active" : ""}`} aria-current={visibleView === "owner" ? "page" : undefined} onClick={() => openView("owner")}>
+              <Icon name="grid" size={16} /> Owner overview
+            </button>
+            <button type="button" className={`nav-item ${visibleView === "access" ? "is-active" : ""}`} aria-current={visibleView === "access" ? "page" : undefined} onClick={() => openView("access")}>
+              <Icon name="users" size={16} /> Access
+            </button>
+          </>
+        )}
       </nav>
       <main className="ot-main ot-shell__main" aria-labelledby="ot-view-title">
         {access.status === "loading" && <div className="ot-warning" role="status"><span aria-hidden="true">ⓘ</span><span>Loading OT access…</span></div>}
@@ -1495,8 +1879,13 @@ function OtRequestShell({
               </div>
             </div>
             {access.status === "ready" && (visibleView === "overview" || visibleView === "my-requests") && <OtEmployeeDashboard access={access} listOnly={visibleView === "my-requests"} />}
-            {access.status === "ready" && visibleView === "manager" && <OtManagerDashboard access={access} />}
-            {access.status === "ready" && visibleView === "root-causes" && <OtManagerDashboard access={access} rootCauseOnly />}
+            {access.status === "ready" && visibleView === "manager" && <OtManagerDashboard access={access} refreshToken={operationsRefreshKey} />}
+            {access.status === "ready" && visibleView === "root-causes" && <OtManagerDashboard access={access} rootCauseOnly refreshToken={operationsRefreshKey} />}
+            {access.status === "ready" && access.isOwner && visibleView === "owner" && <OtOwnerDashboard access={access} onOpenView={openView} refreshKey={operationsRefreshKey} />}
+            {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "compliance" && <OtComplianceQueue refreshKey={operationsRefreshKey} onChanged={() => setOperationsRefreshKey(value => value + 1)} />}
+            {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "audit" && <OtAuditTimeline refreshKey={operationsRefreshKey} />}
+            {access.status === "ready" && (access.isOwner || access.isHrAdmin) && visibleView === "export" && <OtHrExportPanel refreshKey={operationsRefreshKey} onChanged={() => setOperationsRefreshKey(value => value + 1)} />}
+            {access.status === "ready" && access.isOwner && visibleView === "access" && <OtAccessAdminPanel access={access} />}
           </div>
         )}
       </main>

@@ -109,4 +109,40 @@ describe("OT request browser client", () => {
     const source = readFileSync(clientPath, "utf8");
     expect(source).not.toMatch(/\.from\s*\(/);
   });
+
+  it("builds the exact HR-ready CSV contract and escapes spreadsheet control characters", () => {
+    const client = loadClient(async () => ({ data: null, error: null }));
+    const csvTools = (client as unknown as {
+      FlowMateOtHrCsv: { build: (rows: Array<Record<string, unknown>>) => string };
+    }).FlowMateOtHrCsv;
+    const csv = csvTools.build([{
+      id: requestId,
+      employee_email: "employee@garena.com",
+      function_code: "mkt",
+      title: "Patch, \"launch\"\nnight",
+      event_plan_id: null,
+      actual_start_at: "2026-08-07T18:30:00Z",
+      day_type: "working_day",
+      planned_start_at: "2026-08-07T18:00:00+07:00",
+      planned_end_at: "2026-08-07T20:00:00+07:00",
+      planned_break_minutes: 0,
+      planned_minutes: 120,
+      actual_end_at: "2026-08-07T21:00:00+07:00",
+      actual_break_minutes: 15,
+      actual_minutes: 135,
+      reason_code: "scope_change",
+      reason_detail: "Line one\nLine two",
+      approver_email: "approver@garena.com",
+      actual_submitted_at: "2026-08-07T21:05:00+07:00",
+      actual_verified_at: "2026-08-07T21:15:00+07:00",
+      compliance_outcome: "approved",
+      hr_ready_at: "2026-08-07T21:20:00+07:00",
+    }]);
+
+    expect(csv.split("\r\n", 1)[0]).toBe("request_id,employee_email,function,assignment,event_id,work_date,day_type,planned_start,planned_end,planned_break_minutes,planned_minutes,actual_start,actual_end,actual_break_minutes,actual_minutes,reason_code,reason_detail,approver_email,employee_confirmed_at,verified_at,compliance_outcome,hr_ready_at");
+    expect(csv).toContain('"Patch, ""launch""\nnight"');
+    expect(csv).toContain('"Line one\nLine two"');
+    expect(csv).toContain(",2026-08-08,working_day,");
+    expect(csv).not.toMatch(/salary|pay_rate|bank|password|gps/i);
+  });
 });

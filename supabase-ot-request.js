@@ -29,3 +29,63 @@ window.loadOtHrReady = weekStart => callOtRequestRpc("ot_list_hr_ready", { p_wee
 window.markOtExported = (requestIds, batchName, key) => callOtRequestRpc("ot_mark_exported", { p_request_ids: requestIds, p_batch_name: batchName, p_idempotency_key: key }, "OT export could not be marked.");
 window.setOtApprover = (userId, active, reason, key) => callOtRequestRpc("ot_set_approver", { p_user_id: userId, p_active: active, p_reason: reason, p_idempotency_key: key }, "OT approver could not be updated.");
 window.setOtSystemRole = (userId, roleCode, active, reason, key) => callOtRequestRpc("ot_set_system_role", { p_user_id: userId, p_role_code: roleCode, p_active: active, p_reason: reason, p_idempotency_key: key }, "OT system role could not be updated.");
+
+const OT_HR_CSV_COLUMNS = "request_id,employee_email,function,assignment,event_id,work_date,day_type,planned_start,planned_end,planned_break_minutes,planned_minutes,actual_start,actual_end,actual_break_minutes,actual_minutes,reason_code,reason_detail,approver_email,employee_confirmed_at,verified_at,compliance_outcome,hr_ready_at".split(",");
+
+function getOtHrBangkokDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+function otHrCsvValue(row, column) {
+  const fields = {
+    request_id: row.request_id ?? row.requestId ?? row.id,
+    employee_email: row.employee_email ?? row.employeeEmail,
+    function: row.function ?? row.function_code ?? row.functionCode,
+    assignment: row.assignment ?? row.title,
+    event_id: row.event_id ?? row.event_plan_id ?? row.eventPlanId,
+    work_date: row.work_date ?? row.workDate ?? getOtHrBangkokDate(row.actual_start_at ?? row.actualStartAt ?? row.planned_start_at ?? row.plannedStartAt),
+    day_type: row.day_type ?? row.dayType,
+    planned_start: row.planned_start ?? row.planned_start_at ?? row.plannedStartAt,
+    planned_end: row.planned_end ?? row.planned_end_at ?? row.plannedEndAt,
+    planned_break_minutes: row.planned_break_minutes ?? row.plannedBreakMinutes,
+    planned_minutes: row.planned_minutes ?? row.plannedMinutes,
+    actual_start: row.actual_start ?? row.actual_start_at ?? row.actualStartAt,
+    actual_end: row.actual_end ?? row.actual_end_at ?? row.actualEndAt,
+    actual_break_minutes: row.actual_break_minutes ?? row.actualBreakMinutes,
+    actual_minutes: row.actual_minutes ?? row.actualMinutes,
+    reason_code: row.reason_code ?? row.reasonCode,
+    reason_detail: row.reason_detail ?? row.reasonDetail,
+    approver_email: row.approver_email ?? row.approverEmail,
+    employee_confirmed_at: row.employee_confirmed_at ?? row.actual_submitted_at ?? row.actualSubmittedAt,
+    verified_at: row.verified_at ?? row.actual_verified_at ?? row.actualVerifiedAt,
+    compliance_outcome: row.compliance_outcome ?? row.complianceOutcome,
+    hr_ready_at: row.hr_ready_at ?? row.hrReadyAt,
+  };
+  return fields[column] ?? "";
+}
+
+function escapeOtHrCsvCell(value) {
+  const text = String(value ?? "");
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+window.FlowMateOtHrCsv = Object.freeze({
+  columns: Object.freeze(OT_HR_CSV_COLUMNS.slice()),
+  build(rows) {
+    const records = Array.isArray(rows) ? rows : [];
+    return [
+      OT_HR_CSV_COLUMNS.join(","),
+      ...records.map(row => OT_HR_CSV_COLUMNS.map(column => escapeOtHrCsvCell(otHrCsvValue(row || {}, column))).join(",")),
+    ].join("\r\n");
+  },
+});

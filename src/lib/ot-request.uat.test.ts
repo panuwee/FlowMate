@@ -302,6 +302,83 @@ describe("OT Request static module integration", () => {
     expect(panel).toContain("buildOtInsightRows(filteredRows, selectedInsight.recordIds)");
   });
 
+  it("renders owner, compliance, audit, access, and HR export only from server access capabilities", () => {
+    const sql = read("supabase", "ot_request.sql");
+    const screen = read("screens-ot.jsx");
+
+    expect(sql).toContain("panuwee.w@garena.com");
+    expect(sql).toContain("ot_current_user_is_owner");
+    for (const component of ["OtOwnerDashboard", "OtComplianceQueue", "OtAuditTimeline", "OtAccessAdminPanel", "OtHrExportPanel"]) {
+      expect(screen).toContain(`function ${component}(`);
+    }
+    expect(screen).toContain('owner: "ot-request/owner"');
+    expect(screen).toContain('compliance: "ot-request/compliance"');
+    expect(screen).toContain('audit: "ot-request/audit"');
+    expect(screen).toContain('access: "ot-request/access"');
+    expect(screen).toContain('export: "ot-request/export"');
+    expect(screen).toContain('access.status === "ready" && access.isOwner');
+    expect(screen).toContain('access.status === "ready" && (access.isOwner || access.isHrAdmin)');
+    expect(screen).not.toMatch(/currentUserEmail\s*(?:===|==|\.includes|\.endsWith)/);
+    expect(sql).not.toMatch(/create policy[^;]+on public\.(work_items|marketing_plans|product_book)/is);
+  });
+
+  it("keeps owner visibility read-only for normal approvals and shows truthful compliance evidence", () => {
+    const screen = read("screens-ot.jsx");
+    const manager = screen.slice(screen.indexOf("function OtManagerDashboard("), screen.indexOf("function OtApprovalQueue("));
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+    const compliance = screen.slice(screen.indexOf("function OtComplianceQueue("), screen.indexOf("function OtHrExportPanel("));
+
+    expect(manager).toContain("All Functions");
+    expect(manager).toContain("access.isOwner || access.isHrAdmin");
+    expect(approval).toContain("window.FlowMateOtRequestDomain.canActOnAssignedRequest(access, request)");
+    expect(approval).toContain("Read only");
+    for (const evidence of ["actualStartAt", "plannedStartAt", "actualWeekSegments", "actualVarianceReason", "actualDecisionNote", "weeklyTotals"]) {
+      expect(compliance).toContain(evidence);
+    }
+    expect(compliance).toContain("actualMinutes: loadState.weeklyTotals");
+    expect(compliance).toContain("projectedMinutes: loadState.weeklyTotals");
+    expect(compliance).toContain("Projected / counted:");
+    expect(compliance).toContain("window.reviewOtCompliance(");
+    expect(compliance).toContain("<OtAuditTimeline");
+    expect(compliance).toContain("if (!outcome || !note.trim())");
+    expect(compliance).not.toContain("window.submitOtActual");
+    expect(compliance).not.toMatch(/type="(?:datetime-local|time)"/);
+  });
+
+  it("exports only explicit HR-ready selections after a local CSV download succeeds", () => {
+    const screen = read("screens-ot.jsx");
+    const panel = screen.slice(screen.indexOf("function OtHrExportPanel("), screen.indexOf("function OtAccessAdminPanel("));
+    const exactColumns = "request_id,employee_email,function,assignment,event_id,work_date,day_type,planned_start,planned_end,planned_break_minutes,planned_minutes,actual_start,actual_end,actual_break_minutes,actual_minutes,reason_code,reason_detail,approver_email,employee_confirmed_at,verified_at,compliance_outcome,hr_ready_at";
+
+    expect(panel).toContain("window.loadOtHrReady(");
+    expect(panel).toContain("window.FlowMateOtHrCsv.build(selectedRows)");
+    expect(panel).toContain("downloadOtHrCsv(");
+    expect(panel).toContain("window.markOtExported(selectedIds, batchName.trim(), intentKey)");
+    expect(panel.indexOf("downloadOtHrCsv(")).toBeLessThan(panel.indexOf("window.markOtExported("));
+    expect(panel).toContain("local CSV exists, but server export status remains unchanged");
+    expect(read("supabase-ot-request.js")).toContain(exactColumns);
+    expect(panel).not.toMatch(/salary|pay rate|bank|password|gps/i);
+  });
+
+  it("keeps audit read-only and access administration restricted to audited server RPCs", () => {
+    const screen = read("screens-ot.jsx");
+    const audit = screen.slice(screen.indexOf("function OtAuditTimeline("), screen.indexOf("function OtComplianceQueue("));
+    const admin = screen.slice(screen.indexOf("function OtAccessAdminPanel("), screen.indexOf("function OtOwnerDashboard("));
+
+    for (const field of ["actorUserId", "action", "oldStatus", "newStatus", "changedFields", "note", "createdAt"]) {
+      expect(audit).toContain(field);
+    }
+    expect(audit).toContain("window.loadOtRequestAudit(");
+    expect(audit).toContain("row.createdAt, JSON.stringify(row.changedFields)");
+    expect(audit).not.toContain("flowmateSupabase");
+    expect(admin).toContain("window.setOtApprover(");
+    expect(admin).toContain("window.setOtSystemRole(");
+    expect(admin).toContain("if (!reason.trim())");
+    expect(admin).toContain("OT_APPROVED_APPROVER_EMAILS");
+    expect(admin).not.toMatch(/\.from\s*\(/);
+    expect(admin).not.toContain("currentUserEmail");
+  });
+
   it("adds OT Request as the fourth product without changing the first three", () => {
     const app = read("app.jsx");
 
