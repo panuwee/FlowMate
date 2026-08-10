@@ -2023,21 +2023,23 @@ begin
   if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_reason, ''))) = 0 then
     raise exception 'A non-empty reason is required';
   end if;
-  select pg_catalog.lower(pg_catalog.btrim(u.email))
-  into v_target_email
-  from public.users u
-  where u.id = p_user_id and u.is_active = true;
-  if not found or v_target_email not like '%@garena.com' then
-    raise exception 'OT role holder must be an active Garena Workgrid user';
-  end if;
-  if p_role_code = 'owner'
-     and v_target_email <> 'panuwee.w@garena.com' then
-    raise exception 'The only approved OT Owner identity is panuwee.w@garena.com';
-  end if;
-  if p_role_code = 'hr_admin'
-     and p_active = true
-     and not public.ot_user_is_approved_approver_identity(p_user_id) then
-    raise exception 'HR Admin must be one of the three approved MVP identities';
+  if p_active then
+    select pg_catalog.lower(pg_catalog.btrim(u.email))
+    into v_target_email
+    from public.users u
+    where u.id = p_user_id and u.is_active = true;
+    if not found or v_target_email not like '%@garena.com' then
+      raise exception 'OT role holder must be an active Garena Workgrid user';
+    end if;
+    if p_role_code = 'owner'
+       and v_target_email <> 'panuwee.w@garena.com' then
+      raise exception 'The only approved OT Owner identity is panuwee.w@garena.com';
+    end if;
+    if p_role_code = 'hr_admin'
+       and p_active = true
+       and not public.ot_user_is_approved_approver_identity(p_user_id) then
+      raise exception 'HR Admin must be one of the three approved MVP identities';
+    end if;
   end if;
   perform public.ot_lock_idempotency('set_system_role', p_idempotency_key);
   select a.changed_fields into v_result
@@ -2047,8 +2049,18 @@ begin
   if found then
     return v_result;
   end if;
-  select pg_catalog.to_jsonb(r) into v_previous
-  from public.ot_system_roles r where r.user_id = p_user_id for update;
+  if not p_active then
+    select pg_catalog.to_jsonb(r) into v_previous
+    from public.ot_system_roles r where r.user_id = p_user_id for update;
+    if not found
+       or p_role_code <> 'hr_admin'
+       or v_previous->>'role_code' <> 'hr_admin' then
+      raise exception 'Only an existing HR Admin role can be deactivated';
+    end if;
+  else
+    select pg_catalog.to_jsonb(r) into v_previous
+    from public.ot_system_roles r where r.user_id = p_user_id for update;
+  end if;
   insert into public.ot_system_roles (user_id, role_code, active)
   values (p_user_id, p_role_code, p_active)
   on conflict (user_id) do update

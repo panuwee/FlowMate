@@ -328,6 +328,26 @@ describe("OT Request backend contract", () => {
     expect(setRole).toMatch(/insert into public\.ot_system_roles[\s\S]*values \(p_user_id, p_role_code, p_active\)[\s\S]*v_actor_id, 'set_system_role', v_result, pg_catalog\.btrim\(p_reason\), p_idempotency_key/);
   });
 
+  it("keeps legacy HR Admin deactivation reachable when the target is inactive or no longer Garena", () => {
+    const setRole = functionSql(sql, "ot_set_system_role");
+    const activationStart = setRole.indexOf("if p_active then");
+    const activationEnd = setRole.indexOf("perform public.ot_lock_idempotency('set_system_role', p_idempotency_key)", activationStart);
+    const deactivationStart = setRole.indexOf("if not p_active then");
+    const deactivationEnd = setRole.indexOf("insert into public.ot_system_roles", deactivationStart);
+    const activationGuard = setRole.slice(activationStart, activationEnd);
+    const deactivationGuard = setRole.slice(deactivationStart, deactivationEnd);
+
+    expect(activationStart).toBeGreaterThan(-1);
+    expect(activationGuard).toMatch(/where u\.id = p_user_id and u\.is_active = true[\s\S]*not like '%@garena\.com'/);
+    expect(activationGuard).toMatch(/p_role_code = 'hr_admin'[\s\S]*p_active = true[\s\S]*ot_user_is_approved_approver_identity\(p_user_id\)/);
+    expect(deactivationStart).toBeGreaterThan(activationEnd);
+    expect(deactivationGuard).toMatch(/p_role_code <> 'hr_admin'[\s\S]*existing HR Admin role can be deactivated/);
+    expect(deactivationGuard).toMatch(/v_previous->>'role_code' <> 'hr_admin'/);
+    expect(deactivationGuard).toMatch(/from public\.ot_system_roles r[\s\S]*for update/);
+    expect(setRole).toContain("A non-empty reason is required");
+    expect(setRole).toContain("public.ot_lock_idempotency('set_system_role', p_idempotency_key)");
+  });
+
   it("keeps approved HR admin activation and deactivation on the audited role path", () => {
     const setRole = functionSql(sql, "ot_set_system_role");
 
