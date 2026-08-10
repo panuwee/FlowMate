@@ -2783,10 +2783,12 @@ function OtComplianceQueue({
   const [selected, setSelected] = useStateApp(null);
   const [outcome, setOutcome] = useStateApp("");
   const [note, setNote] = useStateApp("");
+  const [intent, setIntent] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({
     status: "idle",
     message: ""
   });
+  const reviewSubmissionRef = useRefApp(false);
   useEffectApp(() => {
     let alive = true;
     setLoadState(current => ({
@@ -2825,16 +2827,23 @@ function OtComplianceQueue({
     };
   }, [weekStart, localRefreshKey, refreshKey]);
   function openReview(request) {
+    if (reviewSubmissionRef.current || actionState.status === "submitting") return;
     setSelected(request);
     setOutcome("");
     setNote("");
+    setIntent(window.FlowMateOtIntent.complete());
     setActionState({
       status: "idle",
       message: ""
     });
   }
+  function closeReview() {
+    if (reviewSubmissionRef.current || actionState.status === "submitting") return;
+    setSelected(null);
+    setIntent(window.FlowMateOtIntent.complete());
+  }
   async function submitReview() {
-    if (!selected || actionState.status === "submitting") return;
+    if (!selected || reviewSubmissionRef.current || actionState.status === "submitting") return;
     if (!outcome || !note.trim()) {
       setActionState({
         status: "error",
@@ -2842,12 +2851,19 @@ function OtComplianceQueue({
       });
       return;
     }
+    const requestId = selected.id;
+    const normalizedNote = note.trim();
+    const signature = window.FlowMateOtIntent.signature([requestId, outcome, normalizedNote]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    reviewSubmissionRef.current = true;
     setActionState({
       status: "submitting",
       message: "Saving the compliance outcome and immutable audit entry…"
     });
     try {
-      await window.reviewOtCompliance(selected.id, outcome, note.trim(), crypto.randomUUID());
+      await window.reviewOtCompliance(requestId, outcome, normalizedNote, currentIntent.key);
+      setIntent(window.FlowMateOtIntent.complete());
       setActionState({
         status: "success",
         message: "Compliance review saved. Dashboard, audit, and HR-ready data are refreshing."
@@ -2859,6 +2875,8 @@ function OtComplianceQueue({
         status: "error",
         message: error.message || "Compliance review could not be saved."
       });
+    } finally {
+      reviewSubmissionRef.current = false;
     }
   }
   const actualStartAt = selected && otValue(selected, "actualStartAt", "actual_start_at");
@@ -2890,10 +2908,12 @@ function OtComplianceQueue({
     className: "input",
     type: "date",
     value: weekStart,
+    disabled: actionState.status === "submitting",
     onChange: event => setWeekStart(event.target.value ? window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value) : "")
   })), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
+    disabled: actionState.status === "submitting",
     onClick: () => setLocalRefreshKey(value => value + 1)
   }, "Refresh compliance")), React.createElement("section", {
     className: "ot-list",
@@ -2916,6 +2936,7 @@ function OtComplianceQueue({
     key: request.id,
     type: "button",
     className: `ot-queue-item ${selected?.id === request.id ? "is-selected" : ""}`,
+    disabled: actionState.status === "submitting",
     onClick: () => openReview(request)
   }, React.createElement("span", null, React.createElement("strong", null, request.title), React.createElement("small", null, getOtManagerEmployeeName(request, loadState.peopleById), " · ", String(otValue(request, "functionCode", "function_code") || "").toUpperCase())), React.createElement("span", {
     className: "ot-status ot-status--compliance_review_required"
@@ -2929,7 +2950,8 @@ function OtComplianceQueue({
   }, "Request ", selected.id)), React.createElement("button", {
     type: "button",
     className: "btn btn--ghost",
-    onClick: () => setSelected(null)
+    disabled: actionState.status === "submitting",
+    onClick: closeReview
   }, "Close")), React.createElement("div", {
     className: "ot-detail-grid"
   }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selected, loadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Plan"), React.createElement("strong", null, formatOtDateTime(plannedStartAt), " → ", formatOtDateTime(plannedEndAt)), React.createElement("small", null, formatOtHours(plannedMinutes))), React.createElement("div", null, React.createElement("span", null, "Truthful actual"), React.createElement("strong", null, formatOtDateTime(actualStartAt), " → ", formatOtDateTime(actualEndAt)), React.createElement("small", null, formatOtHours(actualMinutes))), React.createElement("div", null, React.createElement("span", null, "Signed variance"), React.createElement("strong", null, window.FlowMateOtRequestDomain.formatSignedHours(actualMinutes - plannedMinutes))), React.createElement("div", null, React.createElement("span", null, "Employee explanation"), React.createElement("strong", null, actualVarianceReason || "Not provided")), React.createElement("div", null, React.createElement("span", null, "Manager decision / note"), React.createElement("strong", null, getOtStatusLabel(actualDecision || "pending"), " · ", actualDecisionNote || "Not provided"))), React.createElement("section", {
@@ -2943,7 +2965,10 @@ function OtComplianceQueue({
     kind: "critical",
     title: "Actual hours are immutable",
     message: "Record the compliance outcome against the truthful worked time. Do not ask the employee to reduce actual hours to fit the weekly limit."
-  }), React.createElement("div", {
+  }), React.createElement("fieldset", {
+    className: "ot-form__fieldset",
+    disabled: actionState.status === "submitting"
+  }, React.createElement("div", {
     className: "form-grid"
   }, React.createElement("label", {
     className: "field"
@@ -2974,7 +2999,7 @@ function OtComplianceQueue({
     onChange: event => setNote(event.target.value),
     required: true,
     placeholder: "Record the evidence, decision, and follow-up."
-  }))), React.createElement("div", {
+  })))), React.createElement("div", {
     className: "ot-form__actions"
   }, React.createElement("button", {
     type: "button",
@@ -3023,15 +3048,12 @@ function OtHrExportPanel({
   const [batchName, setBatchName] = useStateApp("");
   const [reviewing, setReviewing] = useStateApp(false);
   const [confirmed, setConfirmed] = useStateApp(false);
-  const [intent, setIntent] = useStateApp(() => ({
-    key: crypto.randomUUID(),
-    signature: "",
-    downloaded: false
-  }));
+  const [intent, setIntent] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({
     status: "idle",
     message: ""
   });
+  const exportSubmissionRef = useRefApp(false);
   useEffectApp(() => {
     let alive = true;
     setLoadState(current => ({
@@ -3061,71 +3083,62 @@ function OtHrExportPanel({
     };
   }, [weekStart, localRefreshKey, refreshKey]);
   function resetReview() {
+    if (exportSubmissionRef.current || actionState.status === "submitting") return;
     setReviewing(false);
     setConfirmed(false);
-    setIntent({
-      key: crypto.randomUUID(),
-      signature: "",
-      downloaded: false
-    });
+    setIntent(window.FlowMateOtIntent.complete());
     setActionState({
       status: "idle",
       message: ""
     });
   }
   function toggleRequest(requestId) {
+    if (exportSubmissionRef.current || actionState.status === "submitting") return;
     setSelectedIds(current => current.includes(requestId) ? current.filter(id => id !== requestId) : [...current, requestId]);
     resetReview();
   }
   function changeBatchName(value) {
+    if (exportSubmissionRef.current || actionState.status === "submitting") return;
     setBatchName(value);
     resetReview();
   }
   const selectedRows = loadState.rows.filter(row => selectedIds.includes(row.id));
   const selectionSignature = `${batchName.trim()}|${selectedIds.slice().sort().join("|")}`;
   async function exportSelected() {
-    if (!confirmed || !batchName.trim() || !selectedRows.length || actionState.status === "submitting") return;
-    const currentIntent = intent.signature === selectionSignature ? intent : {
-      key: crypto.randomUUID(),
-      signature: selectionSignature,
-      downloaded: false
-    };
+    if (!confirmed || !batchName.trim() || !selectedRows.length || exportSubmissionRef.current || actionState.status === "submitting") return;
+    let currentIntent = window.FlowMateOtHrExport.establish(intent, selectionSignature, () => crypto.randomUUID());
     const intentKey = currentIntent.key;
+    const includedIds = selectedRows.map(row => row.id);
+    setIntent(currentIntent);
+    exportSubmissionRef.current = true;
     setActionState({
       status: "submitting",
       message: currentIntent.downloaded ? "Retrying the idempotent server export mark…" : "Creating the reviewed CSV…"
     });
-    let downloaded = currentIntent.downloaded;
-    if (!downloaded) {
-      const csv = window.FlowMateOtHrCsv.build(selectedRows);
-      downloaded = downloadOtHrCsv(csv, batchName.trim());
-      if (!downloaded) {
+    if (window.FlowMateOtHrExport.phase(currentIntent) === "download") {
+      const localResult = window.FlowMateOtHrExport.createLocalFile(selectedRows, batchName.trim(), downloadOtHrCsv);
+      if (!localResult.ok) {
         setActionState({
           status: "error",
-          message: "The browser did not create the local CSV. Server export status is unchanged."
+          message: `The local file was not created, and the server was not marked exported. ${localResult.error?.message || "CSV creation or download initiation failed."}`
         });
+        exportSubmissionRef.current = false;
         return;
       }
-      setIntent({
-        ...currentIntent,
-        downloaded: true
-      });
+      currentIntent = window.FlowMateOtHrExport.markDownloaded(currentIntent);
+      setIntent(currentIntent);
     }
     try {
-      await window.markOtExported(selectedIds, batchName.trim(), intentKey);
+      await window.markOtExported(includedIds, batchName.trim(), intentKey);
       setActionState({
         status: "success",
-        message: `${selectedIds.length} reviewed HR-ready record(s) were downloaded and marked exported.`
+        message: `${includedIds.length} reviewed HR-ready record(s) were downloaded and marked exported.`
       });
       setSelectedIds([]);
       setBatchName("");
       setReviewing(false);
       setConfirmed(false);
-      setIntent({
-        key: crypto.randomUUID(),
-        signature: "",
-        downloaded: false
-      });
+      setIntent(window.FlowMateOtIntent.complete());
       setLocalRefreshKey(value => value + 1);
       if (onChanged) onChanged();
     } catch (error) {
@@ -3133,6 +3146,8 @@ function OtHrExportPanel({
         status: "error",
         message: `The local CSV exists, but server export status remains unchanged. Retry the server mark with the same selection: ${error.message || "Export mark failed."}`
       });
+    } finally {
+      exportSubmissionRef.current = false;
     }
   }
   return React.createElement("div", {
@@ -3147,6 +3162,7 @@ function OtHrExportPanel({
     className: "input",
     type: "date",
     value: weekStart,
+    disabled: actionState.status === "submitting",
     onChange: event => {
       setWeekStart(event.target.value ? window.FlowMateOtRequestDomain.getWeekStartKey(event.target.value) : "");
       resetReview();
@@ -3154,6 +3170,7 @@ function OtHrExportPanel({
   })), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
+    disabled: actionState.status === "submitting",
     onClick: () => setLocalRefreshKey(value => value + 1)
   }, "Refresh HR-ready")), React.createElement("section", {
     className: "ot-list"
@@ -3181,6 +3198,7 @@ function OtHrExportPanel({
     type: "checkbox",
     "aria-label": `Select ${row.title}`,
     checked: selectedIds.includes(row.id),
+    disabled: actionState.status === "submitting",
     onChange: () => toggleRequest(row.id)
   })), React.createElement("td", null, otValue(row, "employeeEmail", "employee_email")), React.createElement("td", null, String(otValue(row, "functionCode", "function_code") || "").toUpperCase()), React.createElement("td", null, React.createElement("strong", null, row.title), React.createElement("small", null, row.id)), React.createElement("td", null, formatOtDate(getOtBangkokParts(otValue(row, "actualStartAt", "actual_start_at")).date)), React.createElement("td", null, formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))), React.createElement("td", null, getOtStatusLabel(otValue(row, "complianceOutcome", "compliance_outcome") || "not_required")))))))), React.createElement("section", {
     className: "ot-workflow",
@@ -3194,6 +3212,7 @@ function OtHrExportPanel({
   }, "Export batch name *"), React.createElement("input", {
     className: "input",
     value: batchName,
+    disabled: actionState.status === "submitting",
     onChange: event => changeBatchName(event.target.value),
     placeholder: "Example: 2026-08 week 32 reviewed OT"
   }))), React.createElement("p", {
@@ -3203,7 +3222,7 @@ function OtHrExportPanel({
   }, React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
-    disabled: !batchName.trim() || !selectedRows.length,
+    disabled: !batchName.trim() || !selectedRows.length || actionState.status === "submitting",
     onClick: () => setReviewing(true)
   }, "Review export selection")) : React.createElement("section", {
     className: "ot-export__review"
@@ -3214,12 +3233,14 @@ function OtHrExportPanel({
   }, React.createElement("input", {
     type: "checkbox",
     checked: confirmed,
+    disabled: actionState.status === "submitting",
     onChange: event => setConfirmed(event.target.checked)
   }), React.createElement("span", null, "I reviewed the exact records and understand they become immutable after the server marks this idempotent batch exported.")), React.createElement("div", {
     className: "ot-form__actions"
   }, React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
+    disabled: actionState.status === "submitting",
     onClick: () => {
       setReviewing(false);
       setConfirmed(false);
@@ -3229,7 +3250,7 @@ function OtHrExportPanel({
     className: "btn btn--primary",
     disabled: !confirmed || actionState.status === "submitting",
     onClick: exportSelected
-  }, intent.downloaded ? "Retry server export mark" : "Download CSV and mark exported"))), actionState.message && React.createElement(OtWarning, {
+  }, intent?.downloaded ? "Retry server export mark" : "Download CSV and mark exported"))), actionState.message && React.createElement(OtWarning, {
     kind: actionState.status === "error" ? "error" : "info",
     message: actionState.message
   })));
@@ -3245,10 +3266,12 @@ function OtAccessAdminPanel({
     message: ""
   });
   const [reason, setReason] = useStateApp("");
+  const [intent, setIntent] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({
     status: "idle",
     message: ""
   });
+  const accessSubmissionRef = useRefApp(false);
   useEffectApp(() => {
     if (!access.isOwner) return undefined;
     let alive = true;
@@ -3279,6 +3302,7 @@ function OtAccessAdminPanel({
     };
   }, [access.isOwner, refreshKey]);
   async function applyApproverAccess(person, active) {
+    if (accessSubmissionRef.current || actionState.status === "submitting") return;
     if (!reason.trim()) {
       setActionState({
         status: "error",
@@ -3286,12 +3310,18 @@ function OtAccessAdminPanel({
       });
       return;
     }
+    const normalizedReason = reason.trim();
+    const signature = window.FlowMateOtIntent.signature([person.userId, `set_approver:${active}`, normalizedReason]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    accessSubmissionRef.current = true;
     setActionState({
       status: "submitting",
       message: "Saving the audited approver change…"
     });
     try {
-      await window.setOtApprover(person.userId, active, reason.trim(), crypto.randomUUID());
+      await window.setOtApprover(person.userId, active, normalizedReason, currentIntent.key);
+      setIntent(window.FlowMateOtIntent.complete());
       setActionState({
         status: "success",
         message: "Approver access changed and audited."
@@ -3303,9 +3333,12 @@ function OtAccessAdminPanel({
         status: "error",
         message: error.message || "Approver access could not be changed."
       });
+    } finally {
+      accessSubmissionRef.current = false;
     }
   }
   async function applyHrRole(person, active) {
+    if (accessSubmissionRef.current || actionState.status === "submitting") return;
     if (!reason.trim()) {
       setActionState({
         status: "error",
@@ -3313,12 +3346,18 @@ function OtAccessAdminPanel({
       });
       return;
     }
+    const normalizedReason = reason.trim();
+    const signature = window.FlowMateOtIntent.signature([person.userId, `set_system_role:hr_admin:${active}`, normalizedReason]);
+    const currentIntent = window.FlowMateOtIntent.establish(intent, signature, () => crypto.randomUUID());
+    setIntent(currentIntent);
+    accessSubmissionRef.current = true;
     setActionState({
       status: "submitting",
       message: "Saving the audited OT role change…"
     });
     try {
-      await window.setOtSystemRole(person.userId, "hr_admin", active, reason.trim(), crypto.randomUUID());
+      await window.setOtSystemRole(person.userId, "hr_admin", active, normalizedReason, currentIntent.key);
+      setIntent(window.FlowMateOtIntent.complete());
       setActionState({
         status: "success",
         message: "HR/Admin role instruction saved and audited. Refresh access context for the affected user."
@@ -3329,6 +3368,8 @@ function OtAccessAdminPanel({
         status: "error",
         message: error.message || "OT role could not be changed."
       });
+    } finally {
+      accessSubmissionRef.current = false;
     }
   }
   if (!access.isOwner) return null;
@@ -3350,6 +3391,7 @@ function OtAccessAdminPanel({
   }, "Required reason for the next change *"), React.createElement("textarea", {
     className: "textarea",
     value: reason,
+    disabled: actionState.status === "submitting",
     onChange: event => setReason(event.target.value),
     placeholder: "Explain the operational or compliance reason."
   })), directoryState.status === "loading" && React.createElement("div", {

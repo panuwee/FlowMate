@@ -145,4 +145,98 @@ describe("OT request browser client", () => {
     expect(csv).toContain(",2026-08-08,working_day,");
     expect(csv).not.toMatch(/salary|pay_rate|bank|password|gps/i);
   });
+
+  it.each([
+    ["=2+2", "'=2+2"],
+    ["+SUM(A1:A2)", "'+SUM(A1:A2)"],
+    ["-10", "'-10"],
+    ["@cmd", "'@cmd"],
+    ["\t=2+2", "'\t=2+2"],
+    ["\r=2+2", '"\'\r=2+2"'],
+  ])("neutralizes spreadsheet formula prefix %j before RFC CSV escaping", (value, expected) => {
+    const client = loadClient(async () => ({ data: null, error: null }));
+    const csvTools = (client as unknown as {
+      FlowMateOtHrCsv: { escapeCell: (value: unknown) => string };
+    }).FlowMateOtHrCsv;
+
+    expect(csvTools.escapeCell(value)).toBe(expected);
+  });
+
+  it("reuses an established mutation intent after failure and rotates it only after material input change or success", () => {
+    const client = loadClient(async () => ({ data: null, error: null }));
+    const intentTools = (client as unknown as {
+      FlowMateOtIntent: {
+        signature: (parts: unknown[]) => string;
+        establish: (current: unknown, signature: string, createKey: () => string) => { key: string; signature: string };
+        complete: () => null;
+      };
+    }).FlowMateOtIntent;
+    let keyNumber = 0;
+    const createKey = () => `key-${++keyNumber}`;
+    const complianceSignature = intentTools.signature([requestId, "approved", "Evidence reviewed"]);
+    const first = intentTools.establish(null, complianceSignature, createKey);
+
+    expect(first).toEqual({ key: "key-1", signature: complianceSignature });
+    expect(intentTools.establish(first, complianceSignature, createKey)).toBe(first);
+    expect(keyNumber).toBe(1);
+
+    const changedCompliance = intentTools.establish(
+      first,
+      intentTools.signature([requestId, "action_required", "Evidence reviewed"]),
+      createKey,
+    );
+    expect(changedCompliance.key).toBe("key-2");
+
+    const accessSignature = intentTools.signature([employeeId, "set_approver:true", "Coverage update"]);
+    const accessIntent = intentTools.establish(changedCompliance, accessSignature, createKey);
+    expect(accessIntent.key).toBe("key-3");
+    expect(intentTools.establish(accessIntent, accessSignature, createKey)).toBe(accessIntent);
+
+    expect(intentTools.complete()).toBeNull();
+    expect(intentTools.establish(intentTools.complete(), accessSignature, createKey).key).toBe("key-4");
+  });
+
+  it("keeps export in the local phase after creation failure and skips redownload after success", () => {
+    const client = loadClient(async () => ({ data: null, error: null }));
+    const exportTools = (client as unknown as {
+      FlowMateOtHrExport: {
+        establish: (current: unknown, signature: string, createKey: () => string) => { key: string; signature: string; downloaded: boolean };
+        createLocalFile: (
+          rows: Array<Record<string, unknown>>,
+          batchName: string,
+          initiateDownload: (csv: string, batchName: string) => boolean,
+          buildCsv?: (rows: Array<Record<string, unknown>>) => string,
+        ) => { ok: boolean; error?: Error };
+        markDownloaded: (intent: { key: string; signature: string; downloaded: boolean }) => { key: string; signature: string; downloaded: boolean };
+        phase: (intent: { downloaded: boolean }) => string;
+      };
+    }).FlowMateOtHrExport;
+    let keyNumber = 0;
+    const signature = "reviewed-batch|request-1";
+    const intent = exportTools.establish(null, signature, () => `export-${++keyNumber}`);
+
+    const buildFailure = exportTools.createLocalFile([], "reviewed-batch", () => true, () => {
+      throw new Error("CSV build failed");
+    });
+    expect(buildFailure.ok).toBe(false);
+    expect(buildFailure.error?.message).toBe("CSV build failed");
+    expect(exportTools.phase(intent)).toBe("download");
+    expect(exportTools.establish(intent, signature, () => `export-${++keyNumber}`)).toBe(intent);
+
+    const initiationFailure = exportTools.createLocalFile([], "reviewed-batch", () => {
+      throw new Error("Download blocked");
+    });
+    expect(initiationFailure.ok).toBe(false);
+    expect(exportTools.phase(intent)).toBe("download");
+
+    const localSuccess = exportTools.createLocalFile([], "reviewed-batch", () => true);
+    expect(localSuccess).toEqual({ ok: true });
+    const downloadedIntent = exportTools.markDownloaded(intent);
+    expect(exportTools.phase(downloadedIntent)).toBe("mark");
+    expect(exportTools.establish(downloadedIntent, signature, () => `export-${++keyNumber}`)).toBe(downloadedIntent);
+    expect(keyNumber).toBe(1);
+
+    const changedIntent = exportTools.establish(downloadedIntent, "changed-batch|request-1", () => `export-${++keyNumber}`);
+    expect(changedIntent).toEqual({ key: "export-2", signature: "changed-batch|request-1", downloaded: false });
+  });
 });

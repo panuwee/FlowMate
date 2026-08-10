@@ -374,7 +374,11 @@ describe("OT Request static module integration", () => {
     expect(compliance).toContain("window.reviewOtCompliance(");
     expect(compliance).toContain("<OtAuditTimeline");
     expect(compliance).toContain("if (!outcome || !note.trim())");
+    expect(compliance).toContain("window.FlowMateOtIntent.establish(");
+    expect(compliance).toContain("reviewSubmissionRef.current");
+    expect(compliance).toContain("disabled={actionState.status === \"submitting\"}");
     expect(compliance).not.toContain("window.submitOtActual");
+    expect(compliance).not.toMatch(/reviewOtCompliance\([^;]+crypto\.randomUUID\(\)/);
     expect(compliance).not.toMatch(/type="(?:datetime-local|time)"/);
   });
 
@@ -384,11 +388,12 @@ describe("OT Request static module integration", () => {
     const exactColumns = "request_id,employee_email,function,assignment,event_id,work_date,day_type,planned_start,planned_end,planned_break_minutes,planned_minutes,actual_start,actual_end,actual_break_minutes,actual_minutes,reason_code,reason_detail,approver_email,employee_confirmed_at,verified_at,compliance_outcome,hr_ready_at";
 
     expect(panel).toContain("window.loadOtHrReady(");
-    expect(panel).toContain("window.FlowMateOtHrCsv.build(selectedRows)");
-    expect(panel).toContain("downloadOtHrCsv(");
-    expect(panel).toContain("window.markOtExported(selectedIds, batchName.trim(), intentKey)");
-    expect(panel.indexOf("downloadOtHrCsv(")).toBeLessThan(panel.indexOf("window.markOtExported("));
+    expect(panel).toContain("window.FlowMateOtHrExport.createLocalFile(selectedRows, batchName.trim(), downloadOtHrCsv)");
+    expect(panel).toContain("window.markOtExported(includedIds, batchName.trim(), intentKey)");
+    expect(panel.indexOf("window.FlowMateOtHrExport.createLocalFile(")).toBeLessThan(panel.indexOf("window.markOtExported("));
     expect(panel).toContain("local CSV exists, but server export status remains unchanged");
+    expect(panel).toContain("The local file was not created, and the server was not marked exported.");
+    expect(panel).toContain("window.FlowMateOtHrExport.createLocalFile(");
     expect(read("supabase-ot-request.js")).toContain(exactColumns);
     expect(panel).not.toMatch(/salary|pay rate|bank|password|gps/i);
   });
@@ -407,7 +412,9 @@ describe("OT Request static module integration", () => {
     expect(admin).toContain("window.setOtApprover(");
     expect(admin).toContain("window.setOtSystemRole(");
     expect(admin).toContain("if (!reason.trim())");
+    expect(admin).toContain("window.FlowMateOtIntent.establish(");
     expect(admin).toContain("OT_APPROVED_APPROVER_EMAILS");
+    expect(admin).not.toMatch(/setOt(?:Approver|SystemRole)\([^;]+crypto\.randomUUID\(\)/);
     expect(admin).not.toMatch(/\.from\s*\(/);
     expect(admin).not.toContain("currentUserEmail");
   });

@@ -76,16 +76,60 @@ function otHrCsvValue(row, column) {
 
 function escapeOtHrCsvCell(value) {
   const text = String(value ?? "");
-  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  const spreadsheetSafeText = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return /[",\r\n]/.test(spreadsheetSafeText) ? `"${spreadsheetSafeText.replace(/"/g, '""')}"` : spreadsheetSafeText;
 }
+
+function buildOtHrCsv(rows) {
+  const records = Array.isArray(rows) ? rows : [];
+  return [
+    OT_HR_CSV_COLUMNS.join(","),
+    ...records.map(row => OT_HR_CSV_COLUMNS.map(column => escapeOtHrCsvCell(otHrCsvValue(row || {}, column))).join(",")),
+  ].join("\r\n");
+}
+
+window.FlowMateOtIntent = Object.freeze({
+  signature(parts) {
+    return JSON.stringify(Array.isArray(parts) ? parts : [parts]);
+  },
+  establish(current, signature, createKey) {
+    if (current?.key && current.signature === signature) return current;
+    return { key: createKey(), signature };
+  },
+  complete() {
+    return null;
+  },
+});
 
 window.FlowMateOtHrCsv = Object.freeze({
   columns: Object.freeze(OT_HR_CSV_COLUMNS.slice()),
-  build(rows) {
-    const records = Array.isArray(rows) ? rows : [];
-    return [
-      OT_HR_CSV_COLUMNS.join(","),
-      ...records.map(row => OT_HR_CSV_COLUMNS.map(column => escapeOtHrCsvCell(otHrCsvValue(row || {}, column))).join(",")),
-    ].join("\r\n");
+  escapeCell: escapeOtHrCsvCell,
+  build: buildOtHrCsv,
+});
+
+window.FlowMateOtHrExport = Object.freeze({
+  establish(current, signature, createKey) {
+    const established = window.FlowMateOtIntent.establish(current, signature, createKey);
+    return established === current ? current : { ...established, downloaded: false };
+  },
+  createLocalFile(rows, batchName, initiateDownload, buildCsv = buildOtHrCsv) {
+    try {
+      const csv = buildCsv(rows);
+      if (initiateDownload(csv, batchName) !== true) {
+        throw new Error("The browser did not initiate the CSV download.");
+      }
+      return { ok: true };
+    } catch (error) {
+      const message = error && typeof error === "object" && "message" in error
+        ? error.message
+        : String(error || "Local CSV creation failed.");
+      return { ok: false, error: new Error(message) };
+    }
+  },
+  markDownloaded(intent) {
+    return { ...intent, downloaded: true };
+  },
+  phase(intent) {
+    return intent?.downloaded ? "mark" : "download";
   },
 });
