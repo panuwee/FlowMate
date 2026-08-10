@@ -455,17 +455,31 @@ describe("OT Request static module integration", () => {
     const screen = read("screens-ot.jsx");
     const warning = screen.slice(screen.indexOf("function getOtAnnouncementProps("), screen.indexOf("function OtLimitProgress("));
     const navigation = screen.slice(screen.indexOf('<nav className="ot-sidebar"'), screen.indexOf("</nav>", screen.indexOf('<nav className="ot-sidebar"')));
-    const requestForm = screen.slice(screen.indexOf("function OtRequestForm("), screen.indexOf("function OtConsentPanel("));
 
     expect(warning).toContain('? { role: "alert" }');
     expect(warning).toContain('{ role: "status", "aria-live": "polite" }');
-    expect(requestForm).toContain('{...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))}');
     expect(navigation).toContain('aria-label="OT Request navigation"');
     expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(9);
     for (const view of ["overview", "my-requests", "manager", "root-causes", "compliance", "audit", "export", "owner", "access"]) {
       expect(navigation).toContain(`aria-current={visibleView === "${view}" ? "page" : undefined}`);
     }
     expect(screen).not.toContain("function getOtCurrentPageProps(");
+  });
+
+  it("connects every personal OT action to its rendered submission feedback", () => {
+    const screen = read("screens-ot.jsx");
+    const describedProps = screen.slice(screen.indexOf("function getOtDescribedActionProps("), screen.indexOf("function OtWarning("));
+    const requestForm = screen.slice(screen.indexOf("function OtRequestForm("), screen.indexOf("function OtConsentPanel("));
+    const consentPanel = screen.slice(screen.indexOf("function OtConsentPanel("), screen.indexOf("function OtActualConfirmationForm("));
+    const actualForm = screen.slice(screen.indexOf("function OtActualConfirmationForm("), screen.indexOf("function OtMyRequestsTable("));
+
+    expect(describedProps).toContain('return isDescribed ? { "aria-describedby": descriptionId } : {};');
+    expect(requestForm.match(/getOtDescribedActionProps\(/g)).toHaveLength(1);
+    expect(requestForm).toContain('{...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))}');
+    expect(consentPanel.match(/getOtDescribedActionProps\(/g)).toHaveLength(2);
+    expect(consentPanel).toContain('{...getOtDescribedActionProps("ot-consent-submit-feedback", Boolean(submitState.message))}');
+    expect(actualForm.match(/getOtDescribedActionProps\(/g)).toHaveLength(1);
+    expect(actualForm).toContain('{...getOtDescribedActionProps("ot-actual-submit-feedback", Boolean(submitState.message))}');
   });
 
   it("exposes ProductSwitch as a labelled control group", () => {
