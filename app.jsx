@@ -208,6 +208,7 @@ function App() {
   const [searchInput, setSearchInput] = useStateApp("");
   const [searchQuery, setSearchQuery] = useStateApp("");
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useStateApp(false);
+  const normalizedGlobalSearch = searchInput.trim();
   const searchWrapRef = useRefApp(null);
   const [navCounts, setNavCounts] = useStateApp({});
   const [notifications, setNotifications] = useStateApp([]);
@@ -375,9 +376,8 @@ function App() {
       return;
     }
     try {
-      if (window.loadFlowMateListRows && window.findFlowMateWorkItemById) {
-        const rows = await window.loadFlowMateListRows();
-        const row = window.findFlowMateWorkItemById(rows, notification.workItemId);
+      if (window.loadFlowMateWorkItemById) {
+        const row = await window.loadFlowMateWorkItemById(notification.workItemId, { includeArchived: true });
         if (row) {
           window.flowmateSelectedWorkItem = row;
           open(row.id);
@@ -648,10 +648,14 @@ function App() {
   useEffectApp(() => {
     if (authState.status !== "signed-in") return;
     let alive = true;
-    async function refreshNavCounts() {
-      if (!window.loadFlowMateListRows || !window.getFlowMateNavCounts) return;
+    async function refreshNavCounts(event) {
+      if (!window.loadFlowMateNavigationRows || !window.getFlowMateNavCounts) return;
+      if (event?.detail?.reason && window.flowMateRefreshReasonMatches && !window.flowMateRefreshReasonMatches(event, [
+        "work_items", "assignment_runs", "work_item_events", "work_status_changed", "admin_work_status_changed",
+        "active_team_changed", "recheck_brief", "capacity_allocation_rescheduled", "admin_archive", "admin_restore",
+      ])) return;
       try {
-        const rows = await window.loadFlowMateListRows();
+        const rows = await window.loadFlowMateNavigationRows();
         if (!alive) return;
         const currentUser = window.FLOWMATE_CURRENT_USER || authState.user || {};
         setNavCounts(window.getFlowMateNavCounts(rows, currentUser, window.MEMBERS || []));
@@ -702,7 +706,12 @@ function App() {
     }
     let alive = true;
     async function refreshGlobalSearchRows() {
-      if (!window.loadFlowMateListRows) {
+      if (!isGlobalSearchOpen || !normalizedGlobalSearch) {
+        setGlobalSearchRows([]);
+        setGlobalSearchLoadState({ status: "idle", message: "" });
+        return;
+      }
+      if (!window.loadFlowMateSearchRows) {
         setGlobalSearchRows([]);
         setGlobalSearchLoadState({
           status: "error",
@@ -711,7 +720,7 @@ function App() {
         return;
       }
       try {
-        const rows = await window.loadFlowMateListRows();
+        const rows = await window.loadFlowMateSearchRows();
         if (!alive) return;
         setGlobalSearchRows(rows || []);
         setGlobalSearchLoadState({
@@ -728,13 +737,12 @@ function App() {
         });
       }
     }
-    refreshGlobalSearchRows();
-    window.addEventListener("flowmate:refresh-request", refreshGlobalSearchRows);
+    const timer = setTimeout(refreshGlobalSearchRows, 150);
     return () => {
       alive = false;
-      window.removeEventListener("flowmate:refresh-request", refreshGlobalSearchRows);
+      clearTimeout(timer);
     };
-  }, [authState.status]);
+  }, [authState.status, isGlobalSearchOpen, normalizedGlobalSearch, activeTeamKey]);
   if (authState.status === "loading") {
     return React.createElement(LoadingScreen, null);
   }
@@ -753,7 +761,6 @@ function App() {
   const visibleNavGroups = getVisibleNavGroups(user.role);
   const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route);
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
-  const normalizedGlobalSearch = searchInput.trim();
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
   const accessibleTeams = getFlowMateAccessibleTeams(user);
   function handleActiveTeamChange(teamKey) {
@@ -2959,6 +2966,13 @@ function MarketingPlanFunctionFilter({
   }), React.createElement("span", null, option.label))));
 }
 const MARKETING_PLAN_TIMELINE_SELECT_COLUMNS = ["plan_id", "month_key", "plan_title", "market", "audience_scope", "campaign_id", "campaign_name", "campaign_team", "campaign_sort_order", "content_item_id", "content_title", "content_team", "format", "content_tier", "pic_user_id", "pic_name", "sub_pic_user_id", "sub_pic_name", "brief_link", "flowmate_work_item_id", "flowmate_display_id", "flowmate_status", "content_status", "content_sort_order", "placement_id", "channel", "publish_date", "publish_time", "placement_status", "placement_note"].join(",");
+const MARKETING_PLAN_REFRESH_REASONS = [
+  "work_items", "work_status_changed", "admin_work_status_changed",
+  "marketing_plan_creative_request_link", "marketing_plan_working_sheet_updated",
+  "marketing_plan_working_sheet_time_updated", "marketing_plan_working_sheet_status_updated",
+  "marketing_plan_working_sheet_row_edited", "marketing_plan_working_sheet_row_deleted",
+  "marketing_plan_working_sheet_saved",
+];
 const MARKETING_PLAN_TIMELINE_CACHE_TTL_MS = 60000;
 const marketingPlanTimelineCache = new Map();
 const marketingPlanTimelineRequests = new Map();
@@ -3921,7 +3935,7 @@ function MarketingPlanTimelineScreen({
     loadTimelineRows(isAlive);
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows(isAlive, {
       force: true
-    })) : () => {};
+    }), { reasons: MARKETING_PLAN_REFRESH_REASONS }) : () => {};
     return () => {
       alive = false;
       cleanup();
@@ -4589,7 +4603,7 @@ function MarketingPlanChannelPlanScreen() {
     loadTimelineRows();
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadTimelineRows({
       force: true
-    })) : () => {};
+    }), { reasons: MARKETING_PLAN_REFRESH_REASONS }) : () => {};
     return () => {
       alive = false;
       cleanup();
@@ -4851,7 +4865,7 @@ function MarketingPlanCalendarScreen() {
     loadCalendarRows();
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadCalendarRows({
       force: true
-    })) : () => {};
+    }), { reasons: MARKETING_PLAN_REFRESH_REASONS }) : () => {};
     return () => {
       alive = false;
       cleanup();
@@ -5197,7 +5211,7 @@ function MarketingPlanWorkingSheetScreen() {
     loadRows();
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadRows({
       force: true
-    })) : () => {};
+    }), { reasons: MARKETING_PLAN_REFRESH_REASONS }) : () => {};
     return () => {
       aliveRef.alive = false;
       cleanup();

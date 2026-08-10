@@ -1,4 +1,4 @@
-/* AUTO-GENERATED from screens-c.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
+/* AUTO-GENERATED from screens-c.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run npm run build:github. */
 const {
   useState: useStateC,
   useEffect: useEffectC
@@ -228,7 +228,7 @@ function mapFlowMatePlanningViewRowC(item) {
   };
 }
 async function loadFlowMatePlanningRowsC() {
-  if (!window.flowmateSupabase && !window.loadFlowMateListRows) {
+  if (!window.flowmateSupabase && !window.loadFlowMateOperationalRows) {
     throw new Error("Planning data loader is not ready.");
   }
   if (window.flowmateSupabase) {
@@ -244,10 +244,10 @@ async function loadFlowMatePlanningRowsC() {
       console.warn("[FlowMate Planning] planning_work_items_v query failed; using live list rows:", error && error.message);
     }
   }
-  if (!window.loadFlowMateListRows) {
+  if (!window.loadFlowMateOperationalRows) {
     throw new Error("Planning view is unavailable and live list loader is not ready.");
   }
-  const rows = await window.loadFlowMateListRows();
+  const rows = await window.loadFlowMateOperationalRows();
   return (rows || []).filter(row => row && row.type === "creative" && !row.archivedAt).map(row => ({
     ...row,
     planningDate: row.planningDate || row.publishDate || row.launchDate || "",
@@ -390,7 +390,7 @@ function WorkloadScreen({
         return;
       }
       try {
-        const [liveRows, liveItems] = await Promise.all([window.loadFlowMateWorkloadRows(), window.loadFlowMateListRows ? window.loadFlowMateListRows() : Promise.resolve([])]);
+        const [liveRows, liveItems] = await Promise.all([window.loadFlowMateWorkloadRows(), window.loadFlowMateOperationalRows ? window.loadFlowMateOperationalRows() : Promise.resolve([])]);
         if (!alive) return;
         setRows(liveRows);
         setWorkloadItems(liveItems || []);
@@ -2524,7 +2524,7 @@ function LegacyTeamGanttScreen({
   useEffectC(() => {
     let alive = true;
     async function loadRowsIfAlive() {
-      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
       if (!loader) {
         if (!alive) return;
         setSourceRows([]);
@@ -2948,7 +2948,7 @@ function TeamGanttScreen({
   useEffectC(() => {
     let alive = true;
     async function loadSchedule() {
-      const taskLoader = window.loadFlowMateTeamScheduleRows || window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      const taskLoader = window.loadFlowMateTeamScheduleRows || window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
       if (!taskLoader) {
         if (alive) setLoadState({
           status: "error",
@@ -3386,7 +3386,7 @@ function CalendarScreen({
     message: ""
   });
   async function loadRows() {
-    const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+    const loader = window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
     if (!loader) {
       setSourceRows([]);
       setLoadState({
@@ -3414,7 +3414,7 @@ function CalendarScreen({
   useEffectC(() => {
     let alive = true;
     async function loadRowsIfAlive() {
-      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
       if (!loader) {
         if (!alive) return;
         setSourceRows([]);

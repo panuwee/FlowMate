@@ -1067,7 +1067,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(screensC).not.toContain("delivered: 22");
     expect(screensC).not.toContain("count: 28");
     expect(screensC).not.toContain("Apr 19-May 15, 2026");
-    expect(screensC).toContain("window.loadFlowMateListRows");
+    expect(screensC).toContain("window.loadFlowMateOperationalRows");
   });
 
   it("KPI monthly export controls are enabled", () => {
@@ -1175,7 +1175,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(appJsx).toContain("const globalSearchResults =");
     expect(appJsx).toContain("function openGlobalSearchResult(row)");
     expect(appJsx).toContain("window.flowmateSelectedWorkItem = row");
-    expect(appJsx).toContain("loadFlowMateListRows");
+    expect(appJsx).toContain("loadFlowMateSearchRows");
     expect(appJsx).toContain("GlobalSearchResultsPanel");
     expect(appJsx).toContain("onMouseDown");
     expect(appJsx).toContain("searchbar__result-id");
@@ -1972,7 +1972,7 @@ describe("Marketing Plan Supervisor backend SQL", () => {
 describe("FlowMate operational performance", () => {
   it("refreshes nav counts for identity or workspace changes, not route-only transitions", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
-    const refreshStart = appJsx.indexOf("async function refreshNavCounts()");
+    const refreshStart = appJsx.indexOf("async function refreshNavCounts(event)");
     const effectEnd = appJsx.indexOf("  useEffectApp(() => {", refreshStart);
     const navEffect = appJsx.slice(refreshStart, effectEnd);
 
@@ -2018,7 +2018,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
 
     expect(loaderSource).toContain('from("planning_work_items_v")');
     expect(loaderSource).toContain("mapFlowMatePlanningViewRowC");
-    expect(loaderSource).toContain("window.loadFlowMateListRows");
+    expect(loaderSource).toContain("window.loadFlowMateOperationalRows");
     expect(loaderSource).toContain("row.type === \"creative\"");
     expect(loaderSource).not.toContain("WORK");
   });
@@ -2936,7 +2936,8 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
     expect(appJsx).toContain('}, "Sub PIC")');
     expect(listData).toContain("marketing_content_items");
     expect(listData).toContain("marketingPlanSubPicUserId");
-    expect(screensA).toContain("currentUserId === w.marketingPlanSubPicUserId");
+    expect(screensA).toContain("window.canFlowMateTransitionWorkItem?.(");
+    expect(readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8")).toContain("userId === row.marketingPlanSubPicUserId");
     expect(marketingPlanSql).toContain("sub_pic_user_id uuid references public.users(id)");
     expect(marketingPlanSql).toContain("create policy \"pic or sub pic can update marketing content items\"");
     expect(marketingPlanSql).toContain("create policy \"pic or sub pic can update marketing channel placements\"");
@@ -3619,7 +3620,8 @@ describe("MVP 1.2 AI Tag backend and detail UI", () => {
     expect(helperJs).toContain("remove_work_item_ai_tag");
     expect(helperJs).not.toMatch(/p_actor_user_id|localStorage\.setItem/i);
     expect(detailSource).toContain("const [detailAiTags, setDetailAiTags]");
-    expect(detailSource).toContain("window.loadFlowMateAiTags({ displayId: w.id })");
+    expect(detailSource).not.toContain("window.loadFlowMateAiTags({ displayId: w.id })");
+    expect(detailSource).toContain("aiTagsUnavailable");
     expect(detailSource).toContain("function addAiTag()");
     expect(detailSource).toContain('const tag = "AI";');
     expect(detailSource).toContain("normalizedTag === \"ai\"");
@@ -4069,7 +4071,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     const calendarSource = screensC.slice(screensC.indexOf("function CalendarScreen"));
 
     expect(calendarSource).toContain("function CalendarScreen({ onOpen })");
-    expect(calendarSource).toContain("window.loadFlowMateListRows");
+    expect(calendarSource).toContain("window.loadFlowMateOperationalRows");
     expect(calendarSource).toContain("attachFlowMateLiveRefresh(loadRowsIfAlive)");
     expect(calendarSource).toContain('setViewMode("month")');
     expect(calendarSource).toContain('setViewMode("agenda")');
@@ -4354,7 +4356,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
     expect(listDataJs).toContain("watchers: watchersByWorkItemId[item.id] || []");
     expect(listDataJs).toContain("requesterUserId: item.requester_user_id");
     expect(listDataJs).toContain("assigneeUserId: item.assignee_user_id");
-    expect(listDataJs).toContain("syncFlowMateMentionUsers(usersResult.data || [])");
+    expect(listDataJs).toContain("syncFlowMateMentionUsers(scopedUsers)");
     expect(listDataJs).toContain("window.loadFlowMateMentionUsers = loadFlowMateMentionUsers");
   });
 
@@ -4367,7 +4369,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
     expect(quickTaskJs).toContain('rpc("add_work_item_watcher"');
     expect(quickTaskJs).toContain("async function adminTransitionFlowMateWorkStatus(displayId, nextStatus, options = {})");
     expect(quickTaskJs).toContain('rpc("flowmate_admin_transition_work_status"');
-    expect(quickTaskJs).toContain("if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === \"admin\")");
+    expect(quickTaskJs).toContain("window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === \"admin\"");
 
     const linkHelper = quickTaskJs.slice(
       quickTaskJs.indexOf("async function addFlowMateWorkItemLink"),
@@ -4499,7 +4501,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
     const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
     const boardSource = screensB.slice(screensB.indexOf("function BoardScreen"), screensB.indexOf("function QueueScreen"));
 
-    expect(boardSource).toContain("window.transitionFlowMateWorkStatus(row.id, targetStatus, options)");
+    expect(boardSource).toContain("window.transitionFlowMateWorkStatus(row.id, targetStatus, { ...options, currentStatus: row.status })");
     expect(boardSource).not.toContain("window.transitionFlowMateCreativeStatus(row.id, targetStatus, options)");
   });
 
@@ -4512,7 +4514,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
 
     const archiveHelper = quickTaskJs.slice(
       quickTaskJs.indexOf("async function adminArchiveFlowMateWorkItem"),
-      quickTaskJs.indexOf("window.adminArchiveFlowMateWorkItem"),
+      quickTaskJs.indexOf("async function restoreFlowMateArchivedWorkItem"),
     );
     expect(archiveHelper).not.toContain("p_actor_user_id");
     expect(archiveHelper).not.toMatch(/delete\s*\(/i);

@@ -243,14 +243,14 @@ function ListScreen({ onOpen, searchQuery = "" }) {
     let alive = true;
 
     async function loadRows() {
-      if (!window.loadFlowMateListRows) {
+      if (!window.loadFlowMateOperationalRows) {
         setSourceRows([]);
         setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
         return;
       }
 
       try {
-        const rows = await window.loadFlowMateListRows();
+        const rows = await window.loadFlowMateOperationalRows();
         let liveRequesterTeams = [];
         if (window.loadFlowMateRequesterTeams) {
           liveRequesterTeams = await window.loadFlowMateRequesterTeams();
@@ -523,6 +523,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
   const laneBodyRefs = useRefB({});
   const laneLoadedCounts = useRefB(savedBoardState.laneLoadedCounts || {});
   const laneScrollPositions = useRefB(savedBoardState.laneScrollPositions || {});
+  const cardPendingRef = useRefB({});
   const activeTabRef = useRefB(activeTab);
   const deliveredFiltersRef = useRefB(deliveredFilters);
   const deliveredCursorRef = useRefB(deliveredCursor);
@@ -584,7 +585,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
     try {
       do {
         const pageSize = Math.min(50, Math.max(1, desiredCount - accumulatedRows.length));
-        latestResult = await window.loadFlowMateBoardLane({ status, cursor, limit: pageSize });
+        latestResult = await window.loadFlowMateBoardLane({ status, cursor, limit: pageSize, total: currentLane.total || summary.counts?.[status] || null });
         if (!isAlive() || requestId !== laneRequestRef.current[status] || workspaceKey !== boardWorkspaceKeyRef.current) return false;
         accumulatedRows = Array.from(new Map([...accumulatedRows, ...(latestResult.rows || [])].map(row => [row.id, row])).values());
         cursor = latestResult.nextCursor || null;
@@ -636,17 +637,41 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
   }
 
   async function loadActiveBoard(isAlive = () => true, { preserveScroll = true } = {}) {
+    if (!window.loadFlowMateActiveBoard) {
+      setLoadState({ status: "error", message: "Active Board batch loader is not ready." });
+      return false;
+    }
     const requestId = ++activeBoardRequestRef.current;
-    const results = await Promise.all([
-      ...columns.map(column => loadLane(column.key, {
-        isAlive,
-        preserveScroll,
-        targetCount: Math.max(50, Number(laneLoadedCounts.current[column.key] || laneStateRef.current[column.key]?.rows.length || 0)),
-      })),
-      loadSummary(isAlive, requestId),
-    ]);
-    if (isAlive() && requestId === activeBoardRequestRef.current) {
-      setLoadState({ status: results.every(Boolean) ? "live" : "error", message: results.every(Boolean) ? "Live Supabase data" : "One or more Board lanes could not be loaded." });
+    setLanes(current => Object.fromEntries(columns.map(column => {
+      const lane = current[column.key] || emptyLane;
+      return [column.key, { ...lane, status: lane.rows.length > 0 ? "refreshing" : "loading", message: "" }];
+    })));
+    try {
+      const result = await window.loadFlowMateActiveBoard({
+        laneLimits: Object.fromEntries(columns.map(column => [
+          column.key,
+          Math.max(50, Number(laneLoadedCounts.current[column.key] || laneStateRef.current[column.key]?.rows.length || 0)),
+        ])),
+      });
+      if (!isAlive() || requestId !== activeBoardRequestRef.current) return false;
+      laneStateRef.current = result.lanes;
+      columns.forEach(column => { laneLoadedCounts.current[column.key] = result.lanes[column.key]?.rows.length || 0; });
+      setLanes(result.lanes);
+      setSummary(result.summary);
+      writeFlowMateBoardSnapshot(boardWorkspaceKeyRef.current, { lanes: result.lanes, summary: result.summary });
+      if (preserveScroll) columns.forEach(column => restoreLaneScroll(column.key));
+      persistBoardViewState();
+      setLoadState({ status: "live", message: "Live Supabase data" });
+      return true;
+    } catch (error) {
+      if (!isAlive() || requestId !== activeBoardRequestRef.current) return false;
+      console.error("[FlowMate Board] batch load failed:", error);
+      setLanes(current => Object.fromEntries(columns.map(column => {
+        const lane = current[column.key] || emptyLane;
+        return [column.key, { ...lane, status: lane.rows.length > 0 ? "stale-error" : "error", message: boardError(error, "Could not load Active Board.") }];
+      })));
+      setLoadState({ status: "error", message: boardError(error, "Could not load Active Board.") });
+      return false;
     }
   }
 
@@ -794,7 +819,15 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
     const refreshCurrent = () => activeTabRef.current === "active"
       ? refreshActiveBoardPreservingState()
       : loadDelivered(deliveredCursorRef.current, () => true, { ...deliveredFiltersRef.current });
-    return window.attachFlowMateLiveRefresh(refreshCurrent);
+    return window.attachFlowMateLiveRefresh(refreshCurrent, {
+      reasons: [
+        "work_items", "creative_request_details", "checklist_items", "assignment_runs", "work_item_events",
+        "work_status_changed", "admin_work_status_changed", "active_team_changed", "admin_archive", "admin_restore",
+        "quick_task_created", "rerun_assignment", "creative_assignee_changed", "capacity_allocation_rescheduled",
+        "recheck_brief", "team_settings_admin_update", "team_workspace_changed", "archived_work_item_restored",
+        "marketing_plan_creative_request_link", "marketing_plan_working_sheet_row_edited",
+      ],
+    });
   }, []);
 
   useEffectB(() => {
@@ -827,8 +860,13 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
   function canTransitionBoardWork(row) {
     if (!row?.isSupabaseRow || row.archivedAt) return false;
     const currentUser = window.FLOWMATE_CURRENT_USER || {};
-    if (currentUser.role === "admin") return true;
     const owner = window.MEMBERS_BY_ID?.[row.assignee];
+    if (row.type !== "quick" && window.canFlowMateTransitionWorkItem) {
+      return ["in_progress", "review", "delivered", "blocked", "assigned"].some(target =>
+        window.canFlowMateTransitionWorkItem(row, target, currentUser, window.MEMBERS_BY_ID || {})
+      );
+    }
+    if (currentUser.role === "admin") return true;
     return Boolean(
       currentUser.id && (
         currentUser.id === row.requesterUserId
@@ -840,15 +878,25 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
     );
   }
 
+  function canTransitionBoardTarget(row, targetStatus) {
+    if (row?.type === "quick") return canTransitionBoardWork(row);
+    return Boolean(window.canFlowMateTransitionWorkItem?.(
+      row,
+      targetStatus,
+      window.FLOWMATE_CURRENT_USER || {},
+      window.MEMBERS_BY_ID || {},
+    ));
+  }
+
   function boardTransitionTargets(row) {
-    if (!canTransitionBoardWork(row) || row.type === "quick") return [];
+    if (row.type === "quick") return [];
     const targetsByStatus = {
       assigned: ["in_progress", "blocked"],
       in_progress: ["review", "blocked"],
       review: ["in_progress", "blocked"],
       blocked: ["in_progress"],
     };
-    return targetsByStatus[row.status] || [];
+    return (targetsByStatus[row.status] || []).filter(target => canTransitionBoardTarget(row, target));
   }
 
   function setDeliveredFilter(key, value) {
@@ -916,32 +964,34 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
   }
 
   async function runCardMutation(row, mutation, successText) {
+    if (cardPendingRef.current[row.id]) return false;
+    cardPendingRef.current[row.id] = true;
     setCardPending(current => ({ ...current, [row.id]: true }));
     setCardErrors(current => ({ ...current, [row.id]: "" }));
     try {
       await mutation();
       setLanes(current => ({ ...current, [row.status]: { ...current[row.status], rows: current[row.status].rows.filter(item => item.id !== row.id) } }));
       setFlash({ tone: "ok", text: successText });
-      await refreshActiveBoardPreservingState();
     } catch (error) {
       console.error("[FlowMate Board] card transition failed:", error);
       const message = boardError(error, "Transition rejected by backend.");
       setCardErrors(current => ({ ...current, [row.id]: message }));
       setFlash({ tone: "bad", text: message });
-      await refreshActiveBoardPreservingState();
     } finally {
+      cardPendingRef.current[row.id] = false;
       setCardPending(current => ({ ...current, [row.id]: false }));
     }
   }
 
   async function completeWork(row) {
-    if (!canTransitionBoardWork(row)) {
+    const targetStatus = "delivered";
+    if (row.type === "quick" ? !canTransitionBoardWork(row) : !canTransitionBoardTarget(row, targetStatus)) {
       setCardErrors(current => ({ ...current, [row.id]: "You do not have permission to change this work item." }));
       return false;
     }
     if (row.type === "quick") {
       const mutation = window.FLOWMATE_CURRENT_USER?.role === "admin"
-        ? () => window.transitionFlowMateWorkStatus(row.id, "delivered", {})
+        ? () => window.transitionFlowMateWorkStatus(row.id, "delivered", { currentStatus: row.status })
         : () => window.completeFlowMateQuickTask(row.id);
       return runCardMutation(row, mutation, `${row.id} marked done.`);
     }
@@ -954,7 +1004,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
       validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link.",
     });
     if (!deliveryLink) return false;
-    return runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, "delivered", { deliveryLink }), `${row.id} marked Delivered.`);
+    return runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, "delivered", { deliveryLink, currentStatus: row.status }), `${row.id} marked Delivered.`);
   }
 
   function handleDragStart(event, row) {
@@ -972,7 +1022,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
   }
 
   async function moveBoardWork(row, targetStatus) {
-    if (!row || row.status === targetStatus || !canTransitionBoardWork(row)) return false;
+    if (!row || row.status === targetStatus || !canTransitionBoardTarget(row, targetStatus)) return false;
     if (targetStatus === "unassigned") {
       setFlash({ tone: "warn", text: "Open Detail to clear or change an assignee." });
       return false;
@@ -992,7 +1042,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
       if (!blockedReason) return;
       options.blockedReason = blockedReason;
     }
-    await runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, targetStatus, options), `${row.id} moved to ${STATUS_LABEL[targetStatus]}.`);
+    await runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, targetStatus, { ...options, currentStatus: row.status }), `${row.id} moved to ${STATUS_LABEL[targetStatus]}.`);
     return true;
   }
 
@@ -1107,7 +1157,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
                         {row.blockReason && <div className="kcard__row kcard__row--meta board-card__blocked"><Icon name="alert" size={11} /> Blocked: {row.blockReason}</div>}
                         <div className="board-card__actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
                           {row.type === "quick" && canTransitionBoardWork(row) && <button type="button" className="btn btn--xs btn--secondary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark done"}</button>}
-                          {row.type === "creative" && row.status === "review" && canTransitionBoardWork(row) && <button type="button" className="btn btn--xs btn--primary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark Delivered"}</button>}
+                          {row.type === "creative" && row.status === "review" && canTransitionBoardTarget(row, "delivered") && <button type="button" className="btn btn--xs btn--primary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark Delivered"}</button>}
                           <details className="board-card-menu">
                             <summary aria-label={`Actions for ${row.id}`}>Actions</summary>
                             <div className="board-card-menu__items">
@@ -1193,13 +1243,13 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
   useEffectB(() => {
     let alive = true;
     async function loadRows() {
-      if (!window.loadFlowMateListRows) {
+      if (!window.loadFlowMateOperationalRows) {
         setSourceRows([]);
         setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
         return;
       }
       try {
-        const rows = await window.loadFlowMateListRows();
+        const rows = await window.loadFlowMateOperationalRows();
         if (!alive) return;
         setSourceRows(rows);
         setLoadState({ status: "live", message: "Live Supabase data" });

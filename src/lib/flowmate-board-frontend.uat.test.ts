@@ -115,11 +115,20 @@ function makeQueryResult(data: unknown[] = [], count: number | null = null, erro
 }
 
 function makeListLoaderSupabase(batches: Array<{ flagError?: Error }> = [{}]) {
-  let tableCallCount = 0;
+  let currentBatch = -1;
   const from = vi.fn((table: string) => {
-    const batch = batches[Math.min(Math.floor(tableCallCount / 13), batches.length - 1)] || {};
-    tableCallCount += 1;
-    return makeQueryResult([], null, table === "work_item_flags_v" ? batch.flagError || null : null).query;
+    if (table === "work_items") currentBatch += 1;
+    const batch = batches[Math.min(Math.max(currentBatch, 0), batches.length - 1)] || {};
+    const data = table === "work_items" ? [{
+      id: `work-${currentBatch}`,
+      display_id: `CR-${currentBatch}`,
+      title: `batch ${currentBatch}`,
+      work_type: "creative_request",
+      status: "assigned",
+      priority: "normal",
+      created_at: "2026-08-06T00:00:00Z",
+    }] : [];
+    return makeQueryResult(data, null, table === "work_item_flags_v" ? batch.flagError || null : null).query;
   });
   return {
     flowmateSupabase: { from },
@@ -129,10 +138,10 @@ function makeListLoaderSupabase(batches: Array<{ flagError?: Error }> = [{}]) {
 
 function makeDeferredListLoaderSupabase() {
   const batches = [deferred<void>(), deferred<void>(), deferred<void>(), deferred<void>()];
-  let tableCallCount = 0;
+  let currentBatch = -1;
   const from = vi.fn((table: string) => {
-    const batchIndex = Math.floor(tableCallCount / 13);
-    tableCallCount += 1;
+    if (table === "work_items") currentBatch += 1;
+    const batchIndex = Math.max(currentBatch, 0);
     const result = {
       data: table === "work_items" ? [{
         id: `work-${batchIndex}`,
@@ -151,7 +160,7 @@ function makeDeferredListLoaderSupabase() {
       query[method] = () => query;
     });
     query.then = (resolve: (value: typeof result) => unknown, reject: (reason: unknown) => unknown) =>
-      batches[batchIndex].promise.then(() => result).then(resolve, reject);
+      (table === "work_items" ? batches[batchIndex].promise : Promise.resolve()).then(() => result).then(resolve, reject);
     return query;
   });
   return {
@@ -444,7 +453,6 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("emits one Board lane query ordered by the locked tuple without priority phases", async () => {
-    const countResult = makeQueryResult([], 4);
     const workItems = makeQueryResult([
       {
         id: "work-1", display_id: "CR-1001", title: "Earlier normal launch", work_type: "creative_request",
@@ -464,13 +472,13 @@ describe("FlowMate Board and Delivered frontend", () => {
       },
     ]);
     const empty = makeQueryResult([]);
-    const workItemQueries = [countResult.query, workItems.query];
+    const workItemQueries = [workItems.query];
     const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
     const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
     });
 
-    const result = await windowObject.loadFlowMateBoardLane({ status: "assigned", limit: 2 });
+    const result = await windowObject.loadFlowMateBoardLane({ status: "assigned", limit: 2, total: 4 });
 
     expect(workItems.calls.filter(([method]) => method === "order")).toEqual([
       ["order", "launch_date", { ascending: true, nullsFirst: false }],
@@ -496,11 +504,9 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("continues a Board lane with the same launch-date tuple, including null-last branches", async () => {
-    const countResult = makeQueryResult([], 4);
     const workItems = makeQueryResult([]);
-    const otherWorkItems = makeQueryResult([]);
     const empty = makeQueryResult([]);
-    const workItemQueries = [countResult.query, workItems.query, otherWorkItems.query];
+    const workItemQueries = [workItems.query];
     const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
     const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
@@ -524,11 +530,9 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("continues after a null launch and due date without returning earlier non-null dates", async () => {
-    const countResult = makeQueryResult([], 4);
     const workItems = makeQueryResult([]);
-    const otherWorkItems = makeQueryResult([]);
     const empty = makeQueryResult([]);
-    const workItemQueries = [countResult.query, workItems.query, otherWorkItems.query];
+    const workItemQueries = [workItems.query];
     const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
     const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
@@ -549,10 +553,9 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("continues a non-null launch with a null due date in its null-last bucket", async () => {
-    const countResult = makeQueryResult([], 4);
     const workItems = makeQueryResult([]);
     const empty = makeQueryResult([]);
-    const workItemQueries = [countResult.query, workItems.query];
+    const workItemQueries = [workItems.query];
     const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
     const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
@@ -573,10 +576,9 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("continues a null launch with a non-null due date and keeps both null-last branches", async () => {
-    const countResult = makeQueryResult([], 4);
     const workItems = makeQueryResult([]);
     const empty = makeQueryResult([]);
-    const workItemQueries = [countResult.query, workItems.query];
+    const workItemQueries = [workItems.query];
     const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
     const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
@@ -597,7 +599,6 @@ describe("FlowMate Board and Delivered frontend", () => {
   });
 
   it("does not emit a cursor for an exact Board page without an extra raw row", async () => {
-    const countResult = makeQueryResult([], 2);
     const workItems = makeQueryResult([
       {
         id: "work-1", display_id: "CR-1001", title: "First exact-page item", work_type: "creative_request",
@@ -609,13 +610,13 @@ describe("FlowMate Board and Delivered frontend", () => {
       },
     ]);
     const empty = makeQueryResult([]);
-    const workItemQueries = [countResult.query, workItems.query];
+    const workItemQueries = [workItems.query];
     const from = vi.fn((table: string) => table === "work_items" ? workItemQueries.shift() : empty.query);
     const windowObject = loadBrowserScript("supabase-list-data.js", {
       flowmateSupabase: { from },
     });
 
-    const result = await windowObject.loadFlowMateBoardLane({ status: "assigned", limit: 2 });
+    const result = await windowObject.loadFlowMateBoardLane({ status: "assigned", limit: 2, total: 2 });
 
     expect(workItems.calls).toContainEqual(["limit", 3]);
     expect(result.rows.map((row: { id: string }) => row.id)).toEqual(["CR-1001", "CR-1002"]);

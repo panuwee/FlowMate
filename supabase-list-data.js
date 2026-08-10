@@ -53,7 +53,7 @@ function scheduleFlowMateRealtimeRefresh(reason) {
   flowmateRealtimeRefreshTimer = setTimeout(() => {
     flowmateRealtimeRefreshTimer = null;
     window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason } }));
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts", { detail: { reason } }));
   }, FLOWMATE_REALTIME_DEBOUNCE_MS);
 }
 
@@ -105,6 +105,12 @@ function stopFlowMateRealtime() {
   setFlowMateRealtimeState({ status: "idle", message: "Realtime stopped" });
 }
 
+function flowMateRefreshReasonMatches(event, allowedReasons) {
+  const reason = String(event?.detail?.reason || "").trim();
+  if (!reason || !Array.isArray(allowedReasons) || allowedReasons.length === 0) return true;
+  return allowedReasons.includes(reason);
+}
+
 function attachFlowMateLiveRefresh(refreshFn, options = {}) {
   // O-2/O-3: self-scheduling poller that
   //  - pauses entirely while the tab is hidden (no background polling storm),
@@ -138,8 +144,9 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
     schedule();
   }
 
-  async function runRefresh() {
+  async function runRefresh(event) {
     if (stopped) return;
+    if (event?.type === "flowmate:refresh-request" && !flowMateRefreshReasonMatches(event, options.reasons)) return;
     if (running) {
       queued = true;
       return;
@@ -267,14 +274,16 @@ function flowmateDueDelta(dateValue) {
 // O-5: prefer the deduped latest_assignment_run_v view (one row per work item)
 // over transferring the entire assignment_runs history. Falls back to the raw
 // table if the view isn't deployed yet, so frontend/SQL upload order is safe.
-async function loadFlowMateLatestAssignmentRuns() {
+async function loadFlowMateLatestAssignmentRuns(workItemIds = []) {
   let res = await window.flowmateSupabase
     .from("latest_assignment_run_v")
-    .select("work_item_id,capacity_snapshot,reason,result,final_owner_member_id,ran_at");
+    .select("work_item_id,capacity_snapshot,reason,result,final_owner_member_id,ran_at")
+    .in("work_item_id", workItemIds);
   if (res.error) {
     res = await window.flowmateSupabase
       .from("assignment_runs")
       .select("work_item_id,capacity_snapshot,reason,result,final_owner_member_id,ran_at")
+      .in("work_item_id", workItemIds)
       .order("ran_at", { ascending: false });
   }
   return res;
@@ -308,10 +317,11 @@ function parseFlowMateAssignmentWarnings(capacitySnapshot) {
   });
 }
 
-async function loadFlowMateAiTagRowsForList() {
+async function loadFlowMateAiTagRowsForList(workItemIds = []) {
   const res = await window.flowmateSupabase
     .from("work_item_ai_tags")
     .select("id,work_item_id,tag,created_by_user_id,created_at")
+    .in("work_item_id", workItemIds)
     .order("created_at", { ascending: true });
 
   if (res.error) {
@@ -323,10 +333,16 @@ async function loadFlowMateAiTagRowsForList() {
   return res;
 }
 
-async function loadFlowMateWorkItemsForList() {
+async function loadFlowMateWorkItemsForList(options = {}) {
   const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
   const isGdveCreativeWorkspace = activeTeam === "gdve";
+  const actorUserId = window.FLOWMATE_CURRENT_USER?.id;
+  const actorMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id;
+  const ownerFilters = options.profile === "my-work" ? [
+    actorUserId ? `assignee_user_id.eq.${actorUserId}` : null,
+    actorMemberId ? `final_owner_member_id.eq.${actorMemberId}` : null,
+  ].filter(Boolean) : [];
   let query = window.flowmateSupabase
     .from("work_items")
     .select(`${baseColumns},owning_team_code`)
@@ -337,15 +353,18 @@ async function loadFlowMateWorkItemsForList() {
   } else if (activeTeam) {
     query = query.eq("owning_team_code", activeTeam);
   }
+  if (ownerFilters.length) query = query.or(ownerFilters.join(","));
   let result = await query;
 
   // Allow the frontend bundle to be uploaded before the SQL migration.
   if (result.error && /owning_team_code|column/i.test(result.error.message || "")) {
-    result = await window.flowmateSupabase
+    let fallbackQuery = window.flowmateSupabase
       .from("work_items")
       .select(baseColumns)
       .is("archived_at", null)
       .order("due_date", { ascending: true });
+    if (ownerFilters.length) fallbackQuery = fallbackQuery.or(ownerFilters.join(","));
+    result = await fallbackQuery;
     if (!result.error && activeTeam) {
       result.data = (result.data || []).filter((item) => {
         if (isGdveCreativeWorkspace) {
@@ -363,6 +382,12 @@ async function loadFlowMateWorkItemsForList() {
 
 const FLOWMATE_LIST_ROWS_CACHE_TTL_MS = 30_000;
 const flowMateListRowsCacheByWorkspace = new Map();
+const FLOWMATE_LIST_ROW_PROFILES = {
+  legacy: { details: true, checklist: true, comments: true, links: true, watchers: true, aiTags: true, events: true, marketingSubPic: true },
+  operational: { details: true, checklist: true, comments: false, links: false, watchers: false, aiTags: false, events: false, marketingSubPic: false },
+  summary: { details: false, checklist: false, comments: false, links: false, watchers: false, aiTags: false, events: false, marketingSubPic: false },
+  "my-work": { details: true, checklist: true, comments: true, links: false, watchers: false, aiTags: false, events: false, marketingSubPic: false },
+};
 
 function getFlowMateListRowsWorkspaceKey() {
   const activeTeam = window.getFlowMateActiveTeam
@@ -387,58 +412,63 @@ function cloneFlowMateListData(value) {
   return value;
 }
 
-async function loadFlowMateListRowsUncached() {
+function emptyFlowMateQueryResult() {
+  return Promise.resolve({ data: [], error: null });
+}
+
+async function loadFlowMateListRowsUncached(profileName = "legacy") {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
+  const profile = FLOWMATE_LIST_ROW_PROFILES[profileName] || FLOWMATE_LIST_ROW_PROFILES.legacy;
+  const workItemsResult = await loadFlowMateWorkItemsForList({ profile: profileName });
+  if (workItemsResult.error) throw workItemsResult.error;
+  const activeWorkItems = (workItemsResult.data || []).filter((item) => !item.archived_at);
+  const workItemIds = activeWorkItems.map((item) => item.id).filter(Boolean);
+  if (!workItemIds.length) {
+    emitFlowMateSynced("work_items");
+    return [];
+  }
+  const userIds = Array.from(new Set(activeWorkItems.flatMap((item) => [item.requester_user_id, item.assignee_user_id]).filter(Boolean)));
+  const memberIds = Array.from(new Set(activeWorkItems.map((item) => item.final_owner_member_id).filter(Boolean)));
 
-  const [workItemsResult, flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = await Promise.all([
-    loadFlowMateWorkItemsForList(),
+  const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = await Promise.all([
     window.flowmateSupabase
       .from("work_item_flags_v")
-      .select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked"),
-    window.flowmateSupabase
-      .from("users")
-      .select("id,email,display_name,requester_team,is_active"),
-    window.flowmateSupabase
-      .from("team_members")
-      .select("id,user_id,member_code,display_name,initials,color,discipline,discipline_short,active,availability,capacity_per_day,capacity_override_per_day,wip_limit"),
-    window.flowmateSupabase
-      .from("creative_request_details")
-      .select("work_item_id,asset_type,asset_subtype,asset_count,asset_type_2,asset_subtype_2,asset_count_2,platforms,size_format,brief_link,reference_link,brief_missing_reason"),
-    window.flowmateSupabase
-      .from("checklist_items")
-      .select("id,work_item_id,title,is_done,sort_order")
-      .order("sort_order", { ascending: true }),
-    window.flowmateSupabase
-      .from("comments")
-      .select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true }),
-    window.flowmateSupabase
-      .from("work_item_links")
-      .select("id,work_item_id,url,description,created_by_user_id,created_at,deleted_at")
-      .is("deleted_at", null)
-      .order("created_at", { ascending: true }),
-    window.flowmateSupabase
-      .from("work_item_watchers")
-      .select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at")
-      .is("removed_at", null)
-      .order("created_at", { ascending: true }),
-    loadFlowMateAiTagRowsForList(),
-    window.flowmateSupabase
-      .from("work_item_events")
-      .select("id,work_item_id,actor_user_id,event_type,from_status,to_status,metadata,created_at")
-      .order("created_at", { ascending: false }),
-    loadFlowMateLatestAssignmentRuns(),
-    window.flowmateSupabase
-      .from("marketing_content_items")
-      .select("flowmate_work_item_id,sub_pic_user_id,brief_link")
-      .not("sub_pic_user_id", "is", null),
+      .select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked")
+      .in("work_item_id", workItemIds),
+    userIds.length
+      ? window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", userIds)
+      : emptyFlowMateQueryResult(),
+    memberIds.length
+      ? window.flowmateSupabase.from("team_members").select("id,user_id,member_code,display_name,initials,color,discipline,discipline_short,active,availability,capacity_per_day,capacity_override_per_day,wip_limit").in("id", memberIds)
+      : emptyFlowMateQueryResult(),
+    profile.details
+      ? window.flowmateSupabase.from("creative_request_details").select("work_item_id,asset_type,asset_subtype,asset_count,asset_type_2,asset_subtype_2,asset_count_2,platforms,size_format,brief_link,reference_link,brief_missing_reason").in("work_item_id", workItemIds)
+      : emptyFlowMateQueryResult(),
+    profile.checklist
+      ? window.flowmateSupabase.from("checklist_items").select("id,work_item_id,title,is_done,sort_order").in("work_item_id", workItemIds).order("sort_order", { ascending: true })
+      : emptyFlowMateQueryResult(),
+    profile.comments
+      ? window.flowmateSupabase.from("comments").select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at").in("work_item_id", workItemIds).is("deleted_at", null).order("created_at", { ascending: true })
+      : emptyFlowMateQueryResult(),
+    profile.links
+      ? window.flowmateSupabase.from("work_item_links").select("id,work_item_id,url,description,created_by_user_id,created_at,deleted_at").in("work_item_id", workItemIds).is("deleted_at", null).order("created_at", { ascending: true })
+      : emptyFlowMateQueryResult(),
+    profile.watchers
+      ? window.flowmateSupabase.from("work_item_watchers").select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at").in("work_item_id", workItemIds).is("removed_at", null).order("created_at", { ascending: true })
+      : emptyFlowMateQueryResult(),
+    profile.aiTags ? loadFlowMateAiTagRowsForList(workItemIds) : emptyFlowMateQueryResult(),
+    profile.events
+      ? window.flowmateSupabase.from("work_item_events").select("id,work_item_id,actor_user_id,event_type,from_status,to_status,metadata,created_at").in("work_item_id", workItemIds).order("created_at", { ascending: false })
+      : emptyFlowMateQueryResult(),
+    loadFlowMateLatestAssignmentRuns(workItemIds),
+    profile.marketingSubPic
+      ? window.flowmateSupabase.from("marketing_content_items").select("flowmate_work_item_id,sub_pic_user_id,brief_link").in("flowmate_work_item_id", workItemIds).not("sub_pic_user_id", "is", null)
+      : emptyFlowMateQueryResult(),
   ]);
 
   const firstError =
-    workItemsResult.error ||
     flagsResult.error ||
     usersResult.error ||
     membersResult.error ||
@@ -454,10 +484,28 @@ async function loadFlowMateListRowsUncached() {
 
   if (firstError) throw firstError;
 
+  const baseUsers = usersResult.data || [];
+  const baseUserIds = new Set(baseUsers.map((user) => user.id));
+  const relatedUserIds = Array.from(new Set([
+    ...(commentsResult.data || []).map((row) => row.author_user_id),
+    ...(linksResult.data || []).map((row) => row.created_by_user_id),
+    ...(watchersResult.data || []).flatMap((row) => [row.watcher_user_id, row.added_by_user_id]),
+    ...(aiTagsResult.data || []).map((row) => row.created_by_user_id),
+    ...(eventsResult.data || []).map((row) => row.actor_user_id),
+  ].filter((userId) => userId && !baseUserIds.has(userId))));
+  const relatedUsersResult = relatedUserIds.length
+    ? await window.flowmateSupabase
+      .from("users")
+      .select("id,email,display_name,requester_team,is_active")
+      .in("id", relatedUserIds)
+    : { data: [], error: null };
+  if (relatedUsersResult.error) throw relatedUsersResult.error;
+  const scopedUsers = [...baseUsers, ...(relatedUsersResult.data || [])];
+
   const flagsByWorkItemId = Object.fromEntries(
     (flagsResult.data || []).map((flag) => [flag.work_item_id, flag]),
   );
-  const usersById = Object.fromEntries((usersResult.data || []).map((user) => [user.id, user]));
+  const usersById = Object.fromEntries(scopedUsers.map((user) => [user.id, user]));
   const membersById = Object.fromEntries(
     (membersResult.data || []).map((member) => [member.id, member]),
   );
@@ -536,9 +584,7 @@ async function loadFlowMateListRowsUncached() {
   );
 
   syncFlowMateMembers(membersResult.data || []);
-  syncFlowMateMentionUsers(usersResult.data || []);
-
-  const activeWorkItems = (workItemsResult.data || []).filter((item) => !item.archived_at);
+  syncFlowMateMentionUsers(scopedUsers);
 
   const rows = activeWorkItems.map((item) => {
     const flags = flagsByWorkItemId[item.id] || {};
@@ -660,7 +706,8 @@ function loadFlowMateListRows(options = {}) {
     return Promise.reject(new Error("Supabase client is not ready."));
   }
 
-  const workspaceKey = getFlowMateListRowsWorkspaceKey();
+  const profile = FLOWMATE_LIST_ROW_PROFILES[options.profile] ? options.profile : "legacy";
+  const workspaceKey = `${getFlowMateListRowsWorkspaceKey()}:${profile}`;
   const force = options.force === true;
   const now = Date.now();
   const cached = flowMateListRowsCacheByWorkspace.get(workspaceKey);
@@ -668,7 +715,7 @@ function loadFlowMateListRows(options = {}) {
   if (!force && cached?.rows && cached.expiresAt > now) return Promise.resolve(cloneFlowMateListData(cached.rows));
 
   const entry = { rows: null, expiresAt: 0, promise: null };
-  const request = loadFlowMateListRowsUncached();
+  const request = loadFlowMateListRowsUncached(profile);
   const tracked = request
     .then((rows) => {
       const cachedRows = cloneFlowMateListData(rows);
@@ -695,9 +742,40 @@ function loadFlowMateListRows(options = {}) {
   return tracked.then(cloneFlowMateListData);
 }
 
+function loadFlowMateNavigationRows(options = {}) {
+  return loadFlowMateListRows({ ...options, profile: "summary" });
+}
+
+function loadFlowMateSearchRows(options = {}) {
+  return loadFlowMateListRows({ ...options, profile: "summary" });
+}
+
+function loadFlowMateOperationalRows(options = {}) {
+  return loadFlowMateListRows({ ...options, profile: "operational" });
+}
+
+function loadFlowMateMyWorkRows(options = {}) {
+  return loadFlowMateListRows({ ...options, profile: "my-work" });
+}
+
 if (typeof window.addEventListener === "function") {
   window.addEventListener("flowmate:team-workspace-changed", () => invalidateFlowMateListRowsCache());
-  window.addEventListener("flowmate:refresh-request", () => invalidateFlowMateListRowsCache());
+  window.addEventListener("flowmate:refresh-request", (event) => {
+    const reason = String(event?.detail?.reason || "").trim();
+    if (reason === "comments") {
+      Array.from(flowMateListRowsCacheByWorkspace.keys())
+        .filter((key) => key.endsWith(":my-work") || key.endsWith(":legacy"))
+        .forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
+      return;
+    }
+    if (["work_item_links", "work_item_watchers", "work_item_ai_tags"].includes(reason)) {
+      Array.from(flowMateListRowsCacheByWorkspace.keys())
+        .filter((key) => key.endsWith(":legacy"))
+        .forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
+      return;
+    }
+    invalidateFlowMateListRowsCache();
+  });
   window.addEventListener("flowmate:signed-out", () => invalidateFlowMateListRowsCache());
 }
 
@@ -798,7 +876,8 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
   const ids = (items || []).map(item => item.id).filter(Boolean);
   if (!ids.length) return {
     flagsById: {}, usersById: {}, membersById: {}, membersByUserId: {}, detailsById: {}, checklistById: {},
-    commentsById: {}, linksById: {}, watchersById: {}, aiTagsById: {}, eventsById: {}, assignmentRunById: {},
+    marketingSubPicById: {}, commentsById: {}, linksById: {}, watchersById: {}, aiTagsById: {}, eventsById: {}, assignmentRunById: {},
+    aiTagsUnavailable: false,
   };
   const userIds = Array.from(new Set(items.flatMap(item => [item.requester_user_id, item.assignee_user_id]).filter(Boolean)));
   const memberIds = Array.from(new Set(items.map(item => item.final_owner_member_id).filter(Boolean)));
@@ -812,6 +891,7 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
       : Promise.resolve({ data: [], error: null }),
     window.flowmateSupabase.from("creative_request_details").select("work_item_id,asset_type,asset_subtype,asset_count,asset_type_2,asset_subtype_2,asset_count_2,platforms,size_format,brief_link,reference_link,brief_missing_reason").in("work_item_id", ids),
     window.flowmateSupabase.from("checklist_items").select("id,work_item_id,title,is_done,sort_order").in("work_item_id", ids).order("sort_order", { ascending: true }),
+    window.flowmateSupabase.from("marketing_content_items").select("flowmate_work_item_id,sub_pic_user_id").in("flowmate_work_item_id", ids).not("sub_pic_user_id", "is", null),
   ];
   const detailQueries = options.includeDetail ? [
     window.flowmateSupabase.from("comments").select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at").in("work_item_id", ids).is("deleted_at", null).order("created_at", { ascending: true }),
@@ -822,14 +902,30 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
     window.flowmateSupabase.from("assignment_runs").select("work_item_id,capacity_snapshot,reason,result,final_owner_member_id,ran_at").in("work_item_id", ids).order("ran_at", { ascending: false }),
   ] : [];
   const results = await Promise.all([...baseQueries, ...detailQueries]);
-  const firstError = results.find(result => result && result.error)?.error;
+  const aiTagsResultIndex = options.includeDetail ? baseQueries.length + 3 : -1;
+  const aiTagsUnavailable = aiTagsResultIndex >= 0 && results[aiTagsResultIndex]?.error?.code === "42501";
+  const firstError = results.find((result, index) => result && result.error && !(index === aiTagsResultIndex && aiTagsUnavailable))?.error;
   if (firstError) throw firstError;
-  const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult] = results;
-  const usersById = Object.fromEntries((usersResult.data || []).map(user => [user.id, user]));
+  const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, marketingSubPicResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult] = results;
+  const baseUsers = usersResult.data || [];
+  const baseUserIds = new Set(baseUsers.map(user => user.id));
+  const relatedUserIds = Array.from(new Set([
+    ...(commentsResult?.data || []).map(row => row.author_user_id),
+    ...(linksResult?.data || []).map(row => row.created_by_user_id),
+    ...(watchersResult?.data || []).flatMap(row => [row.watcher_user_id, row.added_by_user_id]),
+    ...(aiTagsResult?.data || []).map(row => row.created_by_user_id),
+    ...(eventsResult?.data || []).map(row => row.actor_user_id),
+  ].filter(userId => userId && !baseUserIds.has(userId))));
+  const relatedUsersResult = relatedUserIds.length
+    ? await window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", relatedUserIds)
+    : { data: [], error: null };
+  if (relatedUsersResult.error) throw relatedUsersResult.error;
+  const scopedUsers = [...baseUsers, ...(relatedUsersResult.data || [])];
+  const usersById = Object.fromEntries(scopedUsers.map(user => [user.id, user]));
   const membersById = Object.fromEntries((membersResult.data || []).map(member => [member.id, member]));
   const membersByUserId = Object.fromEntries((membersResult.data || []).filter(member => member.user_id).map(member => [member.user_id, member]));
   syncFlowMateMembers(membersResult.data || []);
-  syncFlowMateMentionUsers(usersResult.data || []);
+  syncFlowMateMentionUsers(scopedUsers);
   const assignmentRunById = {};
   (assignmentRunsResult?.data || []).forEach(run => {
     if (!assignmentRunById[run.work_item_id]) assignmentRunById[run.work_item_id] = run;
@@ -841,12 +937,14 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
     membersByUserId,
     detailsById: Object.fromEntries((detailsResult.data || []).map(row => [row.work_item_id, row])),
     checklistById: flowMateGroupByWorkItemId(checklistResult.data || []),
+    marketingSubPicById: Object.fromEntries((marketingSubPicResult.data || []).map(row => [row.flowmate_work_item_id, row.sub_pic_user_id])),
     commentsById: flowMateGroupByWorkItemId(commentsResult?.data || []),
     linksById: flowMateGroupByWorkItemId(linksResult?.data || []),
     watchersById: flowMateGroupByWorkItemId(watchersResult?.data || []),
     aiTagsById: flowMateGroupByWorkItemId(aiTagsResult?.data || []),
     eventsById: flowMateGroupByWorkItemId(eventsResult?.data || []),
     assignmentRunById,
+    aiTagsUnavailable,
   };
 }
 
@@ -926,22 +1024,22 @@ function normalizeFlowMateBoardWorkItem(item, related = {}) {
     links: (related.linksById?.[item.id] || []).map(link => ({ ...link, createdByName: related.usersById?.[link.created_by_user_id]?.display_name || "Unknown", createdLabel: flowmateDateTimeLabel(link.created_at) })),
     watchers: related.watchersById?.[item.id] || [],
     aiTags: (related.aiTagsById?.[item.id] || []).map(tag => ({ id: tag.id, workItemId: tag.work_item_id, tag: tag.tag, createdByUserId: tag.created_by_user_id, createdAt: tag.created_at })),
+    aiTagsUnavailable: Boolean(related.aiTagsUnavailable),
     activityEvents: events,
     overdue: Boolean(flags.is_overdue),
     dueSoon: Boolean(flags.is_due_soon),
     isSupabaseRow: true,
+    detailHydrated: Boolean(related.detailHydrated),
+    marketingPlanSubPicUserId: related.marketingSubPicById?.[item.id] || null,
   };
 }
 
-async function loadFlowMateBoardLane({ status, cursor = null, limit = 50 } = {}) {
+async function loadFlowMateBoardLane({ status, cursor = null, limit = 50, total = null } = {}) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   if (!FLOWMATE_ACTIVE_BOARD_STATUSES.includes(status)) {
     throw new Error("Active Board status must be one of: " + FLOWMATE_ACTIVE_BOARD_STATUSES.join(", ") + ".");
   }
   const pageSize = flowMateClampPageSize(limit);
-  let countQuery = window.flowmateSupabase.from("work_items").select("id", { count: "exact", head: true }).is("archived_at", null).eq("status", status);
-  countQuery = flowMateApplyWorkspaceScope(countQuery);
-  const countPromise = countQuery;
   const laneResult = await flowMateQueryBoardLane(status, cursor, pageSize + 1);
   if (laneResult.error) throw laneResult.error;
   const rawRows = laneResult.data || [];
@@ -950,13 +1048,10 @@ async function loadFlowMateBoardLane({ status, cursor = null, limit = 50 } = {})
     ? flowMateBoardCursorFromRow(loaded[loaded.length - 1])
     : null;
 
-  const countResult = await countPromise;
-  if (countResult.error) throw countResult.error;
-  const total = Number(countResult.count || 0);
   const related = await loadFlowMateBoardRelatedData(loaded);
   return {
     rows: loaded.map(item => normalizeFlowMateBoardWorkItem(item, related)),
-    total,
+    total: total == null ? loaded.length + (nextCursor ? 1 : 0) : Number(total),
     nextCursor,
     hasMore: Boolean(nextCursor),
     asOf: new Date().toISOString(),
@@ -989,6 +1084,56 @@ async function loadFlowMateBoardSummary() {
     },
     asOf: payload.as_of || payload.asOf || new Date().toISOString(),
   };
+}
+
+async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const laneRequests = FLOWMATE_ACTIVE_BOARD_STATUSES.map(async (status) => {
+    const requestedSize = Math.max(1, Math.min(500, Math.trunc(Number(laneLimits[status] || 50))));
+    const firstPageSize = flowMateClampPageSize(requestedSize);
+    let result = await flowMateQueryBoardLane(status, null, firstPageSize + 1);
+    if (result.error) return { status, requestedSize, loaded: [], nextCursor: null, error: result.error };
+
+    let rawRows = result.data || [];
+    let loaded = rawRows.slice(0, firstPageSize);
+    let cursor = rawRows.length > firstPageSize
+      ? flowMateBoardCursorFromRow(loaded[loaded.length - 1])
+      : null;
+    while (cursor && loaded.length < requestedSize) {
+      const pageSize = flowMateClampPageSize(requestedSize - loaded.length);
+      result = await flowMateQueryBoardLane(status, cursor, pageSize + 1);
+      if (result.error) return { status, requestedSize, loaded: [], nextCursor: null, error: result.error };
+      rawRows = result.data || [];
+      const pageRows = rawRows.slice(0, pageSize);
+      loaded = loaded.concat(pageRows);
+      cursor = rawRows.length > pageSize && pageRows.length
+        ? flowMateBoardCursorFromRow(pageRows[pageRows.length - 1])
+        : null;
+    }
+    return { status, requestedSize, loaded, nextCursor: cursor, error: null };
+  });
+  const [laneResults, summary] = await Promise.all([
+    Promise.all(laneRequests),
+    loadFlowMateBoardSummary(),
+  ]);
+  const firstError = laneResults.find(entry => entry.error)?.error;
+  if (firstError) throw firstError;
+  const loadedByStatus = Object.fromEntries(laneResults.map(entry => [entry.status, entry.loaded]));
+  const nextCursorByStatus = Object.fromEntries(laneResults.map(entry => [entry.status, entry.nextCursor]));
+  const allLoadedRows = FLOWMATE_ACTIVE_BOARD_STATUSES.flatMap(status => loadedByStatus[status] || []);
+  const related = await loadFlowMateBoardRelatedData(allLoadedRows);
+  const lanes = Object.fromEntries(FLOWMATE_ACTIVE_BOARD_STATUSES.map(status => {
+    const nextCursor = nextCursorByStatus[status];
+    return [status, {
+      status: "live",
+      rows: (loadedByStatus[status] || []).map(item => normalizeFlowMateBoardWorkItem(item, related)),
+      total: Number(summary.counts?.[status] || 0),
+      nextCursor,
+      hasMore: Boolean(nextCursor),
+      message: "",
+    }];
+  }));
+  return { lanes, summary, asOf: summary.asOf || new Date().toISOString() };
 }
 
 function normalizeFlowMateDeliveredRow(row) {
@@ -1115,6 +1260,7 @@ async function loadFlowMateWorkItemById(displayId, { includeArchived = false } =
   if (error) throw error;
   if (!data) return null;
   const related = await loadFlowMateBoardRelatedData([data], { includeDetail: true });
+  related.detailHydrated = true;
   return normalizeFlowMateBoardWorkItem(data, related);
 }
 
@@ -1251,7 +1397,7 @@ async function loadFlowMateLeaveRows() {
 
 async function loadFlowMateCalendarRows() {
   const [workRows, leaveRows] = await Promise.all([
-    loadFlowMateListRows(),
+    loadFlowMateOperationalRows(),
     loadFlowMateLeaveRows(),
   ]);
   return [...workRows, ...leaveRows];
@@ -1409,9 +1555,14 @@ async function loadFlowMateActiveCreativeMembers() {
 }
 
 window.loadFlowMateListRows = loadFlowMateListRows;
+window.loadFlowMateNavigationRows = loadFlowMateNavigationRows;
+window.loadFlowMateSearchRows = loadFlowMateSearchRows;
+window.loadFlowMateOperationalRows = loadFlowMateOperationalRows;
+window.loadFlowMateMyWorkRows = loadFlowMateMyWorkRows;
 window.invalidateFlowMateListRowsCache = invalidateFlowMateListRowsCache;
 window.loadFlowMateBoardLane = loadFlowMateBoardLane;
 window.loadFlowMateBoardSummary = loadFlowMateBoardSummary;
+window.loadFlowMateActiveBoard = loadFlowMateActiveBoard;
 window.loadFlowMateDeliveredHistory = loadFlowMateDeliveredHistory;
 window.loadFlowMateKpiRows = loadFlowMateKpiRows;
 window.loadFlowMateWorkItemById = loadFlowMateWorkItemById;
@@ -1428,6 +1579,7 @@ window.parseFlowMateAssignmentWarnings = parseFlowMateAssignmentWarnings;
 window.startFlowMateRealtime = startFlowMateRealtime;
 window.stopFlowMateRealtime = stopFlowMateRealtime;
 window.attachFlowMateLiveRefresh = attachFlowMateLiveRefresh;
+window.flowMateRefreshReasonMatches = flowMateRefreshReasonMatches;
 
 async function loadFlowMateRequesterTeams() {
   if (!window.flowmateSupabase) {

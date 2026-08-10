@@ -184,8 +184,9 @@ describe("FlowMate Trello + Asana hybrid frontend static UAT", () => {
     expect(screensA).not.toContain("submitCapacityAllocations");
     expect(screensA).not.toContain("window.rescheduleFlowMateCapacityAllocation(w.id");
     expect(screensA).not.toContain("capacityEditorState");
-    expect(screensA).toContain("currentUserId === w.marketingPlanSubPicUserId");
-    expect(screensA).toContain("const canStatusTransition = Boolean");
+    expect(screensA).toContain("window.canFlowMateTransitionWorkItem?.(");
+    expect(quickTask).toContain("row.marketingPlanSubPicUserId");
+    expect(screensA).toContain(".some(canTransitionTo)");
   });
 
   it("renders warning context and Unassigned status across My Work, List, Board, and Detail", () => {

@@ -177,7 +177,7 @@ async function createFlowMateQuickTask(input) {
   if (error) throw error;
   if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
     window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "quick_task_created" } }));
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts", { detail: { reason: "work_status_changed" } }));
   }
   return data;
 }
@@ -382,7 +382,7 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
   if (error) throw error;
   if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
     window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "work_status_changed" } }));
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts", { detail: { reason: "work_status_changed" } }));
   }
   return data;
 }
@@ -408,7 +408,7 @@ async function adminTransitionFlowMateWorkStatus(displayId, nextStatus, options 
   if (error) throw error;
   if (typeof window.dispatchEvent === "function" && typeof CustomEvent === "function") {
     window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "admin_work_status_changed" } }));
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts", { detail: { reason: "admin_work_status_changed" } }));
   }
   return data;
 }
@@ -454,17 +454,62 @@ async function restoreFlowMateArchivedWorkItem(displayId, reason) {
   return data;
 }
 
-async function transitionFlowMateWorkStatus(displayId, nextStatus, options = {}) {
-  if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin") {
-    return adminTransitionFlowMateWorkStatus(displayId, nextStatus, options);
+function canFlowMateTransitionWorkItem(row, nextStatus, currentUser = window.FLOWMATE_CURRENT_USER || {}, membersById = window.MEMBERS_BY_ID || {}) {
+  if (!row?.isSupabaseRow || row.archivedAt || row.type === "quick") return false;
+  if (!nextStatus || row.status === nextStatus) return false;
+  const owner = row.assignee ? membersById[row.assignee] : null;
+  const userId = currentUser.id || null;
+  const isAdmin = currentUser.role === "admin";
+  const isRequester = Boolean(userId && userId === row.requesterUserId);
+  const isOwner = Boolean(userId && (
+    userId === row.assigneeUserId
+    || userId === owner?.userId
+    || currentUser.team_member_id === row.assignee
+  ));
+  const isMarketingSubPic = Boolean(userId && userId === row.marketingPlanSubPicUserId);
+  const ownerOrSubPic = isOwner || isMarketingSubPic;
+  const requesterOrSubPic = isRequester || isMarketingSubPic;
+  const validTransition = (
+    (row.status === "assigned" && ["in_progress", "blocked"].includes(nextStatus))
+    || (row.status === "in_progress" && ["review", "blocked"].includes(nextStatus))
+    || (row.status === "review" && ["in_progress", "delivered", "blocked"].includes(nextStatus))
+    || (row.status === "blocked" && ["in_progress", "assigned"].includes(nextStatus))
+    || (!["delivered", "cancelled"].includes(row.status) && nextStatus === "cancelled")
+  );
+  if (!validTransition) return false;
+  if (isAdmin) return true;
+  if (nextStatus === "cancelled") return isRequester || ownerOrSubPic;
+  if (row.status === "review" && ["in_progress", "delivered"].includes(nextStatus)) return requesterOrSubPic;
+  return ownerOrSubPic;
+}
+
+const flowMateStatusTransitionRequests = new Map();
+
+function transitionFlowMateWorkStatus(displayId, nextStatus, options = {}) {
+  const normalizedId = String(displayId || "").trim().toUpperCase();
+  const normalizedStatus = String(nextStatus || "").trim().toLowerCase();
+  if (options.currentStatus && String(options.currentStatus).trim().toLowerCase() === normalizedStatus) {
+    return Promise.resolve({ unchanged: true, display_id: normalizedId, status: normalizedStatus });
   }
-  return transitionFlowMateCreativeStatus(displayId, nextStatus, options);
+  const requestKey = `${normalizedId}:${normalizedStatus}`;
+  if (flowMateStatusTransitionRequests.has(requestKey)) return flowMateStatusTransitionRequests.get(requestKey);
+  const request = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin"
+    ? adminTransitionFlowMateWorkStatus(normalizedId, normalizedStatus, options)
+    : transitionFlowMateCreativeStatus(normalizedId, normalizedStatus, options);
+  const tracked = Promise.resolve(request).finally(() => {
+    if (flowMateStatusTransitionRequests.get(requestKey) === tracked) {
+      flowMateStatusTransitionRequests.delete(requestKey);
+    }
+  });
+  flowMateStatusTransitionRequests.set(requestKey, tracked);
+  return tracked;
 }
 
 window.adminTransitionFlowMateWorkStatus = adminTransitionFlowMateWorkStatus;
 window.adminArchiveFlowMateWorkItem = adminArchiveFlowMateWorkItem;
 window.restoreFlowMateArchivedWorkItem = restoreFlowMateArchivedWorkItem;
 window.transitionFlowMateWorkStatus = transitionFlowMateWorkStatus;
+window.canFlowMateTransitionWorkItem = canFlowMateTransitionWorkItem;
 
 // ---------------------------------------------------------------------------
 // Team settings helpers. Admin mutations go through auth.uid-scoped RPCs.
@@ -786,10 +831,6 @@ async function cancelFlowMateWorkItem(work, reason) {
   const trimmed = (reason || "").trim();
   if (!trimmed) throw new Error("Cancel reason is required.");
 
-  if (window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin") {
-    return adminTransitionFlowMateWorkStatus(work.id, "cancelled", { cancelReason: trimmed });
-  }
-
   if (work.type === "quick") {
     const { data, error } = await window.flowmateSupabase.rpc("cancel_quick_task", {
       p_actor_user_id: flowmateActorId(),
@@ -800,7 +841,7 @@ async function cancelFlowMateWorkItem(work, reason) {
     return data;
   }
 
-  return transitionFlowMateCreativeStatus(work.id, "cancelled", { cancelReason: trimmed });
+  return transitionFlowMateWorkStatus(work.id, "cancelled", { cancelReason: trimmed, currentStatus: work.status });
 }
 window.cancelFlowMateWorkItem = cancelFlowMateWorkItem;
 

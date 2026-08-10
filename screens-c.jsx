@@ -241,7 +241,7 @@ function mapFlowMatePlanningViewRowC(item) {
 }
 
 async function loadFlowMatePlanningRowsC() {
-  if (!window.flowmateSupabase && !window.loadFlowMateListRows) {
+  if (!window.flowmateSupabase && !window.loadFlowMateOperationalRows) {
     throw new Error("Planning data loader is not ready.");
   }
 
@@ -260,10 +260,10 @@ async function loadFlowMatePlanningRowsC() {
     }
   }
 
-  if (!window.loadFlowMateListRows) {
+  if (!window.loadFlowMateOperationalRows) {
     throw new Error("Planning view is unavailable and live list loader is not ready.");
   }
-  const rows = await window.loadFlowMateListRows();
+  const rows = await window.loadFlowMateOperationalRows();
   return (rows || [])
     .filter(row => row && row.type === "creative" && !row.archivedAt)
     .map(row => ({
@@ -413,7 +413,7 @@ function WorkloadScreen({ onOpen }) {
       try {
         const [liveRows, liveItems] = await Promise.all([
           window.loadFlowMateWorkloadRows(),
-          window.loadFlowMateListRows ? window.loadFlowMateListRows() : Promise.resolve([]),
+          window.loadFlowMateOperationalRows ? window.loadFlowMateOperationalRows() : Promise.resolve([]),
         ]);
         if (!alive) return;
         setRows(liveRows);
@@ -2296,7 +2296,7 @@ function LegacyTeamGanttScreen({ onOpen }) {
     let alive = true;
 
     async function loadRowsIfAlive() {
-      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
       if (!loader) {
         if (!alive) return;
         setSourceRows([]);
@@ -2671,7 +2671,7 @@ function TeamGanttScreen({ onOpen }) {
   useEffectC(() => {
     let alive = true;
     async function loadSchedule() {
-      const taskLoader = window.loadFlowMateTeamScheduleRows || window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      const taskLoader = window.loadFlowMateTeamScheduleRows || window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
       if (!taskLoader) {
         if (alive) setLoadState({ status: "error", message: "Team Schedule loader is not ready." });
         return;
@@ -2931,7 +2931,7 @@ function CalendarScreen({ onOpen }) {
   const [leaveState, setLeaveState] = useStateC({ status: "idle", message: "" });
 
   async function loadRows() {
-    const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+    const loader = window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
     if (!loader) {
       setSourceRows([]);
       setLoadState({ status: "error", message: "Live data unavailable: Supabase calendar loader is not ready." });
@@ -2953,7 +2953,7 @@ function CalendarScreen({ onOpen }) {
     let alive = true;
 
     async function loadRowsIfAlive() {
-      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateListRows;
+      const loader = window.loadFlowMateCalendarRows || window.loadFlowMateOperationalRows;
       if (!loader) {
         if (!alive) return;
         setSourceRows([]);

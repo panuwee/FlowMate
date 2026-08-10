@@ -1,5 +1,5 @@
 // FlowMate - Screens part A: My Work, Create, Detail
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 
 /* ============================================================
    MY WORK
@@ -12,16 +12,18 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const [sourceRows, setSourceRows] = useState(WORK);
   const [loadState, setLoadState] = useState({ status: "loading", message: "Loading Supabase data..." });
   const [filterStatus, setFilterStatus] = useState("all");
+  const [transitionPending, setTransitionPending] = useState({});
+  const transitionPendingRef = useRef({});
 
   async function loadMyWorkRows(isAlive = () => true) {
-    if (!window.loadFlowMateListRows) {
+    if (!window.loadFlowMateMyWorkRows) {
       setSourceRows([]);
       setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
       return;
     }
 
     try {
-      const rows = await window.loadFlowMateListRows();
+      const rows = await window.loadFlowMateMyWorkRows();
       if (!isAlive()) return;
       setSourceRows(rows);
       setLoadState({ status: "live", message: "Live Supabase data" });
@@ -126,8 +128,21 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
   async function handleCreativeTransition(work, nextStatus) {
     if (!work.isSupabaseRow) return;
+    if (!window.canFlowMateTransitionWorkItem?.(
+      work,
+      nextStatus,
+      window.FLOWMATE_CURRENT_USER || {},
+      window.MEMBERS_BY_ID || {},
+    )) {
+      setLoadState({ status: "live", message: "This action is not available for your role or the current status." });
+      return;
+    }
+    if (transitionPendingRef.current[work.id]) return;
+    transitionPendingRef.current[work.id] = true;
+    setTransitionPending(current => ({ ...current, [work.id]: true }));
 
-    const options = {};
+    try {
+    const options = { currentStatus: work.status };
     if (nextStatus === "review") {
       const deliveryLink = await window.flowmatePrompt({
         title: "Submit for review",
@@ -148,16 +163,17 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       options.blockedReason = blockedReason;
     }
 
-    try {
       // H-12: single transition entry point (routes admins to the admin RPC,
       // everyone else to the owner/requester-guarded RPC) so the same action
       // behaves identically from My Work, Detail, and Board.
       await window.transitionFlowMateWorkStatus(work.id, nextStatus, options);
-      await loadMyWorkRows();
       setLoadState({ status: "live", message: `${work.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}` });
     } catch (error) {
       console.error("[FlowMate My Work] Creative status transition failed:", error);
       setLoadState({ status: "error", message: `Could not update ${work.id}: ${window.flowmateUserError(error, "RPC failed.")}` });
+    } finally {
+      transitionPendingRef.current[work.id] = false;
+      setTransitionPending(current => ({ ...current, [work.id]: false }));
     }
   }
 
@@ -233,21 +249,27 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
         </select>
       </div>
 
-      <MyWorkGroup title="Overdue" tone="overdue" items={overdue} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="Blocked" items={blocked} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="Capacity / deadline risk" items={capacityRisk} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="Due today" items={dueToday} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="In progress" items={inProgress} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="Assigned" items={assigned} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
-      <MyWorkGroup title="In review by requester" items={review} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} />
+      <MyWorkGroup title="Overdue" tone="overdue" items={overdue} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="Blocked" items={blocked} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="Capacity / deadline risk" items={capacityRisk} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="Due today" items={dueToday} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="In progress" items={inProgress} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="Assigned" items={assigned} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="In review by requester" items={review} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
       <MyWorkGroup title="Quick tasks" items={quick} onOpen={onOpen} onQuickDone={handleQuickDone} onChecklistAdd={handleChecklistAdd} onChecklistToggle={handleChecklistToggle} onCommentAdd={handleCommentAdd} onCommentEdit={handleCommentEdit} onCommentDelete={handleCommentDelete} compact />
     </div>
   );
 }
 
-function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, onChecklistAdd, onChecklistToggle, onCommentAdd, onCommentEdit, onCommentDelete, tone, compact }) {
+function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, onChecklistAdd, onChecklistToggle, onCommentAdd, onCommentEdit, onCommentDelete, transitionPending = {}, tone, compact }) {
   if (!items.length) return null;
+  const canTransition = (work, nextStatus) => Boolean(window.canFlowMateTransitionWorkItem?.(
+    work,
+    nextStatus,
+    window.FLOWMATE_CURRENT_USER || {},
+    window.MEMBERS_BY_ID || {},
+  ));
 
   return (
     <div className="section" id={tone === "overdue" ? "my-work-overdue" : undefined}>
@@ -288,11 +310,11 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                     {w.type === "quick" && w.status !== "delivered" && (
                       <button className="btn btn--xs btn--secondary" onClick={() => onQuickDone && onQuickDone(w)}>Mark done</button>
                     )}
-                    {w.type !== "quick" && w.status === "assigned" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Start</button>}
-                    {w.type !== "quick" && w.status === "in_progress" && <button className="btn btn--xs btn--primary" onClick={() => onCreativeTransition && onCreativeTransition(w, "review")}><Icon name="send" size={11} /> Submit review</button>}
+                    {w.type !== "quick" && w.status === "assigned" && canTransition(w, "in_progress") && <button className="btn btn--xs btn--secondary" disabled={Boolean(transitionPending[w.id])} onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Start</button>}
+                    {w.type !== "quick" && w.status === "in_progress" && canTransition(w, "review") && <button className="btn btn--xs btn--primary" disabled={Boolean(transitionPending[w.id])} onClick={() => onCreativeTransition && onCreativeTransition(w, "review")}><Icon name="send" size={11} /> Submit review</button>}
                     {w.type !== "quick" && w.status === "review" && <button className="btn btn--xs btn--ghost" disabled>Awaiting requester</button>}
-                    {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && <button className="btn btn--xs btn--danger" onClick={() => onCreativeTransition && onCreativeTransition(w, "blocked")}><Icon name="block" size={11} /> Block</button>}
-                    {w.type !== "quick" && w.status === "blocked" && <button className="btn btn--xs btn--secondary" onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Resume</button>}
+                    {w.type !== "quick" && ["assigned", "in_progress", "review"].includes(w.status) && canTransition(w, "blocked") && <button className="btn btn--xs btn--danger" disabled={Boolean(transitionPending[w.id])} onClick={() => onCreativeTransition && onCreativeTransition(w, "blocked")}><Icon name="block" size={11} /> Block</button>}
+                    {w.type !== "quick" && w.status === "blocked" && canTransition(w, "in_progress") && <button className="btn btn--xs btn--secondary" disabled={Boolean(transitionPending[w.id])} onClick={() => onCreativeTransition && onCreativeTransition(w, "in_progress")}><Icon name="play" size={11} /> Resume</button>}
                   </div>
                 </td>
               </tr>
@@ -1173,15 +1195,14 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
     if (!detailId) {
       throw new Error("Create succeeded, but the response did not include a work item ID.");
     }
-    if (!window.loadFlowMateListRows) {
+    if (!window.loadFlowMateWorkItemById) {
       throw new Error(`Create succeeded for ${detailId}, but the detail loader is not ready.`);
     }
     if (typeof onOpen !== "function") {
       throw new Error(`Create succeeded for ${detailId}, but detail navigation is not ready.`);
     }
 
-    const rows = await window.loadFlowMateListRows();
-    const createdRow = window.findFlowMateWorkItemById(rows, detailId);
+    const createdRow = await window.loadFlowMateWorkItemById(detailId, { includeArchived: false });
     if (!createdRow) {
       throw new Error(`Create succeeded for ${detailId}, but the detail row could not be loaded.`);
     }
@@ -1873,7 +1894,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const directDetailMatch = directDetailItem && directDetailItem.id === id ? directDetailItem : null;
   // Do not fall back to a static item when the id cannot be resolved.
   // If we genuinely have nothing, render an empty state below.
-  const w = selected || directDetailMatch || null;
+  const w = directDetailMatch || selected || null;
 
   // CR-2: ALL hooks must run unconditionally and BEFORE any early return
   // (Rules of Hooks). When a live refresh clears the selected item, `w` can
@@ -1883,6 +1904,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   // cannot change hook order.
   const [actionMsg, setActionMsg] = useState(null);
   const [pending, setPending] = useState(false);
+  const statusPendingRef = useRef(false);
   // H-10: bumping this re-renders the detail after a mutation refreshes the
   // selected item, so status/owner/buttons reflect the DB without a manual reload.
   const [detailRefreshTick, setDetailRefreshTick] = useState(0);
@@ -1928,24 +1950,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   useEffect(() => {
     let alive = true;
-    if (!w || !w.isSupabaseRow || w.archivedAt || !window.loadFlowMateAiTags) return () => { alive = false; };
-    window.loadFlowMateAiTags({ displayId: w.id })
-      .then((tags) => {
-        if (!alive) return;
-        setDetailAiTags(tags || []);
-        w.aiTags = tags || [];
-        if (window.flowmateSelectedWorkItem && window.flowmateSelectedWorkItem.id === w.id) {
-          window.flowmateSelectedWorkItem.aiTags = tags || [];
-        }
-      })
-      .catch((error) => {
-        console.warn("[FlowMate AI Tags] Load failed:", error && error.message);
-      });
-    return () => { alive = false; };
-  }, [w && w.id, w && w.isSupabaseRow, w && w.archivedAt]);
-
-  useEffect(() => {
-    let alive = true;
     if (window.FLOWMATE_MENTION_USERS && window.FLOWMATE_MENTION_USERS.length > 0) {
       setMentionUsers(window.FLOWMATE_MENTION_USERS);
     }
@@ -1960,8 +1964,11 @@ function DetailScreen({ onNav, onOpen, focusId }) {
 
   useEffect(() => {
     let alive = true;
-    if (!id || w || !window.loadFlowMateWorkItemById) {
-      if (w) setDirectDetailLoadState({ status: "idle", message: "" });
+    const needsDetailHydration = Boolean(
+      id && (!w || !w.detailHydrated) && window.loadFlowMateWorkItemById
+    );
+    if (!needsDetailHydration) {
+      if (w?.detailHydrated) setDirectDetailLoadState({ status: "idle", message: "" });
       return () => { alive = false; };
     }
 
@@ -2042,17 +2049,23 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const canSelfAssignUnassigned = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : (w.assignmentWarnings || []);
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
-  const canStatusTransition = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (
-    isAdminUser ||
-    currentUserId === w.requesterUserId ||
-    currentUserId === w.assigneeUserId ||
-    owner?.userId === currentUserId ||
-    currentUserId === w.marketingPlanSubPicUserId
-  ));
+  const canTransitionTo = (nextStatus) => Boolean(
+    !isArchivedDetail
+    && window.canFlowMateTransitionWorkItem?.(
+      w,
+      nextStatus,
+      window.FLOWMATE_CURRENT_USER || {},
+      window.MEMBERS_BY_ID || {},
+    )
+  );
+  const canStatusTransition = ["in_progress", "review", "delivered", "blocked", "assigned", "cancelled"]
+    .some(canTransitionTo);
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
   const visibleWatchers = detailWatchers;
   const visibleAiTags = detailAiTags;
+  const aiTagsUnavailable = Boolean(w.aiTagsUnavailable);
+  const canRecheckBrief = Boolean(!isArchivedDetail && w.isSupabaseRow && w.status === "need_brief" && isRequesterUser);
   const visibleActivityEvents = (() => {
     const seenAssignmentResults = new Set();
     return (w.activityEvents || []).filter((event) => {
@@ -2189,33 +2202,40 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so status changes are disabled." });
       return;
     }
-    const options = {};
-    if (nextStatus === "review") {
-      const link = await window.flowmatePrompt({
-        title: "Submit for review",
-        label: "Review Link",
-        placeholder: "https://drive.google.com/…",
-        required: true,
-        validate: (value) => (window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."),
-      });
-      if (!link) return;
-      options.deliveryLink = link;
+    if (!canTransitionTo(nextStatus)) {
+      setActionMsg({ tone: "warn", text: "This action is not available for your role or the current status." });
+      return;
     }
-    if (nextStatus === "blocked") {
-      const reason = await window.flowmatePrompt({
-        title: "Block work", label: "Blocked reason", multiline: true, required: true,
-      });
-      if (!reason) return;
-      options.blockedReason = reason;
-    }
+    if (statusPendingRef.current) return;
+    statusPendingRef.current = true;
     setPending(true);
     try {
+      const options = { currentStatus: w.status };
+      if (nextStatus === "review") {
+        const link = await window.flowmatePrompt({
+          title: "Submit for review",
+          label: "Review Link",
+          placeholder: "https://drive.google.com/…",
+          required: true,
+          validate: (value) => (window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."),
+        });
+        if (!link) return;
+        options.deliveryLink = link;
+      }
+      if (nextStatus === "blocked") {
+        const reason = await window.flowmatePrompt({
+          title: "Block work", label: "Blocked reason", multiline: true, required: true,
+        });
+        if (!reason) return;
+        options.blockedReason = reason;
+      }
       await window.transitionFlowMateWorkStatus(w.id, nextStatus, options);
       await refreshDetailItem();
       setActionMsg({ tone: "ok", text: `${w.id} moved to ${STATUS_LABEL[nextStatus] || nextStatus}.` });
     } catch (error) {
       setActionMsg({ tone: "bad", text: window.flowmateUserError(error, "Status change failed.") });
     } finally {
+      statusPendingRef.current = false;
       setPending(false);
     }
   }
@@ -2430,11 +2450,17 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       setActionMsg({ tone: "warn", text: "This item is not loaded from Supabase, so cancel is disabled." });
       return;
     }
+    if (!canTransitionTo("cancelled") || statusPendingRef.current) return;
+    statusPendingRef.current = true;
+    setPending(true);
     const reason = await window.flowmatePrompt({
       title: "Cancel work", label: "Cancel reason", multiline: true, required: true,
     });
-    if (!reason) return;
-    setPending(true);
+    if (!reason) {
+      statusPendingRef.current = false;
+      setPending(false);
+      return;
+    }
     try {
       await window.cancelFlowMateWorkItem(w, reason);
       await refreshDetailItem();
@@ -2448,6 +2474,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
         ),
       });
     } finally {
+      statusPendingRef.current = false;
       setPending(false);
     }
   }
@@ -2540,31 +2567,31 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           {isAdminUser && isArchivedDetail && (
             <button className="btn btn--primary" onClick={runAdminRestore} disabled={pending}><Icon name="rerun" /> Restore archived work</button>
           )}
-          {canStatusTransition && ["assigned", "in_progress", "review"].includes(w.status) && (
+          {canTransitionTo("blocked") && ["assigned", "in_progress", "review"].includes(w.status) && (
             <button className="btn btn--danger" onClick={() => runCreativeTransition("blocked")} disabled={pending}><Icon name="block" /> Block</button>
           )}
-          {canStatusTransition && !["delivered", "cancelled"].includes(w.status) && (
+          {canTransitionTo("cancelled") && !["delivered", "cancelled"].includes(w.status) && (
             <button className="btn btn--ghost" onClick={runCancel} disabled={pending}><Icon name="x" /> Cancel</button>
           )}
           {isAdminUser && w.isSupabaseRow && !w.archivedAt && (
             <button className="btn btn--danger" onClick={runAdminArchive} disabled={pending}><Icon name="layers" /> Admin archive</button>
           )}
-          {canStatusTransition && w.status === "assigned" && (
+          {canTransitionTo("in_progress") && w.status === "assigned" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Start work</button>
           )}
-          {canStatusTransition && w.status === "in_progress" && (
+          {canTransitionTo("review") && w.status === "in_progress" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("review")} disabled={pending}><Icon name="send" /> Submit review</button>
           )}
-          {canStatusTransition && w.status === "review" && (
+          {w.status === "review" && (canTransitionTo("in_progress") || canTransitionTo("delivered")) && (
             <>
-              <button className="btn btn--secondary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}>Request changes</button>
-              <button className="btn btn--primary" onClick={() => runCreativeTransition("delivered")} disabled={pending}><Icon name="check" /> Approve delivered</button>
+              {canTransitionTo("in_progress") && <button className="btn btn--secondary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}>Request changes</button>}
+              {canTransitionTo("delivered") && <button className="btn btn--primary" onClick={() => runCreativeTransition("delivered")} disabled={pending}><Icon name="check" /> Approve delivered</button>}
             </>
           )}
-          {canStatusTransition && w.status === "blocked" && (
+          {canTransitionTo("in_progress") && w.status === "blocked" && (
             <button className="btn btn--primary" onClick={() => runCreativeTransition("in_progress")} disabled={pending}><Icon name="play" /> Resume</button>
           )}
-          {canStatusTransition && w.status === "need_brief" && (
+          {canRecheckBrief && (
             <button className="btn btn--primary" onClick={async () => {
               setPending(true);
               try {
@@ -2836,10 +2863,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row__lbl">AI Tag</div>
                 <div className="meta-row__val">
                   <div className="ai-tag-list">
-                    {visibleAiTags.length > 0 ? visibleAiTags.map((tag) => (
+                    {aiTagsUnavailable ? (
+                      <span className="muted">AI tags are unavailable for your access.</span>
+                    ) : visibleAiTags.length > 0 ? visibleAiTags.map((tag) => (
                       <span className="tag ai-tag" key={tag.id || tag.tag}>
                         <Icon name="zap" size={11} /> {tag.tag}
-                        {!isArchivedDetail && w.isSupabaseRow && window.removeFlowMateAiTag && (
+                        {!isArchivedDetail && !aiTagsUnavailable && w.isSupabaseRow && window.removeFlowMateAiTag && (
                           <button type="button" className="ai-tag__remove" onClick={() => removeAiTag(tag)} disabled={pending} aria-label={`Remove ${tag.tag}`}>
                             <Icon name="x" size={10} />
                             <span>Remove tag</span>
@@ -2849,7 +2878,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                     )) : (
                       <span className="muted">No AI tags</span>
                     )}
-                    {!isArchivedDetail && <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || !w.isSupabaseRow || !window.addFlowMateAiTag}>
+                    {!isArchivedDetail && <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || aiTagsUnavailable || !w.isSupabaseRow || !window.addFlowMateAiTag}>
                       <Icon name="plus" /> Add AI Tag
                     </button>}
                   </div>
