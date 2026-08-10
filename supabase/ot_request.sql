@@ -711,7 +711,8 @@ begin
   ) then
     return pg_catalog.to_jsonb(v_request);
   end if;
-  if v_request.status not in ('pending_actual_verification', 'compliance_review_required') then
+  if v_request.status not in ('pending_actual_verification', 'compliance_review_required')
+     or v_request.actual_decision is not null then
     raise exception 'Actual OT is not awaiting approver verification';
   end if;
   if v_request.source = 'event_plan'
@@ -734,7 +735,8 @@ begin
      or not public.ot_current_user_is_eligible_approver() then
     raise exception 'Actual OT assignment or approver access changed; reload this request';
   end if;
-  if v_request.status not in ('pending_actual_verification', 'compliance_review_required') then
+  if v_request.status not in ('pending_actual_verification', 'compliance_review_required')
+     or v_request.actual_decision is not null then
     raise exception 'Actual OT state changed and is no longer awaiting verification';
   end if;
   if v_request.source = 'event_plan'
@@ -899,7 +901,6 @@ as $function$
     select 1
     from public.users u
     where u.id = p_user_id
-      and u.is_active = true
       and pg_catalog.lower(pg_catalog.btrim(u.email)) in (
         'nithidol.k@garena.com',
         'weerayut@garena.com',
@@ -959,11 +960,7 @@ as $function$
     join public.ot_approvers a on a.user_id = u.id
     where u.id = (select auth.uid())
       and u.is_active = true
-      and pg_catalog.lower(pg_catalog.btrim(u.email)) in (
-        'nithidol.k@garena.com',
-        'weerayut@garena.com',
-        'napol.a@garena.com'
-      )
+      and public.ot_user_is_approved_approver_identity(u.id)
       and a.active = true
   );
 $function$;
@@ -1615,6 +1612,9 @@ begin
   perform public.ot_assert_reason(v_reason_code, v_reason_detail);
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start must be in the future';
+  end if;
   v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
   v_segments := public.ot_build_week_segments(
@@ -1625,6 +1625,9 @@ begin
   );
   perform public.ot_assert_planned_limit(v_actor_id, v_segments, null);
   perform public.ot_assert_no_employee_overlap(v_actor_id, v_start_at, v_end_at, null);
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start became non-future while the request was being created';
+  end if;
 
   insert into public.ot_requests (
     employee_user_id, approver_user_id, created_by_user_id, source, request_type,
@@ -1758,6 +1761,9 @@ begin
   perform public.ot_assert_reason(v_reason_code, v_reason_detail);
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start must be in the future';
+  end if;
   v_break_minutes := pg_catalog.coalesce(
     pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer,
     0
@@ -1812,6 +1818,9 @@ begin
     'plannedWeekSegments', v_request.planned_week_segments
   );
 
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start became non-future while the plan was being resubmitted';
+  end if;
   update public.ot_requests
   set function_code = pg_catalog.coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
       title = pg_catalog.btrim(p_payload->>'title'),
@@ -1882,7 +1891,6 @@ create or replace function public.ot_preview_event_plan(
 )
 returns jsonb
 language plpgsql
-stable
 security definer
 set search_path = ''
 as $function$
@@ -1913,6 +1921,9 @@ begin
   end if;
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start must be in the future';
+  end if;
   v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
   v_segments := public.ot_build_week_segments(
     v_start_at, v_end_at, v_break_minutes,
@@ -2024,6 +2035,9 @@ begin
   perform public.ot_assert_reason(v_reason_code, v_reason_detail);
   v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
   v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start must be in the future';
+  end if;
   v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
   v_segments := public.ot_build_week_segments(
@@ -2046,6 +2060,9 @@ begin
     perform public.ot_assert_planned_limit(v_employee_user_id, v_segments, null);
     perform public.ot_assert_no_employee_overlap(v_employee_user_id, v_start_at, v_end_at, null);
   end loop;
+  if v_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start became non-future while the event plan was being created';
+  end if;
 
   insert into public.ot_event_plans (
     title, function_code, work_location_type, venue, reason_code, reason_detail,
@@ -2517,6 +2534,14 @@ begin
   end if;
   if not public.ot_user_is_approved_approver_identity(p_user_id) then
     raise exception 'Approver must be one of the three approved MVP identities';
+  end if;
+  if p_active and not exists (
+    select 1
+    from public.users u
+    where u.id = p_user_id
+      and u.is_active = true
+  ) then
+    raise exception 'Approver must be an active Workgrid user when activated';
   end if;
   perform public.ot_lock_idempotency('set_approver', p_idempotency_key);
   select a.changed_fields into v_result

@@ -311,10 +311,56 @@ describe("OT Request backend contract", () => {
     const submit = functionSql(sql, "ot_submit_actual");
     const verifyActual = functionSql(sql, "ot_verify_actual");
     const stateGuard = "status not in ('pending_actual_verification', 'compliance_review_required')";
+    const decisionGuard = "v_request.actual_decision is not null";
+    const replayReturn = verifyActual.indexOf("return pg_catalog.to_jsonb(v_request);");
+    const authorityLock = verifyActual.indexOf("for key share of a");
+    const requestLock = verifyActual.indexOf("select * into v_request from public.ot_requests r where r.id = p_request_id for update;");
+    const actualWrite = verifyActual.indexOf("update public.ot_requests", requestLock);
+    const firstDecisionGuard = verifyActual.indexOf(decisionGuard);
+    const secondDecisionGuard = verifyActual.indexOf(decisionGuard, firstDecisionGuard + decisionGuard.length);
 
     expect(submit).toContain("status in ('cancelled', 'exported', 'hr_ready')");
     expect(verifyActual.split(stateGuard)).toHaveLength(3);
     expect(verifyActual.lastIndexOf(stateGuard)).toBeGreaterThan(verifyActual.indexOf("for update"));
+    expect(verifyActual.split(decisionGuard)).toHaveLength(3);
+    expect(firstDecisionGuard).toBeGreaterThan(replayReturn);
+    expect(firstDecisionGuard).toBeLessThan(authorityLock);
+    expect(secondDecisionGuard).toBeGreaterThan(requestLock);
+    expect(secondDecisionGuard).toBeLessThan(actualWrite);
+    expect(verify).toContain("OT approved Actual immutability contract (Expected = valid)");
+  });
+
+  it("rejects non-future planned starts at every server caller and rechecks after write-path locks", () => {
+    const createRequest = functionSql(sql, "ot_create_request");
+    const resubmitPlan = functionSql(sql, "ot_resubmit_plan");
+    const previewEvent = functionSql(sql, "ot_preview_event_plan");
+    const createEvent = functionSql(sql, "ot_create_event_plan");
+    const futureGuard = "v_start_at <= pg_catalog.clock_timestamp()";
+
+    for (const caller of [createRequest, resubmitPlan, previewEvent, createEvent]) {
+      expect(caller).toContain("v_start_at timestamptz");
+      expect(caller).toContain(futureGuard);
+      expect(caller).not.toMatch(/v_start_at[\s\S]{0,80}(at time zone|::text)/i);
+    }
+    expect(previewEvent.split(futureGuard)).toHaveLength(2);
+    for (const writer of [createRequest, resubmitPlan, createEvent]) {
+      expect(writer.split(futureGuard)).toHaveLength(3);
+    }
+
+    const createRequestWrite = createRequest.indexOf("insert into public.ot_requests");
+    expect(createRequest.lastIndexOf(futureGuard)).toBeGreaterThan(createRequest.lastIndexOf("public.ot_assert_no_employee_overlap", createRequestWrite));
+    expect(createRequest.lastIndexOf(futureGuard)).toBeLessThan(createRequestWrite);
+
+    const resubmitWrite = resubmitPlan.indexOf("update public.ot_requests");
+    expect(resubmitPlan.lastIndexOf(futureGuard)).toBeGreaterThan(resubmitPlan.lastIndexOf("public.ot_assert_no_employee_overlap", resubmitWrite));
+    expect(resubmitPlan.lastIndexOf(futureGuard)).toBeLessThan(resubmitWrite);
+
+    const createEventWrite = createEvent.indexOf("insert into public.ot_event_plans");
+    expect(createEvent.lastIndexOf(futureGuard)).toBeGreaterThan(createEvent.lastIndexOf("public.ot_assert_no_employee_overlap", createEventWrite));
+    expect(createEvent.lastIndexOf(futureGuard)).toBeLessThan(createEventWrite);
+
+    expect(verify).toContain("OT future planned-start enforcement contract (Expected = valid)");
+    expect(read("supabase", "README.md")).toContain("future at call time and again after all write-path locks");
   });
 
   it("authorizes actual submission only through the locked request state machine", () => {
@@ -415,6 +461,7 @@ describe("OT Request backend contract", () => {
 
   it("enforces the fixed MVP owner and approver identity allowlists", () => {
     const owner = functionSql(sql, "ot_current_user_is_owner");
+    const fixedApproverIdentity = functionSql(sql, "ot_user_is_approved_approver_identity");
     const eligibleApprover = functionSql(sql, "ot_current_user_is_eligible_approver");
     const canReadRequest = functionSql(sql, "ot_current_user_can_read_request");
     const setApprover = functionSql(sql, "ot_set_approver");
@@ -422,8 +469,9 @@ describe("OT Request backend contract", () => {
 
     expect(owner).toContain("pg_catalog.lower(pg_catalog.btrim(u.email)) = 'panuwee.w@garena.com'");
     for (const email of ["nithidol.k@garena.com", "weerayut@garena.com", "napol.a@garena.com"]) {
-      expect(eligibleApprover).toContain(email);
+      expect(fixedApproverIdentity).toContain(email);
     }
+    expect(eligibleApprover).toContain("public.ot_user_is_approved_approver_identity(u.id)");
     expect(canReadRequest).toMatch(/approver_user_id = \(select auth\.uid\(\)\)[\s\S]*ot_current_user_is_eligible_approver/);
     expect(setApprover).toContain("public.ot_user_is_approved_approver_identity(p_user_id)");
     expect(setRole).toMatch(/p_role_code = 'owner'[\s\S]*panuwee\.w@garena\.com[\s\S]*raise exception/);
@@ -779,6 +827,28 @@ describe("OT Request backend contract", () => {
     expect(reassign).toContain("'reassign_pending_approver_admin'");
     expect(reassign).toMatch(/changed_fields->'result'[\s\S]*return v_replay_result/);
     expect(setApprover).toMatch(/if not p_active[\s\S]*exists \([\s\S]*from public\.ot_requests r[\s\S]*pending approver work/i);
+  });
+
+  it("keeps fixed source identity separate from active destination eligibility", () => {
+    const fixedIdentity = functionSql(sql, "ot_user_is_approved_approver_identity");
+    const eligibleApprover = functionSql(sql, "ot_current_user_is_eligible_approver");
+    const reassign = functionSql(sql, "ot_reassign_pending_approver");
+    const setApprover = functionSql(sql, "ot_set_approver");
+
+    expect(fixedIdentity).toContain("from public.users u");
+    expect(fixedIdentity).toContain("where u.id = p_user_id");
+    expect(fixedIdentity).not.toContain("u.is_active");
+    expect(eligibleApprover).toContain("public.ot_user_is_approved_approver_identity(u.id)");
+    expect(eligibleApprover).toContain("u.is_active = true");
+    expect(eligibleApprover).toContain("a.active = true");
+
+    expect(reassign).toContain("public.ot_user_is_approved_approver_identity(p_from_user_id)");
+    expect(reassign).toMatch(/p_to_user_id[\s\S]*a\.active = true[\s\S]*u\.is_active = true/);
+    expect(setApprover).toMatch(/if p_active[\s\S]*from public\.users u[\s\S]*u\.id = p_user_id[\s\S]*u\.is_active = true[\s\S]*raise exception/);
+    expect(setApprover.indexOf("if p_active")).toBeLessThan(setApprover.indexOf("perform public.ot_lock_idempotency"));
+
+    expect(verify).toContain("OT inactive fixed approver remediation contract (Expected = valid)");
+    expect(read("supabase", "README.md")).toContain("inactive Workgrid source remains a fixed allowlisted identity for reassignment and deactivation only");
   });
 
   it("keeps reassignment least-privilege and exposes read-only staging checks", () => {

@@ -150,6 +150,47 @@ where n.nspname = 'public'
   and p.proname = 'ot_set_approver'
   and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, uuid';
 
+with approver_contracts as (
+  select
+    p.proname,
+    pg_catalog.pg_get_functiondef(p.oid) as definition
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in (
+      'ot_user_is_approved_approver_identity',
+      'ot_current_user_is_eligible_approver',
+      'ot_reassign_pending_approver',
+      'ot_set_approver'
+    )
+), definitions as (
+  select
+    pg_catalog.max(definition) filter (where proname = 'ot_user_is_approved_approver_identity') as fixed_identity,
+    pg_catalog.max(definition) filter (where proname = 'ot_current_user_is_eligible_approver') as eligible_approver,
+    pg_catalog.max(definition) filter (where proname = 'ot_reassign_pending_approver') as reassign,
+    pg_catalog.max(definition) filter (where proname = 'ot_set_approver') as set_approver
+  from approver_contracts
+)
+select
+  'OT inactive fixed approver remediation contract (Expected = valid)' as check_name,
+  pg_catalog.position('u.is_active' in d.fixed_identity) = 0 as fixed_identity_survives_user_deactivation,
+  (
+    pg_catalog.position('public.ot_user_is_approved_approver_identity(u.id)' in d.eligible_approver) > 0
+    and pg_catalog.position('u.is_active = true' in d.eligible_approver) > 0
+    and pg_catalog.position('a.active = true' in d.eligible_approver) > 0
+  ) as current_eligibility_requires_active_user_and_approver,
+  pg_catalog.position('public.ot_user_is_approved_approver_identity(p_from_user_id)' in d.reassign) > 0 as fixed_source_allowlist,
+  (
+    pg_catalog.position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in d.reassign) > 0
+    and pg_catalog.position('a.active = true' in d.reassign) > 0
+    and pg_catalog.position('u.is_active = true' in d.reassign) > 0
+  ) as destination_remains_active_and_allowlisted,
+  (
+    pg_catalog.position('if p_active and not exists (' in d.set_approver) > 0
+    and pg_catalog.position('u.is_active = true' in d.set_approver) > 0
+  ) as inactive_identity_cannot_be_activated
+from definitions d;
+
 with decision_functions as (
   select
     p.proname,
@@ -184,6 +225,85 @@ select
   ) > 0 as refreshed_eligibility_guard
 from decision_functions d
 order by d.proname;
+
+with actual_verifier as (
+  select pg_catalog.pg_get_functiondef(p.oid) as definition
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname = 'ot_verify_actual'
+    and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, uuid'
+)
+select
+  'OT approved Actual immutability contract (Expected = valid)' as check_name,
+  (
+    pg_catalog.position('v_request.actual_decision is not null' in a.definition)
+      > pg_catalog.position('return pg_catalog.to_jsonb(v_request);' in a.definition)
+    and pg_catalog.position('v_request.actual_decision is not null' in a.definition)
+      < pg_catalog.position('for key share of a' in a.definition)
+  ) as guard_after_replay_before_locks,
+  pg_catalog.position(
+    'v_request.actual_decision is not null'
+    in pg_catalog.substring(
+      a.definition
+      from pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in a.definition)
+    )
+  ) > 0 as guard_after_request_lock
+from actual_verifier a;
+
+with planned_start_functions as (
+  select
+    p.proname,
+    pg_catalog.pg_get_functiondef(p.oid) as definition,
+    case p.proname
+      when 'ot_create_request' then 'insert into public.ot_requests'
+      when 'ot_resubmit_plan' then 'update public.ot_requests'
+      when 'ot_create_event_plan' then 'insert into public.ot_event_plans'
+      else null
+    end as write_anchor
+  from pg_catalog.pg_proc p
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and p.proname in (
+      'ot_create_request',
+      'ot_resubmit_plan',
+      'ot_preview_event_plan',
+      'ot_create_event_plan'
+    )
+)
+select
+  'OT future planned-start enforcement contract (Expected = valid)' as check_name,
+  f.proname,
+  pg_catalog.position('v_start_at timestamptz' in f.definition) > 0 as timestamptz_input,
+  pg_catalog.position('v_start_at <= pg_catalog.clock_timestamp()' in f.definition) > 0 as caller_future_guard,
+  case
+    when f.write_anchor is null then true
+    else
+      pg_catalog.position('v_start_at <= pg_catalog.clock_timestamp()' in f.definition)
+        < pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+      and pg_catalog.position(
+        'v_start_at <= pg_catalog.clock_timestamp()'
+        in pg_catalog.substring(
+          f.definition
+          from pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+        )
+      ) > 0
+      and pg_catalog.position(
+        'v_start_at <= pg_catalog.clock_timestamp()'
+        in pg_catalog.substring(
+          f.definition
+          from pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+        )
+      ) < pg_catalog.position(
+        f.write_anchor
+        in pg_catalog.substring(
+          f.definition
+          from pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+        )
+      )
+  end as post_lock_recheck_before_write
+from planned_start_functions f
+order by f.proname;
 
 select
   'Actual amendment RPC contract (Expected = valid)' as check_name,
