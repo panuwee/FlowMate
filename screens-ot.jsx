@@ -125,10 +125,6 @@ function getOtDescribedActionProps(descriptionId, isDescribed) {
   return isDescribed ? { "aria-describedby": descriptionId } : {};
 }
 
-function getOtCurrentPageProps(isCurrent) {
-  return isCurrent ? { "aria-current": "page" } : {};
-}
-
 function OtWarning({ id, kind = "info", title, message, testId }) {
   if (!message) return null;
   const heading = title || (kind === "error" || kind === "critical" ? "Action needed" : "Update");

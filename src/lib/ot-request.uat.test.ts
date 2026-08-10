@@ -453,11 +453,19 @@ describe("OT Request static module integration", () => {
 
   it("uses labelled warnings and accessible OT navigation state", () => {
     const screen = read("screens-ot.jsx");
+    const warning = screen.slice(screen.indexOf("function getOtAnnouncementProps("), screen.indexOf("function OtLimitProgress("));
+    const navigation = screen.slice(screen.indexOf('<nav className="ot-sidebar"'), screen.indexOf("</nav>", screen.indexOf('<nav className="ot-sidebar"')));
+    const requestForm = screen.slice(screen.indexOf("function OtRequestForm("), screen.indexOf("function OtConsentPanel("));
 
-    expect(screen).toContain('role: "alert"');
-    expect(screen).toContain('"aria-live": "polite"');
-    expect(screen).toContain('"aria-describedby"');
-    expect(screen).toContain('"aria-current": "page"');
+    expect(warning).toContain('? { role: "alert" }');
+    expect(warning).toContain('{ role: "status", "aria-live": "polite" }');
+    expect(requestForm).toContain('{...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))}');
+    expect(navigation).toContain('aria-label="OT Request navigation"');
+    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(9);
+    for (const view of ["overview", "my-requests", "manager", "root-causes", "compliance", "audit", "export", "owner", "access"]) {
+      expect(navigation).toContain(`aria-current={visibleView === "${view}" ? "page" : undefined}`);
+    }
+    expect(screen).not.toContain("function getOtCurrentPageProps(");
   });
 
   it("exposes ProductSwitch as a labelled control group", () => {
@@ -470,12 +478,24 @@ describe("OT Request static module integration", () => {
 
   it("keeps OT tables contained and keyboard focus visible across themes and viewports", () => {
     const css = read("app.css");
+    const otStyles = css.slice(css.indexOf("/* ---------- OT Request shell ---------- */"));
+    const mobile = otStyles.slice(otStyles.indexOf("@media (max-width: 760px)"));
+    const warningRule = otStyles.slice(otStyles.indexOf(".ot-warning {"), otStyles.indexOf(".ot-warning--error"));
+    const darkTheme = css.slice(css.indexOf('html[data-theme="dark"] {'), css.indexOf("}", css.indexOf('html[data-theme="dark"] {')) + 1);
 
-    expect(css).toContain(".ot-table-wrap { overflow-x: auto; }");
-    expect(css).toContain("html[data-theme=\"dark\"] {");
-    expect(css).toContain("@media (max-width: 900px)");
-    expect(css).toContain(".ot-sidebar .nav-item:focus-visible");
-    expect(css).toContain(".ot-link-button:focus-visible");
+    expect(otStyles).toContain(".ot-table-wrap { overflow-x: auto; }");
+    expect(otStyles).toContain(".ot-sidebar .nav-item:focus-visible");
+    expect(otStyles).toContain(".ot-link-button:focus-visible");
+    expect(warningRule).toContain("background: var(--garena-white);");
+    expect(warningRule).toContain("color: var(--garena-iron);");
+    expect(darkTheme).toContain("--garena-white: #171A1F;");
+    expect(darkTheme).toContain("--garena-iron: #D7DCE2;");
+    expect(mobile).toContain(".ot-shell {");
+    expect(mobile).toContain("grid-template-columns: minmax(0, 1fr);");
+    expect(mobile).toContain(".ot-sidebar {");
+    expect(mobile).toContain("overflow-x: auto;");
+    expect(mobile).toContain(".ot-metric-grid--employee,");
+    expect(mobile).toContain(".ot-form__actions .btn { width: 100%; }");
   });
 
   it("loads OT runtime files before the application on every tracked entry", () => {

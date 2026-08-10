@@ -119,11 +119,6 @@ function getOtDescribedActionProps(descriptionId, isDescribed) {
     "aria-describedby": descriptionId
   } : {};
 }
-function getOtCurrentPageProps(isCurrent) {
-  return isCurrent ? {
-    "aria-current": "page"
-  } : {};
-}
 function OtWarning({
   id,
   kind = "info",
