@@ -909,6 +909,8 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
   const [showEventForm, setShowEventForm] = useStateApp(false);
   const [selectedRow, setSelectedRow] = useStateApp(null);
   const errorRef = useRefApp(null);
+  const decisionIntentRef = useRefApp(null);
+  const bulkIntentsRef = useRefApp({});
   const managerWeeks = rootCauseOnly ? [0, -7, -14, -21, -28].map(offset => addOtDays(weekStart, offset)) : [weekStart];
   const managerLoadKey = `${rootCauseOnly ? "root" : "manager"}:${weekStart}:${functionFilter}:${refreshKey}:${refreshToken}`;
   const clientFilterKey = getOtManagerClientFilterKey(filters);
@@ -999,7 +1001,7 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
             <button type="button" className="btn btn--secondary" onClick={() => setRefreshKey(value => value + 1)}>Refresh {hasFullScope ? "OT scope" : "assigned scope"}</button>
           </div>
           {showEventForm && <section className="ot-workflow"><div className="ot-workflow__head"><h2>Shared Event OT plan</h2></div><OtEventPlanForm access={access} onSuccess={() => setRefreshKey(value => value + 1)} /></section>}
-          <OtApprovalQueue access={access} requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={activeLoadState.peopleById} onChanged={() => setRefreshKey(value => value + 1)} />
+          <OtApprovalQueue access={access} requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={activeLoadState.peopleById} decisionIntentRef={decisionIntentRef} bulkIntentsRef={bulkIntentsRef} onChanged={() => setRefreshKey(value => value + 1)} />
           <OtTeamWeekTable requests={filteredCurrentRows} allRequests={currentRows} peopleById={activeLoadState.peopleById} onOpenRequest={setSelectedRow} />
           {selectedRow && <section className="ot-manager-detail" aria-label="Authorized OT details">
             <div className="ot-section-head"><h2>{selectedRow.title}</h2><button type="button" className="btn btn--ghost" onClick={() => setSelectedRow(null)}>Close</button></div>
@@ -1012,13 +1014,11 @@ function OtManagerDashboard({ access, rootCauseOnly = false, refreshToken = 0 })
   );
 }
 
-function OtApprovalQueue({ access, requests, allRequests, peopleById, onChanged }) {
+function OtApprovalQueue({ access, requests, allRequests, peopleById, decisionIntentRef, bulkIntentsRef, onChanged }) {
   const [selected, setSelected] = useStateApp(null);
   const [note, setNote] = useStateApp("");
   const [bulkReview, setBulkReview] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
-  const decisionIntentRef = useRefApp(null);
-  const bulkIntentsRef = useRefApp({});
   const decisionSubmissionRef = useRefApp(false);
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request"

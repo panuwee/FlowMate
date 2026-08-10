@@ -90,6 +90,8 @@ function createOtRootCauseHarness() {
 function createOtApprovalQueueHarness() {
   const stateSlots: unknown[] = [];
   const refSlots: Array<{ current: unknown }> = [];
+  const decisionIntentRef = { current: null };
+  const bulkIntentsRef = { current: {} };
   let stateIndex = 0;
   let refIndex = 0;
   let keySequence = 0;
@@ -130,7 +132,146 @@ function createOtApprovalQueueHarness() {
     render(props: Record<string, unknown>) {
       stateIndex = 0;
       refIndex = 0;
-      return sandbox.__OtApprovalQueue(props) as RenderedElement;
+      return sandbox.__OtApprovalQueue({ ...props, decisionIntentRef, bulkIntentsRef }) as RenderedElement;
+    },
+  };
+}
+
+function createOtManagerApprovalHarness() {
+  type EffectSlot = {
+    callback: () => unknown;
+    cleanup?: () => void;
+    deps?: unknown[];
+    pending: boolean;
+  };
+  type HookScope = {
+    states: unknown[];
+    refs: Array<{ current: unknown }>;
+    effects: EffectSlot[];
+    stateIndex: number;
+    refIndex: number;
+    effectIndex: number;
+  };
+  const createScope = (): HookScope => ({ states: [], refs: [], effects: [], stateIndex: 0, refIndex: 0, effectIndex: 0 });
+  let parentScope = createScope();
+  let childScope = createScope();
+  let currentScope: HookScope | null = null;
+  let keySequence = 0;
+  let dashboardRows: Array<Record<string, unknown>> = [];
+  let lastQueueProps: Record<string, unknown> | null = null;
+
+  const sandbox: any = {
+    React: {
+      Fragment: Symbol("Fragment"),
+      createElement(type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) {
+        return { type, props: props || {}, children };
+      },
+    },
+    useStateApp(initialValue: unknown) {
+      if (!currentScope) throw new Error("useStateApp called outside a harness render");
+      const scope = currentScope;
+      const index = scope.stateIndex;
+      scope.stateIndex += 1;
+      if (!(index in scope.states)) scope.states[index] = typeof initialValue === "function" ? (initialValue as () => unknown)() : initialValue;
+      return [scope.states[index], (nextValue: unknown) => {
+        scope.states[index] = typeof nextValue === "function" ? (nextValue as (current: unknown) => unknown)(scope.states[index]) : nextValue;
+      }];
+    },
+    useEffectApp(callback: () => unknown, deps?: unknown[]) {
+      if (!currentScope) throw new Error("useEffectApp called outside a harness render");
+      const scope = currentScope;
+      const index = scope.effectIndex;
+      scope.effectIndex += 1;
+      const previous = scope.effects[index];
+      const changed = !previous || !deps || !previous.deps || deps.length !== previous.deps.length
+        || deps.some((value, depIndex) => !Object.is(value, previous.deps?.[depIndex]));
+      scope.effects[index] = changed
+        ? { callback, cleanup: previous?.cleanup, deps: deps ? [...deps] : undefined, pending: true }
+        : previous;
+    },
+    useRefApp(initialValue: unknown) {
+      if (!currentScope) throw new Error("useRefApp called outside a harness render");
+      const scope = currentScope;
+      const index = scope.refIndex;
+      scope.refIndex += 1;
+      if (!(index in scope.refs)) scope.refs[index] = { current: initialValue };
+      return scope.refs[index];
+    },
+    useMemoApp(factory: () => unknown) { return factory(); },
+    crypto: { randomUUID: () => `intent-${++keySequence}` },
+    window: { location: { hash: "" } },
+  };
+  runInNewContext(read("supabase-ot-request.js"), sandbox);
+  sandbox.window.FlowMateOtRequestDomain = loadOtRequestDomain();
+  sandbox.window.loadOtManagerDashboard = async () => ({ requests: dashboardRows });
+  sandbox.window.loadOtPeopleForEvent = async () => [];
+  runInNewContext(`${read("screens-ot.js")}
+    globalThis.__OtManagerDashboard = OtManagerDashboard;
+    globalThis.__OtApprovalQueue = OtApprovalQueue;
+    globalThis.__getCurrentOtWeekStart = getCurrentOtWeekStart;
+  `, sandbox);
+
+  function renderWith(scope: HookScope, component: (props: Record<string, unknown>) => RenderedElement, props: Record<string, unknown>) {
+    scope.stateIndex = 0;
+    scope.refIndex = 0;
+    scope.effectIndex = 0;
+    currentScope = scope;
+    try {
+      return component(props) as RenderedElement;
+    } finally {
+      currentScope = null;
+    }
+  }
+
+  async function flushEffects(scope: HookScope) {
+    for (const effect of scope.effects) {
+      if (!effect?.pending) continue;
+      effect.pending = false;
+      if (effect.cleanup) effect.cleanup();
+      const cleanup = effect.callback();
+      effect.cleanup = typeof cleanup === "function" ? cleanup as () => void : undefined;
+    }
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+  }
+
+  function renderManager() {
+    const tree = renderWith(parentScope, sandbox.__OtManagerDashboard, {
+      access: { isEligibleApprover: true, userId: "approver-1" },
+      rootCauseOnly: false,
+      refreshToken: 0,
+    });
+    const queueElement = findRenderedElements(tree, element => element.type === sandbox.__OtApprovalQueue)[0];
+    if (!queueElement) {
+      childScope = createScope();
+      lastQueueProps = null;
+      return { tree, queue: null };
+    }
+    lastQueueProps = queueElement.props;
+    return { tree, queue: renderWith(childScope, sandbox.__OtApprovalQueue, queueElement.props) };
+  }
+
+  return {
+    window: sandbox.window,
+    weekStart: sandbox.__getCurrentOtWeekStart(),
+    setRows(rows: Array<Record<string, unknown>>) { dashboardRows = rows; },
+    renderQueue() {
+      if (!lastQueueProps) throw new Error("Approval queue is not mounted");
+      return renderWith(childScope, sandbox.__OtApprovalQueue, lastQueueProps);
+    },
+    async mountQueue() {
+      renderManager();
+      await flushEffects(parentScope);
+      const ready = renderManager();
+      if (!ready.queue) throw new Error("Approval queue did not mount after manager load");
+      return ready.queue;
+    },
+    async refreshQueue() {
+      const loading = renderManager();
+      if (loading.queue) throw new Error("Approval queue stayed mounted during manager refresh");
+      await flushEffects(parentScope);
+      const ready = renderManager();
+      if (!ready.queue) throw new Error("Approval queue did not remount after manager refresh");
+      return { loadingText: renderedText(loading.tree), queue: ready.queue };
     },
   };
 }
@@ -1199,6 +1340,69 @@ describe("OT Request static module integration", () => {
     expect(keys).toHaveLength(3);
     expect(keys[1]).toBe(keys[0]);
     expect(keys[2]).not.toBe(keys[0]);
+  });
+
+  it("persists bulk retry keys across the real manager refresh lifecycle and clears them only after success", async () => {
+    const harness = createOtManagerApprovalHarness();
+    const keys: string[] = [];
+    const outcomes = ["fail", "fail", "fail", "success", "fail"];
+    harness.window.verifyOtActual = async (_requestId: string, _decision: string, _note: string | null, key: string) => {
+      keys.push(key);
+      if (outcomes.shift() === "fail") throw new Error("Ambiguous network failure");
+    };
+    const request = (id: string, title: string) => ({
+      id,
+      title,
+      source: "employee_request",
+      status: "pending_actual_verification",
+      approverUserId: "approver-1",
+      employeeUserId: "employee-1",
+      plannedMinutes: 60,
+      actualMinutes: 60,
+      plannedWeekSegments: [{ weekStart: harness.weekStart, minutes: 60 }],
+      actualSubmittedAt: "2026-08-10T12:00:00Z",
+      actualWeekSegments: [{ weekStart: harness.weekStart, minutes: 60 }],
+    });
+    const requestA = request("actual-a", "Actual A");
+    const requestB = request("actual-b", "Actual B");
+    harness.setRows([requestA]);
+    let rendered = await harness.mountQueue();
+
+    async function verifyVisibleBulk() {
+      renderedButton(rendered, "Review 1 eligible").props.onClick();
+      rendered = harness.renderQueue();
+      await renderedButton(rendered, "Confirm 1 verifications").props.onClick();
+    }
+
+    await verifyVisibleBulk();
+    harness.setRows([requestA]);
+    let refreshed = await harness.refreshQueue();
+    expect(refreshed.loadingText).toContain("Loading assigned OT operations");
+    rendered = refreshed.queue;
+
+    await verifyVisibleBulk();
+    harness.setRows([requestB]);
+    refreshed = await harness.refreshQueue();
+    expect(refreshed.loadingText).toContain("Loading assigned OT operations");
+    rendered = refreshed.queue;
+
+    await verifyVisibleBulk();
+    harness.setRows([requestB]);
+    refreshed = await harness.refreshQueue();
+    rendered = refreshed.queue;
+
+    await verifyVisibleBulk();
+    harness.setRows([requestB]);
+    refreshed = await harness.refreshQueue();
+    rendered = refreshed.queue;
+
+    await verifyVisibleBulk();
+
+    expect(keys).toHaveLength(5);
+    expect(keys[1]).toBe(keys[0]);
+    expect(keys[2]).not.toBe(keys[1]);
+    expect(keys[3]).toBe(keys[2]);
+    expect(keys[4]).not.toBe(keys[3]);
   });
 
   it("renders approved compliance rows as non-actionable while awaiting HR", () => {

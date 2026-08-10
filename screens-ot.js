@@ -1499,6 +1499,8 @@ function OtManagerDashboard({
   const [showEventForm, setShowEventForm] = useStateApp(false);
   const [selectedRow, setSelectedRow] = useStateApp(null);
   const errorRef = useRefApp(null);
+  const decisionIntentRef = useRefApp(null);
+  const bulkIntentsRef = useRefApp({});
   const managerWeeks = rootCauseOnly ? [0, -7, -14, -21, -28].map(offset => addOtDays(weekStart, offset)) : [weekStart];
   const managerLoadKey = `${rootCauseOnly ? "root" : "manager"}:${weekStart}:${functionFilter}:${refreshKey}:${refreshToken}`;
   const clientFilterKey = getOtManagerClientFilterKey(filters);
@@ -1703,6 +1705,8 @@ function OtManagerDashboard({
     allRequests: currentRows,
     weekStart: weekStart,
     peopleById: activeLoadState.peopleById,
+    decisionIntentRef: decisionIntentRef,
+    bulkIntentsRef: bulkIntentsRef,
     onChanged: () => setRefreshKey(value => value + 1)
   }), React.createElement(OtTeamWeekTable, {
     requests: filteredCurrentRows,
@@ -1735,6 +1739,8 @@ function OtApprovalQueue({
   requests,
   allRequests,
   peopleById,
+  decisionIntentRef,
+  bulkIntentsRef,
   onChanged
 }) {
   const [selected, setSelected] = useStateApp(null);
@@ -1744,8 +1750,6 @@ function OtApprovalQueue({
     status: "idle",
     message: ""
   });
-  const decisionIntentRef = useRefApp(null);
-  const bulkIntentsRef = useRefApp({});
   const decisionSubmissionRef = useRefApp(false);
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request" && !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval");
