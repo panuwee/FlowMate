@@ -211,14 +211,14 @@ select
     < position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition) as week_before_request_lock,
   position(
     'v_request.approver_user_id <> v_actor_id'
-    in pg_catalog.substring(
+    in substring(
       d.definition
       from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
     )
   ) > 0 as refreshed_assignment_guard,
   position(
     'not public.ot_current_user_is_eligible_approver()'
-    in pg_catalog.substring(
+    in substring(
       d.definition
       from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
     )
@@ -244,7 +244,7 @@ select
   ) as guard_after_replay_before_locks,
   position(
     'v_request.actual_decision is not null'
-    in pg_catalog.substring(
+    in substring(
       a.definition
       from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in a.definition)
     )
@@ -283,20 +283,20 @@ select
         < position('public.ot_assert_no_employee_overlap' in f.definition)
       and position(
         'v_start_at <= pg_catalog.clock_timestamp()'
-        in pg_catalog.substring(
+        in substring(
           f.definition
           from position('public.ot_assert_no_employee_overlap' in f.definition)
         )
       ) > 0
       and position(
         'v_start_at <= pg_catalog.clock_timestamp()'
-        in pg_catalog.substring(
+        in substring(
           f.definition
           from position('public.ot_assert_no_employee_overlap' in f.definition)
         )
       ) < position(
         f.write_anchor
-        in pg_catalog.substring(
+        in substring(
           f.definition
           from position('public.ot_assert_no_employee_overlap' in f.definition)
         )

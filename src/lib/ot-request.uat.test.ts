@@ -315,6 +315,7 @@ describe("OT Request backend contract", () => {
       expect(script).not.toContain("pg_catalog.greatest(");
       expect(script).not.toContain("pg_catalog.least(");
       expect(script).not.toContain("pg_catalog.position(");
+      expect(script).not.toContain("pg_catalog.substring(");
     }
   });
 
