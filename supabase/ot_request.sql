@@ -43,7 +43,7 @@ create table if not exists public.ot_event_plans (
   created_at timestamptz not null default now(),
   constraint ot_event_plans_title_required check (pg_catalog.length(pg_catalog.btrim(title)) > 0),
   constraint ot_event_plans_time_order check (planned_end_at > planned_start_at),
-  constraint ot_event_plans_venue_required check (work_location_type <> 'venue' or pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(venue, ''))) > 0),
+  constraint ot_event_plans_venue_required check (work_location_type <> 'venue' or pg_catalog.length(pg_catalog.btrim(coalesce(venue, ''))) > 0),
   unique (created_by_user_id, idempotency_key)
 );
 
@@ -110,7 +110,7 @@ create table if not exists public.ot_requests (
     or
     (actual_start_at is not null and actual_end_at is not null and actual_break_minutes is not null and actual_minutes is not null and actual_week_segments is not null and actual_end_at > actual_start_at)
   ),
-  constraint ot_requests_venue_required check (work_location_type <> 'venue' or pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(venue, ''))) > 0),
+  constraint ot_requests_venue_required check (work_location_type <> 'venue' or pg_catalog.length(pg_catalog.btrim(coalesce(venue, ''))) > 0),
   constraint ot_requests_week_segments_array check (pg_catalog.jsonb_typeof(planned_week_segments) = 'array' and (actual_week_segments is null or pg_catalog.jsonb_typeof(actual_week_segments) = 'array')),
   unique (created_by_user_id, idempotency_key, employee_user_id)
 );
@@ -144,7 +144,7 @@ alter table public.ot_request_audit
   add column if not exists actor_email_snapshot text;
 
 update public.ot_request_audit a
-set actor_email_snapshot = pg_catalog.nullif(pg_catalog.lower(pg_catalog.btrim(u.email)), '')
+set actor_email_snapshot = nullif(pg_catalog.lower(pg_catalog.btrim(u.email)), '')
 from public.users u
 where u.id = a.actor_user_id
   and a.actor_email_snapshot is null;
@@ -173,7 +173,7 @@ as $function$
 declare
   v_actor_email text;
 begin
-  select pg_catalog.nullif(pg_catalog.lower(pg_catalog.btrim(u.email)), '')
+  select nullif(pg_catalog.lower(pg_catalog.btrim(u.email)), '')
   into v_actor_email
   from public.users u
   where u.id = new.actor_user_id;
@@ -253,7 +253,7 @@ on public.ot_request_audit(
   actor_user_id,
   action,
   idempotency_key,
-  (pg_catalog.coalesce(request_id, event_plan_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  (coalesce(request_id, event_plan_id, '00000000-0000-0000-0000-000000000000'::uuid))
 );
 create index if not exists ot_event_plans_approver_idx
 on public.ot_event_plans(approver_user_id, planned_start_at desc);
@@ -310,8 +310,8 @@ security definer
 set search_path = ''
 as $function$
 declare
-  v_reason_code text := pg_catalog.nullif(pg_catalog.btrim(p_reason_code), '');
-  v_reason_detail text := pg_catalog.nullif(pg_catalog.btrim(p_reason_detail), '');
+  v_reason_code text := nullif(pg_catalog.btrim(p_reason_code), '');
+  v_reason_detail text := nullif(pg_catalog.btrim(p_reason_detail), '');
 begin
   if v_reason_code is null or v_reason_code not in (
     'offline_event', 'campaign_launch', 'live_incident', 'capacity',
@@ -336,7 +336,7 @@ security definer
 set search_path = ''
 as $function$
 begin
-  if pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '') is distinct from '2026-08-07' then
+  if nullif(pg_catalog.btrim(p_consent_statement_version), '') is distinct from '2026-08-07' then
     raise exception 'Consent statement version must be 2026-08-07';
   end if;
 end
@@ -360,7 +360,7 @@ declare
   v_request public.ot_requests;
   v_old_status text;
   v_counted_segments jsonb;
-  v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
+  v_consent_statement_version text := nullif(pg_catalog.btrim(p_consent_statement_version), '');
 begin
   perform public.ot_lock_idempotency('record_consent', p_idempotency_key);
   perform pg_catalog.pg_advisory_xact_lock(
@@ -462,7 +462,7 @@ declare
   v_request public.ot_requests;
   v_old_status text;
   v_new_status text;
-  v_note text := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_note, '')), '');
+  v_note text := nullif(pg_catalog.btrim(coalesce(p_note, '')), '');
 begin
   perform public.ot_lock_idempotency('review_plan', p_idempotency_key);
   select * into v_request from public.ot_requests r where r.id = p_request_id;
@@ -571,27 +571,27 @@ begin
   if v_request.status in ('cancelled', 'exported', 'hr_ready') then
     raise exception 'Actual OT cannot be changed after cancellation, HR readiness, or export';
   end if;
-  v_start_at := pg_catalog.coalesce(p_payload->>'actualStartAt', p_payload->>'actual_start_at')::timestamptz;
-  v_end_at := pg_catalog.coalesce(p_payload->>'actualEndAt', p_payload->>'actual_end_at')::timestamptz;
-  v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'actualBreakMinutes', p_payload->>'actual_break_minutes')::integer, 0);
+  v_start_at := coalesce(p_payload->>'actualStartAt', p_payload->>'actual_start_at')::timestamptz;
+  v_end_at := coalesce(p_payload->>'actualEndAt', p_payload->>'actual_end_at')::timestamptz;
+  v_break_minutes := coalesce(coalesce(p_payload->>'actualBreakMinutes', p_payload->>'actual_break_minutes')::integer, 0);
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
-  v_variance_reason := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_variance_reason := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'actualVarianceReason',
     p_payload->>'actual_variance_reason',
     p_payload->>'varianceReason'
   )), '');
   v_segments := public.ot_build_week_segments(
     v_start_at, v_end_at, v_break_minutes,
-    pg_catalog.coalesce(p_payload->'actualWeekSegments', p_payload->'actual_week_segments')
+    coalesce(p_payload->'actualWeekSegments', p_payload->'actual_week_segments')
   );
   with affected_weeks as (
-    select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    select (coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
     from pg_catalog.jsonb_array_elements(v_request.planned_week_segments) item
     union
-    select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
-    from pg_catalog.jsonb_array_elements(pg_catalog.coalesce(v_request.actual_week_segments, '[]'::jsonb)) item
+    select (coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    from pg_catalog.jsonb_array_elements(coalesce(v_request.actual_week_segments, '[]'::jsonb)) item
     union
-    select (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    select (coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
     from pg_catalog.jsonb_array_elements(v_segments) item
   )
   select pg_catalog.jsonb_agg(
@@ -703,7 +703,7 @@ declare
   v_request public.ot_requests;
   v_old_status text;
   v_new_status text;
-  v_note text := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(p_note, '')), '');
+  v_note text := nullif(pg_catalog.btrim(coalesce(p_note, '')), '');
 begin
   perform public.ot_lock_idempotency('verify_actual', p_idempotency_key);
   select * into v_request from public.ot_requests r where r.id = p_request_id;
@@ -808,7 +808,7 @@ declare
   v_previous_actual_decision text;
   v_previous_compliance_outcome text;
   v_previous_hr_ready_at timestamptz;
-  v_reason text := pg_catalog.nullif(pg_catalog.btrim(p_reason), '');
+  v_reason text := nullif(pg_catalog.btrim(p_reason), '');
   v_replay_result jsonb;
 begin
   if not public.ot_current_user_is_owner()
@@ -1069,11 +1069,11 @@ begin
   select (item->>'minutes')::integer
   into v_first_minutes
   from pg_catalog.jsonb_array_elements(p_supplied_segments) item
-  where pg_catalog.coalesce(item->>'weekStart', item->>'week_start') = v_first_week::text;
+  where coalesce(item->>'weekStart', item->>'week_start') = v_first_week::text;
   select (item->>'minutes')::integer
   into v_last_minutes
   from pg_catalog.jsonb_array_elements(p_supplied_segments) item
-  where pg_catalog.coalesce(item->>'weekStart', item->>'week_start') = v_last_week::text;
+  where coalesce(item->>'weekStart', item->>'week_start') = v_last_week::text;
 
   v_boundary := ((v_last_week::timestamp) at time zone 'Asia/Bangkok');
   v_first_gross := pg_catalog.floor(pg_catalog.date_part('epoch', v_boundary - p_start_at) / 60)::integer;
@@ -1130,7 +1130,7 @@ begin
           r.planned_week_segments @> pg_catalog.jsonb_build_array(
             pg_catalog.jsonb_build_object('weekStart', (key->>'weekStart')::date)
           )
-          or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(
+          or coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(
             pg_catalog.jsonb_build_object('weekStart', (key->>'weekStart')::date)
           )
         )
@@ -1152,7 +1152,7 @@ as $function$
 declare
   v_keys jsonb;
 begin
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     pg_catalog.jsonb_build_object(
       'employeeUserId', p_employee_user_id,
       'weekStart', week_start
@@ -1160,7 +1160,7 @@ begin
   ), '[]'::jsonb)
   into v_keys
   from (
-    select distinct (pg_catalog.coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
+    select distinct (coalesce(item->>'weekStart', item->>'week_start'))::date as week_start
     from pg_catalog.jsonb_array_elements(p_segments) item
   ) weeks;
   perform public.ot_lock_employee_week_keys(v_keys);
@@ -1178,7 +1178,7 @@ stable
 security definer
 set search_path = ''
 as $function$
-  select pg_catalog.coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
+  select coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
   from public.ot_requests r
   cross join lateral pg_catalog.jsonb_array_elements(r.planned_week_segments) segment
   where r.employee_user_id = p_employee_user_id
@@ -1188,7 +1188,7 @@ as $function$
       'actual_confirmation_required', 'pending_actual_verification',
       'compliance_review_required', 'hr_ready', 'exported'
     )
-    and pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
+    and coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
 $function$;
 
 create or replace function public.ot_counted_week_minutes_unchecked(
@@ -1202,7 +1202,7 @@ stable
 security definer
 set search_path = ''
 as $function$
-  select pg_catalog.coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
+  select coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
   from public.ot_requests r
   cross join lateral pg_catalog.jsonb_array_elements(
     case
@@ -1221,7 +1221,7 @@ as $function$
       )
       or (r.status = 'revision_required' and r.actual_submitted_at is not null)
     )
-    and pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
+    and coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
 $function$;
 
 create or replace function public.ot_assert_no_employee_overlap(
@@ -1309,13 +1309,13 @@ stable
 security definer
 set search_path = ''
 as $function$
-  select pg_catalog.coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
+  select coalesce(pg_catalog.sum((segment->>'minutes')::integer), 0)::integer
   from public.ot_requests r
-  cross join lateral pg_catalog.jsonb_array_elements(pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb)) segment
+  cross join lateral pg_catalog.jsonb_array_elements(coalesce(r.actual_week_segments, '[]'::jsonb)) segment
   where r.employee_user_id = p_employee_user_id
     and (p_exclude_request_id is null or r.id <> p_exclude_request_id)
     and r.status <> 'cancelled'
-    and pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
+    and coalesce(segment->>'weekStart', segment->>'week_start') = p_week_start::text;
 $function$;
 
 create or replace function public.ot_assert_planned_limit(
@@ -1338,10 +1338,10 @@ begin
   perform public.ot_lock_employee_weeks(p_employee_user_id, p_segments);
   for v_segment in select item from pg_catalog.jsonb_array_elements(p_segments) item
   loop
-    v_week := pg_catalog.coalesce(v_segment->>'weekStart', v_segment->>'week_start')::date;
+    v_week := coalesce(v_segment->>'weekStart', v_segment->>'week_start')::date;
     v_added := (v_segment->>'minutes')::integer;
     v_current := public.ot_counted_week_minutes_unchecked(p_employee_user_id, v_week, p_exclude_request_id);
-    v_remaining := pg_catalog.greatest(0, 2160 - v_current);
+    v_remaining := greatest(0, 2160 - v_current);
     if v_current + v_added > 2160 then
       raise exception 'OT weekly limit exceeded: current=% minutes, added=% minutes, remaining=% minutes, affected_week=%',
         v_current, v_added, v_remaining, v_week;
@@ -1408,7 +1408,7 @@ begin
     and (
       p_week_start is null
       or r.planned_week_segments @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
-      or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
+      or coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
     )
   order by r.planned_start_at desc, r.id desc;
 end
@@ -1432,7 +1432,7 @@ begin
     raise exception 'Week start must be a Monday date in the Bangkok workweek';
   end if;
   select
-    pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.planned_start_at, r.id), '[]'::jsonb),
+    coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.planned_start_at, r.id), '[]'::jsonb),
     public.ot_projected_week_minutes(v_actor_id, p_week_start, null),
     public.ot_actual_week_minutes(v_actor_id, p_week_start, null),
     public.ot_counted_week_minutes_unchecked(v_actor_id, p_week_start, null)
@@ -1441,14 +1441,14 @@ begin
   where r.employee_user_id = v_actor_id
     and (
       r.planned_week_segments @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
-      or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
+      or coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
     );
   return pg_catalog.jsonb_build_object(
     'weekStart', p_week_start,
     'plannedMinutes', v_planned,
     'actualMinutes', v_actual,
     'countedMinutes', v_counted,
-    'remainingPlannedMinutes', pg_catalog.greatest(0, 2160 - v_counted),
+    'remainingPlannedMinutes', greatest(0, 2160 - v_counted),
     'requests', v_rows
   );
 end
@@ -1478,14 +1478,14 @@ begin
   if p_function_code is not null and p_function_code not in ('gdve', 'ops', 'mkt', 'esport') then
     raise exception 'Unsupported OT function code';
   end if;
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.planned_start_at, r.id), '[]'::jsonb)
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.planned_start_at, r.id), '[]'::jsonb)
   into v_rows
   from public.ot_requests r
   where (v_full_access or r.approver_user_id = v_actor_id)
     and (p_function_code is null or r.function_code = p_function_code)
     and (
       r.planned_week_segments @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
-      or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
+      or coalesce(r.actual_week_segments, '[]'::jsonb) @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
     );
   return pg_catalog.jsonb_build_object(
     'weekStart', p_week_start,
@@ -1506,7 +1506,7 @@ declare
   v_actor_id uuid := public.ot_require_current_user();
   v_result jsonb;
 begin
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     pg_catalog.jsonb_build_object('userId', u.id, 'email', u.email, 'displayName', u.display_name)
     order by u.display_name, u.email
   ), '[]'::jsonb)
@@ -1540,7 +1540,7 @@ begin
      and not public.ot_current_user_is_hr_admin() then
     raise exception 'OT event planning access required';
   end if;
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     pg_catalog.jsonb_build_object(
       'userId', u.id,
       'email', u.email,
@@ -1570,14 +1570,14 @@ begin
   if not public.ot_current_user_is_owner() then
     raise exception 'Only the OT Owner can list access administration identities';
   end if;
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     pg_catalog.jsonb_build_object(
       'displayLabel', identity.display_label,
       'email', identity.email,
       'userId', u.id,
-      'isWorkgridActive', pg_catalog.coalesce(u.is_active, false),
-      'isApproverActive', pg_catalog.coalesce(a.active, false),
-      'isHrAdminActive', pg_catalog.coalesce(r.active, false)
+      'isWorkgridActive', coalesce(u.is_active, false),
+      'isApproverActive', coalesce(a.active, false),
+      'isHrAdminActive', coalesce(r.active, false)
     ) order by identity.sort_order
   ), '[]'::jsonb)
   into v_result
@@ -1631,7 +1631,7 @@ begin
     return pg_catalog.to_jsonb(v_request);
   end if;
 
-  v_consent_statement_version := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_consent_statement_version := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'consentStatementVersion',
     p_payload->>'consent_statement_version'
   )), '');
@@ -1640,7 +1640,7 @@ begin
   end if;
   perform public.ot_assert_consent_version(v_consent_statement_version);
 
-  v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
+  v_approver_user_id := coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
   perform 1
   from public.ot_approvers a
   where a.user_id = v_approver_user_id
@@ -1652,25 +1652,25 @@ begin
   ) then
     raise exception 'An active approved OT approver is required';
   end if;
-  v_reason_code := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
   )), '');
-  v_reason_detail := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_reason_detail := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonDetail', p_payload->>'reason_detail'
   )), '');
   perform public.ot_assert_reason(v_reason_code, v_reason_detail);
-  v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
-  v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  v_start_at := coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
+  v_end_at := coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   if v_start_at <= pg_catalog.clock_timestamp() then
     raise exception 'Planned OT start must be in the future';
   end if;
-  v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
+  v_break_minutes := coalesce(coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
   v_segments := public.ot_build_week_segments(
     v_start_at,
     v_end_at,
     v_break_minutes,
-    pg_catalog.coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
+    coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
   );
   perform public.ot_assert_planned_limit(v_actor_id, v_segments, null);
   perform public.ot_assert_no_employee_overlap(v_actor_id, v_start_at, v_end_at, null);
@@ -1690,11 +1690,11 @@ begin
     v_actor_id,
     'employee_request',
     'planned',
-    pg_catalog.coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
+    coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
     pg_catalog.btrim(p_payload->>'title'),
-    pg_catalog.coalesce(p_payload->>'dayType', p_payload->>'day_type'),
-    pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
-    pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
+    coalesce(p_payload->>'dayType', p_payload->>'day_type'),
+    coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
+    nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
     v_reason_code,
     v_reason_detail,
     v_start_at, v_end_at, v_break_minutes, v_minutes, v_segments,
@@ -1741,7 +1741,7 @@ declare
   v_minutes integer;
   v_segments jsonb;
   v_lock_segments jsonb;
-  v_consent_statement_version text := pg_catalog.nullif(pg_catalog.btrim(p_consent_statement_version), '');
+  v_consent_statement_version text := nullif(pg_catalog.btrim(p_consent_statement_version), '');
   v_reason_code text;
   v_reason_detail text;
   v_old_status text;
@@ -1785,7 +1785,7 @@ begin
   end if;
   perform public.ot_assert_consent_version(v_consent_statement_version);
 
-  v_approver_user_id := pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
+  v_approver_user_id := coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
   perform 1
   from public.ot_approvers a
   where a.user_id = v_approver_user_id
@@ -1801,20 +1801,20 @@ begin
      ) then
     raise exception 'An active approved OT approver is required';
   end if;
-  v_reason_code := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
   )), '');
-  v_reason_detail := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_reason_detail := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonDetail', p_payload->>'reason_detail'
   )), '');
   perform public.ot_assert_reason(v_reason_code, v_reason_detail);
-  v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
-  v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  v_start_at := coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
+  v_end_at := coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   if v_start_at <= pg_catalog.clock_timestamp() then
     raise exception 'Planned OT start must be in the future';
   end if;
-  v_break_minutes := pg_catalog.coalesce(
-    pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer,
+  v_break_minutes := coalesce(
+    coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer,
     0
   );
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
@@ -1822,10 +1822,10 @@ begin
     v_start_at,
     v_end_at,
     v_break_minutes,
-    pg_catalog.coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
+    coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
   );
 
-  select pg_catalog.coalesce(
+  select coalesce(
     pg_catalog.jsonb_agg(
       pg_catalog.jsonb_build_object('weekStart', week_start, 'minutes', 0)
       order by week_start
@@ -1834,7 +1834,7 @@ begin
   )
   into v_lock_segments
   from (
-    select distinct pg_catalog.coalesce(item->>'weekStart', item->>'week_start')::date as week_start
+    select distinct coalesce(item->>'weekStart', item->>'week_start')::date as week_start
     from pg_catalog.jsonb_array_elements(v_request.planned_week_segments || v_segments) item
   ) affected_weeks;
 
@@ -1871,11 +1871,11 @@ begin
     raise exception 'Planned OT start became non-future while the plan was being resubmitted';
   end if;
   update public.ot_requests
-  set function_code = pg_catalog.coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
+  set function_code = coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
       title = pg_catalog.btrim(p_payload->>'title'),
-      day_type = pg_catalog.coalesce(p_payload->>'dayType', p_payload->>'day_type'),
-      work_location_type = pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
-      venue = pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
+      day_type = coalesce(p_payload->>'dayType', p_payload->>'day_type'),
+      work_location_type = coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
+      venue = nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
       reason_code = v_reason_code,
       reason_detail = v_reason_detail,
       planned_start_at = v_start_at,
@@ -1968,15 +1968,15 @@ begin
   ) then
     raise exception 'Employee assignments must be unique per event occurrence';
   end if;
-  v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
-  v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  v_start_at := coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
+  v_end_at := coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   if v_start_at <= pg_catalog.clock_timestamp() then
     raise exception 'Planned OT start must be in the future';
   end if;
-  v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
+  v_break_minutes := coalesce(coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
   v_segments := public.ot_build_week_segments(
     v_start_at, v_end_at, v_break_minutes,
-    pg_catalog.coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
+    coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
   );
   foreach v_employee_user_id in array p_employee_user_ids
   loop
@@ -1997,7 +1997,7 @@ begin
         'weekStart', v_week,
         'currentMinutes', v_current,
         'addedMinutes', v_added,
-        'remainingMinutes', pg_catalog.greatest(0, 2160 - v_current),
+        'remainingMinutes', greatest(0, 2160 - v_current),
         'projectedMinutes', v_current + v_added,
         'overLimit', v_current + v_added > 2160
       ));
@@ -2045,7 +2045,7 @@ begin
   from public.ot_event_plans e
   where e.created_by_user_id = v_actor_id and e.idempotency_key = p_idempotency_key;
   if found then
-    select pg_catalog.coalesce(pg_catalog.array_agg(r.id order by r.id), '{}'::uuid[])
+    select coalesce(pg_catalog.array_agg(r.id order by r.id), '{}'::uuid[])
     into v_request_ids from public.ot_requests r where r.event_plan_id = v_plan.id;
     return pg_catalog.jsonb_build_object('eventPlan', pg_catalog.to_jsonb(v_plan), 'requestIds', v_request_ids);
   end if;
@@ -2057,8 +2057,8 @@ begin
   ) then
     raise exception 'Employee assignments must be unique per event occurrence';
   end if;
-  v_approver_user_id := pg_catalog.coalesce(
-    pg_catalog.coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid,
+  v_approver_user_id := coalesce(
+    coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid,
     v_actor_id
   );
   perform 1
@@ -2075,23 +2075,23 @@ begin
   if v_approver_user_id <> v_actor_id then
     raise exception 'The assigned approver must personally authorize and create the event plan';
   end if;
-  v_reason_code := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
   )), '');
-  v_reason_detail := pg_catalog.nullif(pg_catalog.btrim(pg_catalog.coalesce(
+  v_reason_detail := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonDetail', p_payload->>'reason_detail'
   )), '');
   perform public.ot_assert_reason(v_reason_code, v_reason_detail);
-  v_start_at := pg_catalog.coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
-  v_end_at := pg_catalog.coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
+  v_start_at := coalesce(p_payload->>'plannedStartAt', p_payload->>'planned_start_at')::timestamptz;
+  v_end_at := coalesce(p_payload->>'plannedEndAt', p_payload->>'planned_end_at')::timestamptz;
   if v_start_at <= pg_catalog.clock_timestamp() then
     raise exception 'Planned OT start must be in the future';
   end if;
-  v_break_minutes := pg_catalog.coalesce(pg_catalog.coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
+  v_break_minutes := coalesce(coalesce(p_payload->>'plannedBreakMinutes', p_payload->>'planned_break_minutes')::integer, 0);
   v_minutes := public.ot_calculate_occurrence_minutes(v_start_at, v_end_at, v_break_minutes);
   v_segments := public.ot_build_week_segments(
     v_start_at, v_end_at, v_break_minutes,
-    pg_catalog.coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
+    coalesce(p_payload->'plannedWeekSegments', p_payload->'planned_week_segments')
   );
 
   foreach v_employee_user_id in array (
@@ -2119,9 +2119,9 @@ begin
     approver_user_id, created_by_user_id, idempotency_key
   ) values (
     pg_catalog.btrim(p_payload->>'title'),
-    pg_catalog.coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
-    pg_catalog.coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
-    pg_catalog.nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
+    coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
+    coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
+    nullif(pg_catalog.btrim(p_payload->>'venue'), ''),
     v_reason_code,
     v_reason_detail,
     v_start_at, v_end_at, v_break_minutes, v_approver_user_id, v_actor_id, p_idempotency_key
@@ -2139,7 +2139,7 @@ begin
     ) values (
       v_plan.id, v_employee_user_id, v_approver_user_id, v_actor_id,
       'event_plan', 'consented', v_plan.function_code, v_plan.title,
-      pg_catalog.coalesce(p_payload->>'dayType', p_payload->>'day_type'),
+      coalesce(p_payload->>'dayType', p_payload->>'day_type'),
       v_plan.work_location_type, v_plan.venue, v_plan.reason_code, v_plan.reason_detail,
       v_start_at, v_end_at, v_break_minutes, v_minutes, v_segments,
       'awaiting_consent', 'approved', 'Authorized with event plan',
@@ -2175,7 +2175,7 @@ begin
   if not public.ot_current_user_is_owner() and not public.ot_current_user_is_hr_admin() then
     raise exception 'OT Owner or HR/Admin access required';
   end if;
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.actual_start_at, r.id), '[]'::jsonb)
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.actual_start_at, r.id), '[]'::jsonb)
   into v_result
   from public.ot_requests r
   where r.compliance_required = true
@@ -2183,7 +2183,7 @@ begin
     and (r.compliance_reviewed_at is null or r.compliance_outcome = 'action_required')
     and (
       p_week_start is null
-      or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb)
+      or coalesce(r.actual_week_segments, '[]'::jsonb)
         @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
     );
   return v_result;
@@ -2228,7 +2228,7 @@ begin
   if p_outcome not in ('approved', 'cleared', 'action_required', 'rejected') then
     raise exception 'Compliance outcome must be approved, cleared, action_required, or rejected';
   end if;
-  if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_note, ''))) = 0 then
+  if pg_catalog.length(pg_catalog.btrim(coalesce(p_note, ''))) = 0 then
     raise exception 'A compliance review note is required';
   end if;
   perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.actual_week_segments);
@@ -2278,7 +2278,7 @@ begin
   if not public.ot_current_user_can_read_request(p_request_id) then
     raise exception 'OT request access denied';
   end if;
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(a) order by a.created_at, a.id), '[]'::jsonb)
+  select coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(a) order by a.created_at, a.id), '[]'::jsonb)
   into v_result
   from public.ot_request_audit a
   where a.request_id = p_request_id;
@@ -2314,7 +2314,7 @@ begin
     and (not r.compliance_required or r.compliance_reviewed_at is not null)
     and (
       p_week_start is null
-      or pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb)
+      or coalesce(r.actual_week_segments, '[]'::jsonb)
         @> pg_catalog.jsonb_build_array(pg_catalog.jsonb_build_object('weekStart', p_week_start))
     )
   order by r.actual_start_at, r.id;
@@ -2347,7 +2347,7 @@ begin
      ) then
     raise exception 'A non-empty unique OT request list is required';
   end if;
-  if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_batch_name, ''))) = 0 then
+  if pg_catalog.length(pg_catalog.btrim(coalesce(p_batch_name, ''))) = 0 then
     raise exception 'Export batch name is required';
   end if;
   perform public.ot_lock_idempotency('mark_exported', p_idempotency_key);
@@ -2360,14 +2360,14 @@ begin
   with affected_keys as (
     select distinct
       r.employee_user_id,
-      (pg_catalog.coalesce(segment->>'weekStart', segment->>'week_start'))::date as week_start
+      (coalesce(segment->>'weekStart', segment->>'week_start'))::date as week_start
     from public.ot_requests r
     cross join lateral pg_catalog.jsonb_array_elements(
-      pg_catalog.coalesce(r.actual_week_segments, '[]'::jsonb)
+      coalesce(r.actual_week_segments, '[]'::jsonb)
     ) segment
     where r.id = any(p_request_ids)
   )
-  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  select coalesce(pg_catalog.jsonb_agg(
     pg_catalog.jsonb_build_object(
       'employeeUserId', employee_user_id,
       'weekStart', week_start
@@ -2432,7 +2432,7 @@ set search_path = ''
 as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
-  v_reason text := pg_catalog.nullif(pg_catalog.btrim(p_reason), '');
+  v_reason text := nullif(pg_catalog.btrim(p_reason), '');
   v_request public.ot_requests;
   v_moved_request public.ot_requests;
   v_moved_request_ids uuid[] := '{}'::uuid[];
@@ -2578,7 +2578,7 @@ begin
   if p_active is null then
     raise exception 'Approver active state is required';
   end if;
-  if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_reason, ''))) = 0 then
+  if pg_catalog.length(pg_catalog.btrim(coalesce(p_reason, ''))) = 0 then
     raise exception 'A non-empty reason is required';
   end if;
   if not public.ot_user_is_approved_approver_identity(p_user_id) then
@@ -2655,7 +2655,7 @@ begin
   if p_role_code not in ('owner', 'hr_admin') then
     raise exception 'OT system role must be owner or hr_admin';
   end if;
-  if pg_catalog.length(pg_catalog.btrim(pg_catalog.coalesce(p_reason, ''))) = 0 then
+  if pg_catalog.length(pg_catalog.btrim(coalesce(p_reason, ''))) = 0 then
     raise exception 'A non-empty reason is required';
   end if;
   if p_active then

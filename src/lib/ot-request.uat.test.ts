@@ -305,6 +305,18 @@ function renderedButton(node: unknown, label: string, exact = true) {
 }
 
 describe("OT Request backend contract", () => {
+  it("uses unqualified SQL conditional expressions so installer and verifier compile", () => {
+    for (const script of [
+      read("supabase", "ot_request.sql"),
+      read("supabase", "ot_request_verify.sql"),
+    ]) {
+      expect(script).not.toContain("pg_catalog.coalesce(");
+      expect(script).not.toContain("pg_catalog.nullif(");
+      expect(script).not.toContain("pg_catalog.greatest(");
+      expect(script).not.toContain("pg_catalog.least(");
+    }
+  });
+
   const sql = read("supabase", "ot_request.sql");
   const verify = read("supabase", "ot_request_verify.sql");
 
@@ -834,7 +846,7 @@ describe("OT Request backend contract", () => {
     expect(dashboard).toContain("public.ot_actual_week_minutes(v_actor_id, p_week_start, null)");
     expect(dashboard).toContain("public.ot_counted_week_minutes_unchecked(v_actor_id, p_week_start, null)");
     expect(dashboard).toMatch(/'plannedMinutes', v_planned[\s\S]*'actualMinutes', v_actual[\s\S]*'countedMinutes', v_counted/);
-    expect(dashboard).toContain("'remainingPlannedMinutes', pg_catalog.greatest(0, 2160 - v_counted)");
+    expect(dashboard).toContain("'remainingPlannedMinutes', greatest(0, 2160 - v_counted)");
   });
 
   it("keeps weekly accounting helpers private", () => {
@@ -974,7 +986,7 @@ describe("OT Request backend contract", () => {
     expect(resubmit.indexOf(requestLock)).toBeLessThan(resubmit.indexOf(unionLock));
     expect(resubmit.indexOf(unionLock)).toBeLessThan(resubmit.indexOf(rowLock));
     expect(resubmit).toContain("v_request.planned_week_segments || v_segments");
-    expect(resubmit).toContain("select distinct pg_catalog.coalesce(item->>'weekStart', item->>'week_start')::date as week_start");
+    expect(resubmit).toContain("select distinct coalesce(item->>'weekStart', item->>'week_start')::date as week_start");
     expect(resubmit).toContain("order by week_start");
     expect(resubmit).toMatch(/employee_user_id <> v_actor_id[\s\S]*source <> 'employee_request'[\s\S]*raise exception/);
     expect(resubmit).toMatch(/status <> 'revision_required'[\s\S]*actual_submitted_at is not null[\s\S]*plan_decision is distinct from 'revision_required'[\s\S]*raise exception/);
@@ -1041,7 +1053,7 @@ describe("OT Request backend contract", () => {
     const verifyActual = functionSql(sql, "ot_verify_actual");
 
     for (const decision of [reviewPlan, verifyActual]) {
-      expect(decision).toMatch(/v_note text := pg_catalog\.nullif\(pg_catalog\.btrim\(pg_catalog\.coalesce\(p_note, ''\)\), ''\)/);
+      expect(decision).toMatch(/v_note text := nullif\(pg_catalog\.btrim\(coalesce\(p_note, ''\)\), ''\)/);
       expect(decision).toMatch(/note, idempotency_key[\s\S]*v_note, p_idempotency_key/);
       expect(decision).not.toMatch(/note, idempotency_key[\s\S]*p_note, p_idempotency_key/);
     }
@@ -1077,9 +1089,9 @@ describe("OT Request backend contract", () => {
 
     expect(sql).toContain("actor_email_snapshot text");
     expect(sql).toContain("add column if not exists actor_email_snapshot text");
-    expect(sql).toMatch(/update public\.ot_request_audit a[\s\S]*actor_email_snapshot = pg_catalog\.nullif\(pg_catalog\.lower\(pg_catalog\.btrim\(u\.email\)\), ''\)[\s\S]*from public\.users u[\s\S]*u\.id = a\.actor_user_id[\s\S]*a\.actor_email_snapshot is null/);
+    expect(sql).toMatch(/update public\.ot_request_audit a[\s\S]*actor_email_snapshot = nullif\(pg_catalog\.lower\(pg_catalog\.btrim\(u\.email\)\), ''\)[\s\S]*from public\.users u[\s\S]*u\.id = a\.actor_user_id[\s\S]*a\.actor_email_snapshot is null/);
     expect(sql).toMatch(/alter table public\.ot_request_audit[\s\S]*alter column actor_email_snapshot set not null/);
-    expect(snapshotTrigger).toMatch(/select pg_catalog\.nullif\(pg_catalog\.lower\(pg_catalog\.btrim\(u\.email\)\), ''\)[\s\S]*into v_actor_email[\s\S]*u\.id = new\.actor_user_id/);
+    expect(snapshotTrigger).toMatch(/select nullif\(pg_catalog\.lower\(pg_catalog\.btrim\(u\.email\)\), ''\)[\s\S]*into v_actor_email[\s\S]*u\.id = new\.actor_user_id/);
     expect(snapshotTrigger).toMatch(/if v_actor_email is null[\s\S]*raise exception[\s\S]*new\.actor_email_snapshot := v_actor_email/);
     expect(sql).toMatch(/create trigger ot_request_audit_actor_email_snapshot[\s\S]*before insert on public\.ot_request_audit/);
     expect(sql).toContain("revoke all on function public.ot_set_audit_actor_email_snapshot() from public, anon, authenticated");

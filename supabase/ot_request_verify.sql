@@ -107,7 +107,7 @@ select
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
   pg_catalog.pg_get_function_result(p.oid) as result_type,
   p.prosecdef as security_definer,
-  pg_catalog.coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
   pg_catalog.position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as owner_guard,
   pg_catalog.position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as destination_allowlist,
   pg_catalog.position('order by a.user_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as approver_lock_order,
@@ -310,7 +310,7 @@ select
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
   pg_catalog.pg_get_function_result(p.oid) as result_type,
   p.prosecdef as security_definer,
-  pg_catalog.coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
   (
     pg_catalog.position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
     and pg_catalog.position('public.ot_current_user_is_hr_admin()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
@@ -344,7 +344,7 @@ select
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
   pg_catalog.pg_get_function_result(p.oid) as result_type,
   p.prosecdef as security_definer,
-  pg_catalog.coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
   (
     pg_catalog.position('v_request.employee_user_id <> v_actor_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0
     and pg_catalog.position('v_request.source <> ''employee_request''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
@@ -445,7 +445,7 @@ target_functions as (
     e.replay_marker,
     e.future_guard_marker,
     p.oid as function_oid,
-    pg_catalog.coalesce(pg_catalog.pg_get_functiondef(p.oid), '') as definition
+    coalesce(pg_catalog.pg_get_functiondef(p.oid), '') as definition
   from expected_transition_functions e
   left join pg_catalog.pg_namespace n
     on n.nspname = 'public'
@@ -748,8 +748,8 @@ where p.schemaname = 'public'
   and p.tablename not like 'ot\_%' escape '\'
   and (
     pg_catalog.lower(p.policyname) like '%ot %'
-    or pg_catalog.lower(pg_catalog.coalesce(p.qual, '')) like '%ot\_%' escape '\'
-    or pg_catalog.lower(pg_catalog.coalesce(p.with_check, '')) like '%ot\_%' escape '\'
+    or pg_catalog.lower(coalesce(p.qual, '')) like '%ot\_%' escape '\'
+    or pg_catalog.lower(coalesce(p.with_check, '')) like '%ot\_%' escape '\'
   );
 
 select
@@ -766,6 +766,6 @@ where p.schemaname = 'public'
   )
   and (
     pg_catalog.lower(p.policyname) like '%ot %'
-    or pg_catalog.lower(pg_catalog.coalesce(p.qual, '')) like '%ot\_%' escape '\'
-    or pg_catalog.lower(pg_catalog.coalesce(p.with_check, '')) like '%ot\_%' escape '\'
+    or pg_catalog.lower(coalesce(p.qual, '')) like '%ot\_%' escape '\'
+    or pg_catalog.lower(coalesce(p.with_check, '')) like '%ot\_%' escape '\'
   );
