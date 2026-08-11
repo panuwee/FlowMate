@@ -687,7 +687,7 @@ select
   'Legacy HR Admin deactivation reachability (Expected = true)' as check_name,
   (
     pg_catalog.pg_get_functiondef(p.oid) ~
-      'if[[:space:]]+p_active[[:space:]]+then[[:space:]]+select[[:space:]]+pg_catalog[.]lower[(]pg_catalog[.]btrim[(]u[.]email[)])[[:space:]]+into v_target_email[[:space:]]+from public[.]users u[[:space:]]+where u[.]id = p_user_id and u[.]is_active = true;'
+      'if[[:space:]]+p_active[[:space:]]+then[[:space:]]+select[[:space:]]+pg_catalog[.]lower[(]pg_catalog[.]btrim[(]u[.]email[)][)][[:space:]]+into v_target_email[[:space:]]+from public[.]users u[[:space:]]+where u[.]id = p_user_id and u[.]is_active = true;'
     and pg_catalog.pg_get_functiondef(p.oid) ~
       'if[[:space:]]+not p_active[[:space:]]+then[[:space:]]+select[[:space:]]+pg_catalog[.]to_jsonb[(]r[)][[:space:]]+into v_previous[[:space:]]+from public[.]ot_system_roles r where r[.]user_id = p_user_id for update;[[:space:]]+if not found[[:space:]]+or p_role_code <> ''hr_admin''[[:space:]]+or v_previous->>''role_code'' <> ''hr_admin''[[:space:]]+then[[:space:]]+raise exception ''Only an existing HR Admin role can be deactivated'';'
   ) as legacy_deactivation_matches_contract

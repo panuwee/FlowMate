@@ -316,7 +316,9 @@ describe("OT Request backend contract", () => {
       expect(script).not.toContain("pg_catalog.least(");
       expect(script).not.toContain("pg_catalog.position(");
       expect(script).not.toContain("pg_catalog.substring(");
+      expect(script).not.toContain("email[)])");
     }
+    expect(read("supabase", "ot_request_verify.sql")).toContain("email[)][)]");
   });
 
   const sql = read("supabase", "ot_request.sql");
