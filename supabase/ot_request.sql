@@ -403,6 +403,9 @@ begin
   v_old_status := v_request.status;
   if p_accept then
     perform public.ot_assert_planned_limit(v_request.employee_user_id, v_counted_segments, v_request.id);
+    if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then
+      raise exception 'Planned OT start must remain in the future for consent acceptance';
+    end if;
     update public.ot_requests
     set employee_consent = 'accepted',
         consent_statement_version = v_consent_statement_version,
@@ -502,6 +505,9 @@ begin
     v_new_status := p_decision;
   end if;
   v_old_status := v_request.status;
+  if p_decision = 'approved' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start must remain in the future for approval';
+  end if;
   update public.ot_requests
   set plan_decision = p_decision,
       plan_decision_note = v_note,
@@ -1546,6 +1552,49 @@ begin
   from public.users u
   where u.is_active = true
     and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com';
+  return v_result;
+end
+$function$;
+
+create or replace function public.ot_list_access_admin_identities()
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_result jsonb;
+begin
+  if not public.ot_current_user_is_owner() then
+    raise exception 'Only the OT Owner can list access administration identities';
+  end if;
+  select pg_catalog.coalesce(pg_catalog.jsonb_agg(
+    pg_catalog.jsonb_build_object(
+      'displayLabel', identity.display_label,
+      'email', identity.email,
+      'userId', u.id,
+      'isWorkgridActive', pg_catalog.coalesce(u.is_active, false),
+      'isApproverActive', pg_catalog.coalesce(a.active, false),
+      'isHrAdminActive', pg_catalog.coalesce(r.active, false)
+    ) order by identity.sort_order
+  ), '[]'::jsonb)
+  into v_result
+  from (values
+    (1, 'Big', 'nithidol.k@garena.com'),
+    (2, 'Mac', 'weerayut@garena.com'),
+    (3, 'Pluem', 'napol.a@garena.com')
+  ) as identity(sort_order, display_label, email)
+  left join public.users u on u.id = (
+    select matched_user.id
+    from public.users matched_user
+    where pg_catalog.lower(pg_catalog.btrim(matched_user.email)) = identity.email
+    order by matched_user.id
+    limit 1
+  )
+  left join public.ot_approvers a on a.user_id = u.id
+  left join public.ot_system_roles r on r.user_id = u.id and r.role_code = 'hr_admin';
   return v_result;
 end
 $function$;
@@ -2738,6 +2787,7 @@ revoke all on function public.ot_list_my_requests(date) from public, anon, authe
 revoke all on function public.ot_get_manager_dashboard(date, text) from public, anon, authenticated;
 revoke all on function public.ot_list_eligible_approvers() from public, anon, authenticated;
 revoke all on function public.ot_list_people_for_event() from public, anon, authenticated;
+revoke all on function public.ot_list_access_admin_identities() from public, anon, authenticated;
 revoke all on function public.ot_create_request(jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_resubmit_plan(uuid, jsonb, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_preview_event_plan(jsonb, uuid[]) from public, anon, authenticated;
@@ -2767,6 +2817,7 @@ grant execute on function public.ot_list_my_requests(date) to authenticated;
 grant execute on function public.ot_get_manager_dashboard(date, text) to authenticated;
 grant execute on function public.ot_list_eligible_approvers() to authenticated;
 grant execute on function public.ot_list_people_for_event() to authenticated;
+grant execute on function public.ot_list_access_admin_identities() to authenticated;
 grant execute on function public.ot_create_request(jsonb, uuid) to authenticated;
 grant execute on function public.ot_resubmit_plan(uuid, jsonb, text, uuid) to authenticated;
 grant execute on function public.ot_preview_event_plan(jsonb, uuid[]) to authenticated;

@@ -169,6 +169,31 @@
     return plannedStart > now;
   }
 
+  function isPlannedStartFuture(plannedStartAt, reference) {
+    if (!plannedStartAt) return false;
+    const plannedStart = new Date(plannedStartAt).getTime();
+    const now = reference === undefined ? Date.now() : getReferenceTimestamp(reference);
+    return Number.isFinite(plannedStart) && now !== null && plannedStart > now;
+  }
+
+  function getAccessAdminIdentityEligibility(identity) {
+    const userId = valueOf(identity, "userId", "user_id");
+    const isWorkgridActive = Boolean(valueOf(identity, "isWorkgridActive", "is_workgrid_active"));
+    const isApproverActive = Boolean(valueOf(identity, "isApproverActive", "is_approver_active"));
+    const isHrAdminActive = Boolean(valueOf(identity, "isHrAdminActive", "is_hr_admin_active"));
+    const hasActiveIdentity = Boolean(userId) && isWorkgridActive;
+    const canDeactivateApprover = Boolean(userId) && isApproverActive;
+
+    return {
+      canActivateApprover: hasActiveIdentity && !isApproverActive,
+      canDeactivateApprover,
+      canReassignFrom: canDeactivateApprover,
+      canReassignTo: hasActiveIdentity && isApproverActive,
+      canActivateHrAdmin: hasActiveIdentity && !isHrAdminActive,
+      canDeactivateHrAdmin: Boolean(userId) && isHrAdminActive,
+    };
+  }
+
   function splitMinutesByWeek(input) {
     const startDate = input.startDate;
     const endDate = input.endDate || startDate;
@@ -541,6 +566,8 @@
     resetIntentAfterEdit,
     isSubmissionLocked,
     isBangkokPlannedStartFuture,
+    isPlannedStartFuture,
+    getAccessAdminIdentityEligibility,
     deriveRequestStatus,
     canViewRequest,
     canActOnAssignedRequest,

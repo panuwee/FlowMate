@@ -25,18 +25,17 @@ function canOpenOtRequestView(view, access) {
 const OT_LIMIT_MINUTES = 36 * 60;
 const OT_CONSENT_STATEMENT_VERSION = "2026-08-07";
 const OT_DETAIL_REQUIRED_REASONS = new Set(["other", "live_incident", "rework", "scope_change"]);
-const OT_APPROVER_DISPLAY_DIRECTORY = Object.freeze([{
-  email: "nithidol.k@garena.com",
-  label: "Big"
-}, {
-  email: "weerayut@garena.com",
-  label: "Mac"
-}, {
-  email: "napol.a@garena.com",
-  label: "Pluem"
-}]);
 function otValue(record, camel, snake) {
   return record && (record[camel] !== undefined ? record[camel] : record[snake]);
+}
+function useOtCurrentTimestamp() {
+  const [timestamp, setTimestamp] = useStateApp(() => Date.now());
+  useEffectApp(() => {
+    if (typeof window.setInterval !== "function") return undefined;
+    const interval = window.setInterval(() => setTimestamp(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+  return timestamp;
 }
 function getBangkokDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -951,6 +950,7 @@ function OtConsentPanel({
   }));
   const errorRef = useRefApp(null);
   const summaryErrorRef = useRefApp(null);
+  const currentTimestamp = useOtCurrentTimestamp();
   const plannedMinutes = Number(otValue(request, "plannedMinutes", "planned_minutes") || 0);
   const plannedSegments = getOtWeekSegments(request, "planned");
   const weekSummaryState = useOtWeekSummaries(plannedSegments);
@@ -960,6 +960,7 @@ function OtConsentPanel({
   const overLimit = projections.some(row => row.overLimit);
   const start = getOtBangkokParts(otValue(request, "plannedStartAt", "planned_start_at"));
   const end = getOtBangkokParts(otValue(request, "plannedEndAt", "planned_end_at"));
+  const plannedStartIsFuture = window.FlowMateOtRequestDomain.isPlannedStartFuture(otValue(request, "plannedStartAt", "planned_start_at"), currentTimestamp);
   useEffectApp(() => {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
@@ -967,6 +968,13 @@ function OtConsentPanel({
     if (weekSummaryState.status === "error" && summaryErrorRef.current) summaryErrorRef.current.focus();
   }, [weekSummaryState.status]);
   async function recordConsent(choice) {
+    if (choice && !window.FlowMateOtRequestDomain.isPlannedStartFuture(otValue(request, "plannedStartAt", "planned_start_at"), Date.now())) {
+      setSubmitState({
+        status: "error",
+        message: "Accepting is no longer available because the planned start is not strictly future in Bangkok time. Declining remains available."
+      });
+      return;
+    }
     if (choice && (!accepted || overLimit || weekSummaryState.status !== "ready")) {
       setSubmitState({
         status: "error",
@@ -1027,6 +1035,10 @@ function OtConsentPanel({
     kind: "critical",
     title: "Consent blocked",
     message: `At least one affected week would exceed 36 hours: ${projections.filter(row => row.overLimit).map(row => formatOtDate(row.weekStart)).join(", ")}. Contact the Event Lead because the server will not accept this planned occurrence.`
+  }), !plannedStartIsFuture && React.createElement(OtWarning, {
+    kind: "critical",
+    title: "Consent window closed",
+    message: "Accepting is no longer available because the planned start is not strictly future in Bangkok time. Declining remains available."
   }), React.createElement("label", {
     className: "ot-consent"
   }, React.createElement("input", {
@@ -1048,7 +1060,7 @@ function OtConsentPanel({
     type: "button",
     className: "btn btn--primary",
     ...getOtDescribedActionProps("ot-consent-submit-feedback", Boolean(submitState.message)),
-    disabled: !accepted || overLimit || weekSummaryState.status !== "ready" || submitState.status === "submitting",
+    disabled: !accepted || overLimit || weekSummaryState.status !== "ready" || !plannedStartIsFuture || submitState.status === "submitting",
     onClick: () => recordConsent(true)
   }, "Accept occurrence"), React.createElement("button", {
     type: "button",
@@ -1750,6 +1762,7 @@ function OtApprovalQueue({
     status: "idle",
     message: ""
   });
+  const currentTimestamp = useOtCurrentTimestamp();
   const decisionSubmissionRef = useRefApp(false);
   const employeeTotals = getOtManagerTotals(allRequests);
   const planRequests = requests.filter(request => otValue(request, "source", "source") === "employee_request" && !otValue(request, "actualSubmittedAt", "actual_submitted_at") && getOtRequestStatus(request) === "pending_approval");
@@ -1821,6 +1834,13 @@ function OtApprovalQueue({
       setActionState({
         status: "error",
         message: "This actual record cannot be verified until consent, submitted actual time, and variance checks are complete."
+      });
+      return;
+    }
+    if (selected.kind === "plan" && decision === "approved" && !window.FlowMateOtRequestDomain.isPlannedStartFuture(otValue(selected.request, "plannedStartAt", "planned_start_at"), Date.now())) {
+      setActionState({
+        status: "error",
+        message: "Approval is no longer available because the planned start is not strictly future in Bangkok time. Reject or return remains available."
       });
       return;
     }
@@ -1920,6 +1940,7 @@ function OtApprovalQueue({
     }
   }
   const selectedChecks = selected?.kind === "actual" ? getActualChecks(selected.request) : null;
+  const selectedPlanStartIsFuture = selected?.kind !== "plan" || window.FlowMateOtRequestDomain.isPlannedStartFuture(otValue(selected.request, "plannedStartAt", "planned_start_at"), currentTimestamp);
   const selectedTotal = selected ? employeeTotals[getOtManagerEmployeeId(selected.request)]?.countedMinutes || 0 : 0;
   const selectedPlanned = selected ? getOccurrenceMinutes(selected.request, "plannedMinutes") : 0;
   const selectedActual = selected ? getOccurrenceMinutes(selected.request, "actualMinutes") : 0;
@@ -2044,6 +2065,10 @@ function OtApprovalQueue({
     kind: "critical",
     title: "Weekly limit",
     message: selected.kind === "actual" ? "This employee/week is above 36h. The assigned approver may verify truthful actual time; the server keeps the compliance gate active." : "This employee/week is above 36h. Plan approval is blocked."
+  }), selected.kind === "plan" && !selectedPlanStartIsFuture && React.createElement(OtWarning, {
+    kind: "critical",
+    title: "Approval window closed",
+    message: "Approval is no longer available because the planned start is not strictly future in Bangkok time. Reject or return remains available."
   }), selectedChecks && !selectedChecks.consentAccepted && React.createElement(OtWarning, {
     kind: "critical",
     title: "Consent missing",
@@ -2078,7 +2103,7 @@ function OtApprovalQueue({
   }, "Reject plan"), React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
-    disabled: selectedTotal > OT_LIMIT_MINUTES || actionState.status === "submitting",
+    disabled: selectedTotal > OT_LIMIT_MINUTES || !selectedPlanStartIsFuture || actionState.status === "submitting",
     onClick: () => decide("approved")
   }, "Approve plan")) : React.createElement(React.Fragment, null, React.createElement("button", {
     type: "button",
@@ -3615,11 +3640,9 @@ function OtHrExportPanel({
 function OtAccessAdminPanel({
   access
 }) {
-  const [refreshKey, setRefreshKey] = useStateApp(0);
   const [directoryState, setDirectoryState] = useStateApp({
     status: "loading",
     people: [],
-    activeApproverIds: new Set(),
     message: ""
   });
   const [reason, setReason] = useStateApp("");
@@ -3631,21 +3654,15 @@ function OtAccessAdminPanel({
   });
   const accessSubmissionRef = useRefApp(false);
   async function loadOtAccessDirectory() {
-    const [people, approvers] = await Promise.all([window.loadOtPeopleForEvent(), window.loadOtEligibleApprovers()]);
-    const displayByEmail = new Map(OT_APPROVER_DISPLAY_DIRECTORY.map(entry => [entry.email, entry]));
-    const displayPeople = (Array.isArray(people) ? people : []).flatMap(person => {
-      const displayEntry = displayByEmail.get(String(person.email || "").trim().toLowerCase());
-      return displayEntry ? [{
-        ...person,
-        displayLabel: displayEntry.label
-      }] : [];
-    });
+    const identities = await window.loadOtAccessAdminIdentities();
     return {
       status: "ready",
-      people: displayPeople,
-      activeApproverIds: new Set((Array.isArray(approvers) ? approvers : []).map(person => person.userId)),
+      people: Array.isArray(identities) ? identities : [],
       message: ""
     };
+  }
+  function getAccessAdminIdentityEligibility(person) {
+    return window.FlowMateOtRequestDomain.getAccessAdminIdentityEligibility(person);
   }
   useEffectApp(() => {
     if (!access.isOwner) return undefined;
@@ -3661,16 +3678,22 @@ function OtAccessAdminPanel({
       if (alive) setDirectoryState({
         status: "error",
         people: [],
-        activeApproverIds: new Set(),
         message: error.message || "OT access directory could not be loaded."
       });
     });
     return () => {
       alive = false;
     };
-  }, [access.isOwner, refreshKey]);
+  }, [access.isOwner]);
   function beginApproverDeactivation(person) {
     if (accessSubmissionRef.current || actionState.status === "submitting") return;
+    if (!getAccessAdminIdentityEligibility(person).canReassignFrom) {
+      setActionState({
+        status: "error",
+        message: "Only an existing active approver state can be used as a reassignment source and deactivation target."
+      });
+      return;
+    }
     setDeactivationPlan({
       sourceUserId: person.userId,
       destinationUserId: "",
@@ -3696,6 +3719,22 @@ function OtAccessAdminPanel({
       setActionState({
         status: "error",
         message: "Choose an active reassignment destination before continuing."
+      });
+      return;
+    }
+    const sourcePerson = directoryState.people.find(person => person.userId === deactivationPlan.sourceUserId);
+    const destinationPerson = directoryState.people.find(person => person.userId === deactivationPlan.destinationUserId);
+    if (!sourcePerson || !getAccessAdminIdentityEligibility(sourcePerson).canReassignFrom) {
+      setActionState({
+        status: "error",
+        message: "The reassignment source is no longer eligible. Refresh the Owner directory and try again."
+      });
+      return;
+    }
+    if (!destinationPerson || !getAccessAdminIdentityEligibility(destinationPerson).canReassignTo) {
+      setActionState({
+        status: "error",
+        message: "The destination must have an existing active Workgrid identity and active approver access."
       });
       return;
     }
@@ -3739,6 +3778,13 @@ function OtAccessAdminPanel({
   async function deactivateApprover(person) {
     if (accessSubmissionRef.current || actionState.status === "submitting") return;
     if (!deactivationPlan?.ready || deactivationPlan.sourceUserId !== person.userId) return;
+    if (!getAccessAdminIdentityEligibility(person).canDeactivateApprover) {
+      setActionState({
+        status: "error",
+        message: "This identity no longer has active approver state to deactivate."
+      });
+      return;
+    }
     if (!reason.trim()) {
       setActionState({
         status: "error",
@@ -3757,7 +3803,12 @@ function OtAccessAdminPanel({
     });
     try {
       await window.setOtApprover(person.userId, false, normalizedReason, currentIntent.key);
-      const refreshedDirectory = await loadOtAccessDirectory();
+      let refreshedDirectory;
+      try {
+        refreshedDirectory = await loadOtAccessDirectory();
+      } catch (refreshError) {
+        throw new Error(`Approver deactivation completed, but the Owner directory refresh failed. Reload before another change. ${refreshError.message || ""}`.trim());
+      }
       setDirectoryState(refreshedDirectory);
       setIntent(window.FlowMateOtIntent.complete());
       setDeactivationPlan(null);
@@ -3777,6 +3828,13 @@ function OtAccessAdminPanel({
   }
   async function enableApprover(person) {
     if (accessSubmissionRef.current || actionState.status === "submitting") return;
+    if (!getAccessAdminIdentityEligibility(person).canActivateApprover) {
+      setActionState({
+        status: "error",
+        message: "Approver activation requires an existing active Workgrid identity without active approver access."
+      });
+      return;
+    }
     if (!reason.trim()) {
       setActionState({
         status: "error",
@@ -3795,13 +3853,19 @@ function OtAccessAdminPanel({
     });
     try {
       await window.setOtApprover(person.userId, true, normalizedReason, currentIntent.key);
+      let refreshedDirectory;
+      try {
+        refreshedDirectory = await loadOtAccessDirectory();
+      } catch (refreshError) {
+        throw new Error(`Approver activation completed, but the Owner directory refresh failed. Reload before another change. ${refreshError.message || ""}`.trim());
+      }
+      setDirectoryState(refreshedDirectory);
       setIntent(window.FlowMateOtIntent.complete());
       setActionState({
         status: "success",
         message: "Approver access activated and audited."
       });
       setReason("");
-      setRefreshKey(value => value + 1);
     } catch (error) {
       setActionState({
         status: "error",
@@ -3813,6 +3877,14 @@ function OtAccessAdminPanel({
   }
   async function applyHrRole(person, active) {
     if (accessSubmissionRef.current || actionState.status === "submitting") return;
+    const eligibility = getAccessAdminIdentityEligibility(person);
+    if (active ? !eligibility.canActivateHrAdmin : !eligibility.canDeactivateHrAdmin) {
+      setActionState({
+        status: "error",
+        message: active ? "HR/Admin activation requires an existing active Workgrid identity without active HR/Admin access." : "This identity does not have active HR/Admin access to remove."
+      });
+      return;
+    }
     if (!reason.trim()) {
       setActionState({
         status: "error",
@@ -3831,6 +3903,13 @@ function OtAccessAdminPanel({
     });
     try {
       await window.setOtSystemRole(person.userId, "hr_admin", active, normalizedReason, currentIntent.key);
+      let refreshedDirectory;
+      try {
+        refreshedDirectory = await loadOtAccessDirectory();
+      } catch (refreshError) {
+        throw new Error(`The HR/Admin change completed, but the Owner directory refresh failed. Reload before another change. ${refreshError.message || ""}`.trim());
+      }
+      setDirectoryState(refreshedDirectory);
       setIntent(window.FlowMateOtIntent.complete());
       setActionState({
         status: "success",
@@ -3848,7 +3927,7 @@ function OtAccessAdminPanel({
   }
   if (!access.isOwner) return null;
   const deactivationPerson = directoryState.people.find(person => person.userId === deactivationPlan?.sourceUserId) || null;
-  const destinationPeople = directoryState.people.filter(person => person.userId !== deactivationPlan?.sourceUserId && directoryState.activeApproverIds.has(person.userId));
+  const destinationPeople = directoryState.people.filter(person => person.userId !== deactivationPlan?.sourceUserId && getAccessAdminIdentityEligibility(person).canReassignTo);
   return React.createElement("section", {
     className: "ot-access ot-list",
     "aria-label": "OT access administration"
@@ -3856,7 +3935,9 @@ function OtAccessAdminPanel({
     className: "ot-section-head"
   }, React.createElement("div", null, React.createElement("h2", null, "OT access administration"), React.createElement("p", {
     className: "muted"
-  }, "This display-only MVP directory labels candidate identities; the server validates every access change and remains the authorization authority.")), React.createElement("span", null, "Owner only")), React.createElement("article", {
+  }, "This fixed server directory shows only Big, Mac, and Pluem. The server validates every access change and remains the authorization authority."), React.createElement("p", {
+    className: "muted"
+  }, "Inactive Workgrid identities are source/deactivation only. Destinations and activations require an existing active Workgrid identity; reassignment destinations also require active approver access.")), React.createElement("span", null, "Owner only")), React.createElement("article", {
     className: "ot-access__owner"
   }, React.createElement("div", null, React.createElement("strong", null, "Sole OT Owner"), React.createElement("small", null, "Identity resolved by the server access context · User ", access.userId)), React.createElement("span", {
     className: "ot-status"
@@ -3935,26 +4016,29 @@ function OtAccessAdminPanel({
   }), directoryState.status === "ready" && React.createElement("div", {
     className: "ot-access__list"
   }, directoryState.people.map(person => {
-    const isApprover = directoryState.activeApproverIds.has(person.userId);
+    const eligibility = getAccessAdminIdentityEligibility(person);
+    const isApprover = Boolean(otValue(person, "isApproverActive", "is_approver_active"));
+    const isWorkgridActive = Boolean(otValue(person, "isWorkgridActive", "is_workgrid_active"));
+    const isHrAdminActive = Boolean(otValue(person, "isHrAdminActive", "is_hr_admin_active"));
     return React.createElement("article", {
-      key: person.userId,
+      key: person.userId || person.email,
       className: "ot-access__row"
-    }, React.createElement("div", null, React.createElement("strong", null, person.displayLabel || person.displayName || person.email), React.createElement("small", null, person.email, " · Display candidate; server-authorized state: ", isApprover ? "active" : "inactive")), React.createElement("div", {
+    }, React.createElement("div", null, React.createElement("strong", null, person.displayLabel || person.email), React.createElement("small", null, person.email, " · Workgrid ", isWorkgridActive ? "active" : "inactive", " · Approver ", isApprover ? "active" : "inactive", " · HR/Admin ", isHrAdminActive ? "active" : "inactive")), React.createElement("div", {
       className: "ot-access__actions"
     }, React.createElement("button", {
       type: "button",
       className: "btn btn--sm btn--secondary",
-      disabled: actionState.status === "submitting",
+      disabled: actionState.status === "submitting" || (isApprover ? !eligibility.canDeactivateApprover : !eligibility.canActivateApprover),
       onClick: () => isApprover ? beginApproverDeactivation(person) : enableApprover(person)
     }, isApprover ? "Prepare deactivation" : "Enable approver"), React.createElement("button", {
       type: "button",
       className: "btn btn--sm btn--secondary",
-      disabled: actionState.status === "submitting",
+      disabled: actionState.status === "submitting" || !eligibility.canActivateHrAdmin,
       onClick: () => applyHrRole(person, true)
     }, "Grant HR/Admin"), React.createElement("button", {
       type: "button",
       className: "btn btn--sm btn--ghost",
-      disabled: actionState.status === "submitting",
+      disabled: actionState.status === "submitting" || !eligibility.canDeactivateHrAdmin,
       onClick: () => applyHrRole(person, false)
     }, "Remove HR/Admin")));
   })), actionState.message && React.createElement(OtWarning, {

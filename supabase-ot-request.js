@@ -15,6 +15,7 @@ window.loadMyOtRequests = weekStart => callOtRequestRpc("ot_list_my_requests", {
 window.loadOtManagerDashboard = (weekStart, functionCode) => callOtRequestRpc("ot_get_manager_dashboard", { p_week_start: weekStart, p_function_code: functionCode || null }, "Team OT could not be loaded.");
 window.loadOtEligibleApprovers = () => callOtRequestRpc("ot_list_eligible_approvers", {}, "OT approvers could not be loaded.");
 window.loadOtPeopleForEvent = () => callOtRequestRpc("ot_list_people_for_event", {}, "Event participants could not be loaded.");
+window.loadOtAccessAdminIdentities = () => callOtRequestRpc("ot_list_access_admin_identities", {}, "OT access identities could not be loaded.");
 window.createOtRequest = (payload, key) => callOtRequestRpc("ot_create_request", { p_payload: payload, p_idempotency_key: key }, "OT request could not be submitted.");
 window.resubmitOtPlan = (requestId, payload, consentVersion, key) =>
   callOtRequestRpc("ot_resubmit_plan", {

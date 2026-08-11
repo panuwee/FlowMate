@@ -425,6 +425,81 @@ select
   ) as has_execute;
 
 select
+  'OT pre-work post-lock transition guard contract (Expected = valid)' as check_name,
+  p.proname as function_name,
+  pg_catalog.position(
+    case p.proname
+      when 'ot_review_plan' then 'a.action = ''review_plan'' and a.idempotency_key = p_idempotency_key'
+      else 'a.action = ''record_consent'' and a.idempotency_key = p_idempotency_key'
+    end
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) < pg_catalog.position(
+    case p.proname
+      when 'ot_review_plan' then 'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+      else 'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+    end
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) as replay_precedes_future_guard,
+  pg_catalog.position(
+    'select * into v_request from public.ot_requests r where r.id = p_request_id for update;'
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) < pg_catalog.position(
+    case p.proname
+      when 'ot_review_plan' then 'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+      else 'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+    end
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) as request_lock_precedes_future_guard,
+  pg_catalog.position(
+    case p.proname
+      when 'ot_review_plan' then 'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+      else 'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+    end
+    in pg_catalog.pg_get_functiondef(p.oid)
+  ) < pg_catalog.position('update public.ot_requests' in pg_catalog.pg_get_functiondef(p.oid))
+    as future_guard_precedes_update
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname in ('ot_review_plan', 'ot_record_consent');
+
+select
+  'OT access admin identity directory contract (Expected = valid)' as check_name,
+  (
+    pg_catalog.position('if not public.ot_current_user_is_owner() then' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''Big'', ''nithidol.k@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''Mac'', ''weerayut@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''Pluem'', ''napol.a@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''isWorkgridActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''isApproverActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('''isHrAdminActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and pg_catalog.position('left join public.users' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
+    and pg_catalog.position('left join public.ot_approvers' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
+    and pg_catalog.position('left join public.ot_system_roles' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
+  ) as fixed_owner_directory_matches_contract
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_list_access_admin_identities'
+  and pg_catalog.oidvectortypes(p.proargtypes) = '';
+
+select
+  'OT access admin identity directory execute grants (Expected authenticated only)' as check_name,
+  pg_catalog.has_function_privilege(
+    'authenticated',
+    'public.ot_list_access_admin_identities()',
+    'EXECUTE'
+  ) as authenticated_execute,
+  not exists (
+    select 1
+    from information_schema.routine_privileges rp
+    where rp.specific_schema = 'public'
+      and rp.routine_name = 'ot_list_access_admin_identities'
+      and rp.privilege_type = 'EXECUTE'
+      and rp.grantee in ('anon', 'PUBLIC')
+  ) as public_and_anon_revoked;
+
+select
   'OT RPC signatures' as check_name,
   p.proname as function_name,
   pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
@@ -440,7 +515,8 @@ where n.nspname = 'public'
     'ot_counted_week_minutes_unchecked',
     'ot_get_access_context', 'ot_get_my_dashboard', 'ot_list_my_requests',
     'ot_get_manager_dashboard', 'ot_list_eligible_approvers',
-    'ot_list_people_for_event', 'ot_create_request', 'ot_resubmit_plan', 'ot_preview_event_plan',
+    'ot_list_people_for_event', 'ot_list_access_admin_identities',
+    'ot_create_request', 'ot_resubmit_plan', 'ot_preview_event_plan',
     'ot_create_event_plan', 'ot_record_consent', 'ot_review_plan',
     'ot_submit_actual', 'ot_request_actual_amendment', 'ot_verify_actual', 'ot_list_compliance_queue',
     'ot_review_compliance', 'ot_list_request_audit', 'ot_list_hr_ready',

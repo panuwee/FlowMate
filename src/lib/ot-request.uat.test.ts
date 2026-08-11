@@ -871,6 +871,58 @@ describe("OT Request backend contract", () => {
     expect(reviewPlan).not.toMatch(/status not in \('pending_approval', 'revision_required'\)/);
   });
 
+  it("rejects approval and consent that become non-future after their ordered locks while preserving replay", () => {
+    const reviewPlan = functionSql(sql, "ot_review_plan");
+    const recordConsent = functionSql(sql, "ot_record_consent");
+    const reviewRequestLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update;";
+    const consentRequestLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update;";
+    const reviewFutureGuard = "if p_decision = 'approved' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then";
+    const consentFutureGuard = "if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then";
+
+    expect(reviewPlan.indexOf("a.action = 'review_plan' and a.idempotency_key = p_idempotency_key"))
+      .toBeLessThan(reviewPlan.indexOf(reviewFutureGuard));
+    expect(recordConsent.indexOf("a.action = 'record_consent' and a.idempotency_key = p_idempotency_key"))
+      .toBeLessThan(recordConsent.indexOf(consentFutureGuard));
+    expect(reviewPlan.indexOf(reviewRequestLock)).toBeLessThan(reviewPlan.indexOf(reviewFutureGuard));
+    expect(recordConsent.indexOf(consentRequestLock)).toBeLessThan(recordConsent.indexOf(consentFutureGuard));
+    expect(reviewPlan.indexOf(reviewFutureGuard)).toBeLessThan(reviewPlan.indexOf("update public.ot_requests"));
+    expect(recordConsent.indexOf(consentFutureGuard)).toBeLessThan(recordConsent.indexOf("update public.ot_requests"));
+    expect(reviewPlan.slice(reviewPlan.indexOf(reviewFutureGuard), reviewPlan.indexOf("update public.ot_requests")))
+      .toContain("Planned OT start must remain in the future for approval");
+    expect(recordConsent.slice(recordConsent.indexOf(consentFutureGuard), recordConsent.indexOf("update public.ot_requests")))
+      .toContain("Planned OT start must remain in the future for consent acceptance");
+    expect(reviewPlan).not.toMatch(/p_decision in \('approved', 'rejected', 'revision_required'\)[\s\S]*planned_start_at <= pg_catalog\.clock_timestamp\(\)[\s\S]*raise exception/);
+    expect(recordConsent).not.toMatch(/p_accept is not null[\s\S]*planned_start_at <= pg_catalog\.clock_timestamp\(\)[\s\S]*raise exception/);
+    expect(verify).toContain("OT pre-work post-lock transition guard contract (Expected = valid)");
+    expect(read("supabase", "README.md")).toContain("hold the request row lock until the planned start is equal or past");
+    expect(read("supabase", "README.md")).toContain("the same committed idempotency key must replay the original result even after the planned start");
+  });
+
+  it("defines an Owner-only fixed access directory without widening event participants", () => {
+    const directory = functionSql(sql, "ot_list_access_admin_identities");
+    const eventPeople = functionSql(sql, "ot_list_people_for_event");
+    const signature = "public.ot_list_access_admin_identities()";
+
+    expect(directory).toContain("if not public.ot_current_user_is_owner() then");
+    expect(directory).toContain("Only the OT Owner can list access administration identities");
+    expect(directory).toContain("from (values");
+    for (const [label, email] of [["Big", "nithidol.k@garena.com"], ["Mac", "weerayut@garena.com"], ["Pluem", "napol.a@garena.com"]]) {
+      expect(directory).toContain(`'${label}', '${email}'`);
+    }
+    for (const field of ["'displayLabel'", "'email'", "'userId'", "'isWorkgridActive'", "'isApproverActive'", "'isHrAdminActive'"]) {
+      expect(directory).toContain(field);
+    }
+    expect(directory).toContain("left join public.users u");
+    expect(directory).toContain("left join public.ot_approvers a");
+    expect(directory).toContain("left join public.ot_system_roles r");
+    expect(eventPeople).toContain("where u.is_active = true");
+    expect(eventPeople).not.toContain("ot_list_access_admin_identities");
+    expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+    expect(sql).toContain(`grant execute on function ${signature} to authenticated`);
+    expect(verify).toContain("OT access admin identity directory contract (Expected = valid)");
+    expect(verify).toContain("OT access admin identity directory execute grants (Expected authenticated only)");
+  });
+
   it("resubmits only an employee-owned individual pre-work revision under ordered locks", () => {
     const resubmit = functionSql(sql, "ot_resubmit_plan");
     const requestLock = "pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)";
@@ -1242,6 +1294,7 @@ describe("OT Request static module integration", () => {
       status: "pending_approval",
       approverUserId: "approver-1",
       employeeUserId: "employee-1",
+      plannedStartAt: "2099-08-10T12:00:00Z",
       plannedMinutes: 60,
       actualMinutes: 0,
     });
@@ -1671,13 +1724,14 @@ describe("OT Request static module integration", () => {
     expect(admin).toContain("window.setOtSystemRole(");
     expect(admin).toContain("if (!reason.trim())");
     expect(admin).toContain("window.FlowMateOtIntent.establish(");
-    expect(admin).toContain("OT_APPROVER_DISPLAY_DIRECTORY");
-    expect(admin).toContain("display-only");
+    expect(admin).toContain("window.loadOtAccessAdminIdentities()");
+    expect(admin).not.toContain("window.loadOtPeopleForEvent()");
+    expect(admin).not.toContain("window.loadOtEligibleApprovers()");
+    expect(admin).toContain("getAccessAdminIdentityEligibility");
+    expect(admin).toContain("Inactive Workgrid identities are source/deactivation only");
     expect(admin).toContain("server validates");
+    expect(screen).not.toContain("OT_APPROVER_DISPLAY_DIRECTORY");
     expect(screen).not.toContain("OT_APPROVED_APPROVER_EMAILS");
-    for (const email of ["nithidol.k@garena.com", "weerayut@garena.com", "napol.a@garena.com"]) {
-      expect(screen.match(new RegExp(email.replaceAll(".", "\\."), "g"))).toHaveLength(1);
-    }
     expect(admin).not.toMatch(/setOt(?:Approver|SystemRole)\([^;]+crypto\.randomUUID\(\)/);
     expect(admin).not.toMatch(/\.from\s*\(/);
     expect(admin).not.toContain("currentUserEmail");
@@ -1711,6 +1765,22 @@ describe("OT Request static module integration", () => {
     expect(admin).not.toMatch(/reassignPendingOtApprover\([^;]+crypto\.randomUUID\(\)/);
     expect(admin).not.toMatch(/setOtApprover\([^;]+crypto\.randomUUID\(\)/);
     expect(admin).not.toMatch(/\.from\s*\(/);
+  });
+
+  it("blocks only late positive pre-work actions and explains the Bangkok-time boundary", () => {
+    const screen = read("screens-ot.jsx");
+    const consent = screen.slice(screen.indexOf("function OtConsentPanel("), screen.indexOf("function OtActualConfirmationForm("));
+    const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
+
+    expect(consent).toContain("window.FlowMateOtRequestDomain.isPlannedStartFuture(");
+    expect(consent).toContain("Accepting is no longer available because the planned start is not strictly future in Bangkok time. Declining remains available.");
+    expect(consent).toMatch(/Accept occurrence<\/button>[\s\S]*Decline occurrence<\/button>/);
+    expect(consent).toMatch(/disabled=\{[^}]*!plannedStartIsFuture[^}]*\}[\s\S]*Accept occurrence/);
+    expect(consent).not.toMatch(/Decline occurrence<\/button>[\s\S]*!plannedStartIsFuture/);
+    expect(approval).toContain("window.FlowMateOtRequestDomain.isPlannedStartFuture(");
+    expect(approval).toContain("Approval is no longer available because the planned start is not strictly future in Bangkok time. Reject or return remains available.");
+    expect(approval).toMatch(/Reject plan<\/button>[\s\S]*disabled=\{[^}]*!selectedPlanStartIsFuture[^}]*\}[\s\S]*Approve plan/);
+    expect(approval).not.toMatch(/Reject plan<\/button>[^<]*!selectedPlanStartIsFuture/);
   });
 
   it("adds OT Request as the fourth product without changing the first three", () => {

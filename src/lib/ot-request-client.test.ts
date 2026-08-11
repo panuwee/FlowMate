@@ -37,6 +37,7 @@ describe("OT request browser client", () => {
       { wrapper: "loadOtManagerDashboard", args: ["2026-08-03", "MKT"], name: "ot_get_manager_dashboard", params: { p_week_start: "2026-08-03", p_function_code: "MKT" } },
       { wrapper: "loadOtEligibleApprovers", args: [], name: "ot_list_eligible_approvers", params: {} },
       { wrapper: "loadOtPeopleForEvent", args: [], name: "ot_list_people_for_event", params: {} },
+      { wrapper: "loadOtAccessAdminIdentities", args: [], name: "ot_list_access_admin_identities", params: {} },
       { wrapper: "createOtRequest", args: [payload, idempotencyKey], name: "ot_create_request", params: { p_payload: payload, p_idempotency_key: idempotencyKey } },
       { wrapper: "resubmitOtPlan", args: [requestId, payload, consentStatementVersion, idempotencyKey], name: "ot_resubmit_plan", params: { p_request_id: requestId, p_payload: payload, p_consent_statement_version: consentStatementVersion, p_idempotency_key: idempotencyKey } },
       { wrapper: "previewOtEventPlan", args: [payload, [employeeId]], name: "ot_preview_event_plan", params: { p_payload: payload, p_employee_user_ids: [employeeId] } },

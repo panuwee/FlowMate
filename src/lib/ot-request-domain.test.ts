@@ -136,6 +136,60 @@ describe("OT request domain", () => {
     expect(domain.isBangkokPlannedStartFuture("2026-08-10", "10:01", now)).toBe(true);
   });
 
+  it("keeps approval and consent eligible only while the stored planned instant is strictly future", () => {
+    const domain = loadDomain();
+    const now = "2026-08-10T03:00:00.000Z";
+
+    expect(domain.isPlannedStartFuture("2026-08-10T03:00:01.000Z", now)).toBe(true);
+    expect(domain.isPlannedStartFuture("2026-08-10T03:00:00.000Z", now)).toBe(false);
+    expect(domain.isPlannedStartFuture("2026-08-10T02:59:59.000Z", now)).toBe(false);
+    expect(domain.isPlannedStartFuture(null, now)).toBe(false);
+  });
+
+  it("derives safe Owner access actions from server directory state", () => {
+    const domain = loadDomain();
+
+    expect(domain.getAccessAdminIdentityEligibility({
+      userId: "inactive-source",
+      isWorkgridActive: false,
+      isApproverActive: true,
+      isHrAdminActive: true,
+    })).toEqual({
+      canActivateApprover: false,
+      canDeactivateApprover: true,
+      canReassignFrom: true,
+      canReassignTo: false,
+      canActivateHrAdmin: false,
+      canDeactivateHrAdmin: true,
+    });
+    expect(domain.getAccessAdminIdentityEligibility({
+      userId: "active-destination",
+      isWorkgridActive: true,
+      isApproverActive: true,
+      isHrAdminActive: false,
+    })).toEqual({
+      canActivateApprover: false,
+      canDeactivateApprover: true,
+      canReassignFrom: true,
+      canReassignTo: true,
+      canActivateHrAdmin: true,
+      canDeactivateHrAdmin: false,
+    });
+    expect(domain.getAccessAdminIdentityEligibility({
+      userId: null,
+      isWorkgridActive: false,
+      isApproverActive: false,
+      isHrAdminActive: false,
+    })).toEqual({
+      canActivateApprover: false,
+      canDeactivateApprover: false,
+      canReassignFrom: false,
+      canReassignTo: false,
+      canActivateHrAdmin: false,
+      canDeactivateHrAdmin: false,
+    });
+  });
+
   it("uses Monday as the Bangkok workweek start", () => {
     const domain = loadDomain();
     expect(domain.getWeekStartKey("2026-08-09")).toBe("2026-08-03");
