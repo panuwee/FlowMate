@@ -3,6 +3,8 @@
 ## Release status
 
 - Verification base: branch `version2.1`, required base HEAD `7c4f7f0aa827d5ce17b04d657b7dd24a4c1d9084`, checked on 10 Aug 2026.
+- Final Remediation D was implemented from required base `eeecb8c30f1019c469859e687b8826c0f0510a58`. The reviewed product-code HEAD and test-run commit are both `608acb444c9431d16b15f1893677614a707b6cb9` (`fix: enforce OT pre-work authorization transitions`).
+- The focused suite, full suite, Next build, source/bundle parity, whitespace check, secret scan, and security/lock self-review were run against the exact product tree committed at `608acb444c9431d16b15f1893677614a707b6cb9`. A later documentation-only traceability commit may follow; it does not change that tested product tree.
 - Local application tests, production build, scoped source/bundle parity, secret scan, and whitespace checks passed as recorded below.
 - Rendered Browser QA is **BLOCKED BY AUTH**, not PASS. The local sign-in gate rendered, but no authenticated OT screen was reachable.
 - Local Supabase/pgTAP was **SKIPPED by explicit user environment constraint**, not PASS. Docker/local Supabase was not started and no SQL was executed.
@@ -21,8 +23,10 @@
 
 | Check | Exact result | Boundary |
 |---|---|---|
-| `npm.cmd test` | exit 0; 18/18 test files and 570/570 tests passed | Includes the protected concurrent untracked file `src/lib/flowmate-rls-performance.uat.test.ts` and its 5 tests; that file is not part of this handoff commit. |
+| Focused OT test run | exit 0; 3/3 test files and 147/147 tests passed | `src/lib/ot-request-client.test.ts`, `src/lib/ot-request-domain.test.ts`, and `src/lib/ot-request.uat.test.ts`. |
+| `npm.cmd test` | exit 0; 18/18 test files and 575/575 tests passed | Includes the protected concurrent untracked file `src/lib/flowmate-rls-performance.uat.test.ts` and its 5 tests; that file is not part of this handoff commit. |
 | `npm.cmd run build` | exit 0; Next.js 14.2.35 compiled, linted/type-checked, and generated static pages 4/4 | Route summary listed `/` and `/_not-found` as static routes. |
+| Final Remediation D scoped generator | exit 0; isolated single-file Babel transform was idempotent and matched root `screens-ot.js` byte-for-byte | Temporary build directory was removed after parity was verified; no broad root generator was run. |
 | Final Remediation C static generator | **NOT RERUN**; an interrupted temporary-copy attempt produced no accepted evidence | Final Remediation C changes only entry HTML, mechanical token assertions, and this handoff. No root generator was run and no generated output was copied back. |
 | `npx.cmd secretlint "**/*"` | exit 0; no finding output | Local filesystem scan only. |
 | `git diff --check` | exit 0; no whitespace errors | Rerun after the final documentation edit before commit. |
@@ -30,11 +34,11 @@
 
 ### Current source/bundle scope parity
 
-Final Remediation C did not change the OT/runtime source or generated bundles below; `git diff --name-only -- app.jsx app.js screens-ot.jsx screens-ot.js` returned no paths. These are current-file hashes, not a replacement for a fresh generator run:
+Final Remediation D regenerated only `screens-ot.js` from `screens-ot.jsx` with the isolated single-file Babel transform. The current root bundle matched the fresh transform byte-for-byte and the transform was idempotent. `app.jsx` and `app.js` were not changed. These are current-file hashes:
 
-| Pair | Current source SHA-256 | Current bundle SHA-256 | Changed by Final Remediation C |
+| Pair | Current source SHA-256 | Current bundle SHA-256 | Changed by Final Remediation D |
 |---|---|---|---|
-| `screens-ot.jsx` -> `screens-ot.js` | `a2acf3c0d35d5d004b15944bb98e0b4a2cdfca6d0a622b70f495cb1680dd5313` | `fb39e6c30eb77c34bbd505028ce7eeaf2619483d4f1c9eba077661a8e3f53add` | no |
+| `screens-ot.jsx` -> `screens-ot.js` | `1c25cb67fae7f4dc76a4f50bbd900893062c8e1528a8e77455bb033913394046` | `549992ce6d251f024526e3057ba09ef831394da2d11fc967539313456ee56448` | yes |
 | `app.jsx` -> `app.js` | `f84945e754c8e4af1fb5c85818683d0cdd9e13bdadbd96da2b86858aa83cf5c2` | `dad80e9de2b339e4961e9176165a5923793a95946c281761a6104113f9ce2cf1` | no |
 
 ### Worktree boundary
