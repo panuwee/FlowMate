@@ -92,13 +92,13 @@ where n.nspname = 'public'
     (
       p.proname = 'ot_assert_reason'
       and pg_catalog.oidvectortypes(p.proargtypes) = 'text, text'
-      and pg_catalog.position('''offline_event''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-      and pg_catalog.position('''scope_change''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+      and position('''offline_event''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+      and position('''scope_change''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
     )
     or (
       p.proname = 'ot_assert_consent_version'
       and pg_catalog.oidvectortypes(p.proargtypes) = 'text'
-      and pg_catalog.position('''2026-08-07''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+      and position('''2026-08-07''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
     )
   );
 
@@ -108,12 +108,12 @@ select
   pg_catalog.pg_get_function_result(p.oid) as result_type,
   p.prosecdef as security_definer,
   coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
-  pg_catalog.position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as owner_guard,
-  pg_catalog.position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as destination_allowlist,
-  pg_catalog.position('order by a.user_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as approver_lock_order,
-  pg_catalog.position('order by r.id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as request_lock_order,
-  pg_catalog.position('''reassign_pending_approver_admin''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as administration_audit,
-  pg_catalog.position('changed_fields->''result''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as stable_replay
+  position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as owner_guard,
+  position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as destination_allowlist,
+  position('order by a.user_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as approver_lock_order,
+  position('order by r.id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as request_lock_order,
+  position('''reassign_pending_approver_admin''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as administration_audit,
+  position('changed_fields->''result''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as stable_replay
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
@@ -139,10 +139,10 @@ select
 select
   'OT unsafe approver deactivation guard (Expected = true)' as check_name,
   (
-    pg_catalog.position('if not p_active and exists (' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('pending approver work' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''pending_actual_verification''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''compliance_review_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    position('if not p_active and exists (' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('pending approver work' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''pending_actual_verification''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''compliance_review_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
   ) as pending_work_guard
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
@@ -173,21 +173,21 @@ with approver_contracts as (
 )
 select
   'OT inactive fixed approver remediation contract (Expected = valid)' as check_name,
-  pg_catalog.position('u.is_active' in d.fixed_identity) = 0 as fixed_identity_survives_user_deactivation,
+  position('u.is_active' in d.fixed_identity) = 0 as fixed_identity_survives_user_deactivation,
   (
-    pg_catalog.position('public.ot_user_is_approved_approver_identity(u.id)' in d.eligible_approver) > 0
-    and pg_catalog.position('u.is_active = true' in d.eligible_approver) > 0
-    and pg_catalog.position('a.active = true' in d.eligible_approver) > 0
+    position('public.ot_user_is_approved_approver_identity(u.id)' in d.eligible_approver) > 0
+    and position('u.is_active = true' in d.eligible_approver) > 0
+    and position('a.active = true' in d.eligible_approver) > 0
   ) as current_eligibility_requires_active_user_and_approver,
-  pg_catalog.position('public.ot_user_is_approved_approver_identity(p_from_user_id)' in d.reassign) > 0 as fixed_source_allowlist,
+  position('public.ot_user_is_approved_approver_identity(p_from_user_id)' in d.reassign) > 0 as fixed_source_allowlist,
   (
-    pg_catalog.position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in d.reassign) > 0
-    and pg_catalog.position('a.active = true' in d.reassign) > 0
-    and pg_catalog.position('u.is_active = true' in d.reassign) > 0
+    position('public.ot_user_is_approved_approver_identity(p_to_user_id)' in d.reassign) > 0
+    and position('a.active = true' in d.reassign) > 0
+    and position('u.is_active = true' in d.reassign) > 0
   ) as destination_remains_active_and_allowlisted,
   (
-    pg_catalog.position('if p_active and not exists (' in d.set_approver) > 0
-    and pg_catalog.position('u.is_active = true' in d.set_approver) > 0
+    position('if p_active and not exists (' in d.set_approver) > 0
+    and position('u.is_active = true' in d.set_approver) > 0
   ) as inactive_identity_cannot_be_activated
 from definitions d;
 
@@ -204,23 +204,23 @@ with decision_functions as (
 select
   'OT decision authority serialization contract (Expected = valid)' as check_name,
   d.proname,
-  pg_catalog.position('for key share of a' in d.definition) > 0 as actor_approver_lock,
-  pg_catalog.position('for key share of a' in d.definition)
-    < pg_catalog.position('public.ot_lock_employee_weeks' in d.definition) as approver_before_week_lock,
-  pg_catalog.position('public.ot_lock_employee_weeks' in d.definition)
-    < pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition) as week_before_request_lock,
-  pg_catalog.position(
+  position('for key share of a' in d.definition) > 0 as actor_approver_lock,
+  position('for key share of a' in d.definition)
+    < position('public.ot_lock_employee_weeks' in d.definition) as approver_before_week_lock,
+  position('public.ot_lock_employee_weeks' in d.definition)
+    < position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition) as week_before_request_lock,
+  position(
     'v_request.approver_user_id <> v_actor_id'
     in pg_catalog.substring(
       d.definition
-      from pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
+      from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
     )
   ) > 0 as refreshed_assignment_guard,
-  pg_catalog.position(
+  position(
     'not public.ot_current_user_is_eligible_approver()'
     in pg_catalog.substring(
       d.definition
-      from pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
+      from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
     )
   ) > 0 as refreshed_eligibility_guard
 from decision_functions d
@@ -237,16 +237,16 @@ with actual_verifier as (
 select
   'OT approved Actual immutability contract (Expected = valid)' as check_name,
   (
-    pg_catalog.position('v_request.actual_decision is not null' in a.definition)
-      > pg_catalog.position('return pg_catalog.to_jsonb(v_request);' in a.definition)
-    and pg_catalog.position('v_request.actual_decision is not null' in a.definition)
-      < pg_catalog.position('for key share of a' in a.definition)
+    position('v_request.actual_decision is not null' in a.definition)
+      > position('return pg_catalog.to_jsonb(v_request);' in a.definition)
+    and position('v_request.actual_decision is not null' in a.definition)
+      < position('for key share of a' in a.definition)
   ) as guard_after_replay_before_locks,
-  pg_catalog.position(
+  position(
     'v_request.actual_decision is not null'
     in pg_catalog.substring(
       a.definition
-      from pg_catalog.position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in a.definition)
+      from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in a.definition)
     )
   ) > 0 as guard_after_request_lock
 from actual_verifier a;
@@ -274,31 +274,31 @@ with planned_start_functions as (
 select
   'OT future planned-start enforcement contract (Expected = valid)' as check_name,
   f.proname,
-  pg_catalog.position('v_start_at timestamptz' in f.definition) > 0 as timestamptz_input,
-  pg_catalog.position('v_start_at <= pg_catalog.clock_timestamp()' in f.definition) > 0 as caller_future_guard,
+  position('v_start_at timestamptz' in f.definition) > 0 as timestamptz_input,
+  position('v_start_at <= pg_catalog.clock_timestamp()' in f.definition) > 0 as caller_future_guard,
   case
     when f.write_anchor is null then true
     else
-      pg_catalog.position('v_start_at <= pg_catalog.clock_timestamp()' in f.definition)
-        < pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
-      and pg_catalog.position(
+      position('v_start_at <= pg_catalog.clock_timestamp()' in f.definition)
+        < position('public.ot_assert_no_employee_overlap' in f.definition)
+      and position(
         'v_start_at <= pg_catalog.clock_timestamp()'
         in pg_catalog.substring(
           f.definition
-          from pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+          from position('public.ot_assert_no_employee_overlap' in f.definition)
         )
       ) > 0
-      and pg_catalog.position(
+      and position(
         'v_start_at <= pg_catalog.clock_timestamp()'
         in pg_catalog.substring(
           f.definition
-          from pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+          from position('public.ot_assert_no_employee_overlap' in f.definition)
         )
-      ) < pg_catalog.position(
+      ) < position(
         f.write_anchor
         in pg_catalog.substring(
           f.definition
-          from pg_catalog.position('public.ot_assert_no_employee_overlap' in f.definition)
+          from position('public.ot_assert_no_employee_overlap' in f.definition)
         )
       )
   end as post_lock_recheck_before_write
@@ -312,11 +312,11 @@ select
   p.prosecdef as security_definer,
   coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
   (
-    pg_catalog.position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('public.ot_current_user_is_hr_admin()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('public.ot_user_is_approved_approver_identity(v_actor_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    position('public.ot_current_user_is_owner()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('public.ot_current_user_is_hr_admin()' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('public.ot_user_is_approved_approver_identity(v_actor_id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0
   ) as approved_elevated_identity_guard,
-  pg_catalog.position('''request_actual_amendment''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_audit_action
+  position('''request_actual_amendment''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_audit_action
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
@@ -346,21 +346,21 @@ select
   p.prosecdef as security_definer,
   coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
   (
-    pg_catalog.position('v_request.employee_user_id <> v_actor_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('v_request.source <> ''employee_request''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('v_request.status <> ''revision_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('v_request.actual_submitted_at is not null' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('v_request.plan_decision is distinct from ''revision_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    position('v_request.employee_user_id <> v_actor_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('v_request.source <> ''employee_request''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('v_request.status <> ''revision_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('v_request.actual_submitted_at is not null' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('v_request.plan_decision is distinct from ''revision_required''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
   ) as employee_state_guard,
-  pg_catalog.position('ot-request:' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as request_lock,
+  position('ot-request:' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as request_lock,
   (
-    pg_catalog.position('v_request.planned_week_segments || v_segments' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('order by week_start' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('public.ot_lock_employee_weeks' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    position('v_request.planned_week_segments || v_segments' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('order by week_start' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('public.ot_lock_employee_weeks' in pg_catalog.pg_get_functiondef(p.oid)) > 0
   ) as week_union_lock,
-  pg_catalog.position('public.ot_assert_planned_limit' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as canonical_limit_check,
-  pg_catalog.position('public.ot_assert_no_employee_overlap' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as overlap_check,
-  pg_catalog.position('''resubmit_plan''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_audit_action
+  position('public.ot_assert_planned_limit' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as canonical_limit_check,
+  position('public.ot_assert_no_employee_overlap' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as overlap_check,
+  position('''resubmit_plan''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_audit_action
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
@@ -401,7 +401,7 @@ where n.nspname = 'public'
 
 select
   'Personal OT dashboard countedMinutes key (Expected = true)' as check_name,
-  pg_catalog.position('''countedMinutes''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_counted_minutes
+  position('''countedMinutes''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_counted_minutes
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
@@ -458,13 +458,13 @@ marker_positions as (
   select
     t.function_name,
     t.function_oid,
-    pg_catalog.position(t.replay_marker in t.definition) as replay_position,
-    pg_catalog.position(
+    position(t.replay_marker in t.definition) as replay_position,
+    position(
       'select * into v_request from public.ot_requests r where r.id = p_request_id for update;'
       in t.definition
     ) as request_lock_position,
-    pg_catalog.position(t.future_guard_marker in t.definition) as future_guard_position,
-    pg_catalog.position('update public.ot_requests' in t.definition) as update_position
+    position(t.future_guard_marker in t.definition) as future_guard_position,
+    position('update public.ot_requests' in t.definition) as update_position
   from target_functions t
 )
 select
@@ -497,16 +497,16 @@ order by m.function_name;
 select
   'OT access admin identity directory contract (Expected = valid)' as check_name,
   (
-    pg_catalog.position('if not public.ot_current_user_is_owner() then' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''Big'', ''nithidol.k@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''Mac'', ''weerayut@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''Pluem'', ''napol.a@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''isWorkgridActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''isApproverActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''isHrAdminActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('left join public.users' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
-    and pg_catalog.position('left join public.ot_approvers' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
-    and pg_catalog.position('left join public.ot_system_roles' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
+    position('if not public.ot_current_user_is_owner() then' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''Big'', ''nithidol.k@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''Mac'', ''weerayut@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''Pluem'', ''napol.a@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''isWorkgridActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''isApproverActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''isHrAdminActive''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('left join public.users' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
+    and position('left join public.ot_approvers' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
+    and position('left join public.ot_system_roles' in pg_catalog.lower(pg_catalog.pg_get_functiondef(p.oid))) > 0
   ) as fixed_owner_directory_matches_contract
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
@@ -569,8 +569,8 @@ order by routine_name, grantee;
 select
   'HR-ready export RPC contract (Expected = SETOF jsonb with normalized emails)' as check_name,
   pg_catalog.pg_get_function_result(p.oid) as result_type,
-  pg_catalog.position('''employee_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_employee_email,
-  pg_catalog.position('''approver_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_approver_email
+  position('''employee_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_employee_email,
+  position('''approver_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_approver_email
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'
@@ -642,12 +642,12 @@ where n.nspname = 'public'
 select
   'OT HR Admin fixed helper contract (Expected = true)' as check_name,
   (
-    pg_catalog.position('u.id = (select auth.uid())' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('u.is_active = true' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('public.ot_user_is_approved_approver_identity(u.id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('r.role_code = ''hr_admin''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('r.active = true' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('like ''%@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) = 0
+    position('u.id = (select auth.uid())' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('u.is_active = true' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('public.ot_user_is_approved_approver_identity(u.id)' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('r.role_code = ''hr_admin''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('r.active = true' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('like ''%@garena.com''' in pg_catalog.pg_get_functiondef(p.oid)) = 0
   ) as helper_matches_contract
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
@@ -657,7 +657,7 @@ where n.nspname = 'public'
 
 select
   'Legacy active HR Admin role does not satisfy fixed helper (Expected = true)' as check_name,
-  pg_catalog.position(
+  position(
     'public.ot_user_is_approved_approver_identity(u.id)'
     in pg_catalog.pg_get_functiondef(p.oid)
   ) > 0 as legacy_role_cannot_grant_hr_access
@@ -674,8 +674,8 @@ select
       'if[[:space:]]+p_role_code = ''hr_admin''[[:space:]]+and p_active = true[[:space:]]+and not public[.]ot_user_is_approved_approver_identity[(]p_user_id[)][[:space:]]+then[[:space:]]+raise exception ''HR Admin must be one of the three approved MVP identities'';[[:space:]]+end if;'
     and not pg_catalog.pg_get_functiondef(p.oid) ~
       'if[[:space:]]+p_role_code = ''hr_admin''[[:space:]]+and p_active = false[[:space:]]+and not public[.]ot_user_is_approved_approver_identity[(]p_user_id[)][[:space:]]+then[[:space:]]+raise exception'
-    and pg_catalog.position('A non-empty reason is required' in pg_catalog.pg_get_functiondef(p.oid)) > 0
-    and pg_catalog.position('''set_system_role''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('A non-empty reason is required' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('''set_system_role''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
   ) as deactivation_remediation_matches_contract
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
