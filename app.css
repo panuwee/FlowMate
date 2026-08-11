@@ -3702,6 +3702,24 @@ html[data-theme="dark"] .product-book-cms__message--error {
   border-right: var(--border-hairline);
   background: var(--garena-white);
 }
+.ot-sidebar .nav-section {
+  padding: 14px var(--s-5) 6px;
+}
+.ot-sidebar .nav-item {
+  margin: 0;
+  padding: 8px var(--s-5);
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  background: transparent;
+}
+.ot-sidebar .nav-item:hover {
+  background: var(--garena-badge-bg);
+}
+.ot-sidebar .nav-item.is-active {
+  border-left: 3px solid var(--garena-red);
+  background: var(--garena-badge-bg);
+}
 .ot-main {
   grid-column: 2;
   grid-row: 2;
