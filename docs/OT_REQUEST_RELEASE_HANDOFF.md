@@ -26,7 +26,7 @@
 | Final Remediation C static generator | **NOT RERUN**; an interrupted temporary-copy attempt produced no accepted evidence | Final Remediation C changes only entry HTML, mechanical token assertions, and this handoff. No root generator was run and no generated output was copied back. |
 | `npx.cmd secretlint "**/*"` | exit 0; no finding output | Local filesystem scan only. |
 | `git diff --check` | exit 0; no whitespace errors | Rerun after the final documentation edit before commit. |
-| `supabase/ot_request_verify.sql` inspection | 544 lines read; only `SELECT` statements and read-only CTE/catalog/data inspection were present; no DDL or DML | Source inspection only. The verifier was not executed and is not PostgreSQL runtime proof. |
+| `supabase/ot_request_verify.sql` inspection | 664 lines read; only `SELECT` statements and read-only CTE/catalog/data inspection were present; no DDL or DML | Source inspection only. The verifier was not executed and is not PostgreSQL runtime proof. |
 
 ### Current source/bundle scope parity
 
@@ -41,7 +41,7 @@ Final Remediation C did not change the OT/runtime source or generated bundles be
 
 - `screens-a.js`, `screens-b.js`, and `screens-c.js` reported `M` from stat noise before verification, but each worktree Git blob hash equalled HEAD and `git diff` was empty.
 - Protected/concurrent untracked files were preserved: `docs/CAMPAIGN_DASHBOARD_DEVELOPER_BRIEF.md`, `docs/CAMPAIGN_DASHBOARD_OWNER_MERGE_GUIDE.md`, `docs/supabase-performance-analysis-2026-08-07.md`, `docs/superpowers/plans/2026-08-06-flowmate-board-operational-performance-implementation.md`, `docs/superpowers/specs/2026-08-06-flowmate-board-operational-visibility-performance-design.md`, `src/lib/flowmate-rls-performance.uat.test.ts`, `supabase/phase4_rls_read_performance.sql`, and `supabase/phase4_rls_read_performance_archived_board_patch.sql`.
-- Only this handoff is intended for the Task 8 commit. `supabase/README.md` already states the mandatory staging/runtime boundary and did not need correction.
+- Final Remediation C commit `f054400` contains exactly three entry pages (`index.html`, `home/index.html`, and `product-book/index.html`), four mechanical token assertion files (`src/lib/ot-request.uat.test.ts`, `src/lib/flowmate-board-integration.uat.test.ts`, `src/lib/workflow-mvp.uat.test.ts`, and `src/lib/product-book-cms.uat.test.ts`), and this handoff. `screens-a.js`, `screens-b.js`, `screens-c.js`, all concurrent untracked files, `supabase/README.md`, and every other unrelated file were excluded.
 
 ## Rendered Browser QA
 
