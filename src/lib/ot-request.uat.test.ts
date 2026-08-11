@@ -879,23 +879,58 @@ describe("OT Request backend contract", () => {
     const reviewFutureGuard = "if p_decision = 'approved' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then";
     const consentFutureGuard = "if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then";
 
-    expect(reviewPlan.indexOf("a.action = 'review_plan' and a.idempotency_key = p_idempotency_key"))
-      .toBeLessThan(reviewPlan.indexOf(reviewFutureGuard));
-    expect(recordConsent.indexOf("a.action = 'record_consent' and a.idempotency_key = p_idempotency_key"))
-      .toBeLessThan(recordConsent.indexOf(consentFutureGuard));
-    expect(reviewPlan.indexOf(reviewRequestLock)).toBeLessThan(reviewPlan.indexOf(reviewFutureGuard));
-    expect(recordConsent.indexOf(consentRequestLock)).toBeLessThan(recordConsent.indexOf(consentFutureGuard));
-    expect(reviewPlan.indexOf(reviewFutureGuard)).toBeLessThan(reviewPlan.indexOf("update public.ot_requests"));
-    expect(recordConsent.indexOf(consentFutureGuard)).toBeLessThan(recordConsent.indexOf("update public.ot_requests"));
-    expect(reviewPlan.slice(reviewPlan.indexOf(reviewFutureGuard), reviewPlan.indexOf("update public.ot_requests")))
+    const markerIndex = (source: string, marker: string) => {
+      const index = source.indexOf(marker);
+      expect(index, `missing transition marker: ${marker}`).toBeGreaterThan(-1);
+      return index;
+    };
+    const reviewReplayIndex = markerIndex(reviewPlan, "a.action = 'review_plan' and a.idempotency_key = p_idempotency_key");
+    const consentReplayIndex = markerIndex(recordConsent, "a.action = 'record_consent' and a.idempotency_key = p_idempotency_key");
+    const reviewRequestLockIndex = markerIndex(reviewPlan, reviewRequestLock);
+    const consentRequestLockIndex = markerIndex(recordConsent, consentRequestLock);
+    const reviewFutureGuardIndex = markerIndex(reviewPlan, reviewFutureGuard);
+    const consentFutureGuardIndex = markerIndex(recordConsent, consentFutureGuard);
+    const reviewUpdateIndex = markerIndex(reviewPlan, "update public.ot_requests");
+    const consentUpdateIndex = markerIndex(recordConsent, "update public.ot_requests");
+
+    expect(reviewReplayIndex).toBeLessThan(reviewFutureGuardIndex);
+    expect(consentReplayIndex).toBeLessThan(consentFutureGuardIndex);
+    expect(reviewRequestLockIndex).toBeLessThan(reviewFutureGuardIndex);
+    expect(consentRequestLockIndex).toBeLessThan(consentFutureGuardIndex);
+    expect(reviewFutureGuardIndex).toBeLessThan(reviewUpdateIndex);
+    expect(consentFutureGuardIndex).toBeLessThan(consentUpdateIndex);
+    expect(reviewPlan.slice(reviewFutureGuardIndex, reviewUpdateIndex))
       .toContain("Planned OT start must remain in the future for approval");
-    expect(recordConsent.slice(recordConsent.indexOf(consentFutureGuard), recordConsent.indexOf("update public.ot_requests")))
+    expect(recordConsent.slice(consentFutureGuardIndex, consentUpdateIndex))
       .toContain("Planned OT start must remain in the future for consent acceptance");
     expect(reviewPlan).not.toMatch(/p_decision in \('approved', 'rejected', 'revision_required'\)[\s\S]*planned_start_at <= pg_catalog\.clock_timestamp\(\)[\s\S]*raise exception/);
     expect(recordConsent).not.toMatch(/p_accept is not null[\s\S]*planned_start_at <= pg_catalog\.clock_timestamp\(\)[\s\S]*raise exception/);
     expect(verify).toContain("OT pre-work post-lock transition guard contract (Expected = valid)");
     expect(read("supabase", "README.md")).toContain("hold the request row lock until the planned start is equal or past");
     expect(read("supabase", "README.md")).toContain("the same committed idempotency key must replay the original result even after the planned start");
+  });
+
+  it("makes the read-only transition verifier fail closed when a target function or ordering marker is absent", () => {
+    const contractStart = verify.indexOf("with expected_transition_functions(function_name, argument_types, replay_marker, future_guard_marker)");
+    const contractEnd = verify.indexOf("OT access admin identity directory contract (Expected = valid)");
+    expect(contractStart).toBeGreaterThan(-1);
+    expect(contractEnd).toBeGreaterThan(contractStart);
+    const contract = verify.slice(contractStart, contractEnd);
+
+    expect(contract).toContain("OT pre-work post-lock transition guard contract (Expected = valid)");
+    expect(Array.from(
+      contract.matchAll(/^\s*\(\s*'(ot_(?:review_plan|record_consent))'/gm),
+      match => match[1],
+    )).toEqual(["ot_review_plan", "ot_record_consent"]);
+    expect(contract).toContain("left join pg_catalog.pg_proc p");
+    expect(contract).toContain("pg_catalog.count(*) over () = 2 as exact_target_check_rows");
+    expect(contract).toContain("function_oid is not null as function_present");
+    for (const marker of ["replay_position", "request_lock_position", "future_guard_position", "update_position"]) {
+      expect(contract).toContain(`${marker} > 0`);
+    }
+    expect(contract).toMatch(/m\.replay_position > 0[\s\S]*m\.future_guard_position > 0[\s\S]*m\.replay_position < m\.future_guard_position/);
+    expect(contract).toMatch(/m\.request_lock_position > 0[\s\S]*m\.future_guard_position > 0[\s\S]*m\.request_lock_position < m\.future_guard_position/);
+    expect(contract).toMatch(/m\.future_guard_position > 0[\s\S]*m\.update_position > 0[\s\S]*m\.future_guard_position < m\.update_position/);
   });
 
   it("defines an Owner-only fixed access directory without widening event participants", () => {

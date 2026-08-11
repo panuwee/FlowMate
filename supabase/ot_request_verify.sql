@@ -424,44 +424,75 @@ select
     'EXECUTE'
   ) as has_execute;
 
+with expected_transition_functions(function_name, argument_types, replay_marker, future_guard_marker) as (
+  values
+    (
+      'ot_review_plan',
+      'uuid, text, text, uuid',
+      'a.action = ''review_plan'' and a.idempotency_key = p_idempotency_key',
+      'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+    ),
+    (
+      'ot_record_consent',
+      'uuid, boolean, text, uuid',
+      'a.action = ''record_consent'' and a.idempotency_key = p_idempotency_key',
+      'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
+    )
+),
+target_functions as (
+  select
+    e.function_name,
+    e.replay_marker,
+    e.future_guard_marker,
+    p.oid as function_oid,
+    pg_catalog.coalesce(pg_catalog.pg_get_functiondef(p.oid), '') as definition
+  from expected_transition_functions e
+  left join pg_catalog.pg_namespace n
+    on n.nspname = 'public'
+  left join pg_catalog.pg_proc p
+    on p.pronamespace = n.oid
+   and p.proname = e.function_name
+   and pg_catalog.oidvectortypes(p.proargtypes) = e.argument_types
+),
+marker_positions as (
+  select
+    t.function_name,
+    t.function_oid,
+    pg_catalog.position(t.replay_marker in t.definition) as replay_position,
+    pg_catalog.position(
+      'select * into v_request from public.ot_requests r where r.id = p_request_id for update;'
+      in t.definition
+    ) as request_lock_position,
+    pg_catalog.position(t.future_guard_marker in t.definition) as future_guard_position,
+    pg_catalog.position('update public.ot_requests' in t.definition) as update_position
+  from target_functions t
+)
 select
   'OT pre-work post-lock transition guard contract (Expected = valid)' as check_name,
-  p.proname as function_name,
-  pg_catalog.position(
-    case p.proname
-      when 'ot_review_plan' then 'a.action = ''review_plan'' and a.idempotency_key = p_idempotency_key'
-      else 'a.action = ''record_consent'' and a.idempotency_key = p_idempotency_key'
-    end
-    in pg_catalog.pg_get_functiondef(p.oid)
-  ) < pg_catalog.position(
-    case p.proname
-      when 'ot_review_plan' then 'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
-      else 'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
-    end
-    in pg_catalog.pg_get_functiondef(p.oid)
+  m.function_name,
+  pg_catalog.count(*) over () = 2 as exact_target_check_rows,
+  m.function_oid is not null as function_present,
+  m.replay_position > 0 as replay_marker_present,
+  m.request_lock_position > 0 as request_lock_marker_present,
+  m.future_guard_position > 0 as future_guard_marker_present,
+  m.update_position > 0 as update_marker_present,
+  (
+    m.replay_position > 0
+    and m.future_guard_position > 0
+    and m.replay_position < m.future_guard_position
   ) as replay_precedes_future_guard,
-  pg_catalog.position(
-    'select * into v_request from public.ot_requests r where r.id = p_request_id for update;'
-    in pg_catalog.pg_get_functiondef(p.oid)
-  ) < pg_catalog.position(
-    case p.proname
-      when 'ot_review_plan' then 'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
-      else 'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
-    end
-    in pg_catalog.pg_get_functiondef(p.oid)
+  (
+    m.request_lock_position > 0
+    and m.future_guard_position > 0
+    and m.request_lock_position < m.future_guard_position
   ) as request_lock_precedes_future_guard,
-  pg_catalog.position(
-    case p.proname
-      when 'ot_review_plan' then 'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
-      else 'if p_accept and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
-    end
-    in pg_catalog.pg_get_functiondef(p.oid)
-  ) < pg_catalog.position('update public.ot_requests' in pg_catalog.pg_get_functiondef(p.oid))
-    as future_guard_precedes_update
-from pg_catalog.pg_proc p
-join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-where n.nspname = 'public'
-  and p.proname in ('ot_review_plan', 'ot_record_consent');
+  (
+    m.future_guard_position > 0
+    and m.update_position > 0
+    and m.future_guard_position < m.update_position
+  ) as future_guard_precedes_update
+from marker_positions m
+order by m.function_name;
 
 select
   'OT access admin identity directory contract (Expected = valid)' as check_name,
