@@ -759,12 +759,7 @@ begin
     raise exception 'Actual decision note is required for a compliance-required approval';
   end if;
   if p_decision = 'approved' then
-    v_new_status := case
-      when not v_request.compliance_required then 'hr_ready'
-      when v_request.compliance_outcome in ('approved', 'cleared') then 'hr_ready'
-      when v_request.compliance_outcome = 'rejected' then 'rejected'
-      else 'compliance_review_required'
-    end;
+    v_new_status := 'hr_ready';
   else
     v_new_status := p_decision;
   end if;
@@ -2172,8 +2167,8 @@ declare
   v_actor_id uuid := public.ot_require_current_user();
   v_result jsonb;
 begin
-  if not public.ot_current_user_is_owner() and not public.ot_current_user_is_hr_admin() then
-    raise exception 'OT Owner or HR/Admin access required';
+  if not public.ot_current_user_is_owner() and not public.ot_current_user_is_eligible_approver() then
+    raise exception 'OT Owner or active Team Lead access required';
   end if;
   select coalesce(pg_catalog.jsonb_agg(pg_catalog.to_jsonb(r) order by r.actual_start_at, r.id), '[]'::jsonb)
   into v_result
@@ -2298,8 +2293,8 @@ as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
 begin
-  if not public.ot_current_user_is_owner() and not public.ot_current_user_is_hr_admin() then
-    raise exception 'OT Owner or HR/Admin access required';
+  if not public.ot_current_user_is_owner() and not public.ot_current_user_is_eligible_approver() then
+    raise exception 'OT Owner or active Team Lead access required';
   end if;
   return query
   select pg_catalog.to_jsonb(r) || pg_catalog.jsonb_build_object(
@@ -2311,7 +2306,7 @@ begin
   join public.users approver on approver.id = r.approver_user_id
   where r.status = 'hr_ready'
     and r.hr_ready_at is not null
-    and (not r.compliance_required or r.compliance_reviewed_at is not null)
+    and (public.ot_current_user_is_owner() or r.approver_user_id = v_actor_id)
     and (
       p_week_start is null
       or coalesce(r.actual_week_segments, '[]'::jsonb)
@@ -2338,8 +2333,8 @@ declare
   v_request_id uuid;
   v_lock_keys jsonb;
 begin
-  if not public.ot_current_user_is_owner() and not public.ot_current_user_is_hr_admin() then
-    raise exception 'OT Owner or HR/Admin access required';
+  if not public.ot_current_user_is_owner() and not public.ot_current_user_is_eligible_approver() then
+    raise exception 'OT Owner or active Team Lead access required';
   end if;
   if p_request_ids is null or pg_catalog.cardinality(p_request_ids) = 0
      or pg_catalog.cardinality(p_request_ids) <> (
@@ -2384,13 +2379,13 @@ begin
   loop
     select * into v_request from public.ot_requests r where r.id = v_request_id;
     if not found or v_request.status <> 'hr_ready' or v_request.hr_ready_at is null
-       or (v_request.compliance_required and v_request.compliance_reviewed_at is null) then
-      raise exception 'Request % is not eligible for HR export', v_request_id;
+       or (not public.ot_current_user_is_owner() and v_request.approver_user_id <> v_actor_id) then
+      raise exception 'Request % is not eligible for Team Lead export', v_request_id;
     end if;
     select * into v_request from public.ot_requests r where r.id = v_request_id for update;
     if v_request.status <> 'hr_ready' or v_request.hr_ready_at is null
-       or (v_request.compliance_required and v_request.compliance_reviewed_at is null) then
-      raise exception 'Request % changed and is no longer eligible for HR export', v_request_id;
+       or (not public.ot_current_user_is_owner() and v_request.approver_user_id <> v_actor_id) then
+      raise exception 'Request % changed and is no longer eligible for Team Lead export', v_request_id;
     end if;
   end loop;
 

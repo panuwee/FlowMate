@@ -567,10 +567,12 @@ where specific_schema = 'public'
 order by routine_name, grantee;
 
 select
-  'HR-ready export RPC contract (Expected = SETOF jsonb with normalized emails)' as check_name,
+  'Team Lead export RPC contract (Expected = SETOF jsonb with normalized emails and assigned scope)' as check_name,
   pg_catalog.pg_get_function_result(p.oid) as result_type,
   position('''employee_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_employee_email,
-  position('''approver_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_approver_email
+  position('''approver_email''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_approver_email,
+  position('public.ot_current_user_is_eligible_approver()' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_team_lead_guard,
+  position('r.approver_user_id = v_actor_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as has_assigned_scope
 from pg_catalog.pg_proc p
 join pg_catalog.pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public'

@@ -373,16 +373,11 @@ describe("OT Request backend contract", () => {
       expect(hrAdmin).toContain(contract);
     }
     expect(hrAdmin).not.toContain("like '%@garena.com'");
-    for (const name of [
-      "ot_get_access_context",
-      "ot_get_manager_dashboard",
-      "ot_list_people_for_event",
-      "ot_list_compliance_queue",
-      "ot_review_compliance",
-      "ot_list_hr_ready",
-      "ot_mark_exported",
-    ]) {
+    for (const name of ["ot_get_access_context", "ot_get_manager_dashboard", "ot_list_people_for_event"]) {
       expect(functionSql(sql, name)).toContain("public.ot_current_user_is_hr_admin()");
+    }
+    for (const name of ["ot_list_hr_ready", "ot_mark_exported"]) {
+      expect(functionSql(sql, name)).toContain("public.ot_current_user_is_eligible_approver()");
     }
     expect(canReadRequest).toContain("public.ot_current_user_is_hr_admin()");
     expect(fullScopePolicy).toContain("public.ot_current_user_is_hr_admin()");
@@ -486,22 +481,22 @@ describe("OT Request backend contract", () => {
     expect(sql).not.toMatch(/grant\s+(insert|update|delete)\s+on\s+public\.ot_requests\s+to\s+authenticated/i);
   });
 
-  it("returns privacy-scoped HR-ready export rows with normalized identity emails", () => {
+  it("returns Team Lead-scoped export rows with normalized identity emails", () => {
     const hrReady = functionSql(sql, "ot_list_hr_ready");
 
     expect(sql).toContain("drop function if exists public.ot_list_hr_ready(date)");
     expect(hrReady).toContain("returns setof jsonb");
     expect(hrReady).toContain("security definer");
     expect(hrReady).toContain("set search_path = ''");
-    expect(hrReady).toMatch(/ot_current_user_is_owner\(\)[\s\S]*ot_current_user_is_hr_admin\(\)[\s\S]*raise exception/);
+    expect(hrReady).toMatch(/ot_current_user_is_owner\(\)[\s\S]*ot_current_user_is_eligible_approver\(\)[\s\S]*raise exception/);
     expect(hrReady).toMatch(/to_jsonb\(r\)[\s\S]*jsonb_build_object\([\s\S]*'employee_email'[\s\S]*lower\(pg_catalog\.btrim\(employee\.email\)\)[\s\S]*'approver_email'[\s\S]*lower\(pg_catalog\.btrim\(approver\.email\)\)/);
     expect(hrReady).toMatch(/join public\.users employee on employee\.id = r\.employee_user_id[\s\S]*join public\.users approver on approver\.id = r\.approver_user_id/);
-    expect(hrReady).toMatch(/r\.status = 'hr_ready'[\s\S]*r\.hr_ready_at is not null[\s\S]*compliance_reviewed_at is not null/);
+    expect(hrReady).toMatch(/r\.status = 'hr_ready'[\s\S]*r\.hr_ready_at is not null[\s\S]*r\.approver_user_id = v_actor_id/);
     expect(hrReady).toMatch(/p_week_start is null[\s\S]*actual_week_segments[\s\S]*weekStart/);
     expect(hrReady).toContain("order by r.actual_start_at, r.id");
     expect(sql).toContain("grant execute on function public.ot_list_hr_ready(date) to authenticated");
     expect(sql).not.toMatch(/grant\s+(insert|update|delete)\s+on\s+public\.ot_requests\s+to\s+authenticated/i);
-    expect(verify).toContain("HR-ready export RPC contract (Expected = SETOF jsonb with normalized emails)");
+    expect(verify).toContain("Team Lead export RPC contract (Expected = SETOF jsonb with normalized emails and assigned scope)");
     expect(verify).toContain("has_employee_email");
     expect(verify).toContain("has_approver_email");
   });
@@ -1697,22 +1692,21 @@ describe("OT Request static module integration", () => {
     expect(manager).toContain('setLoadState({ status: "error", queryKey: managerLoadKey, rows: [], peopleById: {}, message: error.message || "Assigned OT could not be loaded." })');
   });
 
-  it("renders owner, compliance, audit, access, and HR export only from server access capabilities", () => {
+  it("renders Owner controls and Team Lead export only from server access capabilities", () => {
     const sql = read("supabase", "ot_request.sql");
     const screen = read("screens-ot.jsx");
 
     expect(sql).toContain("panuwee.w@garena.com");
     expect(sql).toContain("ot_current_user_is_owner");
-    for (const component of ["OtOwnerDashboard", "OtComplianceQueue", "OtAuditTimeline", "OtAccessAdminPanel", "OtHrExportPanel"]) {
+    for (const component of ["OtOwnerDashboard", "OtAccessAdminPanel", "OtHrExportPanel"]) {
       expect(screen).toContain(`function ${component}(`);
     }
     expect(screen).toContain('owner: "ot-request/owner"');
-    expect(screen).toContain('compliance: "ot-request/compliance"');
-    expect(screen).toContain('audit: "ot-request/audit"');
     expect(screen).toContain('access: "ot-request/access"');
     expect(screen).toContain('export: "ot-request/export"');
     expect(screen).toContain('access.status === "ready" && access.isOwner');
-    expect(screen).toContain('access.status === "ready" && (access.isOwner || access.isHrAdmin)');
+    expect(screen).toContain('access.status === "ready" && access.canExport');
+    expect(screen).not.toContain("Compliance & HR");
     expect(screen).not.toMatch(/currentUserEmail\s*(?:===|==|\.includes|\.endsWith)/);
     expect(sql).not.toMatch(/create policy[^;]+on public\.(work_items|marketing_plans|product_book)/is);
   });
@@ -1874,8 +1868,8 @@ describe("OT Request static module integration", () => {
     expect(warning).toContain('? { role: "alert" }');
     expect(warning).toContain('{ role: "status", "aria-live": "polite" }');
     expect(navigation).toContain('aria-label="OT Request navigation"');
-    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(9);
-    for (const view of ["overview", "my-requests", "manager", "root-causes", "compliance", "audit", "export", "owner", "access"]) {
+    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(7);
+    for (const view of ["overview", "my-requests", "manager", "root-causes", "export", "owner", "access"]) {
       expect(navigation).toContain(`aria-current={visibleView === "${view}" ? "page" : undefined}`);
     }
     expect(screen).not.toContain("function getOtCurrentPageProps(");
@@ -1952,5 +1946,23 @@ describe("OT Request static module integration", () => {
   it("compiles the OT screen before the application bundle", () => {
     const build = read("build-github.cjs");
     expect(build).toContain('"screens-c.jsx", "screens-ot.jsx", "app.jsx"');
+  });
+
+  it("keeps daily OT operations while giving Team Leads a monthly Function report and export flow", () => {
+    const screen = read("screens-ot.jsx");
+    const client = read("supabase-ot-request.js");
+    const sql = read("supabase", "ot_request.sql");
+
+    expect(screen).toContain("function OtMonthlyTeamReport(");
+    expect(screen).toContain('type="month"');
+    expect(screen).toContain("buildOtMonthlyFunctionReport");
+    expect(screen).toContain("Monthly report");
+    expect(screen).toContain("Download OT report");
+    expect(screen).not.toContain("Compliance & HR");
+    expect(screen).not.toContain("HR export");
+    expect(client).toContain("window.loadOtHrReady");
+    expect(sql).toContain("not public.ot_current_user_is_owner() and not public.ot_current_user_is_eligible_approver()");
+    expect(sql).toContain("r.approver_user_id = v_actor_id");
+    expect(sql).toContain("v_new_status := 'hr_ready';");
   });
 });

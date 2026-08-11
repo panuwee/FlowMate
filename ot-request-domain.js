@@ -487,6 +487,41 @@
     };
   }
 
+  function getBangkokMonthKey(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const fields = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+      timeZone: TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+    }).formatToParts(date).map(part => [part.type, part.value]));
+    return `${fields.year}-${fields.month}`;
+  }
+
+  function buildOtMonthlyFunctionReport(records, monthKey) {
+    const uniqueRequests = new Map();
+    (Array.isArray(records) ? records : []).forEach(record => {
+      const requestId = valueOf(record, "requestId", "request_id") || valueOf(record, "id", "id");
+      const startAt = valueOf(record, "plannedStartAt", "planned_start_at") || valueOf(record, "actualStartAt", "actual_start_at");
+      if (!requestId || getBangkokMonthKey(startAt) !== monthKey || uniqueRequests.has(requestId)) return;
+      uniqueRequests.set(requestId, record);
+    });
+    const totals = new Map();
+    uniqueRequests.forEach(record => {
+      const functionCode = String(valueOf(record, "functionCode", "function_code") || "unassigned").trim().toLowerCase() || "unassigned";
+      const row = totals.get(functionCode) || { functionCode, requestCount: 0, plannedMinutes: 0, actualMinutes: 0, verifiedMinutes: 0 };
+      const plannedMinutes = recordMinutes(record, "occurrencePlannedMinutes", "planned_minutes") || recordMinutes(record, "plannedMinutes", "planned_minutes");
+      const actualMinutes = recordMinutes(record, "occurrenceActualMinutes", "actual_minutes") || recordMinutes(record, "actualMinutes", "actual_minutes");
+      row.requestCount += 1;
+      row.plannedMinutes += plannedMinutes;
+      row.actualMinutes += actualMinutes;
+      if (isConfirmedActual(record)) row.verifiedMinutes += actualMinutes;
+      totals.set(functionCode, row);
+    });
+    return Array.from(totals.values()).sort((left, right) => left.functionCode.localeCompare(right.functionCode));
+  }
+
   function buildRootCauseInsights(records, options) {
     const confirmed = (Array.isArray(records) ? records : []).filter(isConfirmedActual);
     if (!confirmed.length) return [];
@@ -580,6 +615,7 @@
     countWeeksWithActualMinutes,
     buildOtWeeklyTrend,
     buildOtWorkloadConcentration,
+    buildOtMonthlyFunctionReport,
     buildRootCauseInsights,
   });
 });

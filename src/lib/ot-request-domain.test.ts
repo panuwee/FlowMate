@@ -612,4 +612,19 @@ describe("OT request domain", () => {
       { requestId: "unverified", functionCode: "mkt", title: "Unverified", actualMinutes: 300 },
     ])).toEqual({ byFunction: [], byAssignment: [] });
   });
+
+  it("builds a monthly Function report from daily requests without double-counting cross-week rows", () => {
+    const domain = loadDomain();
+    const report = domain.buildOtMonthlyFunctionReport([
+      { id: "a:2026-08-03", requestId: "a", plannedStartAt: "2026-08-03T11:00:00Z", functionCode: "gdve", plannedMinutes: 120, actualMinutes: 90, actualDecision: "approved", status: "hr_ready" },
+      { id: "a:2026-08-10", requestId: "a", plannedStartAt: "2026-08-03T11:00:00Z", functionCode: "gdve", plannedMinutes: 120, actualMinutes: 90, actualDecision: "approved", status: "hr_ready" },
+      { id: "b", requestId: "b", plannedStartAt: "2026-08-11T11:00:00Z", functionCode: "mkt", plannedMinutes: 60, actualMinutes: 0, status: "approved" },
+      { id: "c", requestId: "c", plannedStartAt: "2026-09-01T11:00:00Z", functionCode: "gdve", plannedMinutes: 180, actualMinutes: 180, actualDecision: "approved", status: "hr_ready" },
+    ], "2026-08");
+
+    expect(report).toEqual([
+      { functionCode: "gdve", requestCount: 1, plannedMinutes: 120, actualMinutes: 90, verifiedMinutes: 90 },
+      { functionCode: "mkt", requestCount: 1, plannedMinutes: 60, actualMinutes: 0, verifiedMinutes: 0 },
+    ]);
+  });
 });
