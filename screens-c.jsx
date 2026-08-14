@@ -2856,7 +2856,7 @@ function TeamGanttScreen({ onOpen }) {
       {viewMode === "timeline" ? (
         <>
           <div className="team-schedule__legend" aria-label="Timeline legend">
-            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__draft-marker"></i>1st Draft</span><span><i className="team-schedule__final-approved-marker" style={{ display: "inline-block", position: "relative", top: 2, width: 2, height: 12, background: "#2563EB" }}></i>Final/Approved</span><span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
+            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>Asset First Draft</span><span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span><span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
           </div>
           <div className="gantt team-schedule__timeline" data-testid="flowmate-team-gantt-chart">
             <div className="gantt__header">
@@ -2884,7 +2884,7 @@ function TeamGanttScreen({ onOpen }) {
                       <span className="team-schedule__production" style={{ width: `${Math.min(100, (task.productionSpanDays / task.spanDays) * 100)}%` }}></span>
                       {task.reviewSpanDays > 0 && <span className="team-schedule__review-span" style={{ left: `${Math.max(0, ((task.draftOffset - task.startOffset) / task.spanDays) * 100)}%`, width: `${Math.min(100, (task.reviewSpanDays / task.spanDays) * 100)}%` }}></span>}
                       <span className="team-schedule__task-label">{task.item.priority === "urgent" ? "⚑ " : ""}<b className="mono">{task.item.id}</b> {task.item.title}</span>
-                      <span className="team-schedule__draft-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.draftOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%` }} title="1st Draft"></span>
+                      <span className="team-schedule__draft-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.draftOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%` }} title="Asset First Draft Due"></span>
                       {task.finalApprovedOffset !== null && <span className="team-schedule__final-approved-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.finalApprovedOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%`, position: "absolute", top: -3, bottom: -3, zIndex: 3, width: 2, background: "#2563EB", pointerEvents: "none" }} title={`Final/Approved: ${calendarDateLabelC(task.finalApprovedKey)}`}></span>}
                       {task.launchOffset !== null && <span className="gantt__launch-marker" title="Launch"></span>}
                     </button>)}

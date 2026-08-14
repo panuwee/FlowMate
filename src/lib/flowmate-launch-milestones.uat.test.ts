@@ -132,3 +132,17 @@ it("keeps Creative Request launch milestones aligned across Calendar compact car
   expect(gantt).toContain('Asset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}');
   expect(gantt).toContain('Launch: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}');
 });
+
+it("keeps Team Schedule legend markers from reusing absolute task-bar marker styles", () => {
+  const screenC = repo("screens-c.jsx");
+  const css = repo("app.css");
+  const teamSchedule = screenC.slice(screenC.indexOf("function TeamGanttScreen"), screenC.indexOf("function CalendarScreen"));
+  const legend = teamSchedule.slice(teamSchedule.indexOf('<div className="team-schedule__legend"'), teamSchedule.indexOf('<div className="gantt team-schedule__timeline"'));
+
+  expect(legend).toContain("team-schedule__legend-draft-marker");
+  expect(legend).toContain("Asset First Draft");
+  expect(legend).not.toContain(">1st Draft<");
+  expect(legend).not.toContain('<i className="team-schedule__draft-marker"></i>');
+  expect(css).toContain(".team-schedule__legend-draft-marker");
+  expect(css).toContain(".team-schedule__draft-marker { position: absolute;");
+});

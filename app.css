@@ -2525,6 +2525,16 @@ button.gantt__capacity-summary:focus-visible {
   text-align: left;
   text-shadow: 0 1px 1px rgba(17, 24, 39, 0.45);
 }
+.team-schedule__legend-draft-marker,
+.team-schedule__legend-final-approved-marker {
+  display: inline-block;
+  position: relative;
+  top: 2px;
+  width: 2px;
+  height: 12px;
+}
+.team-schedule__legend-draft-marker { background: #F59E0B; }
+.team-schedule__legend-final-approved-marker { background: #2563EB; }
 .team-schedule__draft-marker { position: absolute; top: -3px; bottom: -3px; z-index: 3; width: 2px; background: #F59E0B; pointer-events: none; }
 .team-schedule__task .gantt__launch-marker { right: -5px; }
 .team-schedule__workload-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; align-items: start; }

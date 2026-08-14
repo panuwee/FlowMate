@@ -3193,17 +3193,9 @@ function TeamGanttScreen({
   }), "Review"), React.createElement("span", null, React.createElement("i", {
     className: "schedule-legend is-blocked"
   }), "Blocked"), React.createElement("span", null, React.createElement("i", {
-    className: "team-schedule__draft-marker"
-  }), "1st Draft"), React.createElement("span", null, React.createElement("i", {
-    className: "team-schedule__final-approved-marker",
-    style: {
-      display: "inline-block",
-      position: "relative",
-      top: 2,
-      width: 2,
-      height: 12,
-      background: "#2563EB"
-    }
+    className: "team-schedule__legend-draft-marker"
+  }), "Asset First Draft"), React.createElement("span", null, React.createElement("i", {
+    className: "team-schedule__legend-final-approved-marker"
   }), "Final/Approved"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
   }), "Launch"), React.createElement("span", null, React.createElement("i", {
@@ -3310,7 +3302,7 @@ function TeamGanttScreen({
       style: {
         left: `${Math.min(100, Math.max(0, (task.draftOffset - task.startOffset + 0.5) / task.spanDays * 100))}%`
       },
-      title: "1st Draft"
+      title: "Asset First Draft Due"
     }), task.finalApprovedOffset !== null && React.createElement("span", {
       className: "team-schedule__final-approved-marker",
       style: {
