@@ -1,4 +1,4 @@
-/* AUTO-GENERATED from screens-a.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run npm run build:github. */
+/* AUTO-GENERATED from screens-a.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
 const {
   useState,
   useEffect,
@@ -924,7 +924,8 @@ const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
 const FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET = 4;
 const FLOWMATE_MIDDAY_CUTOFF_HOUR = 12;
 const FLOWMATE_PRODUCTION_CUTOFF_HOUR = 15;
-const FLOWMATE_REVIEW_BUFFER_WORKING_DAYS = 2;
+const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 7;
+const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 5;
 const FLOWMATE_CREATIVE_UNIT_EFFORT = {
   banner: 2,
   "hero-album": 16,
@@ -979,8 +980,13 @@ function clampFlowMateDateToToday(dateValue) {
 }
 function getFlowMateDraftDateForLaunchDate(launchDate) {
   const nextLaunchDate = clampFlowMateDateToToday(launchDate);
-  const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_REVIEW_BUFFER_WORKING_DAYS);
+  const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS);
   return clampFlowMateDateToToday(draftDate);
+}
+function getFlowMateFinalApprovedDateForLaunchDate(launchDate) {
+  const nextLaunchDate = clampFlowMateDateToToday(launchDate);
+  const finalApprovedDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS);
+  return clampFlowMateDateToToday(finalApprovedDate);
 }
 function getFlowMateEarliestCreativeDraftDate(draft, now = new Date()) {
   const productionStart = getFlowMateProductionStartBucket(now);
@@ -993,12 +999,9 @@ function getFlowMateEarliestCreativeDraftDate(draft, now = new Date()) {
   }
   return cursorDate;
 }
-function getFlowMateAutoCreativeDraftDate(draft, now = new Date()) {
+function getFlowMateAutoCreativeDraftDate(draft) {
   const launchDate = clampFlowMateDateToToday(draft?.launchDate);
-  const reviewTargetDate = getFlowMateDraftDateForLaunchDate(launchDate);
-  const earliestProductionDate = getFlowMateEarliestCreativeDraftDate(draft, now);
-  const effortAwareDate = reviewTargetDate > earliestProductionDate ? reviewTargetDate : earliestProductionDate;
-  return effortAwareDate > launchDate ? launchDate : effortAwareDate;
+  return getFlowMateDraftDateForLaunchDate(launchDate);
 }
 function getFlowMateNextWorkingDay(dateValue) {
   const parts = String(dateValue || "").slice(0, 10).split("-").map(part => Number(part));
@@ -1086,9 +1089,9 @@ function getFlowMateCreativeTimePressure(draft) {
 }
 function getFlowMateAutoUrgentReason(timePressure) {
   if (timePressure.isReviewBufferAtRisk && !timePressure.isInsufficient) {
-    return `Auto urgent: earliest feasible 1st Draft is ${timePressure.dueDate}, leaving less than ${FLOWMATE_REVIEW_BUFFER_WORKING_DAYS} working days before Launch ${timePressure.launchDate}.`;
+    return `Auto urgent: the earliest feasible Asset First Draft is ${timePressure.dueDate}, after the fixed Asset First Draft Due date before Launch ${timePressure.launchDate}.`;
   }
-  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before 1st Draft.`;
+  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before Asset First Draft Due.`;
 }
 function normalizeFlowMateQuickDraft(draft) {
   const nextDraft = {
@@ -1127,7 +1130,8 @@ function normalizeFlowMateCreativeDraft(draft) {
   };
   return {
     ...normalizedDraft,
-    dueDate: getFlowMateAutoCreativeDraftDate(normalizedDraft)
+    dueDate: getFlowMateAutoCreativeDraftDate(normalizedDraft),
+    finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(launchDate)
   };
 }
 function normalizeFlowMatePublishTimeInput(value) {
@@ -1189,6 +1193,7 @@ function getDefaultCreativeDraft() {
     priority: "normal",
     urgentReason: "",
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
+    finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(todayDate),
     launchDate: todayDate,
     publishTime: FLOWMATE_PUBLISH_TIME_OPTIONS[0],
     marketingPlanContentItemId: "",
@@ -1464,7 +1469,7 @@ function CreateScreen({
       const confirmed = window.flowmatePrompt ? await window.flowmatePrompt({
         title: "เวลาไม่เพียงพอ",
         hideInput: true,
-        note: timePressure.isInsufficient ? `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before 1st Draft. Priority will be set to Urgent.` : `The earliest feasible 1st Draft is ${timePressure.dueDate}, leaving less than ${FLOWMATE_REVIEW_BUFFER_WORKING_DAYS} working days before Launch. Priority will be set to Urgent.`,
+        note: timePressure.isInsufficient ? `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before Asset First Draft Due. Priority will be set to Urgent.` : `The earliest feasible Asset First Draft is ${timePressure.dueDate}, after the fixed Asset First Draft Due date. Priority will be set to Urgent.`,
         confirmText: "Set Urgent and submit"
       }) : "";
       if (confirmed === null) {
@@ -1892,13 +1897,14 @@ function CreativeRequestForm({
     };
   }, []);
   function update(field, next) {
-    const applyAutoDraftDate = nextValue => ({
+    const applyCreativeMilestones = nextValue => ({
       ...nextValue,
-      dueDate: getFlowMateAutoCreativeDraftDate(nextValue)
+      dueDate: getFlowMateAutoCreativeDraftDate(nextValue),
+      finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(nextValue.launchDate)
     });
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
-      onChange(applyAutoDraftDate({
+      onChange(applyCreativeMilestones({
         ...value,
         assetType: nextType.assetType,
         assetSubtype: nextType.key
@@ -1907,7 +1913,7 @@ function CreativeRequestForm({
     }
     if (field === "assetSubtype2") {
       if (!next) {
-        onChange(applyAutoDraftDate({
+        onChange(applyCreativeMilestones({
           ...value,
           assetType2: "",
           assetSubtype2: "",
@@ -1916,7 +1922,7 @@ function CreativeRequestForm({
         return;
       }
       const nextType = getFlowMateCreativeTypeOption(next);
-      onChange(applyAutoDraftDate({
+      onChange(applyCreativeMilestones({
         ...value,
         assetType2: nextType.assetType,
         assetSubtype2: nextType.key,
@@ -1926,7 +1932,7 @@ function CreativeRequestForm({
     }
     if (field === "launchDate") {
       const nextLaunchDate = clampFlowMateDateToToday(next);
-      onChange(applyAutoDraftDate({
+      onChange(applyCreativeMilestones({
         ...value,
         launchDate: nextLaunchDate
       }));
@@ -1936,7 +1942,7 @@ function CreativeRequestForm({
       ...value,
       [field]: next
     };
-    onChange(["assetCount", "assetCount2"].includes(field) ? applyAutoDraftDate(nextValue) : nextValue);
+    onChange(["assetCount", "assetCount2"].includes(field) ? applyCreativeMilestones(nextValue) : nextValue);
   }
   function toggleChannel(channelLabel) {
     const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
@@ -2198,7 +2204,7 @@ function CreativeRequestForm({
     className: `field ${errors.dueDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "1st Draft ", React.createElement("span", {
+  }, "Asset First Draft Due ", React.createElement("span", {
     className: "req"
   }, "*")), React.createElement("input", {
     className: "input",
@@ -2213,9 +2219,26 @@ function CreativeRequestForm({
       fontSize: 12,
       marginTop: 6
     }
-  }, "Generated from effort, current production cutoff, and Launch Date review buffer."), errors.dueDate && React.createElement("div", {
+  }, "Generated as T-7 weekdays before Launch Date."), errors.dueDate && React.createElement("div", {
     className: "field__error"
   }, errors.dueDate)), React.createElement("div", {
+    className: "field"
+  }, React.createElement("label", {
+    className: "field__label"
+  }, "Asset Final/Approved Due"), React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: value.finalApprovedDueDate || getFlowMateFinalApprovedDateForLaunchDate(value.launchDate),
+    readOnly: true,
+    disabled: true,
+    min: todayDate
+  }), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginTop: 6
+    }
+  }, "Generated as T-5 weekdays before Launch Date.")), React.createElement("div", {
     className: `field ${errors.launchDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -3831,9 +3854,15 @@ function DetailScreen({
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"
-  }, w.type === "quick" ? "1st Review / Draft" : "1st Draft"), React.createElement("div", {
+  }, w.type === "quick" ? "1st Review / Draft" : "Asset First Draft Due"), React.createElement("div", {
     className: "meta-row__val"
-  }, w.dueFullLabel || w.dueLabel || "-")), React.createElement("div", {
+  }, w.dueFullLabel || w.dueLabel || "-")), w.type === "creative" && React.createElement("div", {
+    className: "meta-row"
+  }, React.createElement("div", {
+    className: "meta-row__lbl"
+  }, "Asset Final/Approved Due"), React.createElement("div", {
+    className: "meta-row__val"
+  }, w.finalApprovedDueFullLabel || w.finalApprovedDueLabel || w.finalApprovedDueDate || "-")), React.createElement("div", {
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"

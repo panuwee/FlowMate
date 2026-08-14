@@ -1,4 +1,4 @@
-/* AUTO-GENERATED from screens-b.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run npm run build:github. */
+/* AUTO-GENERATED from screens-b.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
 const {
   useState: useStateB,
   useEffect: useEffectB,
@@ -190,8 +190,8 @@ Object.assign(window, {
   runFlowMateBoardRefresh
 });
 function exportRowsCsv(rows) {
-  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "1st Draft", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
-  const csvRows = rows.map(w => [w.id, w.title, w.type, STATUS_LABEL[w.status] || w.status, w.campaign || "", w.channel || w.platform || "", w.publishFullLabel || w.publishLabel || w.publishDate || "", w.launchFullLabel || w.launchLabel || w.launchDate || "", w.dueFullLabel || w.dueLabel || w.dueDate || "", w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : ASSET_LABEL[w.assetType] || w.assetType || "", w.assetCount || "", w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned", w.requester || "", w.requesterTeam || "", ASSET_LABEL[w.assetType] || w.assetType || "", w.effort || "", w.priority || ""]);
+  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "Due / First Draft", "Final / Approved", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
+  const csvRows = rows.map(w => [w.id, w.title, w.type, STATUS_LABEL[w.status] || w.status, w.campaign || "", w.channel || w.platform || "", w.publishFullLabel || w.publishLabel || w.publishDate || "", w.launchFullLabel || w.launchLabel || w.launchDate || "", w.dueFullLabel || w.dueLabel || w.dueDate || "", w.type === "creative" ? w.finalApprovedDueFullLabel || w.finalApprovedDueLabel || w.finalApprovedDueDate || "" : "", w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : ASSET_LABEL[w.assetType] || w.assetType || "", w.assetCount || "", w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned", w.requester || "", w.requesterTeam || "", ASSET_LABEL[w.assetType] || w.assetType || "", w.effort || "", w.priority || ""]);
   window.flowmateDownloadCsv(`flowmate-list-${new Date().toISOString().slice(0, 10)}.csv`, columns, csvRows);
 }
 function ListScreen({
@@ -443,7 +443,7 @@ function ListScreen({
     className: "tbl"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
     className: "col-id"
-  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Publish Date"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Requester / Team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Priority"), React.createElement("th", null, "1st Draft"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, rows.map(w => React.createElement("tr", {
+  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Publish Date"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Requester / Team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Due / First Draft"), React.createElement("th", null, "Final / Approved"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, rows.map(w => React.createElement("tr", {
     key: w.id,
     className: w.overdue ? "is-overdue" : "",
     onClick: () => openListWorkItem(w)
@@ -500,11 +500,21 @@ function ListScreen({
     value: w.effort
   })), React.createElement("td", null, React.createElement(PriorityBadge, {
     level: w.priority
-  })), React.createElement("td", null, React.createElement(DueBadge, {
+  })), React.createElement("td", null, React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 11
+    }
+  }, w.type === "creative" ? "First Draft" : "Due"), React.createElement(DueBadge, {
     delta: w.dueDelta,
     label: w.dueLabel,
     status: w.status
   })), React.createElement("td", null, React.createElement("span", {
+    className: "mono muted",
+    style: {
+      fontSize: 12
+    }
+  }, w.type === "creative" ? w.finalApprovedDueLabel || "-" : "-")), React.createElement("td", null, React.createElement("span", {
     className: "row",
     style: {
       gap: 4

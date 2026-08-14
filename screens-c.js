@@ -1,4 +1,4 @@
-/* AUTO-GENERATED from screens-c.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run npm run build:github. */
+/* AUTO-GENERATED from screens-c.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
 const {
   useState: useStateC,
   useEffect: useEffectC
@@ -193,6 +193,9 @@ function mapFlowMatePlanningViewRowC(item) {
     dueDate: item.first_draft_date || "",
     dueLabel: flowMateDateLabelPlanningC(item.first_draft_date),
     dueFullLabel: flowMateDateFullLabelPlanningC(item.first_draft_date),
+    finalApprovedDueDate: item.final_approved_due_date || "",
+    finalApprovedDueLabel: flowMateDateLabelPlanningC(item.final_approved_due_date),
+    finalApprovedDueFullLabel: flowMateDateFullLabelPlanningC(item.final_approved_due_date),
     launchDate: item.launch_date || "",
     launchLabel: flowMateDateLabelPlanningC(item.launch_date),
     launchFullLabel: flowMateDateFullLabelPlanningC(item.launch_date),
@@ -1069,6 +1072,7 @@ function PlanningChannelViewScreen({
     const planningReadiness = deriveFlowMatePlanningReadinessC(row);
     const planningDateLabel = row.planningFullLabel || row.planningLabel || row.planningDate || row.publishFullLabel || row.publishLabel || row.launchFullLabel || row.launchLabel || "-";
     const draftLabel = row.dueFullLabel || row.dueLabel || row.dueDate || "-";
+    const finalApprovedLabel = row.finalApprovedDueFullLabel || row.finalApprovedDueLabel || row.finalApprovedDueDate || "-";
     return React.createElement("button", {
       key: `${channel}-${row.id}`,
       type: "button",
@@ -1084,7 +1088,7 @@ function PlanningChannelViewScreen({
       className: "planning-card__title"
     }, row.title || "Untitled request"), React.createElement("div", {
       className: "planning-card__meta"
-    }, React.createElement("span", null, "Campaign"), React.createElement("strong", null, row.campaign || "No campaign"), React.createElement("span", null, "Channel"), React.createElement("strong", null, channel), React.createElement("span", null, "Publish / launch"), React.createElement("strong", null, planningDateLabel), React.createElement("span", null, "1st Draft"), React.createElement("strong", null, draftLabel), React.createElement("span", null, "Status"), React.createElement("strong", null, STATUS_LABEL[row.status] || row.status || "-"), React.createElement("span", null, "Priority"), React.createElement("strong", null, row.priority || "-"), React.createElement("span", null, "Owner"), React.createElement("strong", null, owner), React.createElement("span", null, "Type / Skill"), React.createElement("strong", null, typeSkill)));
+    }, React.createElement("span", null, "Campaign"), React.createElement("strong", null, row.campaign || "No campaign"), React.createElement("span", null, "Channel"), React.createElement("strong", null, channel), React.createElement("span", null, "Publish / launch"), React.createElement("strong", null, planningDateLabel), React.createElement("span", null, "First Draft"), React.createElement("strong", null, draftLabel), React.createElement("span", null, "Final / Approved"), React.createElement("strong", null, finalApprovedLabel), React.createElement("span", null, "Status"), React.createElement("strong", null, STATUS_LABEL[row.status] || row.status || "-"), React.createElement("span", null, "Priority"), React.createElement("strong", null, row.priority || "-"), React.createElement("span", null, "Owner"), React.createElement("strong", null, owner), React.createElement("span", null, "Type / Skill"), React.createElement("strong", null, typeSkill)));
   }
   return React.createElement("div", {
     className: "page planning-page"
@@ -2278,6 +2282,7 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return null;
   const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
+  const finalApprovedKey = ganttDateKeyFromRowC(row, ["finalApprovedDueDate", "final_approved_due_date"]);
   const rawStartKey = ganttSuggestedStartKeyC(row, allocationStartKey) || dueKey;
   const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
   const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
@@ -2288,9 +2293,11 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
   const endOffset = Math.floor((calendarParseKeyC(clampedEndKey).getTime() - timeline.startDate.getTime()) / 86400000);
   const draftOffset = dueKey >= timeline.startKey && dueKey <= timeline.endKey ? Math.floor((calendarParseKeyC(dueKey).getTime() - timeline.startDate.getTime()) / 86400000) : dueKey < timeline.startKey ? 0 : timeline.totalDays - 1;
   const launchOffset = launchKey && launchKey >= timeline.startKey && launchKey <= timeline.endKey ? Math.floor((calendarParseKeyC(launchKey).getTime() - timeline.startDate.getTime()) / 86400000) : null;
+  const finalApprovedOffset = finalApprovedKey && finalApprovedKey >= timeline.startKey && finalApprovedKey <= timeline.endKey ? Math.floor((calendarParseKeyC(finalApprovedKey).getTime() - timeline.startDate.getTime()) / 86400000) : null;
   return {
     item: row,
     dueKey,
+    finalApprovedKey,
     launchKey,
     startOffset,
     draftOffset,
@@ -2299,6 +2306,7 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
     reviewSpanDays: launchOffset === null ? 0 : Math.max(1, launchOffset - draftOffset + 1),
     spanDays: Math.max(1, endOffset - startOffset + 1),
     launchOffset,
+    finalApprovedOffset,
     spansToLaunch: Boolean(launchKey && launchKey > dueKey),
     isSuggestedStart: !ganttDateKeyFromRowC(row, ["startedAt", "started_at"]),
     priorityClass: row.priority === "urgent" ? "is-urgent" : row.priority === "high" ? "is-high" : row.priority === "low" ? "is-low" : "is-normal",
@@ -3185,6 +3193,18 @@ function TeamGanttScreen({
   }), "Review"), React.createElement("span", null, React.createElement("i", {
     className: "schedule-legend is-blocked"
   }), "Blocked"), React.createElement("span", null, React.createElement("i", {
+    className: "team-schedule__draft-marker"
+  }), "1st Draft"), React.createElement("span", null, React.createElement("i", {
+    className: "team-schedule__final-approved-marker",
+    style: {
+      display: "inline-block",
+      position: "relative",
+      top: 2,
+      width: 2,
+      height: 12,
+      background: "#2563EB"
+    }
+  }), "Final/Approved"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
   }), "Launch"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-line"
@@ -3268,7 +3288,7 @@ function TeamGanttScreen({
         gridColumn: `${task.startOffset + 1} / span ${task.spanDays}`
       },
       onClick: () => openScheduleItem(task.item),
-      title: `${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\n1st Draft: ${calendarDateLabelC(task.dueKey)}${task.launchKey ? `\nLaunch: ${calendarDateLabelC(task.launchKey)}` : ""}`,
+      title: `${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\nAsset First Draft Due: ${calendarDateLabelC(task.dueKey)}\nAsset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}\nLaunch: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}`,
       "data-testid": "flowmate-gantt-task-bar"
     }, React.createElement("span", {
       className: "team-schedule__production",
@@ -3291,6 +3311,19 @@ function TeamGanttScreen({
         left: `${Math.min(100, Math.max(0, (task.draftOffset - task.startOffset + 0.5) / task.spanDays * 100))}%`
       },
       title: "1st Draft"
+    }), task.finalApprovedOffset !== null && React.createElement("span", {
+      className: "team-schedule__final-approved-marker",
+      style: {
+        left: `${Math.min(100, Math.max(0, (task.finalApprovedOffset - task.startOffset + 0.5) / task.spanDays * 100))}%`,
+        position: "absolute",
+        top: -3,
+        bottom: -3,
+        zIndex: 3,
+        width: 2,
+        background: "#2563EB",
+        pointerEvents: "none"
+      },
+      title: `Final/Approved: ${calendarDateLabelC(task.finalApprovedKey)}`
     }), task.launchOffset !== null && React.createElement("span", {
       className: "gantt__launch-marker",
       title: "Launch"
@@ -3646,7 +3679,17 @@ function CalendarScreen({
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, isLeaveItem ? leavePeriodLabel : `${owner} - ${STATUS_LABEL[item.status] || item.status}`), !compact && item.launchLabel && React.createElement("span", {
+    }, isLeaveItem ? leavePeriodLabel : `${owner} - ${STATUS_LABEL[item.status] || item.status}`), !compact && item.type === "creative" && item.dueLabel && React.createElement("span", {
+      className: "muted",
+      style: {
+        fontSize: 11
+      }
+    }, "First Draft: ", item.dueFullLabel || item.dueLabel), item.type === "creative" && item.finalApprovedDueLabel && React.createElement("span", {
+      className: "muted",
+      style: {
+        fontSize: 11
+      }
+    }, "Final / Approved: ", item.finalApprovedDueFullLabel || item.finalApprovedDueLabel), !compact && item.launchLabel && React.createElement("span", {
       className: "muted",
       style: {
         fontSize: 11
@@ -3869,7 +3912,7 @@ function CalendarScreen({
     }
   }, React.createElement("table", {
     className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Due date"), React.createElement("th", null, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Launch date"))), React.createElement("tbody", null, agendaRows.map(item => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Due / First Draft"), React.createElement("th", null, "Final / Approved"), React.createElement("th", null, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Launch date"))), React.createElement("tbody", null, agendaRows.map(item => React.createElement("tr", {
     key: item.id,
     className: item.overdue ? "is-overdue" : "",
     onClick: () => openCalendarItem(item)
@@ -3879,6 +3922,8 @@ function CalendarScreen({
     status: item.status
   })), React.createElement("td", {
     className: "mono"
+  }, item.type === "creative" ? item.finalApprovedDueFullLabel || item.finalApprovedDueLabel || "-" : "-"), React.createElement("td", {
+    className: "mono"
   }, item.id), React.createElement("td", {
     className: "col-title"
   }, item.title), React.createElement("td", null, calendarTypePill(item)), React.createElement("td", null, calendarStatusPill(item)), React.createElement("td", null, item.assignee && MEMBERS_BY_ID[item.assignee] ? MEMBERS_BY_ID[item.assignee].name : item.assigneeOtherName || "Unassigned"), React.createElement("td", null, React.createElement(PriorityBadge, {
@@ -3886,7 +3931,7 @@ function CalendarScreen({
   })), React.createElement("td", null, React.createElement("span", {
     className: "muted"
   }, item.launchFullLabel || item.launchLabel || "-")))), agendaRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "8"
+    colSpan: "9"
   }, React.createElement("span", {
     className: "muted"
   }, "No work items match this calendar selection.")))))), React.createElement(Source, null, loadState.status === "live" ? "Supabase work_items and leave_requests tables" : "No local fallback data", " - due date calendar placement"), leaveModalOpen && React.createElement("div", {

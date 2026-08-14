@@ -334,7 +334,7 @@ async function loadFlowMateAiTagRowsForList(workItemIds = []) {
 }
 
 async function loadFlowMateWorkItemsForList(options = {}) {
-  const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
+  const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,final_approved_due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
   const isGdveCreativeWorkspace = activeTeam === "gdve";
   const actorUserId = window.FLOWMATE_CURRENT_USER?.id;
@@ -633,6 +633,9 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
       dueLabel: flowmateDateLabel(item.due_date),
       dueFullLabel: flowmateDateFullLabel(item.due_date),
       dueDelta: flowmateDueDelta(item.due_date),
+      finalApprovedDueDate: item.final_approved_due_date,
+      finalApprovedDueLabel: flowmateDateLabel(item.final_approved_due_date),
+      finalApprovedDueFullLabel: flowmateDateFullLabel(item.final_approved_due_date),
       launchDate: item.launch_date,
       launchLabel: flowmateDateLabel(item.launch_date),
       launchFullLabel: flowmateDateTimeWithOptionalTimeLabel(item.launch_date, item.publish_time),
@@ -785,7 +788,7 @@ if (typeof window.addEventListener === "function") {
 // loadFlowMateListRows() with its original default contract.
 // ---------------------------------------------------------------------------
 const FLOWMATE_ACTIVE_BOARD_STATUSES = ["unassigned", "assigned", "in_progress", "review", "blocked"];
-const FLOWMATE_BOARD_WORK_ITEM_COLUMNS = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,created_at,delivered_at,archived_at,archive_reason,owning_team_code";
+const FLOWMATE_BOARD_WORK_ITEM_COLUMNS = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,final_approved_due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,created_at,delivered_at,archived_at,archive_reason,owning_team_code";
 
 function flowMateClampPageSize(value, fallback = 50) {
   const parsed = Number(value);
@@ -980,6 +983,9 @@ function normalizeFlowMateBoardWorkItem(item, related = {}) {
     dueLabel: flowmateDateLabel(item.due_date),
     dueFullLabel: flowmateDateFullLabel(item.due_date),
     dueDelta: flowmateDueDelta(item.due_date),
+    finalApprovedDueDate: item.final_approved_due_date,
+    finalApprovedDueLabel: flowmateDateLabel(item.final_approved_due_date),
+    finalApprovedDueFullLabel: flowmateDateFullLabel(item.final_approved_due_date),
     launchDate: item.launch_date,
     launchLabel: flowmateDateLabel(item.launch_date),
     launchFullLabel: flowmateDateTimeWithOptionalTimeLabel(item.launch_date, item.publish_time),
@@ -1150,6 +1156,9 @@ function normalizeFlowMateDeliveredRow(row) {
     dueDate: row.due_date || null,
     dueLabel: flowmateDateLabel(row.due_date),
     dueFullLabel: flowmateDateFullLabel(row.due_date),
+    finalApprovedDueDate: row.final_approved_due_date || null,
+    finalApprovedDueLabel: flowmateDateLabel(row.final_approved_due_date),
+    finalApprovedDueFullLabel: flowmateDateFullLabel(row.final_approved_due_date),
     launchDate: row.launch_date || null,
     deliveredAt: row.delivered_at || null,
     deliveredLabel: flowmateDateTimeFullLabel(row.delivered_at),
@@ -1206,6 +1215,9 @@ function normalizeFlowMateKpiRow(row) {
     dueDate: row.due_date || null,
     dueLabel: flowmateDateLabel(row.due_date),
     dueFullLabel: flowmateDateFullLabel(row.due_date),
+    finalApprovedDueDate: row.final_approved_due_date || null,
+    finalApprovedDueLabel: flowmateDateLabel(row.final_approved_due_date),
+    finalApprovedDueFullLabel: flowmateDateFullLabel(row.final_approved_due_date),
     launchDate: row.launch_date || null,
     launchLabel: flowmateDateLabel(row.launch_date),
     createdAt: row.created_at || null,
@@ -1234,7 +1246,7 @@ async function loadFlowMateKpiRows({ month } = {}) {
   }
   let query = window.flowmateSupabase
     .from("flowmate_kpi_work_items_v")
-    .select("id,display_id,title,work_type,status,priority,effort_point,due_date,launch_date,created_at,assigned_at,delivered_at,archived_at,final_owner_member_id,owner_member_id,owner_name,final_owner_name,assignee_other_name,requester_name,requester_team,review_round,campaign_name,project_name,platform,size_format,ai_tags");
+    .select("id,display_id,title,work_type,status,priority,effort_point,due_date,final_approved_due_date,launch_date,created_at,assigned_at,delivered_at,archived_at,final_owner_member_id,owner_member_id,owner_name,final_owner_name,assignee_other_name,requester_name,requester_team,review_round,campaign_name,project_name,platform,size_format,ai_tags");
   if (normalizedMonth) {
     const monthStart = `${normalizedMonth}-01`;
     const nextMonthDate = new Date(`${monthStart}T00:00:00Z`);
@@ -1407,7 +1419,7 @@ async function loadFlowMateTeamScheduleRows() {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   const { data, error } = await window.flowmateSupabase
     .from("flowmate_team_schedule_v")
-    .select("work_item_id,display_id,title,status,priority,effort_point,owner_member_id,first_draft_date,launch_date,first_assigned_at,actual_started_at,suggested_start_date,asset_type,asset_subtype")
+    .select("work_item_id,display_id,title,status,priority,effort_point,owner_member_id,first_draft_date,final_approved_due_date,launch_date,first_assigned_at,actual_started_at,suggested_start_date,asset_type,asset_subtype")
     .order("first_draft_date", { ascending: true });
   if (error && ["42P01", "PGRST205"].includes(error.code)) return loadFlowMateCalendarRows();
   if (error) throw error;
@@ -1422,6 +1434,9 @@ async function loadFlowMateTeamScheduleRows() {
     effort: Number(row.effort_point || 0),
     assignee: row.owner_member_id,
     dueDate: row.first_draft_date,
+    finalApprovedDueDate: row.final_approved_due_date,
+    finalApprovedDueLabel: flowmateDateLabel(row.final_approved_due_date),
+    finalApprovedDueFullLabel: flowmateDateFullLabel(row.final_approved_due_date),
     launchDate: row.launch_date,
     assignedAt: row.first_assigned_at,
     startedAt: row.actual_started_at,

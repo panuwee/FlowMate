@@ -208,6 +208,9 @@ function mapFlowMatePlanningViewRowC(item) {
     dueDate: item.first_draft_date || "",
     dueLabel: flowMateDateLabelPlanningC(item.first_draft_date),
     dueFullLabel: flowMateDateFullLabelPlanningC(item.first_draft_date),
+    finalApprovedDueDate: item.final_approved_due_date || "",
+    finalApprovedDueLabel: flowMateDateLabelPlanningC(item.final_approved_due_date),
+    finalApprovedDueFullLabel: flowMateDateFullLabelPlanningC(item.final_approved_due_date),
     launchDate: item.launch_date || "",
     launchLabel: flowMateDateLabelPlanningC(item.launch_date),
     launchFullLabel: flowMateDateFullLabelPlanningC(item.launch_date),
@@ -898,6 +901,7 @@ function PlanningChannelViewScreen({ onOpen }) {
     const planningReadiness = deriveFlowMatePlanningReadinessC(row);
     const planningDateLabel = row.planningFullLabel || row.planningLabel || row.planningDate || row.publishFullLabel || row.publishLabel || row.launchFullLabel || row.launchLabel || "-";
     const draftLabel = row.dueFullLabel || row.dueLabel || row.dueDate || "-";
+    const finalApprovedLabel = row.finalApprovedDueFullLabel || row.finalApprovedDueLabel || row.finalApprovedDueDate || "-";
 
     return (
       <button key={`${channel}-${row.id}`} type="button" className="planning-card" onClick={() => openPlanningCard(row)}>
@@ -910,7 +914,8 @@ function PlanningChannelViewScreen({ onOpen }) {
           <span>Campaign</span><strong>{row.campaign || "No campaign"}</strong>
           <span>Channel</span><strong>{channel}</strong>
           <span>Publish / launch</span><strong>{planningDateLabel}</strong>
-          <span>1st Draft</span><strong>{draftLabel}</strong>
+          <span>First Draft</span><strong>{draftLabel}</strong>
+          <span>Final / Approved</span><strong>{finalApprovedLabel}</strong>
           <span>Status</span><strong>{STATUS_LABEL[row.status] || row.status || "-"}</strong>
           <span>Priority</span><strong>{row.priority || "-"}</strong>
           <span>Owner</span><strong>{owner}</strong>
@@ -2041,6 +2046,7 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return null;
   const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
+  const finalApprovedKey = ganttDateKeyFromRowC(row, ["finalApprovedDueDate", "final_approved_due_date"]);
   const rawStartKey = ganttSuggestedStartKeyC(row, allocationStartKey) || dueKey;
   const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
   const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
@@ -2055,9 +2061,13 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
   const launchOffset = launchKey && launchKey >= timeline.startKey && launchKey <= timeline.endKey
     ? Math.floor((calendarParseKeyC(launchKey).getTime() - timeline.startDate.getTime()) / 86400000)
     : null;
+  const finalApprovedOffset = finalApprovedKey && finalApprovedKey >= timeline.startKey && finalApprovedKey <= timeline.endKey
+    ? Math.floor((calendarParseKeyC(finalApprovedKey).getTime() - timeline.startDate.getTime()) / 86400000)
+    : null;
   return {
     item: row,
     dueKey,
+    finalApprovedKey,
     launchKey,
     startOffset,
     draftOffset,
@@ -2066,6 +2076,7 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
     reviewSpanDays: launchOffset === null ? 0 : Math.max(1, launchOffset - draftOffset + 1),
     spanDays: Math.max(1, endOffset - startOffset + 1),
     launchOffset,
+    finalApprovedOffset,
     spansToLaunch: Boolean(launchKey && launchKey > dueKey),
     isSuggestedStart: !ganttDateKeyFromRowC(row, ["startedAt", "started_at"]),
     priorityClass: row.priority === "urgent" ? "is-urgent" : row.priority === "high" ? "is-high" : row.priority === "low" ? "is-low" : "is-normal",
@@ -2845,7 +2856,7 @@ function TeamGanttScreen({ onOpen }) {
       {viewMode === "timeline" ? (
         <>
           <div className="team-schedule__legend" aria-label="Timeline legend">
-            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
+            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__draft-marker"></i>1st Draft</span><span><i className="team-schedule__final-approved-marker" style={{ display: "inline-block", position: "relative", top: 2, width: 2, height: 12, background: "#2563EB" }}></i>Final/Approved</span><span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
           </div>
           <div className="gantt team-schedule__timeline" data-testid="flowmate-team-gantt-chart">
             <div className="gantt__header">
@@ -2869,11 +2880,12 @@ function TeamGanttScreen({ onOpen }) {
                   {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
                   <div className="gantt__lane team-schedule__lane" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}>
                     {memberLeaves.map(leave => <div key={leave.segmentKey} className={`gantt__leave ${leave.isPartial ? "is-partial" : ""}`} style={{ gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}` }}>{leave.isPartial ? "Half leave" : "Leave"}</div>)}
-                    {memberTasks.map(task => <button key={task.item.id} type="button" className={`team-schedule__task ${task.statusClass} ${task.priorityClass}`} style={{ gridColumn: `${task.startOffset + 1} / span ${task.spanDays}` }} onClick={() => openScheduleItem(task.item)} title={`${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\n1st Draft: ${calendarDateLabelC(task.dueKey)}${task.launchKey ? `\nLaunch: ${calendarDateLabelC(task.launchKey)}` : ""}`} data-testid="flowmate-gantt-task-bar">
+                    {memberTasks.map(task => <button key={task.item.id} type="button" className={`team-schedule__task ${task.statusClass} ${task.priorityClass}`} style={{ gridColumn: `${task.startOffset + 1} / span ${task.spanDays}` }} onClick={() => openScheduleItem(task.item)} title={`${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\nAsset First Draft Due: ${calendarDateLabelC(task.dueKey)}\nAsset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}\nLaunch: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}`} data-testid="flowmate-gantt-task-bar">
                       <span className="team-schedule__production" style={{ width: `${Math.min(100, (task.productionSpanDays / task.spanDays) * 100)}%` }}></span>
                       {task.reviewSpanDays > 0 && <span className="team-schedule__review-span" style={{ left: `${Math.max(0, ((task.draftOffset - task.startOffset) / task.spanDays) * 100)}%`, width: `${Math.min(100, (task.reviewSpanDays / task.spanDays) * 100)}%` }}></span>}
                       <span className="team-schedule__task-label">{task.item.priority === "urgent" ? "⚑ " : ""}<b className="mono">{task.item.id}</b> {task.item.title}</span>
                       <span className="team-schedule__draft-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.draftOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%` }} title="1st Draft"></span>
+                      {task.finalApprovedOffset !== null && <span className="team-schedule__final-approved-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.finalApprovedOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%`, position: "absolute", top: -3, bottom: -3, zIndex: 3, width: 2, background: "#2563EB", pointerEvents: "none" }} title={`Final/Approved: ${calendarDateLabelC(task.finalApprovedKey)}`}></span>}
                       {task.launchOffset !== null && <span className="gantt__launch-marker" title="Launch"></span>}
                     </button>)}
                   </div>
@@ -3127,6 +3139,8 @@ function CalendarScreen({ onOpen }) {
           )}
           <span className="strong" style={{ fontSize: compact ? 12 : 13, lineHeight: 1.3, minWidth: 0, ...textClampStyle }}>{calendarTitle}</span>
           <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isLeaveItem ? leavePeriodLabel : `${owner} - ${STATUS_LABEL[item.status] || item.status}`}</span>
+          {!compact && item.type === "creative" && item.dueLabel && <span className="muted" style={{ fontSize: 11 }}>First Draft: {item.dueFullLabel || item.dueLabel}</span>}
+          {item.type === "creative" && item.finalApprovedDueLabel && <span className="muted" style={{ fontSize: 11 }}>Final / Approved: {item.finalApprovedDueFullLabel || item.finalApprovedDueLabel}</span>}
           {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
         </span>
       </button>
@@ -3254,7 +3268,8 @@ function CalendarScreen({ onOpen }) {
           <table className="tbl">
             <thead>
               <tr>
-                <th>Due date</th>
+                <th>Due / First Draft</th>
+                <th>Final / Approved</th>
                 <th>ID</th>
                 <th>Title</th>
                 <th>Type</th>
@@ -3268,6 +3283,7 @@ function CalendarScreen({ onOpen }) {
               {agendaRows.map(item => (
                 <tr key={item.id} className={item.overdue ? "is-overdue" : ""} onClick={() => openCalendarItem(item)}>
                   <td><DueBadge delta={item.dueDelta} label={item.dueLabel} status={item.status} /></td>
+                  <td className="mono">{item.type === "creative" ? (item.finalApprovedDueFullLabel || item.finalApprovedDueLabel || "-") : "-"}</td>
                   <td className="mono">{item.id}</td>
                   <td className="col-title">{item.title}</td>
                   <td>{calendarTypePill(item)}</td>
@@ -3278,7 +3294,7 @@ function CalendarScreen({ onOpen }) {
                 </tr>
               ))}
               {agendaRows.length === 0 && (
-                <tr><td colSpan="8"><span className="muted">No work items match this calendar selection.</span></td></tr>
+                <tr><td colSpan="9"><span className="muted">No work items match this calendar selection.</span></td></tr>
               )}
             </tbody>
           </table>

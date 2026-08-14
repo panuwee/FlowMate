@@ -974,4 +974,26 @@ describe("FlowMate Board and Delivered frontend", () => {
     expect(boardCss).toContain("@media (max-width: 600px)");
     expect(boardCss).toContain("@media (min-resolution: 1.75dppx)");
   });
+
+  it("loads both Creative Request launch milestones without changing due-date ordering", () => {
+    const loader = readRepo("supabase-list-data.js");
+    const schema = readRepo("supabase/schema.sql");
+    const weeklyCapacity = readRepo("supabase/team_schedule_weekly_capacity.sql");
+    const kpiNormalizer = loader.slice(
+      loader.indexOf("function normalizeFlowMateKpiRow"),
+      loader.indexOf("async function loadFlowMateKpiRows"),
+    );
+
+    expect(loader).toContain("final_approved_due_date");
+    expect(loader).toContain("finalApprovedDueDate: item.final_approved_due_date");
+    expect(loader).toContain("finalApprovedDueLabel: flowmateDateLabel(item.final_approved_due_date)");
+    expect(loader).toContain("finalApprovedDueFullLabel: flowmateDateFullLabel(item.final_approved_due_date)");
+    expect(kpiNormalizer).toContain("finalApprovedDueDate: row.final_approved_due_date");
+    expect(kpiNormalizer).toContain("finalApprovedDueLabel: flowmateDateLabel(row.final_approved_due_date)");
+    expect(kpiNormalizer).toContain("finalApprovedDueFullLabel: flowmateDateFullLabel(row.final_approved_due_date)");
+    expect(loader).toContain('.order("due_date", { ascending: true })');
+    expect(loader).toContain('.order("first_draft_date", { ascending: true })');
+    expect(schema).toContain("wi.final_approved_due_date as final_approved_due_date");
+    expect(weeklyCapacity).toContain("wi.final_approved_due_date");
+  });
 });

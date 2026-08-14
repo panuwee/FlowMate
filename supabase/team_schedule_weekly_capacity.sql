@@ -63,6 +63,7 @@ select
   wi.effort_point,
   wi.final_owner_member_id as owner_member_id,
   wi.due_date as first_draft_date,
+  wi.final_approved_due_date,
   wi.launch_date,
   et.first_assigned_at,
   et.actual_started_at,

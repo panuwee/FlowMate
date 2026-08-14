@@ -598,21 +598,22 @@ language plpgsql
 immutable
 as $$
 declare
-  v_date date := p_date;
+  v_cursor date := p_date;
   v_remaining integer := greatest(0, coalesce(p_working_days, 0));
 begin
-  if v_date is null then
+  -- Monday-Friday are working days; Thai public holidays on weekdays count.
+  if v_cursor is null then
     return null;
   end if;
 
   while v_remaining > 0 loop
-    v_date := v_date - 1;
-    if extract(isodow from v_date) between 1 and 5 then
+    v_cursor := v_cursor - 1;
+    if extract(isodow from v_cursor) between 1 and 5 then
       v_remaining := v_remaining - 1;
     end if;
   end loop;
 
-  return public.flowmate_next_working_day(v_date);
+  return public.flowmate_next_working_day(v_cursor);
 end;
 $$;
 
@@ -1546,10 +1547,10 @@ declare
   v_work_item_id  uuid;
   v_assignment    jsonb;
   v_due_date      date;
+  v_final_approved_due_date date;
   v_launch_date   date;
-  v_review_target_date date;
   v_earliest_feasible_due_date date;
-  v_review_buffer_at_risk boolean := false;
+  v_first_draft_at_risk boolean := false;
   v_requested_priority public.priority_level;
   v_urgent_reason text;
   v_time_pressure_effort integer;
@@ -1562,7 +1563,6 @@ declare
   v_production_start_half text := 'am';
   v_midday_cutoff time := time '12:00';
   v_production_cutoff time := time '15:00';
-  v_review_buffer_working_days integer := 2;
 begin
   v_actor_id := public.flowmate_actor_user_id();
   perform public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id);
@@ -1617,29 +1617,17 @@ begin
     v_time_pressure_effort := v_time_pressure_effort + public.flowmate_effort_for_subtype(p_asset_type_2, v_asset_subtype_2, v_time_pressure_asset_count_2);
   end if;
 
-  -- A launch-minus-buffer date can be impossible for a large request created
-  -- close to its launch (CR-1047: 9 pt created after noon with a same-day
-  -- generated 1st Draft). Keep the review-buffer target when it is feasible,
-  -- but never give the assignment engine a production deadline earlier than
-  -- the standard 8 pt/day effort window. Do not move 1st Draft past Launch.
-  v_review_target_date := public.flowmate_subtract_working_days(
-    v_launch_date,
-    v_review_buffer_working_days
-  );
+  -- Creative Request milestones are fixed from Launch Date. Capacity pressure
+  -- raises urgent/risk signals but never rebases either generated milestone.
+  v_due_date := public.flowmate_subtract_working_days(v_launch_date, 7);
+  v_final_approved_due_date := public.flowmate_subtract_working_days(v_launch_date, 5);
   v_earliest_feasible_due_date := public.flowmate_earliest_capacity_date(
     v_production_start,
     v_production_start_half,
     v_time_pressure_effort,
     4
   );
-  v_due_date := least(
-    v_launch_date,
-    greatest(
-      coalesce(p_due_date, v_review_target_date, v_production_start),
-      v_earliest_feasible_due_date
-    )
-  );
-  v_review_buffer_at_risk := v_due_date > v_review_target_date;
+  v_first_draft_at_risk := v_earliest_feasible_due_date > v_due_date;
 
   if v_due_date < v_production_start then
     v_time_pressure_working_days := 0;
@@ -1650,7 +1638,7 @@ begin
   end if;
 
   if v_requested_priority <> 'urgent'
-     and (v_time_pressure_effort > v_time_pressure_capacity or v_review_buffer_at_risk) then
+     and (v_time_pressure_effort > v_time_pressure_capacity or v_first_draft_at_risk) then
     v_requested_priority := 'urgent';
     v_urgent_reason := coalesce(
       v_urgent_reason,
@@ -1660,9 +1648,8 @@ begin
           v_time_pressure_working_days::text || ' working day(s) / ' ||
           v_time_pressure_capacity::text || ' pt before 1st Draft.'
         else
-          'Auto urgent: earliest feasible 1st Draft is ' || to_char(v_due_date, 'Mon DD, YYYY') ||
-          ', leaving less than ' || v_review_buffer_working_days::text ||
-          ' working days before Launch ' || to_char(v_launch_date, 'Mon DD, YYYY') || '.'
+          'Auto urgent: earliest feasible date ' || to_char(v_earliest_feasible_due_date, 'Mon DD, YYYY') ||
+          ' misses Asset First Draft Due ' || to_char(v_due_date, 'Mon DD, YYYY') || '.'
       end
     );
   end if;
@@ -1681,7 +1668,7 @@ begin
     description,
     requester_user_id, requester_team,
     status, priority, urgent_reason,
-    due_date, launch_date, publish_date, publish_time,
+    due_date, final_approved_due_date, launch_date, publish_date, publish_time,
     -- effort_point intentionally null; engine writes it.
     effort_point, final_owner_member_id, needs_split, review_round, wip_counted
   ) values (
@@ -1689,7 +1676,7 @@ begin
     nullif(trim(coalesce(p_brief_note,'')), ''),
     v_actor_id, nullif(trim(coalesce(p_requester_team,'')), ''),
     'new', v_requested_priority, v_urgent_reason,
-    v_due_date, v_launch_date, p_publish_date, p_publish_time,
+    v_due_date, v_final_approved_due_date, v_launch_date, p_publish_date, p_publish_time,
     null, null, false, 0, false
   ) returning id into v_work_item_id;
 
@@ -2449,12 +2436,13 @@ begin
         'severity', 'critical',
         'message', 'Nominal production capacity cannot cover the effort by 1st Draft.'
       ) end),
-    (8, case when v_work.launch_date is not null
-                  and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 2) then
+    (8, case when v_work.work_type = 'creative_request'
+                  and v_work.launch_date is not null
+                  and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7) then
       jsonb_build_object(
         'code', 'review_buffer_risk',
         'severity', 'warning',
-        'message', 'The 1st Draft leaves fewer than two working days for review.'
+        'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
       ) end),
     (9, case when v_needs_split then
       jsonb_build_object(
@@ -2838,11 +2826,12 @@ begin
           'code', 'deadline_capacity_gap', 'severity', 'critical',
           'message', 'Nominal capacity cannot cover effort by 1st Draft.'
         ) end),
-      (8, case when v_work.launch_date is not null
-                    and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 2)
+      (8, case when v_work.work_type = 'creative_request'
+                    and v_work.launch_date is not null
+                    and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7)
         then jsonb_build_object(
           'code', 'review_buffer_risk', 'severity', 'warning',
-          'message', 'The 1st Draft leaves fewer than two working days for review.'
+          'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
         ) end),
       (9, case when v_needs_split then jsonb_build_object(
         'code', 'needs_split', 'severity', 'warning',

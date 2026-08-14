@@ -195,7 +195,7 @@ Object.assign(window, {
 });
 
 function exportRowsCsv(rows) {
-  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "1st Draft", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
+  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "Due / First Draft", "Final / Approved", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
   const csvRows = rows.map((w) => [
     w.id,
     w.title,
@@ -206,6 +206,7 @@ function exportRowsCsv(rows) {
     w.publishFullLabel || w.publishLabel || w.publishDate || "",
     w.launchFullLabel || w.launchLabel || w.launchDate || "",
     w.dueFullLabel || w.dueLabel || w.dueDate || "",
+    w.type === "creative" ? (w.finalApprovedDueFullLabel || w.finalApprovedDueLabel || w.finalApprovedDueDate || "") : "",
     w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : (ASSET_LABEL[w.assetType] || w.assetType || ""),
     w.assetCount || "",
     w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned",
@@ -439,7 +440,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
               <th>Asset</th>
               <th>Effort</th>
               <th>Priority</th>
-              <th>1st Draft</th>
+              <th>Due / First Draft</th>
+              <th>Final / Approved</th>
               <th>Flags</th>
             </tr>
           </thead>
@@ -465,7 +467,8 @@ function ListScreen({ onOpen, searchQuery = "" }) {
                 <td><span className="muted" style={{ fontSize: 12 }}>{ASSET_LABEL[w.assetType] || "-"}</span></td>
                 <td><Effort value={w.effort} /></td>
                 <td><PriorityBadge level={w.priority} /></td>
-                <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
+                <td><div className="muted" style={{ fontSize: 11 }}>{w.type === "creative" ? "First Draft" : "Due"}</div><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
+                <td><span className="mono muted" style={{ fontSize: 12 }}>{w.type === "creative" ? (w.finalApprovedDueLabel || "-") : "-"}</span></td>
                 <td>
                   <span className="row" style={{ gap: 4 }}>
                     {w.needsSplit && <span className="tag" style={{ background: "#FDEFE0", color: "#8A4A12" }}>Needs split</span>}
