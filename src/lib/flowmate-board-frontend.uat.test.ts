@@ -759,6 +759,44 @@ describe("FlowMate Board and Delivered frontend", () => {
     });
   });
 
+  it("keeps the second creative Type / Skill when a detail reload hydrates the task", async () => {
+    const workItems = makeQueryResult([{
+      id: "work-creative-2",
+      display_id: "CR-1075",
+      title: "Two-skill creative request",
+      work_type: "creative_request",
+      status: "in_progress",
+      priority: "normal",
+      created_at: "2026-08-10T08:00:00Z",
+    }]);
+    const creativeDetails = makeQueryResult([{
+      work_item_id: "work-creative-2",
+      asset_type: "static",
+      asset_subtype: "banner",
+      asset_count: 4,
+      asset_type_2: "motion",
+      asset_subtype_2: "video-under-1-min",
+      asset_count_2: 2,
+    }]);
+    const empty = makeQueryResult([]);
+    const from = vi.fn((table: string) => {
+      if (table === "work_items") return workItems.query;
+      if (table === "creative_request_details") return creativeDetails.query;
+      return empty.query;
+    });
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    const row = await windowObject.loadFlowMateWorkItemById("CR-1075");
+
+    expect(row).toMatchObject({
+      assetType2: "motion",
+      subtype2: "video-under-1-min",
+      assetCount2: 2,
+    });
+  });
+
   it("resolves a quick-task assignee from users when no team-member row exists", async () => {
     const workItems = makeQueryResult([{
       id: "quick-1",
