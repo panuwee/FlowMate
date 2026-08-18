@@ -2456,6 +2456,32 @@ describe("Marketing Plan product split shell", () => {
     expect(timelineScreenSource).not.toContain("not_started");
   });
 
+  it("removes archived Campaign Tags from every Marketing Plan view and prioritizes today in Campaign Timeline", () => {
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const timelineSource = appJsx.slice(
+      appJsx.indexOf("function MarketingPlanTimelineScreen"),
+      appJsx.indexOf("function MarketingPlanChannelPlanScreen"),
+    );
+    const channelPlanSource = appJsx.slice(
+      appJsx.indexOf("function MarketingPlanChannelPlanScreen"),
+      appJsx.indexOf("function MarketingPlanCalendarScreen"),
+    );
+    const calendarSource = appJsx.slice(
+      appJsx.indexOf("function MarketingPlanCalendarScreen"),
+      appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
+    );
+
+    expect(appJsx).toContain("function filterMarketingPlanRowsByVisibleCampaignTags");
+    expect(appJsx).toContain("function prioritizeMarketingPlanCampaignsForDate");
+    expect(appJsx).toContain("function getMarketingPlanTodayKey");
+    expect(timelineSource).toContain("filterMarketingPlanRowsByVisibleCampaignTags(functionFilteredRows, campaignCatalogRows)");
+    expect(timelineSource).toContain("prioritizeMarketingPlanCampaignsForDate(groupMarketingPlanTimelineRows(timelineRows, selectedMonth), getMarketingPlanTodayKey())");
+    expect(channelPlanSource).toContain("filterMarketingPlanRowsByVisibleCampaignTags(publishableRows, campaignCatalogRows)");
+    expect(calendarSource).toContain("filterMarketingPlanRowsByVisibleCampaignTags(filteredRows, campaignCatalogRows)");
+    expect(timelineSource).toContain("ref: timelineScrollRef");
+    expect(timelineSource).toContain("scrollLeft = Math.max(0, todayIndex * columnWidth - columnWidth * 2)");
+  });
+
   it("makes Marketing Plan Calendar open in Schedule view, uses timeline statuses, and caps Month cells at two rows", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");

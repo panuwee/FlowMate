@@ -2939,6 +2939,25 @@ function filterMarketingPlanRowsByFunctions(rows, selectedCodes, campaignCatalog
   const campaignByName = new Map((campaignCatalogRows || []).map(campaign => [getMarketingPlanCampaignKey(campaign.name), String(campaign.functionCode || "").toLowerCase()]));
   return (rows || []).filter(row => selected.has(campaignByName.get(getMarketingPlanCampaignKey(row.campaignName))));
 }
+function filterMarketingPlanRowsByVisibleCampaignTags(rows, campaignCatalogRows) {
+  const campaignByName = new Map((campaignCatalogRows || []).map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
+  return (rows || []).filter(row => {
+    const campaign = campaignByName.get(getMarketingPlanCampaignKey(row.campaignName));
+    return !campaign || !campaign.isArchived;
+  });
+}
+function getMarketingPlanTodayKey() {
+  return flowMateTodayDateKey();
+}
+function prioritizeMarketingPlanCampaignsForDate(campaigns, dateKey) {
+  const todayCampaigns = [];
+  const otherCampaigns = [];
+  (campaigns || []).forEach(campaign => {
+    const hasPlacementToday = (campaign.assets || []).some(asset => (asset.placements || []).some(placement => placement.publishDate === dateKey));
+    (hasPlacementToday ? todayCampaigns : otherCampaigns).push(campaign);
+  });
+  return [...todayCampaigns, ...otherCampaigns];
+}
 function MarketingPlanFunctionFilter({
   selectedCodes,
   onChange
@@ -3882,6 +3901,7 @@ function MarketingPlanTimelineScreen({
   const [campaignFunctionOptions, setCampaignFunctionOptions] = useStateApp([]);
   const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
   const [collapsedCampaignKeys, setCollapsedCampaignKeys] = useStateApp(() => getStoredMarketingTimelineCollapsedCampaigns(collapseStorageKey));
+  const timelineScrollRef = useRefApp(null);
   const [campaignManagerState, setCampaignManagerState] = useStateApp({
     status: "idle",
     message: ""
@@ -3960,8 +3980,9 @@ function MarketingPlanTimelineScreen({
   const timelineWindow = getMarketingPlanTimelineWindow(selectedMonth);
   const monthDays = timelineWindow.days;
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
-  const timelineRows = isFacebookEsportTimeline ? functionFilteredRows.filter(row => row.channel === "facebook_esport") : functionFilteredRows.filter(row => row.channel !== "facebook_esport" && isMarketingPlanPublishableChannel(row.channel));
-  const groupedCampaigns = groupMarketingPlanTimelineRows(timelineRows, selectedMonth);
+  const visibleCampaignRows = filterMarketingPlanRowsByVisibleCampaignTags(functionFilteredRows, campaignCatalogRows);
+  const timelineRows = isFacebookEsportTimeline ? visibleCampaignRows.filter(row => row.channel === "facebook_esport") : visibleCampaignRows.filter(row => row.channel !== "facebook_esport" && isMarketingPlanPublishableChannel(row.channel));
+  const groupedCampaigns = prioritizeMarketingPlanCampaignsForDate(groupMarketingPlanTimelineRows(timelineRows, selectedMonth), getMarketingPlanTodayKey());
   const campaignCatalogByName = new Map(campaignCatalogRows.map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
   const canArchiveCampaignTags = Boolean(window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin");
   const timelineCountChannels = isFacebookEsportTimeline ? MARKETING_PLAN_ESPORT_TIMELINE_COUNT_CHANNELS : MARKETING_PLAN_TIMELINE_COUNT_CHANNELS;
@@ -3969,6 +3990,12 @@ function MarketingPlanTimelineScreen({
   const columnWidth = 38;
   const timelineWidth = Math.max(monthDays.length * columnWidth, 760);
   const leftWidth = 330;
+  useEffectApp(() => {
+    const todayIndex = monthDays.findIndex(day => day.key === getMarketingPlanTodayKey());
+    const timelineScroller = timelineScrollRef.current;
+    if (!timelineScroller || todayIndex < 0) return;
+    timelineScroller.scrollLeft = Math.max(0, todayIndex * columnWidth - columnWidth * 2);
+  }, [selectedMonth, loadState.status]);
   async function loadCampaignManagerRows() {
     if (!window.loadFlowMateMarketingCampaignOptions) return;
     const campaigns = await window.loadFlowMateMarketingCampaignOptions({
@@ -4353,6 +4380,7 @@ function MarketingPlanTimelineScreen({
   }, option.label)))), React.createElement("div", {
     className: "card__body card__body--flush"
   }, React.createElement("div", {
+    ref: timelineScrollRef,
     style: {
       maxHeight: "calc(100vh - 220px)",
       overflow: "auto",
@@ -4624,9 +4652,10 @@ function MarketingPlanChannelPlanScreen() {
   }, []);
   const functionFilteredRows = filterMarketingPlanRowsByFunctions(rows, selectedFunctionCodes, campaignCatalogRows);
   const publishableRows = functionFilteredRows.filter(row => isMarketingPlanPublishableChannel(row.channel));
-  const statusOptions = getMarketingPlanPlacementStatusOptions(publishableRows, selectedMonth, true);
-  const channelOptions = getMarketingPlanChannelOptions(publishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
-  const groupedChannels = groupMarketingPlanRowsByChannel(publishableRows, selectedMonth, selectedStatus, selectedChannel, true);
+  const visiblePublishableRows = filterMarketingPlanRowsByVisibleCampaignTags(publishableRows, campaignCatalogRows);
+  const statusOptions = getMarketingPlanPlacementStatusOptions(visiblePublishableRows, selectedMonth, true);
+  const channelOptions = getMarketingPlanChannelOptions(visiblePublishableRows, selectedMonth).filter(isMarketingPlanPublishableChannel);
+  const groupedChannels = groupMarketingPlanRowsByChannel(visiblePublishableRows, selectedMonth, selectedStatus, selectedChannel, true);
   const channelPlanWindow = getMarketingPlanTimelineWindow(selectedMonth);
   function renderStatusBadge(status) {
     const statusClass = getMarketingPlanStatusClass(status);
@@ -4902,7 +4931,8 @@ function MarketingPlanCalendarScreen() {
     key: `blank-${index}`,
     isBlank: true
   })), ...monthDays];
-  const visibleRows = filterMarketingPlanRows(publishableRows, selectedMonth, selectedChannel, "", true);
+  const filteredRows = filterMarketingPlanRows(publishableRows, selectedMonth, selectedChannel, "", true);
+  const visibleRows = filterMarketingPlanRowsByVisibleCampaignTags(filteredRows, campaignCatalogRows);
   const rowsByDate = visibleRows.reduce((map, row) => {
     if (!map.has(row.publishDate)) map.set(row.publishDate, []);
     map.get(row.publishDate).push(row);
