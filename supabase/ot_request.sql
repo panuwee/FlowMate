@@ -135,6 +135,68 @@ create table if not exists public.ot_request_audit (
   constraint ot_request_audit_action_required check (pg_catalog.length(pg_catalog.btrim(action)) > 0)
 );
 
+create table if not exists public.ot_seatalk_notifications (
+  id uuid primary key default gen_random_uuid(),
+  request_id uuid not null references public.ot_requests(id) on delete restrict,
+  notification_kind text not null check (notification_kind in ('plan_approval')),
+  status text not null default 'pending' check (status in ('pending', 'dispatching', 'sent', 'failed', 'applied', 'cancelled')),
+  attempt_count integer not null default 0 check (attempt_count >= 0),
+  seatalk_message_id text,
+  dispatch_key uuid,
+  lease_expires_at timestamptz,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (request_id, notification_kind)
+);
+
+alter table public.ot_seatalk_notifications
+  add column if not exists lease_expires_at timestamptz,
+  add column if not exists last_error text;
+
+alter table public.ot_seatalk_notifications drop constraint if exists ot_seatalk_notifications_status_check;
+alter table public.ot_seatalk_notifications
+  add constraint ot_seatalk_notifications_status_check
+  check (status in ('pending', 'dispatching', 'sent', 'failed', 'applied', 'cancelled'));
+
+alter table public.ot_seatalk_notifications drop constraint if exists ot_seatalk_notifications_lease_state_check;
+alter table public.ot_seatalk_notifications
+  add constraint ot_seatalk_notifications_lease_state_check
+  check (
+    (status = 'dispatching' and dispatch_key is not null and lease_expires_at is not null)
+    or (status <> 'dispatching' and lease_expires_at is null)
+  );
+
+create unique index if not exists ot_seatalk_notifications_dispatch_key_uidx
+on public.ot_seatalk_notifications(dispatch_key)
+where dispatch_key is not null;
+
+create table if not exists public.ot_seatalk_pending_rejections (
+  id uuid primary key default gen_random_uuid(),
+  notification_id uuid not null unique references public.ot_seatalk_notifications(id) on delete restrict,
+  sender_email text not null,
+  begin_event_idempotency_key uuid not null,
+  apply_event_idempotency_key uuid,
+  status text not null default 'pending' check (status in ('pending', 'applied', 'expired', 'cancelled')),
+  expires_at timestamptz not null,
+  result jsonb,
+  consumed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint ot_seatalk_pending_rejections_sender_required
+    check (pg_catalog.length(pg_catalog.btrim(sender_email)) > 0),
+  constraint ot_seatalk_pending_rejections_expiry_order
+    check (expires_at > created_at)
+);
+
+create unique index if not exists ot_seatalk_pending_rejections_sender_pending_uidx
+on public.ot_seatalk_pending_rejections(sender_email)
+where status = 'pending';
+
+create unique index if not exists ot_seatalk_pending_rejections_apply_event_uidx
+on public.ot_seatalk_pending_rejections(apply_event_idempotency_key)
+where apply_event_idempotency_key is not null;
+
 -- Existing installations already have the append-only trigger. Remove it only
 -- inside this migration transaction so the one-time nullable-column backfill
 -- can run; it is recreated before any OT RPC definitions below.
@@ -270,6 +332,7 @@ insert into public.ot_approvers (user_id, active)
 select u.id, true
 from public.users u
 where pg_catalog.lower(pg_catalog.btrim(u.email)) in (
+  'panuwee.w@garena.com',
   'nithidol.k@garena.com',
   'weerayut@garena.com',
   'napol.a@garena.com'
@@ -459,70 +522,35 @@ set search_path = ''
 as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
-  v_request public.ot_requests;
-  v_old_status text;
-  v_new_status text;
-  v_note text := nullif(pg_catalog.btrim(coalesce(p_note, '')), '');
+  v_notification_id uuid;
+  v_result jsonb;
 begin
-  perform public.ot_lock_idempotency('review_plan', p_idempotency_key);
-  select * into v_request from public.ot_requests r where r.id = p_request_id;
-  if not found or v_request.approver_user_id <> v_actor_id or not public.ot_current_user_is_eligible_approver() then
-    raise exception 'Only the assigned active OT approver can review this plan';
-  end if;
-  if exists (
-    select 1 from public.ot_request_audit a
-    where a.request_id = p_request_id and a.actor_user_id = v_actor_id
-      and a.action = 'review_plan' and a.idempotency_key = p_idempotency_key
-  ) then
-    return pg_catalog.to_jsonb(v_request);
-  end if;
-  if v_request.source <> 'employee_request' or v_request.status <> 'pending_approval' then
-    raise exception 'This OT plan is not awaiting approver review';
-  end if;
-  if p_decision not in ('approved', 'rejected', 'revision_required') then
-    raise exception 'Plan decision must be approved, rejected, or revision_required';
-  end if;
-  if p_decision in ('rejected', 'revision_required') and v_note is null then
-    raise exception 'Plan decision note is required for rejection or revision';
-  end if;
-  perform 1
-  from public.ot_approvers a
-  where a.user_id = v_actor_id
-  for key share of a;
-  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
-  select * into v_request from public.ot_requests r where r.id = p_request_id for update;
-  if v_request.approver_user_id <> v_actor_id
-     or not public.ot_current_user_is_eligible_approver() then
-    raise exception 'Plan assignment or approver access changed; reload this request';
-  end if;
-  if v_request.status <> 'pending_approval' then
-    raise exception 'Plan state changed; reload this request';
-  end if;
-  if p_decision = 'approved' then
-    perform public.ot_assert_planned_limit(v_request.employee_user_id, v_request.planned_week_segments, v_request.id);
-    v_new_status := 'approved';
-  else
-    v_new_status := p_decision;
-  end if;
-  v_old_status := v_request.status;
-  if p_decision = 'approved' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then
-    raise exception 'Planned OT start must remain in the future for approval';
-  end if;
-  update public.ot_requests
-  set plan_decision = p_decision,
-      plan_decision_note = v_note,
-      plan_reviewed_by_user_id = v_actor_id,
-      plan_reviewed_at = now(),
-      status = v_new_status,
-      updated_at = now()
-  where id = p_request_id returning * into v_request;
-  insert into public.ot_request_audit (
-    request_id, actor_user_id, action, old_status, new_status, changed_fields, note, idempotency_key
-  ) values (
-    v_request.id, v_actor_id, 'review_plan', v_old_status, v_request.status,
-    pg_catalog.jsonb_build_object('decision', p_decision), v_note, p_idempotency_key
+  select n.id into v_notification_id
+  from public.ot_seatalk_notifications n
+  where n.request_id = p_request_id
+    and n.notification_kind = 'plan_approval'
+    and n.status in ('pending', 'dispatching', 'sent', 'failed')
+  for update;
+
+  v_result := public.ot_apply_plan_review(
+    p_request_id,
+    p_decision,
+    p_note,
+    p_idempotency_key,
+    v_actor_id
   );
-  return pg_catalog.to_jsonb(v_request);
+  update public.ot_seatalk_notifications
+  set status = 'cancelled',
+      lease_expires_at = null,
+      updated_at = now()
+  where id = v_notification_id
+    and status in ('pending', 'dispatching', 'sent', 'failed');
+  update public.ot_seatalk_pending_rejections
+  set status = 'cancelled',
+      updated_at = now()
+  where notification_id = v_notification_id
+    and status = 'pending';
+  return v_result;
 end
 $function$;
 
@@ -903,11 +931,648 @@ as $function$
     from public.users u
     where u.id = p_user_id
       and pg_catalog.lower(pg_catalog.btrim(u.email)) in (
+        'panuwee.w@garena.com',
         'nithidol.k@garena.com',
         'weerayut@garena.com',
         'napol.a@garena.com'
       )
   );
+$function$;
+
+create or replace function public.ot_function_approver_id(p_function_code text)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $function$
+declare
+  -- Production SeaTalk routing: each Function is assigned to its approved Team Lead.
+  v_email text := case p_function_code
+    when 'ops' then 'nithidol.k@garena.com'
+    when 'mkt' then 'weerayut@garena.com'
+    when 'gdve' then 'weerayut@garena.com'
+    when 'esport' then 'napol.a@garena.com'
+    else null
+  end;
+  v_approver_id uuid;
+begin
+  if v_email is null then
+    raise exception 'Unsupported OT function code';
+  end if;
+
+  select u.id into v_approver_id
+  from public.users u
+  join public.ot_approvers a on a.user_id = u.id and a.active = true
+  where pg_catalog.lower(pg_catalog.btrim(u.email)) = v_email
+    and u.is_active = true
+    and public.ot_user_is_approved_approver_identity(u.id)
+  order by u.id
+  limit 1;
+
+  if v_approver_id is null then
+    raise exception 'The routed OT approver is not active and approved';
+  end if;
+  return v_approver_id;
+end
+$function$;
+
+create or replace function public.ot_enqueue_seatalk_notification(
+  p_request_id uuid,
+  p_notification_kind text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_notification_id uuid;
+begin
+  if p_notification_kind <> 'plan_approval' then
+    raise exception 'Unsupported OT SeaTalk notification kind';
+  end if;
+
+  insert into public.ot_seatalk_notifications (
+    request_id, notification_kind, status, attempt_count, dispatch_key,
+    lease_expires_at, last_error, updated_at
+  ) values (
+    p_request_id, p_notification_kind, 'pending', 0, null, null, null, now()
+  )
+  on conflict (request_id, notification_kind) do update
+  set status = 'pending',
+      attempt_count = 0,
+      seatalk_message_id = null,
+      dispatch_key = null,
+      lease_expires_at = null,
+      last_error = null,
+      updated_at = now()
+  returning id into v_notification_id;
+
+  return v_notification_id;
+end
+$function$;
+
+create or replace function public.ot_is_service_role_context()
+returns boolean
+language sql
+stable
+set search_path = ''
+as $function$
+  select
+    (select auth.uid()) is null
+    and coalesce(
+      nullif(pg_catalog.current_setting('request.jwt.claim.role', true), ''),
+      ''
+    ) = 'service_role';
+$function$;
+
+create or replace function public.ot_seatalk_claim_dispatch(
+  p_request_id uuid,
+  p_actor_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_notification public.ot_seatalk_notifications;
+  v_request public.ot_requests;
+  v_recipient_email text;
+  v_recipient_display_name text;
+  v_employee_email text;
+  v_employee_display_name text;
+  v_dispatch_key uuid;
+  v_lease_expires_at timestamptz;
+begin
+  if p_request_id is null or p_actor_id is null then
+    raise exception 'SeaTalk OT dispatch claim requires request and actor identifiers';
+  end if;
+
+  select n.* into v_notification
+  from public.ot_seatalk_notifications n
+  where n.request_id = p_request_id
+    and n.notification_kind = 'plan_approval'
+  for update of n;
+  if not found then
+    raise exception 'SeaTalk OT notification not found';
+  end if;
+
+  select * into v_request
+  from public.ot_requests r
+  where r.id = v_notification.request_id
+  for key share of r;
+  if not found then
+    raise exception 'SeaTalk OT request not found';
+  end if;
+  if not exists (
+    select 1
+    from public.users u
+    where u.id = p_actor_id
+      and u.is_active = true
+      and pg_catalog.lower(pg_catalog.btrim(u.email)) like '%@garena.com'
+  ) then
+    raise exception 'Active Garena Workgrid actor required for SeaTalk dispatch';
+  end if;
+  if v_request.created_by_user_id <> p_actor_id
+     and v_request.approver_user_id <> p_actor_id then
+    raise exception 'Only the request creator or assigned approver can dispatch this OT card';
+  end if;
+  if v_request.source <> 'employee_request' or v_request.status <> 'pending_approval' then
+    return pg_catalog.jsonb_build_object(
+      'claimed', false,
+      'status', v_notification.status
+    );
+  end if;
+  if not (
+    v_notification.status in ('pending', 'failed')
+    or (
+      v_notification.status = 'dispatching'
+      and v_notification.lease_expires_at <= pg_catalog.clock_timestamp()
+    )
+  ) then
+    return pg_catalog.jsonb_build_object(
+      'claimed', false,
+      'status', v_notification.status,
+      'leaseExpiresAt', v_notification.lease_expires_at
+    );
+  end if;
+
+  select
+    pg_catalog.lower(pg_catalog.btrim(recipient.email)),
+    recipient.display_name,
+    pg_catalog.lower(pg_catalog.btrim(employee.email)),
+    employee.display_name
+  into
+    v_recipient_email,
+    v_recipient_display_name,
+    v_employee_email,
+    v_employee_display_name
+  from public.users recipient
+  join public.ot_approvers approver
+    on approver.user_id = recipient.id
+   and approver.active = true
+  join public.users employee
+    on employee.id = v_request.employee_user_id
+  where recipient.id = v_request.approver_user_id
+    and recipient.is_active = true
+    and employee.is_active = true
+    and public.ot_user_is_approved_approver_identity(recipient.id);
+  if not found then
+    raise exception 'The assigned SeaTalk OT recipient is not active and approved';
+  end if;
+
+  v_dispatch_key := gen_random_uuid();
+  v_lease_expires_at := pg_catalog.clock_timestamp() + interval '5 minutes';
+  update public.ot_seatalk_notifications
+  set status = 'dispatching',
+      attempt_count = attempt_count + 1,
+      dispatch_key = v_dispatch_key,
+      lease_expires_at = v_lease_expires_at,
+      last_error = null,
+      updated_at = now()
+  where id = v_notification.id;
+
+  return pg_catalog.jsonb_build_object(
+    'claimed', true,
+    'notificationId', v_notification.id,
+    'dispatchKey', v_dispatch_key,
+    'leaseExpiresAt', v_lease_expires_at,
+    'recipientEmail', v_recipient_email,
+    'recipientDisplayName', v_recipient_display_name,
+    'requestId', v_request.id,
+    'employeeEmail', v_employee_email,
+    'employeeDisplayName', v_employee_display_name,
+    'functionCode', v_request.function_code,
+    'title', v_request.title,
+    'dayType', v_request.day_type,
+    'workLocationType', v_request.work_location_type,
+    'venue', v_request.venue,
+    'reasonCode', v_request.reason_code,
+    'reasonDetail', v_request.reason_detail,
+    'plannedStartAt', v_request.planned_start_at,
+    'plannedEndAt', v_request.planned_end_at,
+    'plannedBreakMinutes', v_request.planned_break_minutes,
+    'plannedMinutes', v_request.planned_minutes
+  );
+end
+$function$;
+
+create or replace function public.ot_seatalk_finish_dispatch(
+  p_dispatch_key uuid,
+  p_succeeded boolean,
+  p_seatalk_message_id text,
+  p_error text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_status text;
+  v_message_id text := nullif(pg_catalog.btrim(coalesce(p_seatalk_message_id, '')), '');
+  v_error text := pg_catalog.left(nullif(pg_catalog.btrim(coalesce(p_error, '')), ''), 1000);
+  v_expected_error text;
+  v_stored_message_id text;
+  v_stored_error text;
+begin
+  if p_dispatch_key is null or p_succeeded is null then
+    raise exception 'SeaTalk OT dispatch result requires a dispatch key and outcome';
+  end if;
+  if p_succeeded and v_message_id is null then
+    raise exception 'Successful SeaTalk dispatch requires a message identifier';
+  end if;
+  v_expected_error := coalesce(v_error, 'SeaTalk delivery failed');
+
+  update public.ot_seatalk_notifications
+  set status = case when p_succeeded then 'sent' else 'failed' end,
+      seatalk_message_id = case when p_succeeded then v_message_id else null end,
+      lease_expires_at = null,
+      last_error = case when p_succeeded then null else v_expected_error end,
+      updated_at = now()
+  where dispatch_key = p_dispatch_key
+    and status = 'dispatching'
+  returning status into v_status;
+  if found then
+    return pg_catalog.jsonb_build_object(
+      'finalized', true,
+      'replayed', false,
+      'status', v_status
+    );
+  end if;
+
+  select n.status, n.seatalk_message_id, n.last_error
+  into v_status, v_stored_message_id, v_stored_error
+  from public.ot_seatalk_notifications n
+  where n.status in ('sent', 'failed')
+    and n.dispatch_key = p_dispatch_key;
+  if found then
+    if v_status <> (case when p_succeeded then 'sent' else 'failed' end) then
+      raise exception 'SeaTalk OT dispatch result conflicts with the stored outcome';
+    end if;
+    if p_succeeded and v_stored_message_id is distinct from v_message_id then
+      raise exception 'SeaTalk OT dispatch result conflicts with the stored message identifier';
+    end if;
+    if not p_succeeded and v_stored_error is distinct from v_expected_error then
+      raise exception 'SeaTalk OT dispatch result conflicts with the stored failure detail';
+    end if;
+    return pg_catalog.jsonb_build_object(
+      'finalized', true,
+      'replayed', true,
+      'status', v_status
+    );
+  end if;
+
+  select n.status into v_status
+  from public.ot_seatalk_notifications n
+  where n.dispatch_key = p_dispatch_key;
+  return pg_catalog.jsonb_build_object(
+    'finalized', false,
+    'replayed', false,
+    'status', coalesce(v_status, 'stale')
+  );
+end
+$function$;
+
+create or replace function public.ot_seatalk_begin_rejection(
+  p_notification_id uuid,
+  p_sender_email text,
+  p_event_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_sender_email text := nullif(pg_catalog.lower(pg_catalog.btrim(coalesce(p_sender_email, ''))), '');
+  v_notification public.ot_seatalk_notifications;
+  v_action public.ot_seatalk_pending_rejections;
+  v_approver_email text;
+  v_expires_at timestamptz;
+begin
+  if p_notification_id is null or v_sender_email is null or p_event_idempotency_key is null then
+    raise exception 'SeaTalk OT rejection begin requires notification, sender, and event identifiers';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('ot-seatalk-rejection:' || v_sender_email, 3)
+  );
+
+  select n.* into v_notification
+  from public.ot_seatalk_notifications n
+  where n.id = p_notification_id
+    and n.notification_kind = 'plan_approval'
+  for update of n;
+  if not found then
+    raise exception 'SeaTalk OT notification not found';
+  end if;
+
+  select pg_catalog.lower(pg_catalog.btrim(u.email))
+  into v_approver_email
+  from public.ot_requests r
+  join public.users u on u.id = r.approver_user_id
+  join public.ot_approvers a on a.user_id = u.id and a.active = true
+  where r.id = v_notification.request_id
+    and u.is_active = true
+    and public.ot_user_is_approved_approver_identity(u.id);
+  if v_approver_email is null or v_sender_email is distinct from v_approver_email then
+    raise exception 'SeaTalk sender is not the assigned OT approver';
+  end if;
+
+  select a.* into v_action
+  from public.ot_seatalk_pending_rejections a
+  where a.notification_id = v_notification.id
+  for update of a;
+  if found then
+    if v_action.sender_email is distinct from v_sender_email then
+      if v_action.status = 'applied' then
+        raise exception 'SeaTalk OT notification already has an applied rejection';
+      end if;
+      update public.ot_seatalk_pending_rejections
+      set status = 'cancelled',
+          updated_at = now()
+      where id = v_action.id;
+    else
+      if v_action.status = 'applied' then
+        return pg_catalog.jsonb_build_object(
+          'pendingActionId', v_action.id,
+          'notificationId', v_action.notification_id,
+          'status', v_action.status,
+          'result', v_action.result
+        );
+      end if;
+      if v_action.status = 'pending'
+         and v_action.expires_at > pg_catalog.clock_timestamp() then
+        return pg_catalog.jsonb_build_object(
+          'pendingActionId', v_action.id,
+          'notificationId', v_action.notification_id,
+          'status', v_action.status,
+          'expiresAt', v_action.expires_at
+        );
+      end if;
+      if v_action.begin_event_idempotency_key = p_event_idempotency_key then
+        raise exception 'SeaTalk OT rejection begin event is no longer active';
+      end if;
+    end if;
+  end if;
+  if v_notification.status not in ('dispatching', 'sent', 'failed') then
+    raise exception 'SeaTalk OT notification is not available for rejection';
+  end if;
+
+  update public.ot_seatalk_pending_rejections
+  set status = 'expired',
+      updated_at = now()
+  where sender_email = v_sender_email
+    and status = 'pending'
+    and expires_at <= pg_catalog.clock_timestamp();
+  if exists (
+    select 1
+    from public.ot_seatalk_pending_rejections a
+    where a.sender_email = v_sender_email
+      and a.status = 'pending'
+      and a.notification_id <> v_notification.id
+      and a.expires_at > pg_catalog.clock_timestamp()
+  ) then
+    raise exception 'Complete the existing SeaTalk OT rejection before starting another';
+  end if;
+
+  v_expires_at := pg_catalog.clock_timestamp() + interval '10 minutes';
+  insert into public.ot_seatalk_pending_rejections (
+    notification_id, sender_email, begin_event_idempotency_key,
+    apply_event_idempotency_key, status, expires_at, result,
+    consumed_at, created_at, updated_at
+  ) values (
+    v_notification.id, v_sender_email, p_event_idempotency_key,
+    null, 'pending', v_expires_at, null,
+    null, now(), now()
+  )
+  on conflict (notification_id) do update
+  set sender_email = excluded.sender_email,
+      begin_event_idempotency_key = excluded.begin_event_idempotency_key,
+      apply_event_idempotency_key = null,
+      status = 'pending',
+      expires_at = excluded.expires_at,
+      result = null,
+      consumed_at = null,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at
+  returning * into v_action;
+
+  return pg_catalog.jsonb_build_object(
+    'pendingActionId', v_action.id,
+    'notificationId', v_action.notification_id,
+    'status', v_action.status,
+    'expiresAt', v_action.expires_at
+  );
+end
+$function$;
+
+create or replace function public.ot_seatalk_apply_rejection_reason(
+  p_sender_email text,
+  p_reason text,
+  p_event_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_sender_email text := nullif(pg_catalog.lower(pg_catalog.btrim(coalesce(p_sender_email, ''))), '');
+  v_reason text := nullif(pg_catalog.btrim(coalesce(p_reason, '')), '');
+  v_action_id uuid;
+  v_notification_id uuid;
+  v_action public.ot_seatalk_pending_rejections;
+  v_notification public.ot_seatalk_notifications;
+  v_approver_user_id uuid;
+  v_approver_email text;
+  v_result jsonb;
+begin
+  if v_sender_email is null or v_reason is null or p_event_idempotency_key is null then
+    raise exception 'SeaTalk OT rejection reason requires the same sender, a reason, and an event identifier';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('ot-seatalk-rejection:' || v_sender_email, 3)
+  );
+
+  select a.result into v_result
+  from public.ot_seatalk_pending_rejections a
+  where a.sender_email = v_sender_email
+    and a.status = 'applied'
+    and a.apply_event_idempotency_key = p_event_idempotency_key;
+  if found then
+    return v_result;
+  end if;
+
+  select a.id, a.notification_id
+  into v_action_id, v_notification_id
+  from public.ot_seatalk_pending_rejections a
+  where a.sender_email = v_sender_email
+    and a.status = 'pending'
+    and a.expires_at > pg_catalog.clock_timestamp()
+  order by a.updated_at desc
+  limit 1;
+  if not found then
+    raise exception 'No active SeaTalk OT rejection is waiting for this sender';
+  end if;
+
+  select n.* into v_notification
+  from public.ot_seatalk_notifications n
+  where n.id = v_notification_id
+  for update of n;
+  select a.* into v_action
+  from public.ot_seatalk_pending_rejections a
+  where a.id = v_action_id
+  for update of a;
+  if not found or v_action.sender_email is distinct from v_sender_email then
+    raise exception 'SeaTalk rejection sender does not match the pending action';
+  end if;
+  if v_action.status <> 'pending'
+     or v_action.expires_at <= pg_catalog.clock_timestamp() then
+    raise exception 'SeaTalk OT rejection reason window has expired';
+  end if;
+  if v_notification.notification_kind <> 'plan_approval'
+     or v_notification.status not in ('dispatching', 'sent', 'failed') then
+    raise exception 'SeaTalk OT notification is not available for rejection';
+  end if;
+
+  select r.approver_user_id, pg_catalog.lower(pg_catalog.btrim(u.email))
+  into v_approver_user_id, v_approver_email
+  from public.ot_requests r
+  join public.users u on u.id = r.approver_user_id
+  join public.ot_approvers a on a.user_id = u.id and a.active = true
+  where r.id = v_notification.request_id
+    and u.is_active = true
+    and public.ot_user_is_approved_approver_identity(u.id);
+  if v_approver_user_id is null or v_sender_email is distinct from v_approver_email then
+    raise exception 'SeaTalk sender is not the assigned OT approver';
+  end if;
+
+  v_result := public.ot_apply_plan_review(
+    v_notification.request_id,
+    'rejected',
+    v_reason,
+    p_event_idempotency_key,
+    v_approver_user_id
+  );
+  update public.ot_seatalk_notifications
+  set status = 'applied',
+      lease_expires_at = null,
+      updated_at = now()
+  where id = v_notification.id
+    and status in ('dispatching', 'sent', 'failed');
+  update public.ot_seatalk_pending_rejections
+  set status = 'applied',
+      apply_event_idempotency_key = p_event_idempotency_key,
+      result = v_result,
+      consumed_at = now(),
+      updated_at = now()
+  where id = v_action.id;
+  return v_result;
+end
+$function$;
+
+create or replace function public.ot_apply_plan_review(
+  p_request_id uuid,
+  p_decision text,
+  p_note text,
+  p_idempotency_key uuid,
+  p_actor_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_request public.ot_requests;
+  v_old_status text;
+  v_new_status text;
+  v_note text := nullif(pg_catalog.btrim(coalesce(p_note, '')), '');
+begin
+  perform public.ot_lock_idempotency('review_plan', p_idempotency_key);
+  select * into v_request from public.ot_requests r where r.id = p_request_id;
+  if not found
+     or v_request.approver_user_id <> p_actor_id
+     or not exists (
+       select 1
+       from public.users u
+       join public.ot_approvers a on a.user_id = u.id
+       where u.id = p_actor_id
+         and u.is_active = true
+         and a.active = true
+         and public.ot_user_is_approved_approver_identity(u.id)
+     ) then
+    raise exception 'Only the assigned active OT approver can review this plan';
+  end if;
+  if exists (
+    select 1 from public.ot_request_audit a
+    where a.request_id = p_request_id and a.actor_user_id = p_actor_id
+      and a.action = 'review_plan' and a.idempotency_key = p_idempotency_key
+  ) then
+    return pg_catalog.to_jsonb(v_request);
+  end if;
+  if v_request.source <> 'employee_request' or v_request.status <> 'pending_approval' then
+    raise exception 'This OT plan is not awaiting approver review';
+  end if;
+  if p_decision not in ('approved', 'rejected', 'revision_required') then
+    raise exception 'Plan decision must be approved, rejected, or revision_required';
+  end if;
+  if p_decision in ('rejected', 'revision_required') and v_note is null then
+    raise exception 'Plan decision note is required for rejection or revision';
+  end if;
+  perform 1
+  from public.ot_approvers a
+  where a.user_id = p_actor_id
+  for key share of a;
+  perform public.ot_lock_employee_weeks(v_request.employee_user_id, v_request.planned_week_segments);
+  select * into v_request from public.ot_requests r where r.id = p_request_id for update;
+  if v_request.approver_user_id <> p_actor_id
+     or not exists (
+       select 1
+       from public.users u
+       join public.ot_approvers a on a.user_id = u.id
+       where u.id = p_actor_id
+         and u.is_active = true
+         and a.active = true
+         and public.ot_user_is_approved_approver_identity(u.id)
+     ) then
+    raise exception 'Plan assignment or approver access changed; reload this request';
+  end if;
+  if v_request.status <> 'pending_approval' then
+    raise exception 'Plan state changed; reload this request';
+  end if;
+  if p_decision = 'approved' then
+    perform public.ot_assert_planned_limit(v_request.employee_user_id, v_request.planned_week_segments, v_request.id);
+    v_new_status := 'approved';
+  else
+    v_new_status := p_decision;
+  end if;
+  v_old_status := v_request.status;
+  if p_decision = 'approved' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then
+    raise exception 'Planned OT start must remain in the future for approval';
+  end if;
+  update public.ot_requests
+  set plan_decision = p_decision,
+      plan_decision_note = v_note,
+      plan_reviewed_by_user_id = p_actor_id,
+      plan_reviewed_at = now(),
+      status = v_new_status,
+      updated_at = now()
+  where id = p_request_id returning * into v_request;
+  insert into public.ot_request_audit (
+    request_id, actor_user_id, action, old_status, new_status, changed_fields, note, idempotency_key
+  ) values (
+    v_request.id, p_actor_id, 'review_plan', v_old_status, v_request.status,
+    pg_catalog.jsonb_build_object(
+      'decision', p_decision,
+      'result', pg_catalog.to_jsonb(v_request)
+    ), v_note, p_idempotency_key
+  );
+  return pg_catalog.to_jsonb(v_request);
+end
 $function$;
 
 create or replace function public.ot_current_user_is_owner()
@@ -1606,6 +2271,7 @@ as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
   v_approver_user_id uuid;
+  v_function_code text;
   v_start_at timestamptz;
   v_end_at timestamptz;
   v_break_minutes integer;
@@ -1635,18 +2301,10 @@ begin
   end if;
   perform public.ot_assert_consent_version(v_consent_statement_version);
 
-  v_approver_user_id := coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
-  perform 1
-  from public.ot_approvers a
-  where a.user_id = v_approver_user_id
-  for key share of a;
-  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
-     or not exists (
-    select 1 from public.ot_approvers a join public.users u on u.id = a.user_id
-    where a.user_id = v_approver_user_id and a.active = true and u.is_active = true
-  ) then
-    raise exception 'An active approved OT approver is required';
-  end if;
+  v_function_code := nullif(pg_catalog.btrim(coalesce(
+    p_payload->>'functionCode', p_payload->>'function_code'
+  )), '');
+  v_approver_user_id := public.ot_function_approver_id(v_function_code);
   v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
   )), '');
@@ -1685,7 +2343,7 @@ begin
     v_actor_id,
     'employee_request',
     'planned',
-    coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
+    v_function_code,
     pg_catalog.btrim(p_payload->>'title'),
     coalesce(p_payload->>'dayType', p_payload->>'day_type'),
     coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
@@ -1711,6 +2369,7 @@ begin
     ),
     p_idempotency_key
   );
+  perform public.ot_enqueue_seatalk_notification(v_request.id, 'plan_approval');
   return pg_catalog.to_jsonb(v_request);
 end
 $function$;
@@ -1730,6 +2389,7 @@ declare
   v_actor_id uuid := public.ot_require_current_user();
   v_request public.ot_requests;
   v_approver_user_id uuid;
+  v_function_code text;
   v_start_at timestamptz;
   v_end_at timestamptz;
   v_break_minutes integer;
@@ -1780,22 +2440,10 @@ begin
   end if;
   perform public.ot_assert_consent_version(v_consent_statement_version);
 
-  v_approver_user_id := coalesce(p_payload->>'approverUserId', p_payload->>'approver_user_id')::uuid;
-  perform 1
-  from public.ot_approvers a
-  where a.user_id = v_approver_user_id
-  for key share of a;
-  if not public.ot_user_is_approved_approver_identity(v_approver_user_id)
-     or not exists (
-       select 1
-       from public.ot_approvers a
-       join public.users u on u.id = a.user_id
-       where a.user_id = v_approver_user_id
-         and a.active = true
-         and u.is_active = true
-     ) then
-    raise exception 'An active approved OT approver is required';
-  end if;
+  v_function_code := nullif(pg_catalog.btrim(coalesce(
+    p_payload->>'functionCode', p_payload->>'function_code'
+  )), '');
+  v_approver_user_id := public.ot_function_approver_id(v_function_code);
   v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
   )), '');
@@ -1866,7 +2514,7 @@ begin
     raise exception 'Planned OT start became non-future while the plan was being resubmitted';
   end if;
   update public.ot_requests
-  set function_code = coalesce(p_payload->>'functionCode', p_payload->>'function_code'),
+  set function_code = v_function_code,
       title = pg_catalog.btrim(p_payload->>'title'),
       day_type = coalesce(p_payload->>'dayType', p_payload->>'day_type'),
       work_location_type = coalesce(p_payload->>'workLocationType', p_payload->>'work_location_type'),
@@ -1925,7 +2573,87 @@ begin
     'Employee corrected and resubmitted the OT plan',
     p_idempotency_key
   );
+  perform public.ot_enqueue_seatalk_notification(v_request.id, 'plan_approval');
   return pg_catalog.to_jsonb(v_request);
+end
+$function$;
+
+create or replace function public.ot_seatalk_apply_review(
+  p_notification_id uuid,
+  p_decision text,
+  p_note text,
+  p_sender_email text,
+  p_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_notification public.ot_seatalk_notifications;
+  v_approver_user_id uuid;
+  v_approver_email text;
+  v_result jsonb;
+begin
+  if p_decision is distinct from 'approved' then
+    raise exception 'SeaTalk direct review supports approval only; use the rejection reason workflow';
+  end if;
+
+  select * into v_notification
+  from public.ot_seatalk_notifications n
+  where n.id = p_notification_id
+  for update;
+  if not found or v_notification.notification_kind <> 'plan_approval' then
+    raise exception 'SeaTalk OT notification not found';
+  end if;
+
+  select r.approver_user_id, pg_catalog.lower(pg_catalog.btrim(u.email))
+  into v_approver_user_id, v_approver_email
+  from public.ot_requests r
+  join public.users u on u.id = r.approver_user_id
+  where r.id = v_notification.request_id;
+  if v_approver_user_id is null
+     or nullif(pg_catalog.lower(pg_catalog.btrim(p_sender_email)), '') is distinct from v_approver_email then
+    raise exception 'SeaTalk sender is not the assigned OT approver';
+  end if;
+
+  if v_notification.status = 'applied' then
+    select a.changed_fields->'result' into v_result
+    from public.ot_request_audit a
+    where a.request_id = v_notification.request_id
+      and a.actor_user_id = v_approver_user_id
+      and a.action = 'review_plan'
+      and a.idempotency_key = p_idempotency_key;
+    if found then
+      return v_result;
+    end if;
+    raise exception 'SeaTalk OT notification replay does not match the applied review';
+  end if;
+  if v_notification.status not in ('pending', 'dispatching', 'sent', 'failed') then
+    raise exception 'SeaTalk OT notification is not available for review';
+  end if;
+
+  v_result := public.ot_apply_plan_review(
+    v_notification.request_id,
+    'approved',
+    p_note,
+    p_idempotency_key,
+    v_approver_user_id
+  );
+
+  update public.ot_seatalk_notifications
+  set status = 'applied',
+      lease_expires_at = null,
+      updated_at = now()
+  where id = v_notification.id
+    and status in ('pending', 'dispatching', 'sent', 'failed');
+  update public.ot_seatalk_pending_rejections
+  set status = 'cancelled',
+      updated_at = now()
+  where notification_id = v_notification.id
+    and status = 'pending';
+  return v_result;
 end
 $function$;
 
@@ -2430,6 +3158,7 @@ declare
   v_reason text := nullif(pg_catalog.btrim(p_reason), '');
   v_request public.ot_requests;
   v_moved_request public.ot_requests;
+  v_notification_id uuid;
   v_moved_request_ids uuid[] := '{}'::uuid[];
   v_replay_result jsonb;
   v_result jsonb;
@@ -2469,9 +3198,24 @@ begin
     return v_replay_result;
   end if;
 
-  -- Creation/resubmission RPCs take KEY SHARE on the assignee row before
-  -- employee-week/request locks. UPDATE here uses the same approver-first
-  -- order, preventing new assignment work from racing this atomic move.
+  -- Plan callbacks lock the notification before approver/request state. Lock
+  -- every actionable notification in a deterministic order before taking the
+  -- assignee rows so reassignment can invalidate a lease without deadlocking a
+  -- concurrent callback on the same pending plan.
+  perform 1
+  from public.ot_seatalk_notifications n
+  join public.ot_requests r on r.id = n.request_id
+  where r.approver_user_id = p_from_user_id
+    and r.status in (
+      'pending_approval', 'awaiting_consent', 'approved', 'revision_required',
+      'actual_confirmation_required', 'pending_actual_verification',
+      'compliance_review_required'
+    )
+    and n.notification_kind = 'plan_approval'
+    and n.status in ('pending', 'dispatching', 'sent', 'failed')
+  order by n.id
+  for update of n;
+
   perform 1
   from public.ot_approvers a
   where a.user_id in (p_from_user_id, p_to_user_id)
@@ -2514,6 +3258,33 @@ begin
     returning * into v_moved_request;
 
     if found then
+      select n.id into v_notification_id
+      from public.ot_seatalk_notifications n
+      where n.request_id = v_moved_request.id
+        and n.notification_kind = 'plan_approval';
+      if found then
+        update public.ot_seatalk_pending_rejections
+        set status = 'cancelled',
+            updated_at = now()
+        where notification_id = v_notification_id
+          and status = 'pending';
+        update public.ot_seatalk_notifications
+        set status = case
+              when v_request.status = 'pending_approval' then 'pending'
+              else 'cancelled'
+            end,
+            attempt_count = case
+              when v_request.status = 'pending_approval' then 0
+              else attempt_count
+            end,
+            seatalk_message_id = null,
+            dispatch_key = null,
+            lease_expires_at = null,
+            last_error = null,
+            updated_at = now()
+        where id = v_notification_id
+          and status in ('pending', 'dispatching', 'sent', 'failed');
+      end if;
       v_moved_request_ids := pg_catalog.array_append(v_moved_request_ids, v_moved_request.id);
       insert into public.ot_request_audit (
         request_id, event_plan_id, actor_user_id, action, old_status, new_status,
@@ -2725,6 +3496,8 @@ alter table public.ot_event_plans enable row level security;
 alter table public.ot_requests enable row level security;
 alter table public.ot_request_audit enable row level security;
 alter table public.ot_export_batches enable row level security;
+alter table public.ot_seatalk_notifications enable row level security;
+alter table public.ot_seatalk_pending_rejections enable row level security;
 
 drop policy if exists "employees can read own OT requests" on public.ot_requests;
 create policy "employees can read own OT requests"
@@ -2749,7 +3522,8 @@ using (
 
 revoke all on table public.ot_system_roles, public.ot_approvers,
   public.ot_event_plans, public.ot_requests, public.ot_request_audit,
-  public.ot_export_batches from public, anon, authenticated;
+  public.ot_export_batches, public.ot_seatalk_notifications,
+  public.ot_seatalk_pending_rejections from public, anon, authenticated;
 grant select on public.ot_requests to authenticated;
 revoke insert, update, delete on public.ot_request_audit from authenticated;
 
@@ -2758,6 +3532,14 @@ revoke all on function public.ot_assert_reason(text, text) from public, anon, au
 revoke all on function public.ot_assert_consent_version(text) from public, anon, authenticated;
 revoke all on function public.ot_set_audit_actor_email_snapshot() from public, anon, authenticated;
 revoke all on function public.ot_user_is_approved_approver_identity(uuid) from public, anon, authenticated;
+revoke all on function public.ot_function_approver_id(text) from public, anon, authenticated;
+revoke all on function public.ot_enqueue_seatalk_notification(uuid, text) from public, anon, authenticated;
+revoke all on function public.ot_is_service_role_context() from public, anon, authenticated;
+revoke all on function public.ot_seatalk_claim_dispatch(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.ot_seatalk_finish_dispatch(uuid, boolean, text, text) from public, anon, authenticated;
+revoke all on function public.ot_seatalk_begin_rejection(uuid, text, uuid) from public, anon, authenticated;
+revoke all on function public.ot_seatalk_apply_rejection_reason(text, text, uuid) from public, anon, authenticated;
+revoke all on function public.ot_apply_plan_review(uuid, text, text, uuid, uuid) from public, anon, authenticated;
 revoke all on function public.ot_week_start(timestamptz) from public, anon, authenticated;
 revoke all on function public.ot_build_week_segments(timestamptz, timestamptz, integer, jsonb) from public, anon, authenticated;
 revoke all on function public.ot_lock_employee_week_keys(jsonb) from public, anon, authenticated;
@@ -2789,6 +3571,7 @@ revoke all on function public.ot_preview_event_plan(jsonb, uuid[]) from public, 
 revoke all on function public.ot_create_event_plan(jsonb, uuid[], uuid) from public, anon, authenticated;
 revoke all on function public.ot_record_consent(uuid, boolean, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_review_plan(uuid, text, text, uuid) from public, anon, authenticated;
+revoke all on function public.ot_seatalk_apply_review(uuid, text, text, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_submit_actual(uuid, jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_request_actual_amendment(uuid, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_verify_actual(uuid, text, text, uuid) from public, anon, authenticated;
@@ -2819,6 +3602,11 @@ grant execute on function public.ot_preview_event_plan(jsonb, uuid[]) to authent
 grant execute on function public.ot_create_event_plan(jsonb, uuid[], uuid) to authenticated;
 grant execute on function public.ot_record_consent(uuid, boolean, text, uuid) to authenticated;
 grant execute on function public.ot_review_plan(uuid, text, text, uuid) to authenticated;
+grant execute on function public.ot_seatalk_apply_review(uuid, text, text, text, uuid) to service_role;
+grant execute on function public.ot_seatalk_claim_dispatch(uuid, uuid) to service_role;
+grant execute on function public.ot_seatalk_finish_dispatch(uuid, boolean, text, text) to service_role;
+grant execute on function public.ot_seatalk_begin_rejection(uuid, text, uuid) to service_role;
+grant execute on function public.ot_seatalk_apply_rejection_reason(text, text, uuid) to service_role;
 grant execute on function public.ot_submit_actual(uuid, jsonb, uuid) to authenticated;
 grant execute on function public.ot_request_actual_amendment(uuid, text, uuid) to authenticated;
 grant execute on function public.ot_verify_actual(uuid, text, text, uuid) to authenticated;

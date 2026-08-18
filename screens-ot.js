@@ -27,10 +27,10 @@ const OT_LIMIT_MINUTES = 36 * 60;
 const OT_CONSENT_STATEMENT_VERSION = "2026-08-07";
 const OT_DETAIL_REQUIRED_REASONS = new Set(["other", "live_incident", "rework", "scope_change"]);
 const OT_FUNCTION_APPROVER_EMAILS = Object.freeze({
-  ops: "panuwee.w@garena.com",
-  mkt: "panuwee.w@garena.com",
-  gdve: "panuwee.w@garena.com",
-  esport: "panuwee.w@garena.com"
+  ops: "nithidol.k@garena.com",
+  mkt: "weerayut@garena.com",
+  gdve: "weerayut@garena.com",
+  esport: "napol.a@garena.com"
 });
 function otValue(record, camel, snake) {
   return record && (record[camel] !== undefined ? record[camel] : record[snake]);

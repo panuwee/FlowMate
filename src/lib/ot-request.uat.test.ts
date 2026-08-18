@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
+import { transformSync } from "@babel/core";
+import presetReact from "@babel/preset-react";
 import { describe, expect, it } from "vitest";
 
 const read = (...parts: string[]) => readFileSync(join(process.cwd(), ...parts), "utf8");
@@ -47,6 +49,72 @@ function loadOtRequestDomain() {
   const sandbox = { window: {} as Record<string, unknown> };
   runInNewContext(read("ot-request-domain.js"), sandbox);
   return (sandbox.window as any).FlowMateOtRequestDomain;
+}
+
+function createOtRequestFormHarness(overrides: Record<string, (...args: unknown[]) => Promise<unknown>>) {
+  const stateSlots: unknown[] = [];
+  let stateIndex = 0;
+  const elements = (node: any, results: any[] = []): any[] => {
+    if (!node || typeof node !== "object") return results;
+    if (node.type) results.push(node);
+    for (const child of node.children || []) elements(child, results);
+    return results;
+  };
+  const formSource = read("screens-ot.jsx").slice(
+    read("screens-ot.jsx").indexOf("function OtRequestForm("),
+    read("screens-ot.jsx").indexOf("function OtConsentPanel("),
+  );
+  const compiled = transformSync(formSource, { presets: [[presetReact, { runtime: "classic" }]] })?.code;
+  if (!compiled) throw new Error("OT request form could not be compiled for behavior testing.");
+  const sandbox: any = {
+    React: { createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => ({ type, props: props || {}, children }) },
+    useStateApp(initialValue: unknown) {
+      const index = stateIndex++;
+      if (!(index in stateSlots)) stateSlots[index] = typeof initialValue === "function" ? (initialValue as () => unknown)() : initialValue;
+      return [stateSlots[index], (next: unknown) => { stateSlots[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(stateSlots[index]) : next; }];
+    },
+    useEffectApp() {},
+    useRefApp: (value: unknown) => ({ current: value }),
+    crypto: { randomUUID: () => "test-intent" },
+    OT_CONSENT_STATEMENT_VERSION: "2026-08-07",
+    OT_DETAIL_REQUIRED_REASONS: new Set(["other"]),
+    OT_FUNCTION_APPROVER_EMAILS: { ops: "nithidol.k@garena.com" },
+    getCurrentOtWeekStart: () => "2099-01-05",
+    getBangkokDateKey: () => "2099-01-05",
+    getOtBangkokParts: () => ({ date: "", time: "" }),
+    getOtWeekSegments: () => [],
+    getOtPlanRevisionBreakAllocation: () => ({ breakMinutesBeforeBoundary: "", breakMinutesAfterBoundary: "" }),
+    getOtDescribedActionProps: () => ({}),
+    addOtDays: (date: string, days: number) => new Date(`${date}T00:00:00Z`).setUTCDate(new Date(`${date}T00:00:00Z`).getUTCDate() + days) && new Date(new Date(`${date}T00:00:00Z`).getTime() + days * 86400000).toISOString().slice(0, 10),
+    toOtBangkokIso: (date: string, time: string) => `${date}T${time}:00+07:00`,
+    useOtWeekSummaries: () => ({ status: "ready", summaries: [], retry() {} }),
+    OtWeekProjection: () => null,
+    OtWarning: () => null,
+    otValue: () => undefined,
+    formatOtDate: (value: string) => value,
+    Set,
+    Number,
+    window: {
+      FlowMateOtRequestDomain: {
+        splitMinutesByWeek: () => [{ weekStart: "2099-01-05", minutes: 120 }],
+        getWeekStartKey: () => "2099-01-05",
+        buildWeekProjections: () => [],
+        getCanonicalCountedSegments: () => [],
+        isBangkokPlannedStartFuture: () => true,
+        isSubmissionLocked: (status: string) => status === "submitting",
+        REASON_OPTIONS: [{ key: "other", label: "Other" }],
+      },
+      ...overrides,
+    },
+  };
+  runInNewContext(`${compiled}; globalThis.__OtRequestForm = OtRequestForm;`, sandbox);
+  return {
+    elements,
+    render(mode = "create", request: Record<string, unknown> | null = null, onSuccess = () => {}) {
+      stateIndex = 0;
+      return sandbox.__OtRequestForm({ mode, request, weekStart: "2099-01-05", onSuccess }) as RenderedElement;
+    },
+  };
 }
 
 function createOtRootCauseHarness() {
@@ -338,7 +406,8 @@ describe("OT Request backend contract", () => {
     expect(sql).toContain("nithidol.k@garena.com");
     expect(sql).toContain("weerayut@garena.com");
     expect(sql).toContain("napol.a@garena.com");
-    expect(sql).not.toMatch(/p_actor(_user)?_id/i);
+    expect(functionSql(sql, "ot_review_plan")).not.toMatch(/p_actor(_user)?_id/i);
+    expect(sql).toContain("revoke all on function public.ot_apply_plan_review(uuid, text, text, uuid, uuid) from public, anon, authenticated");
   });
 
   it("ships read-only verification", () => {
@@ -691,6 +760,205 @@ describe("OT Request backend contract", () => {
     expect(setRole).toMatch(/if not exists \([\s\S]*join public\.users owner_user[\s\S]*panuwee\.w@garena\.com[\s\S]*At least one active approved OT Owner/);
   });
 
+  it("routes individual OT approvals in the database and protects the SeaTalk outbox review boundary", () => {
+    const routing = functionSql(sql, "ot_function_approver_id");
+    const createRequest = functionSql(sql, "ot_create_request");
+    const resubmitPlan = functionSql(sql, "ot_resubmit_plan");
+    const applySeaTalkReview = functionSql(sql, "ot_seatalk_apply_review");
+    const reviewSignature = "public.ot_seatalk_apply_review(uuid, text, text, text, uuid)";
+
+    for (const [functionCode, email] of Object.entries({
+      ops: "nithidol.k@garena.com",
+      mkt: "weerayut@garena.com",
+      gdve: "weerayut@garena.com",
+      esport: "napol.a@garena.com",
+    })) {
+      expect(routing).toContain(`when '${functionCode}' then '${email}'`);
+    }
+    expect(routing).toContain("Production SeaTalk routing");
+    expect(routing).toContain("join public.ot_approvers a on a.user_id = u.id and a.active = true");
+    expect(routing).toContain("u.is_active = true");
+    for (const caller of [createRequest, resubmitPlan]) {
+      expect(caller).toContain("public.ot_function_approver_id(v_function_code)");
+      expect(caller).not.toContain("p_payload->>'approverUserId'");
+      expect(caller.indexOf("insert into public.ot_request_audit")).toBeLessThan(
+        caller.indexOf("public.ot_enqueue_seatalk_notification(v_request.id, 'plan_approval')"),
+      );
+    }
+    expect(sql).toContain("create table if not exists public.ot_seatalk_notifications");
+    expect(sql).toContain("seatalk_message_id text");
+    expect(sql).toContain("unique (request_id, notification_kind)");
+    expect(sql).toContain("alter table public.ot_seatalk_notifications enable row level security");
+    expect(sql).toMatch(/revoke all on table[\s\S]*ot_seatalk_notifications,[\s\S]*from public, anon, authenticated/);
+    expect(applySeaTalkReview).not.toContain("public.ot_is_service_role_context()");
+    expect(applySeaTalkReview).toContain("v_notification.status not in ('pending', 'dispatching', 'sent', 'failed')");
+    expect(applySeaTalkReview).toContain("p_sender_email");
+    expect(applySeaTalkReview).toContain("public.ot_apply_plan_review(");
+    expect(sql).toContain(`revoke all on function ${reviewSignature} from public, anon, authenticated`);
+    expect(sql).toContain(`grant execute on function ${reviewSignature} to service_role`);
+    expect(sql).not.toContain(`grant execute on function ${reviewSignature} to authenticated`);
+    expect(verify).toContain("SeaTalk OT review RPC contract (Expected service_role only)");
+  });
+
+  it("replays an applied SeaTalk review safely and closes pending SeaTalk actions after direct review", () => {
+    const directReview = functionSql(sql, "ot_review_plan");
+    const sharedPlanReview = functionSql(sql, "ot_apply_plan_review");
+    const applySeaTalkReview = functionSql(sql, "ot_seatalk_apply_review");
+    const notificationLock = "from public.ot_seatalk_notifications n";
+    const sharedReview = "v_result := public.ot_apply_plan_review(";
+    const senderCheck = "SeaTalk sender is not the assigned OT approver";
+    const appliedReplay = "if v_notification.status = 'applied' then";
+    const pendingGuard = "if v_notification.status not in ('pending', 'dispatching', 'sent', 'failed') then";
+
+    expect(directReview).toContain("for update;");
+    expect(directReview.indexOf(notificationLock)).toBeLessThan(directReview.indexOf(sharedReview));
+    expect(directReview.indexOf(sharedReview)).toBeLessThan(directReview.indexOf("set status = 'cancelled'"));
+    expect(directReview).toContain("where n.request_id = p_request_id");
+    expect(directReview).toContain("and n.notification_kind = 'plan_approval'");
+    expect(directReview).toContain("and n.status in ('pending', 'dispatching', 'sent', 'failed')");
+    expect(directReview).toContain("update public.ot_seatalk_pending_rejections");
+    expect(applySeaTalkReview.indexOf(senderCheck)).toBeLessThan(applySeaTalkReview.indexOf(appliedReplay));
+    expect(applySeaTalkReview.indexOf(appliedReplay)).toBeLessThan(applySeaTalkReview.indexOf(pendingGuard));
+    expect(applySeaTalkReview).toContain("a.actor_user_id = v_approver_user_id");
+    expect(applySeaTalkReview).toContain("a.idempotency_key = p_idempotency_key");
+    expect(applySeaTalkReview).toContain("return v_result;");
+    expect(sharedPlanReview).toMatch(/'decision', p_decision,\s*'result', pg_catalog\.to_jsonb\(v_request\)/);
+    expect(sql).toContain("'cancelled'");
+    expect(sql).toContain("alter table public.ot_seatalk_notifications drop constraint if exists ot_seatalk_notifications_status_check");
+    expect(sql).toMatch(/add constraint ot_seatalk_notifications_status_check\s+check \(status in \('pending', 'dispatching', 'sent', 'failed', 'applied', 'cancelled'\)\)/);
+  });
+
+  it("claims and finalizes SeaTalk dispatches through a leased service-role-only contract", () => {
+    const claimDispatch = functionSql(sql, "ot_seatalk_claim_dispatch");
+    const finishDispatch = functionSql(sql, "ot_seatalk_finish_dispatch");
+    const directReview = functionSql(sql, "ot_review_plan");
+    const claimSignature = "public.ot_seatalk_claim_dispatch(uuid, uuid)";
+    const finishSignature = "public.ot_seatalk_finish_dispatch(uuid, boolean, text, text)";
+
+    expect(sql).toContain("lease_expires_at timestamptz");
+    expect(sql).toContain("last_error text");
+    expect(sql).toContain("ot_seatalk_notifications_dispatch_key_uidx");
+    expect(claimDispatch).not.toContain("public.ot_is_service_role_context()");
+    expect(claimDispatch).toMatch(/v_request\.created_by_user_id <> p_actor_id\s+and v_request\.approver_user_id <> p_actor_id/);
+    expect(claimDispatch).toContain("for update of n;");
+    expect(claimDispatch).toMatch(/v_notification\.status in \('pending', 'failed'\)[\s\S]*v_notification\.status = 'dispatching'[\s\S]*lease_expires_at <= pg_catalog\.clock_timestamp\(\)/);
+    expect(claimDispatch).toContain("interval '5 minutes'");
+    expect(claimDispatch).toContain("attempt_count = attempt_count + 1");
+    for (const safeField of [
+      "notificationId", "dispatchKey", "leaseExpiresAt", "recipientEmail", "recipientDisplayName",
+      "requestId", "employeeEmail", "employeeDisplayName", "functionCode", "title", "dayType",
+      "workLocationType", "venue", "reasonCode", "reasonDetail", "plannedStartAt", "plannedEndAt",
+      "plannedBreakMinutes", "plannedMinutes",
+    ]) {
+      expect(claimDispatch).toContain(`'${safeField}'`);
+    }
+    expect(claimDispatch).not.toMatch(/pg_catalog\.to_jsonb\(v_request\)|actual_start_at|actual_end_at|employee_consent|compliance_outcome/);
+    expect(finishDispatch).not.toContain("public.ot_is_service_role_context()");
+    expect(finishDispatch).toMatch(/where dispatch_key = p_dispatch_key\s+and status = 'dispatching'/);
+    expect(finishDispatch).toContain("if found then");
+    expect(finishDispatch).toMatch(/status in \('sent', 'failed'\)[\s\S]*dispatch_key = p_dispatch_key/);
+    expect(directReview).toContain("status in ('pending', 'dispatching', 'sent', 'failed')");
+    for (const signature of [claimSignature, finishSignature]) {
+      expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+      expect(sql).toContain(`grant execute on function ${signature} to service_role`);
+      expect(sql).not.toContain(`grant execute on function ${signature} to authenticated`);
+    }
+    expect(verify).toContain("SeaTalk OT dispatch RPC contract (Expected leased grant-gated service role and compare-and-set finish)");
+  });
+
+  it("persists sender-bound expiring SeaTalk rejections and applies one locked decision", () => {
+    const beginRejection = functionSql(sql, "ot_seatalk_begin_rejection");
+    const applyReason = functionSql(sql, "ot_seatalk_apply_rejection_reason");
+    const beginSignature = "public.ot_seatalk_begin_rejection(uuid, text, uuid)";
+    const applySignature = "public.ot_seatalk_apply_rejection_reason(text, text, uuid)";
+
+    expect(sql).toContain("create table if not exists public.ot_seatalk_pending_rejections");
+    expect(sql).toContain("sender_email text not null");
+    expect(sql).toContain("expires_at timestamptz not null");
+    expect(sql).toContain("apply_event_idempotency_key uuid");
+    expect(sql).toContain("ot_seatalk_pending_rejections_sender_pending_uidx");
+    expect(sql).toContain("alter table public.ot_seatalk_pending_rejections enable row level security");
+    expect(sql).toMatch(/revoke all on table[\s\S]*ot_seatalk_pending_rejections from public, anon, authenticated/);
+    expect(beginRejection).not.toContain("public.ot_is_service_role_context()");
+    expect(beginRejection).toContain("pg_catalog.pg_advisory_xact_lock");
+    expect(beginRejection).toContain("SeaTalk sender is not the assigned OT approver");
+    expect(beginRejection).toContain("interval '10 minutes'");
+    expect(beginRejection).toMatch(/status = 'pending'[\s\S]*expires_at > pg_catalog\.clock_timestamp\(\)/);
+    expect(beginRejection).toMatch(/v_action\.begin_event_idempotency_key = p_event_idempotency_key[\s\S]*SeaTalk OT rejection begin event is no longer active/);
+    expect(applyReason).not.toContain("public.ot_is_service_role_context()");
+    expect(applyReason).toContain("nullif(pg_catalog.btrim(coalesce(p_reason, '')), '')");
+    expect(applyReason).toContain("a.sender_email = v_sender_email");
+    expect(applyReason).toContain("a.apply_event_idempotency_key = p_event_idempotency_key");
+    expect(applyReason).toMatch(/public\.ot_apply_plan_review\(\s*v_notification\.request_id,\s*'rejected',\s*v_reason,\s*p_event_idempotency_key,/);
+    expect(applyReason).toMatch(/set status = 'applied',[\s\S]*apply_event_idempotency_key = p_event_idempotency_key[\s\S]*consumed_at = now\(\)/);
+    for (const signature of [beginSignature, applySignature]) {
+      expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+      expect(sql).toContain(`grant execute on function ${signature} to service_role`);
+      expect(sql).not.toContain(`grant execute on function ${signature} to authenticated`);
+    }
+    expect(verify).toContain("SeaTalk OT pending rejection contract (Expected expiring sender binding and service_role only)");
+    expect(sql).not.toMatch(/sk_(?:live|test)_[a-z0-9]+|sb_secret_[a-z0-9]+|ghp_[a-z0-9]+|-----BEGIN (?:RSA |EC )?PRIVATE KEY-----|authorization\s*[:=]\s*['\"]bearer/i);
+  });
+
+  it("keeps direct SeaTalk review approval-only so rejection must use the reason gate", () => {
+    const applySeaTalkReview = functionSql(sql, "ot_seatalk_apply_review");
+    const decisionGuard = "if p_decision is distinct from 'approved' then";
+    const notificationLock = "select * into v_notification";
+
+    expect(applySeaTalkReview).toContain(decisionGuard);
+    expect(applySeaTalkReview).toContain("SeaTalk direct review supports approval only; use the rejection reason workflow");
+    expect(applySeaTalkReview.indexOf(decisionGuard)).toBeLessThan(applySeaTalkReview.indexOf(notificationLock));
+    expect(applySeaTalkReview).toMatch(/public\.ot_apply_plan_review\(\s*v_notification\.request_id,\s*'approved',/);
+    expect(verify).toContain("SeaTalk direct review decision gate (Expected approval only)");
+  });
+
+  it("requeues a leased or sent notification and invalidates the old sender during reassignment", () => {
+    const reassign = functionSql(sql, "ot_reassign_pending_approver");
+    const notificationLock = "for update of n;";
+    const approverLock = "for update of a;";
+    const requestLock = "for update of r";
+    const cancelPending = "update public.ot_seatalk_pending_rejections";
+    const resetNotification = "update public.ot_seatalk_notifications";
+    const beginRejection = functionSql(sql, "ot_seatalk_begin_rejection");
+
+    expect(reassign).toMatch(/from public\.ot_seatalk_notifications n\s+join public\.ot_requests r[\s\S]*r\.approver_user_id = p_from_user_id[\s\S]*for update of n;/);
+    expect(reassign.indexOf(notificationLock)).toBeLessThan(reassign.indexOf(approverLock));
+    expect(reassign.indexOf(approverLock)).toBeLessThan(reassign.indexOf(requestLock));
+    expect(reassign.indexOf(cancelPending)).toBeLessThan(reassign.indexOf(resetNotification));
+    expect(reassign).toMatch(/set status = 'cancelled'[\s\S]*where notification_id = v_notification_id[\s\S]*and status = 'pending'/);
+    expect(reassign).toMatch(/set status = case\s+when v_request\.status = 'pending_approval' then 'pending'\s+else 'cancelled'\s+end/);
+    for (const reset of ["seatalk_message_id = null", "dispatch_key = null", "lease_expires_at = null", "last_error = null"]) {
+      expect(reassign).toContain(reset);
+    }
+    expect(beginRejection).toMatch(/v_action\.sender_email is distinct from v_sender_email[\s\S]*set status = 'cancelled'[\s\S]*where id = v_action\.id/);
+    expect(verify).toContain("OT approver reassignment SeaTalk reset (Expected notification-first lock and requeue)");
+  });
+
+  it("returns an exact applied rejection replay before considering a newer pending action", () => {
+    const applyReason = functionSql(sql, "ot_seatalk_apply_rejection_reason");
+    const exactReplay = "a.apply_event_idempotency_key = p_event_idempotency_key";
+    const replayReturn = "return v_result;";
+    const pendingLookup = "a.status = 'pending'";
+
+    expect(applyReason).toMatch(/select a\.result into v_result[\s\S]*a\.sender_email = v_sender_email[\s\S]*a\.status = 'applied'[\s\S]*a\.apply_event_idempotency_key = p_event_idempotency_key/);
+    expect(applyReason.indexOf(exactReplay)).toBeLessThan(applyReason.indexOf(replayReturn));
+    expect(applyReason.indexOf(replayReturn)).toBeLessThan(applyReason.indexOf(pendingLookup));
+    expect(applyReason).not.toContain("order by case when a.status = 'pending' then 0 else 1 end");
+    expect(verify).toContain("SeaTalk rejection replay precedence (Expected applied event before active pending)");
+  });
+
+  it("accepts only a matching terminal dispatch replay payload", () => {
+    const finishDispatch = functionSql(sql, "ot_seatalk_finish_dispatch");
+
+    expect(finishDispatch).toMatch(/select n\.status, n\.seatalk_message_id, n\.last_error[\s\S]*into v_status, v_stored_message_id, v_stored_error/);
+    expect(finishDispatch).toContain("v_stored_message_id is distinct from v_message_id");
+    expect(finishDispatch).toContain("v_status <> (case when p_succeeded then 'sent' else 'failed' end) then");
+    expect(finishDispatch).toContain("SeaTalk OT dispatch result conflicts with the stored message identifier");
+    expect(finishDispatch).toContain("v_stored_error is distinct from v_expected_error");
+    expect(finishDispatch).toContain("SeaTalk OT dispatch result conflicts with the stored failure detail");
+    expect(verify).toContain("SeaTalk terminal dispatch replay identity (Expected matching status, message ID, and failure detail)");
+  });
+
   it("rejects unauthorized HR admin activation at the server boundary", () => {
     const setRole = functionSql(sql, "ot_set_system_role");
 
@@ -781,7 +1049,7 @@ describe("OT Request backend contract", () => {
     expect(previewEvent).not.toContain("public.ot_projected_week_minutes_unchecked(");
     expect(submitActual).toContain("public.ot_counted_week_minutes_unchecked(");
     expect(submitActual).not.toContain("public.ot_actual_week_minutes(");
-    for (const caller of ["ot_create_request", "ot_create_event_plan", "ot_record_consent", "ot_review_plan"]) {
+    for (const caller of ["ot_create_request", "ot_create_event_plan", "ot_record_consent", "ot_apply_plan_review"]) {
       expect(functionSql(sql, caller)).toContain("public.ot_assert_planned_limit(");
     }
   });
@@ -873,7 +1141,7 @@ describe("OT Request backend contract", () => {
   });
 
   it("keeps pre-work revisions out of the server plan-review transition", () => {
-    const reviewPlan = functionSql(sql, "ot_review_plan");
+    const reviewPlan = functionSql(sql, "ot_apply_plan_review");
     const firstGuard = reviewPlan.slice(0, reviewPlan.indexOf("public.ot_lock_employee_weeks"));
     const lockedGuard = reviewPlan.slice(reviewPlan.indexOf("for update"), reviewPlan.indexOf("update public.ot_requests"));
 
@@ -883,7 +1151,7 @@ describe("OT Request backend contract", () => {
   });
 
   it("rejects approval and consent that become non-future after their ordered locks while preserving replay", () => {
-    const reviewPlan = functionSql(sql, "ot_review_plan");
+    const reviewPlan = functionSql(sql, "ot_apply_plan_review");
     const recordConsent = functionSql(sql, "ot_record_consent");
     const reviewRequestLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update;";
     const consentRequestLock = "select * into v_request from public.ot_requests r where r.id = p_request_id for update;";
@@ -930,9 +1198,9 @@ describe("OT Request backend contract", () => {
 
     expect(contract).toContain("OT pre-work post-lock transition guard contract (Expected = valid)");
     expect(Array.from(
-      contract.matchAll(/^\s*\(\s*'(ot_(?:review_plan|record_consent))'/gm),
+      contract.matchAll(/^\s*\(\s*'(ot_(?:apply_plan_review|record_consent))'/gm),
       match => match[1],
-    )).toEqual(["ot_review_plan", "ot_record_consent"]);
+    )).toEqual(["ot_apply_plan_review", "ot_record_consent"]);
     expect(contract).toContain("left join pg_catalog.pg_proc p");
     expect(contract).toContain("pg_catalog.count(*) over () = 2 as exact_target_check_rows");
     expect(contract).toContain("function_oid is not null as function_present");
@@ -1048,7 +1316,7 @@ describe("OT Request backend contract", () => {
   });
 
   it("normalizes manager decision notes once and requires evidence for negative and compliance approvals", () => {
-    const reviewPlan = functionSql(sql, "ot_review_plan");
+    const reviewPlan = functionSql(sql, "ot_apply_plan_review");
     const verifyActual = functionSql(sql, "ot_verify_actual");
 
     for (const decision of [reviewPlan, verifyActual]) {
@@ -1062,7 +1330,7 @@ describe("OT Request backend contract", () => {
   });
 
   it("serializes approver authority before week locks and rechecks it after the request row lock", () => {
-    for (const name of ["ot_review_plan", "ot_verify_actual"]) {
+    for (const name of ["ot_apply_plan_review", "ot_verify_actual"]) {
       const decision = functionSql(sql, name);
       const authorityLock = "for key share of a";
       const weekLock = "perform public.ot_lock_employee_weeks(";
@@ -1073,8 +1341,13 @@ describe("OT Request backend contract", () => {
       expect(decision.indexOf(weekLock)).toBeLessThan(decision.indexOf(requestLock));
 
       const afterRequestLock = decision.slice(decision.indexOf(requestLock) + requestLock.length);
-      expect(afterRequestLock).toMatch(/v_request\.approver_user_id <> v_actor_id/);
-      expect(afterRequestLock).toMatch(/not public\.ot_current_user_is_eligible_approver\(\)/);
+      if (name === "ot_apply_plan_review") {
+        expect(afterRequestLock).toMatch(/v_request\.approver_user_id <> p_actor_id/);
+        expect(afterRequestLock).toContain("not exists (");
+      } else {
+        expect(afterRequestLock).toMatch(/v_request\.approver_user_id <> v_actor_id/);
+        expect(afterRequestLock).toMatch(/not public\.ot_current_user_is_eligible_approver\(\)/);
+      }
     }
 
     expect(verify).toContain("OT decision authority serialization contract (Expected = valid)");
@@ -1117,7 +1390,7 @@ describe("OT Request backend contract", () => {
       expect(setApprover).toContain(`'${status}'`);
     }
     const updateStart = reassign.indexOf("for v_request in");
-    const updateEnd = reassign.indexOf("end loop", updateStart);
+    const updateEnd = reassign.indexOf("order by r.id", updateStart);
     for (const finalStatus of ["draft", "rejected", "hr_ready", "exported", "cancelled"]) {
       expect(reassign.slice(updateStart, updateEnd)).not.toContain(`'${finalStatus}'`);
     }
@@ -1165,6 +1438,51 @@ describe("OT Request backend contract", () => {
 });
 
 describe("OT Request static module integration", () => {
+  it.each(["create", "revision"])("renders individual %s OT success and pending SeaTalk delivery feedback after dispatch failure", async mode => {
+    const calls: string[] = [];
+    const feedback: Array<Record<string, string>> = [];
+    const harness = createOtRequestFormHarness({
+      createOtRequest: async () => { calls.push("create"); return { id: "created-request" }; },
+      resubmitOtPlan: async () => { calls.push("resubmit"); return { id: "resubmitted-request" }; },
+      runOtIndividualSubmission: async submit => {
+        const result = await submit();
+        calls.push(`dispatch:${result.id}`);
+        return { result, deliveryError: new Error("SeaTalk unavailable") };
+      },
+    });
+    const request = mode === "revision" ? {
+      id: "revision-request",
+      functionCode: "ops",
+      title: "Existing OT",
+      plannedStartAt: "2099-01-05T18:00:00+07:00",
+      plannedEndAt: "2099-01-05T20:00:00+07:00",
+      reasonCode: "other",
+      reasonDetail: "Existing detail",
+    } : null;
+    const success = (value: Record<string, string>) => feedback.push(value);
+    let rendered = harness.render(mode, request, success);
+    let controls = harness.elements(rendered);
+    controls.filter(element => element.type === "select")[0].props.onChange({ target: { value: "ops" } });
+    rendered = harness.render(mode, request, success);
+    controls = harness.elements(rendered);
+    controls.find(element => element.type === "input" && !element.props.type)?.props.onChange({ target: { value: "Patch launch" } });
+    controls.filter(element => element.type === "select")[3].props.onChange({ target: { value: "other" } });
+    controls.find(element => element.type === "textarea")?.props.onChange({ target: { value: "Required detail" } });
+    controls.find(element => element.type === "input" && element.props.type === "checkbox")?.props.onChange({ target: { checked: true } });
+    rendered = harness.render(mode, request, success);
+    controls = harness.elements(rendered);
+    await controls.find(element => element.type === "form")?.props.onSubmit({ preventDefault() {} });
+    rendered = harness.render(mode, request, success);
+
+    expect(calls).toEqual(mode === "create" ? ["create", "dispatch:created-request"] : ["resubmit", "dispatch:resubmitted-request"]);
+    expect(harness.elements(rendered).map(element => element.props.message)).toContain(mode === "create" ? "Your OT request was submitted for approval." : "Your corrected OT request was resubmitted for approval.");
+    expect(harness.elements(rendered).map(element => element.props.message)).toContain("SeaTalk delivery is still pending. Your OT request was submitted successfully.");
+    expect(feedback).toEqual([{
+      submissionMessage: mode === "create" ? "Your OT request was submitted for approval." : "Your corrected OT request was resubmitted for approval.",
+      deliveryMessage: "SeaTalk delivery is still pending. Your OT request was submitted successfully.",
+    }]);
+  });
+
   it("keeps employee OT private and makes personal actions explicit", () => {
     const screen = read("screens-ot.jsx");
     for (const component of ["OtEmployeeDashboard", "OtRequestForm", "OtConsentPanel", "OtActualConfirmationForm", "OtMyRequestsTable"]) {
@@ -1181,7 +1499,7 @@ describe("OT Request static module integration", () => {
     const screen = read("screens-ot.jsx");
     const employee = screen.slice(screen.indexOf("function OtEmployeeDashboard("), screen.indexOf("function OtManagerDashboard("));
 
-    for (const api of ["loadMyOtDashboard", "loadMyOtRequests", "loadOtEligibleApprovers", "createOtRequest", "recordOtConsent", "submitOtActual"]) {
+    for (const api of ["loadMyOtDashboard", "loadMyOtRequests", "createOtRequest", "recordOtConsent", "submitOtActual"]) {
       expect(employee).toContain(`window.${api}`);
     }
     expect(employee).not.toContain("loadOtManagerDashboard");
@@ -1197,8 +1515,8 @@ describe("OT Request static module integration", () => {
     expect(employee).toContain("Math.abs(actualMinutes - plannedMinutes) > 30");
     expect(employee).toContain('status === "compliance_review_required"');
     expect(employee).toContain("crypto.randomUUID()");
-    expect(employee).toContain('aria-label="Assigned approver"');
-    expect(employee).toContain("approver.displayName || approver.email");
+    expect(employee).toContain("Routed Team Lead");
+    expect(employee).toContain("This is assigned automatically from your Function.");
     expect(screen).toContain('storedStatus === "approved"');
     expect(employee).toContain('min={isRevision ? undefined : weekStart} max={isRevision ? undefined : addOtDays(weekStart, 6)}');
     expect(employee).toContain("startPersonalWeekLoad(nextWeekStart)");
@@ -1216,10 +1534,19 @@ describe("OT Request static module integration", () => {
 
     expect(requestForm).toContain('function OtRequestForm({ mode = "create", request = null');
     expect(requestForm).toContain('const isRevision = mode === "revision"');
-    for (const field of ["functionCode", "title", "workDate", "startTime", "endTime", "dayType", "workLocationType", "venue", "reasonCode", "reasonDetail", "approverUserId"]) expect(requestForm).toContain(field);
+    for (const field of ["functionCode", "title", "workDate", "startTime", "endTime", "dayType", "workLocationType", "venue", "reasonCode", "reasonDetail"]) expect(requestForm).toContain(field);
+    expect(requestForm).not.toContain("approverUserId");
+    expect(requestForm).not.toContain("loadOtEligibleApprovers");
+    expect(requestForm).toContain("OT_FUNCTION_APPROVER_EMAILS");
+    for (const email of ["nithidol.k@garena.com", "weerayut@garena.com", "napol.a@garena.com"]) {
+      expect(screen).toContain(email);
+    }
+    expect(screen).toContain("Production SeaTalk routing");
     expect(requestForm).toContain("getCanonicalCountedSegments(request)");
     expect(requestForm).toContain("excludedSegments");
     expect(requestForm).toContain("window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key)");
+    expect(requestForm).toContain("window.runOtIndividualSubmission");
+    expect(requestForm).toContain("SeaTalk delivery is still pending");
     expect(requestForm).toContain("Edit and resubmit request");
     expect(requestForm).toContain("Resubmit corrected request");
     expect(requestForm).toContain("resetIntentAfterEdit(");
@@ -1853,8 +2180,8 @@ describe("OT Request static module integration", () => {
 
     for (const html of entries) {
       expect(html).toContain("ot-request-domain.js?v=20260810-01");
-      expect(html).toContain("supabase-ot-request.js?v=20260810-01");
-      expect(html).toContain("screens-ot.js?v=20260810-01");
+    expect(html).toContain("supabase-ot-request.js?v=20260818-seatalk-uat-01");
+    expect(html).toContain("screens-ot.js?v=20260818-seatalk-uat-01");
       expect(html).toContain("app.js?v=20260810-01");
       expect(html).toContain("app.css?v=20260810-01");
     }
