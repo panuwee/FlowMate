@@ -28,6 +28,13 @@ function canOpenOtRequestView(view, access) {
 const OT_LIMIT_MINUTES = 36 * 60;
 const OT_CONSENT_STATEMENT_VERSION = "2026-08-07";
 const OT_DETAIL_REQUIRED_REASONS = new Set(["other", "live_incident", "rework", "scope_change"]);
+const OT_FUNCTION_APPROVER_EMAILS = Object.freeze({
+  // TEMPORARY SeaTalk UAT routing: restore Team Lead addresses before production release.
+  ops: "panuwee.w@garena.com",
+  mkt: "panuwee.w@garena.com",
+  gdve: "panuwee.w@garena.com",
+  esport: "panuwee.w@garena.com",
+});
 
 function otValue(record, camel, snake) {
   return record && (record[camel] !== undefined ? record[camel] : record[snake]);
@@ -237,6 +244,7 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
   const [loadState, setLoadState] = useStateApp(() => window.FlowMateOtRequestDomain.startPersonalWeekLoad(getCurrentOtWeekStart()));
   const [refreshKey, setRefreshKey] = useStateApp(0);
   const [action, setAction] = useStateApp(null);
+  const [actionFeedback, setActionFeedback] = useStateApp(null);
   const loadErrorRef = useRefApp(null);
 
   useEffectApp(() => {
@@ -266,8 +274,9 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
     if (loadState.status === "error" && loadErrorRef.current) loadErrorRef.current.focus();
   }, [loadState.status]);
 
-  function refreshAfterAction() {
+  function refreshAfterAction(feedback = null) {
     setAction(null);
+    setActionFeedback(feedback);
     setRefreshKey(value => value + 1);
   }
 
@@ -317,6 +326,8 @@ function OtEmployeeDashboard({ access, listOnly = false }) {
         </label>
         <button type="button" className="btn btn--primary" onClick={() => setAction({ type: "new", request: null })}>New OT request</button>
       </div>
+      {actionFeedback?.submissionMessage && <OtWarning kind="info" message={actionFeedback.submissionMessage} />}
+      {actionFeedback?.deliveryMessage && <OtWarning kind="info" message={actionFeedback.deliveryMessage} />}
 
       {loadState.status === "error" && (
         <div ref={loadErrorRef} tabIndex="-1">
@@ -425,36 +436,16 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
     venue: isRevision ? String(otValue(request, "venue", "venue") || "") : "",
     reasonCode: isRevision ? String(otValue(request, "reasonCode", "reason_code") || "") : "",
     reasonDetail: isRevision ? String(otValue(request, "reasonDetail", "reason_detail") || "") : "",
-    approverUserId: isRevision ? String(otValue(request, "approverUserId", "approver_user_id") || "") : "",
     consented: false,
   }));
-  const [approverState, setApproverState] = useStateApp({ status: "loading", rows: [] });
-  const [approverRetry, setApproverRetry] = useStateApp(0);
   const [submitState, setSubmitState] = useStateApp({ status: "idle", message: "" });
   const [intent, setIntent] = useStateApp(() => ({ key: crypto.randomUUID(), attempted: false }));
   const errorRef = useRefApp(null);
-  const approverErrorRef = useRefApp(null);
   const summaryErrorRef = useRefApp(null);
-
-  useEffectApp(() => {
-    let alive = true;
-    setApproverState(current => ({ ...current, status: "loading", message: "" }));
-    window.loadOtEligibleApprovers().then(rows => {
-      if (!alive) return;
-      setApproverState({ status: "ready", rows: Array.isArray(rows) ? rows : [] });
-    }).catch(error => {
-      if (alive) setApproverState({ status: "error", rows: [], message: error.message || "Approvers could not be loaded." });
-    });
-    return () => { alive = false; };
-  }, [approverRetry]);
 
   useEffectApp(() => {
     if (submitState.status === "error" && errorRef.current) errorRef.current.focus();
   }, [submitState.status]);
-
-  useEffectApp(() => {
-    if (approverState.status === "error" && approverErrorRef.current) approverErrorRef.current.focus();
-  }, [approverState.status]);
 
   function update(field, value) {
     if (window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)) return;
@@ -504,8 +495,7 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
   const plannedStartIsFuture = preview.valid && window.FlowMateOtRequestDomain.isBangkokPlannedStartFuture(form.workDate, form.startTime);
   const detailRequired = OT_DETAIL_REQUIRED_REASONS.has(form.reasonCode);
   const venueRequired = form.workLocationType === "venue";
-  const approverUnavailable = approverState.status !== "ready" || approverState.rows.length === 0;
-  const selectedApproverAvailable = approverState.rows.some(approver => approver.userId === form.approverUserId);
+  const routedApproverEmail = OT_FUNCTION_APPROVER_EMAILS[form.functionCode] || "";
   const canSubmit = preview.valid
     && plannedStartIsFuture
     && !overLimit
@@ -514,10 +504,7 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
     && form.reasonCode
     && (!detailRequired || form.reasonDetail.trim())
     && (!venueRequired || form.venue.trim())
-    && form.approverUserId
-    && selectedApproverAvailable
     && form.consented
-    && !approverUnavailable
     && weekSummaryState.status === "ready"
     && submitState.status !== "submitting";
 
@@ -549,18 +536,17 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
       plannedEndAt: toOtBangkokIso(preview.endDate, form.endTime),
       plannedBreakMinutes: Number(form.breakMinutes || 0),
       plannedWeekSegments: preview.segments,
-      approverUserId: form.approverUserId,
       consentStatementVersion: OT_CONSENT_STATEMENT_VERSION,
     };
     try {
-      if (isRevision) {
-        await window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key);
-      } else {
-        await window.createOtRequest(payload, intent.key);
-      }
-      setSubmitState({ status: "success", message: isRevision ? "Your corrected OT request was resubmitted for approval." : "Your OT request was submitted for approval." });
+      const { result, deliveryError } = await window.runOtIndividualSubmission(() => isRevision
+        ? window.resubmitOtPlan(request.id, payload, OT_CONSENT_STATEMENT_VERSION, intent.key)
+        : window.createOtRequest(payload, intent.key));
+      const submissionMessage = isRevision ? "Your corrected OT request was resubmitted for approval." : "Your OT request was submitted for approval.";
+      setSubmitState({ status: "success", message: submissionMessage, deliveryMessage: deliveryError ? "SeaTalk delivery is still pending. Your OT request was submitted successfully." : "" });
       setIntent({ key: crypto.randomUUID(), attempted: false });
-      onSuccess();
+      const deliveryMessage = deliveryError ? "SeaTalk delivery is still pending. Your OT request was submitted successfully." : "";
+      onSuccess({ submissionMessage, deliveryMessage });
     } catch (error) {
       setSubmitState({ status: "error", message: error.message || `${isRevision ? "Your corrected OT request could not be resubmitted" : "Your OT request could not be submitted"}. Retry uses the same request key.` });
     }
@@ -569,7 +555,7 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
   return (
     <form className="ot-form" onSubmit={submitRequest} noValidate>
       <fieldset className="ot-form__fieldset" disabled={window.FlowMateOtRequestDomain.isSubmissionLocked(submitState.status)}>
-        {isRevision && <><h3>Edit and resubmit request</h3><p className="muted">Correct the requested schedule and approver, then renew consent before resubmitting.</p></>}
+        {isRevision && <><h3>Edit and resubmit request</h3><p className="muted">Correct the requested schedule, then renew consent before resubmitting.</p></>}
         <div className="form-grid">
         <label className="field"><span className="field__label">Function *</span><select className="select" value={form.functionCode} onChange={event => update("functionCode", event.target.value)} required><option value="">Select Function</option><option value="gdve">GD/VE</option><option value="ops">Ops</option><option value="mkt">MKT</option><option value="esport">eSport</option></select></label>
         <label className="field"><span className="field__label">Assignment or event *</span><input className="input" value={form.title} onChange={event => update("title", event.target.value)} required /></label>
@@ -582,7 +568,7 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
         {preview.crossesWeek && <><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[0]?.weekStart || weekStart)} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesBeforeBoundary} onChange={event => update("breakMinutesBeforeBoundary", event.target.value)} /></label><label className="field"><span className="field__label">Break in week of {formatOtDate(preview.segments[1]?.weekStart || addOtDays(weekStart, 7))} *</span><input className="input" type="number" min="0" step="1" value={form.breakMinutesAfterBoundary} onChange={event => update("breakMinutesAfterBoundary", event.target.value)} /></label></>}
         {venueRequired && <label className="field field--full"><span className="field__label">Venue *</span><input className="input" value={form.venue} onChange={event => update("venue", event.target.value)} placeholder="Event or tournament venue" required /></label>}
         <label className="field"><span className="field__label">Reason *</span><select className="select" value={form.reasonCode} onChange={event => update("reasonCode", event.target.value)} required><option value="">Select reason</option>{window.FlowMateOtRequestDomain.REASON_OPTIONS.map(reason => <option key={reason.key} value={reason.key}>{reason.label}</option>)}</select></label>
-        <label className="field"><span className="field__label">Assigned approver *</span><select className="select" aria-label="Assigned approver" value={form.approverUserId} onChange={event => update("approverUserId", event.target.value)} disabled={approverState.status !== "ready" || !approverState.rows.length} required><option value="">{approverState.status === "loading" ? "Loading approvers…" : approverState.rows.length ? "Select approver" : "No approver available"}</option>{approverState.rows.map(approver => <option key={approver.userId} value={approver.userId}>{approver.displayName || approver.email}{approver.displayName ? ` — ${approver.email}` : ""}</option>)}</select>{approverState.status === "error" && <span className="field__error" role="alert" tabIndex="-1" ref={approverErrorRef}>{approverState.message} <button type="button" className="ot-link-button" onClick={() => setApproverRetry(value => value + 1)}>Retry</button></span>}{approverState.status === "ready" && !approverState.rows.length && <span className="field__error">No active OT approver is available. Contact the OT Owner.</span>}</label>
+        {routedApproverEmail && <div className="field"><span className="field__label">Routed Team Lead</span><strong>{routedApproverEmail}</strong><span className="field__hint">This is assigned automatically from your Function.</span></div>}
         <label className="field field--full"><span className="field__label">Reason detail {detailRequired ? "*" : "(optional)"}</span><textarea className="textarea" value={form.reasonDetail} onChange={event => update("reasonDetail", event.target.value)} required={detailRequired} placeholder={detailRequired ? "Explain what happened and why OT is required" : "Add only information needed for approval"} /></label>
         </div>
 
@@ -600,6 +586,7 @@ function OtRequestForm({ mode = "create", request = null, weekStart: requestedWe
         <small className="muted">Consent statement version {OT_CONSENT_STATEMENT_VERSION}</small>
       </fieldset>
       {submitState.message && <div ref={errorRef} tabIndex={submitState.status === "error" ? "-1" : undefined}><OtWarning id="ot-request-submit-feedback" kind={submitState.status === "error" ? "error" : "info"} message={submitState.message} /></div>}
+      {submitState.deliveryMessage && <OtWarning id="ot-request-delivery-feedback" kind="info" message={submitState.deliveryMessage} />}
       <div className="ot-form__actions"><button type="submit" className="btn btn--primary" {...getOtDescribedActionProps("ot-request-submit-feedback", Boolean(submitState.message))} disabled={!canSubmit}>{submitState.status === "submitting" ? (isRevision ? "Resubmitting…" : "Submitting…") : (isRevision ? "Resubmit corrected request" : "Submit OT request")}</button></div>
     </form>
   );
