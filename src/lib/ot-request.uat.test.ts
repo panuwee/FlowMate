@@ -2180,8 +2180,8 @@ describe("OT Request static module integration", () => {
 
     for (const html of entries) {
       expect(html).toContain("ot-request-domain.js?v=20260810-01");
-    expect(html).toContain("supabase-ot-request.js?v=20260818-seatalk-uat-01");
-    expect(html).toContain("screens-ot.js?v=20260818-seatalk-uat-01");
+    expect(html).toContain("supabase-ot-request.js?v=20260818-seatalk-prod-01");
+    expect(html).toContain("screens-ot.js?v=20260818-seatalk-prod-01");
       expect(html).toContain("app.js?v=20260810-01");
       expect(html).toContain("app.css?v=20260810-01");
     }
