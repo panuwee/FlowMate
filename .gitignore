@@ -9,6 +9,7 @@ dist/
 coverage/
 .npm-cache/
 .superpowers/
+.worktrees/
 
 # The deployed static frontend is a separate local repository.
 /github/
