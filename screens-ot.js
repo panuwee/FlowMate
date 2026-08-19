@@ -7,7 +7,6 @@ const OT_REQUEST_VIEW_ROUTES = {
   "monthly-report": "ot-request/monthly-report",
   "root-causes": "ot-request/root-causes",
   insights: "ot-request/insights",
-  owner: "ot-request/owner",
   compliance: "ot-request/compliance",
   audit: "ot-request/audit",
   access: "ot-request/access",
@@ -15,22 +14,22 @@ const OT_REQUEST_VIEW_ROUTES = {
 };
 function getOtRequestHashView() {
   const route = String(window.location.hash || "").replace(/^#/, "").split("/");
-  if (route[0] !== "ot-request") return "overview";
+  if (route[0] !== "ot-request" || !route[1]) return null;
   if (route[1] === "manager") return "action-queue";
-  if (route[1] === "root-causes") return "insights";
-  return OT_REQUEST_VIEW_ROUTES[route[1]] ? route[1] : "overview";
+  if (route[1] === "root-causes" || route[1] === "owner") return "insights";
+  return OT_REQUEST_VIEW_ROUTES[route[1]] ? route[1] : null;
 }
 function canOpenOtRequestView(view, access) {
   if (!access) return false;
   if (view === "overview" || view === "my-requests") return Boolean(access.canRequestOt);
-  if (view === "owner" || view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);
+  if (view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);
   if (view === "compliance" || view === "audit") return false;
   return Boolean(access.canManage);
 }
 function getOtRequestFallbackView(access) {
   if (!access) return null;
+  if (access.isOwner) return "insights";
   if (access.canRequestOt) return "overview";
-  if (access.isOwner) return "owner";
   if (access.canManage) return "action-queue";
   return null;
 }
@@ -1471,6 +1470,10 @@ function getOtManagerTotals(rows, byWeek = false) {
 function isOtActualConfirmed(request) {
   return window.FlowMateOtRequestDomain.isConfirmedActual(request);
 }
+function getOtReasonLabel(request) {
+  const reasonCode = otValue(request, "reasonCode", "reason_code");
+  return window.FlowMateOtRequestDomain.REASON_OPTIONS.find(reason => reason.key === reasonCode)?.label || getOtStatusLabel(reasonCode);
+}
 function applyOtManagerFilters(rows, filters, employeeTotals) {
   return rows.filter(request => {
     const status = getOtRequestStatus(request);
@@ -1532,7 +1535,6 @@ function OtManagerDashboard({
     message: ""
   });
   const [refreshKey, setRefreshKey] = useStateApp(0);
-  const [selectedRow, setSelectedRow] = useStateApp(null);
   const errorRef = useRefApp(null);
   const decisionIntentRef = useRefApp(null);
   const bulkIntentsRef = useRefApp({});
@@ -1738,31 +1740,11 @@ function OtManagerDashboard({
     decisionIntentRef: decisionIntentRef,
     bulkIntentsRef: bulkIntentsRef,
     onChanged: () => setRefreshKey(value => value + 1)
-  }), isTeamSchedule && React.createElement(React.Fragment, null, React.createElement(OtTeamWeekTable, {
+  }), isTeamSchedule && React.createElement(OtTeamWeekTable, {
     requests: filteredCurrentRows,
     allRequests: currentRows,
-    peopleById: activeLoadState.peopleById,
-    onOpenRequest: setSelectedRow
-  }), selectedRow && React.createElement("section", {
-    className: "ot-manager-detail",
-    "aria-label": "Authorized OT details"
-  }, React.createElement("div", {
-    className: "ot-section-head"
-  }, React.createElement("h2", null, selectedRow.title), React.createElement("button", {
-    type: "button",
-    className: "btn btn--ghost",
-    onClick: () => setSelectedRow(null)
-  }, "Close")), React.createElement("div", {
-    className: "ot-detail-grid"
-  }, React.createElement("div", null, React.createElement("span", null, "Employee"), React.createElement("strong", null, getOtManagerEmployeeName(selectedRow, activeLoadState.peopleById))), React.createElement("div", null, React.createElement("span", null, "Function"), React.createElement("strong", null, String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase())), React.createElement("div", null, React.createElement("span", null, "Reason"), React.createElement("strong", null, getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code")))), React.createElement("div", null, React.createElement("span", null, "Status"), React.createElement("strong", null, getOtStatusLabel(getOtRequestStatus(selectedRow))))), React.createElement(OtActualAmendmentAction, {
-    key: getOtManagerRequestId(selectedRow),
-    access: access,
-    request: selectedRow,
-    onChanged: () => {
-      setSelectedRow(null);
-      setRefreshKey(value => value + 1);
-    }
-  }))), React.createElement("div", {
+    peopleById: activeLoadState.peopleById
+  }), React.createElement("div", {
     className: "ot-manager-actions"
   }, React.createElement("button", {
     type: "button",
@@ -2645,8 +2627,7 @@ function OtEventPlanForm({
 function OtTeamWeekTable({
   requests,
   allRequests,
-  peopleById,
-  onOpenRequest
+  peopleById
 }) {
   const employeeTotals = getOtManagerTotals(allRequests);
   const sorted = requests.slice().sort((left, right) => {
@@ -2690,7 +2671,7 @@ function OtTeamWeekTable({
     className: "ot-table-wrap"
   }, React.createElement("table", {
     className: "tbl ot-table ot-team-table"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Employee"), React.createElement("th", null, "Function"), React.createElement("th", null, "Assignment / event"), React.createElement("th", null, "Schedule"), React.createElement("th", null, "Planned"), React.createElement("th", null, "Actual"), React.createElement("th", null, "Weekly total"), React.createElement("th", null, "Remaining"), React.createElement("th", null, "Status"), React.createElement("th", null, "Details"))), React.createElement("tbody", null, groups.map(functionGroup => React.createElement(React.Fragment, {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Employee"), React.createElement("th", null, "Function"), React.createElement("th", null, "Assignment / event"), React.createElement("th", null, "Schedule"), React.createElement("th", null, "Planned"), React.createElement("th", null, "Actual"), React.createElement("th", null, "Weekly total"), React.createElement("th", null, "Remaining"), React.createElement("th", null, "Status"), React.createElement("th", null, "Reason"))), React.createElement("tbody", null, groups.map(functionGroup => React.createElement(React.Fragment, {
     key: functionGroup.functionCode
   }, React.createElement("tr", {
     className: "ot-table-group"
@@ -2709,11 +2690,7 @@ function OtTeamWeekTable({
       totalMinutes: total
     })), React.createElement("td", null, formatOtHours(remaining)), React.createElement("td", null, React.createElement("span", {
       className: `ot-status ot-status--${getOtRequestStatus(request)}`
-    }, getOtStatusLabel(getOtRequestStatus(request)))), React.createElement("td", null, React.createElement("button", {
-      type: "button",
-      className: "btn btn--sm btn--secondary",
-      onClick: () => onOpenRequest(request)
-    }, "Open")));
+    }, getOtStatusLabel(getOtRequestStatus(request)))), React.createElement("td", null, getOtReasonLabel(request)));
   }))))))));
 }
 function OtMonthlyTeamDetails({
@@ -2734,9 +2711,9 @@ function OtMonthlyTeamDetails({
     className: "ot-table-wrap"
   }, React.createElement("table", {
     className: "tbl ot-table"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Employee"), React.createElement("th", null, "Function"), React.createElement("th", null, "Schedule"), React.createElement("th", null, "Assignment / event"), React.createElement("th", null, "Planned"), React.createElement("th", null, "Actual"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, rows.map(request => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Employee"), React.createElement("th", null, "Function"), React.createElement("th", null, "Schedule"), React.createElement("th", null, "Assignment / event"), React.createElement("th", null, "Reason"), React.createElement("th", null, "Planned"), React.createElement("th", null, "Actual"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, rows.map(request => React.createElement("tr", {
     key: request.id
-  }, React.createElement("td", null, getOtManagerEmployeeName(request, peopleById)), React.createElement("td", null, String(otValue(request, "functionCode", "function_code") || "").toUpperCase()), React.createElement("td", null, formatOtManagerSchedule(request)), React.createElement("td", null, request.title), React.createElement("td", null, formatOtHours(request.plannedMinutes)), React.createElement("td", null, request.actualMinutes ? formatOtHours(request.actualMinutes) : "—"), React.createElement("td", null, React.createElement("span", {
+  }, React.createElement("td", null, getOtManagerEmployeeName(request, peopleById)), React.createElement("td", null, String(otValue(request, "functionCode", "function_code") || "").toUpperCase()), React.createElement("td", null, formatOtManagerSchedule(request)), React.createElement("td", null, request.title), React.createElement("td", null, getOtReasonLabel(request)), React.createElement("td", null, formatOtHours(request.plannedMinutes)), React.createElement("td", null, request.actualMinutes ? formatOtHours(request.actualMinutes) : "—"), React.createElement("td", null, React.createElement("span", {
     className: `ot-status ot-status--${getOtRequestStatus(request)}`
   }, getOtStatusLabel(getOtRequestStatus(request))))))))));
 }
@@ -3463,6 +3440,23 @@ function downloadOtHrCsv(csv, batchName) {
     URL.revokeObjectURL(url);
   }
 }
+function buildOtInsightPreviewRows(reportMonth) {
+  const weeks = getOtMonthWeekStarts(reportMonth);
+  const samples = [["Aof", "ops", "Match operations", "live_incident", 180], ["Folk", "ops", "Player support", "other", 120], ["May", "mkt", "Campaign launch", "scope_change", 240], ["Pim", "gdve", "Creative delivery", "rework", 150], ["Nok", "esport", "Tournament support", "live_incident", 210], ["Aof", "ops", "Post-event review", "other", 90]];
+  return samples.map(([employeeDisplayName, functionCode, title, reasonCode, actualMinutes], index) => ({
+    id: `preview-${reportMonth}-${index}`,
+    requestId: `preview-${reportMonth}-${index}`,
+    weekStart: weeks[index % Math.max(1, weeks.length)] || `${reportMonth}-01`,
+    employeeUserId: `preview-user-${index}`,
+    employeeDisplayName,
+    functionCode,
+    title,
+    reasonCode,
+    actualMinutes,
+    actualDecision: "approved",
+    status: "hr_ready"
+  }));
+}
 function OtOwnerInsightsPanel({
   refreshKey = 0
 }) {
@@ -3477,6 +3471,7 @@ function OtOwnerInsightsPanel({
     peopleById: {},
     message: ""
   });
+  const [previewMode, setPreviewMode] = useStateApp(false);
   useEffectApp(() => {
     let alive = true;
     const weeks = getOtMonthWeekStarts(reportMonth);
@@ -3523,7 +3518,8 @@ function OtOwnerInsightsPanel({
     className: "btn btn--secondary",
     onClick: () => setLocalRefreshKey(value => value + 1)
   }, "Retry"));
-  const confirmedRows = loadState.rows.filter(isOtActualConfirmed);
+  const insightRows = previewMode ? buildOtInsightPreviewRows(reportMonth) : loadState.rows;
+  const confirmedRows = insightRows.filter(isOtActualConfirmed);
   const weekStarts = getOtMonthWeekStarts(reportMonth);
   const weeklyTrend = weekStarts.map(weekStart => ({
     weekStart,
@@ -3577,7 +3573,16 @@ function OtOwnerInsightsPanel({
     type: "button",
     className: "btn btn--secondary",
     onClick: () => setLocalRefreshKey(value => value + 1)
-  }, "Refresh insights")), React.createElement("section", {
+  }, "Refresh insights"), React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    "aria-pressed": previewMode,
+    onClick: () => setPreviewMode(value => !value)
+  }, previewMode ? "Show live data" : "Preview sample data")), previewMode && React.createElement(OtWarning, {
+    kind: "info",
+    title: "Preview data",
+    message: "Preview data — sample only; exports and live data remain unchanged."
+  }), React.createElement("section", {
     className: "ot-analytics-card",
     "aria-label": "Confirmed OT trend chart"
   }, React.createElement("div", {
@@ -3645,10 +3650,6 @@ function OtHrExportPanel({
     rows: [],
     message: ""
   });
-  const [selectedIds, setSelectedIds] = useStateApp([]);
-  const [batchName, setBatchName] = useStateApp("");
-  const [reviewing, setReviewing] = useStateApp(false);
-  const [confirmed, setConfirmed] = useStateApp(false);
   const [intent, setIntent] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({
     status: "idle",
@@ -3665,8 +3666,6 @@ function OtHrExportPanel({
     Promise.all(getOtMonthWeekStarts(reportMonth).map(weekStart => window.loadOtHrReady(weekStart))).then(resultSets => {
       if (!alive) return;
       const readyRows = Array.from(new Map(resultSets.flatMap(rows => Array.isArray(rows) ? rows : []).map(row => [row.id, row])).values()).filter(isOtRequestInDisplayYear);
-      const availableIds = new Set(readyRows.map(row => row.id));
-      setSelectedIds(current => current.filter(id => availableIds.has(id)));
       setLoadState({
         status: "ready",
         rows: readyRows,
@@ -3683,41 +3682,30 @@ function OtHrExportPanel({
       alive = false;
     };
   }, [reportMonth, localRefreshKey, refreshKey]);
-  function resetReview() {
+  function resetExportState() {
     if (exportSubmissionRef.current || actionState.status === "submitting") return;
-    setReviewing(false);
-    setConfirmed(false);
     setIntent(window.FlowMateOtIntent.complete());
     setActionState({
       status: "idle",
       message: ""
     });
   }
-  function toggleRequest(requestId) {
-    if (exportSubmissionRef.current || actionState.status === "submitting") return;
-    setSelectedIds(current => current.includes(requestId) ? current.filter(id => id !== requestId) : [...current, requestId]);
-    resetReview();
-  }
-  function changeBatchName(value) {
-    if (exportSubmissionRef.current || actionState.status === "submitting") return;
-    setBatchName(value);
-    resetReview();
-  }
-  const selectedRows = loadState.rows.filter(row => selectedIds.includes(row.id));
-  const selectionSignature = `${batchName.trim()}|${selectedIds.slice().sort().join("|")}`;
-  async function exportSelected() {
-    if (!confirmed || !batchName.trim() || !selectedRows.length || exportSubmissionRef.current || actionState.status === "submitting") return;
+  const exportRows = loadState.rows;
+  const batchName = `${reportMonth} verified OT`;
+  const selectionSignature = `${reportMonth}|${exportRows.map(row => row.id).sort().join("|")}`;
+  async function exportMonthly() {
+    if (!exportRows.length || exportSubmissionRef.current || actionState.status === "submitting") return;
     let currentIntent = window.FlowMateOtHrExport.establish(intent, selectionSignature, () => crypto.randomUUID());
     const intentKey = currentIntent.key;
-    const includedIds = selectedRows.map(row => row.id);
+    const includedIds = exportRows.map(row => row.id);
     setIntent(currentIntent);
     exportSubmissionRef.current = true;
     setActionState({
       status: "submitting",
-      message: currentIntent.downloaded ? "Retrying the idempotent server export mark…" : "Creating the reviewed CSV…"
+      message: currentIntent.downloaded ? "Retrying the idempotent server export mark…" : "Creating the monthly CSV…"
     });
     if (window.FlowMateOtHrExport.phase(currentIntent) === "download") {
-      const localResult = window.FlowMateOtHrExport.createLocalFile(selectedRows, batchName.trim(), downloadOtHrCsv);
+      const localResult = window.FlowMateOtHrExport.createLocalFile(exportRows, batchName, downloadOtHrCsv);
       if (!localResult.ok) {
         setActionState({
           status: "error",
@@ -3730,22 +3718,18 @@ function OtHrExportPanel({
       setIntent(currentIntent);
     }
     try {
-      await window.markOtExported(includedIds, batchName.trim(), intentKey);
+      await window.markOtExported(includedIds, batchName, intentKey);
       setActionState({
         status: "success",
-        message: `${includedIds.length} reviewed HR-ready record(s) were downloaded and marked exported.`
+        message: `${includedIds.length} verified record(s) were downloaded and marked exported.`
       });
-      setSelectedIds([]);
-      setBatchName("");
-      setReviewing(false);
-      setConfirmed(false);
       setIntent(window.FlowMateOtIntent.complete());
       setLocalRefreshKey(value => value + 1);
       if (onChanged) onChanged();
     } catch (error) {
       setActionState({
         status: "error",
-        message: `The local CSV exists, but server export status remains unchanged. Retry the server mark with the same selection: ${error.message || "Export mark failed."}`
+        message: `The local CSV exists, but server export status remains unchanged. Retry the server mark with the same month: ${error.message || "Export mark failed."}`
       });
     } finally {
       exportSubmissionRef.current = false;
@@ -3768,7 +3752,7 @@ function OtHrExportPanel({
     disabled: actionState.status === "submitting",
     onChange: event => {
       setReportMonth(event.target.value || OT_DISPLAY_MONTH_START);
-      resetReview();
+      resetExportState();
     }
   })), React.createElement("button", {
     type: "button",
@@ -3781,81 +3765,22 @@ function OtHrExportPanel({
     className: "ot-section-head"
   }, React.createElement("div", null, React.createElement("h2", null, "Monthly OT export"), React.createElement("p", {
     className: "muted"
-  }, "Select Team Lead-verified daily OT records, then download the report to send to HR outside this system.")), React.createElement("span", null, loadState.rows.length, " ready")), loadState.status === "loading" && React.createElement("div", {
+  }, "Export every Team Lead-verified daily OT record for the selected month.")), React.createElement("span", null, exportRows.length, " ready")), loadState.status === "loading" && React.createElement("div", {
     className: "ot-state",
     role: "status"
   }, "Loading verified OT records…"), loadState.status === "error" && React.createElement(OtWarning, {
     kind: "error",
     message: loadState.message
-  }), loadState.status === "ready" && !loadState.rows.length && React.createElement("div", {
+  }), loadState.status === "ready" && !exportRows.length && React.createElement("div", {
     className: "ot-state"
-  }, "No verified OT records are ready for export."), loadState.status === "ready" && !!loadState.rows.length && React.createElement("div", {
-    className: "ot-table-wrap"
-  }, React.createElement("table", {
-    className: "tbl ot-table ot-export__table"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
-    scope: "col"
-  }, "Select"), React.createElement("th", null, "Employee"), React.createElement("th", null, "Function"), React.createElement("th", null, "Assignment"), React.createElement("th", null, "Work date"), React.createElement("th", null, "Actual"))), React.createElement("tbody", null, loadState.rows.map(row => React.createElement("tr", {
-    key: row.id
-  }, React.createElement("td", null, React.createElement("input", {
-    type: "checkbox",
-    "aria-label": `Select ${row.title}`,
-    checked: selectedIds.includes(row.id),
-    disabled: actionState.status === "submitting",
-    onChange: () => toggleRequest(row.id)
-  })), React.createElement("td", null, otValue(row, "employeeEmail", "employee_email")), React.createElement("td", null, String(otValue(row, "functionCode", "function_code") || "").toUpperCase()), React.createElement("td", null, React.createElement("strong", null, row.title), React.createElement("small", null, row.id)), React.createElement("td", null, formatOtDate(getOtBangkokParts(otValue(row, "actualStartAt", "actual_start_at")).date)), React.createElement("td", null, formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))))))))), React.createElement("p", {
-    className: "muted"
-  }, "Download OT report after Team Lead verification, then send the file to HR outside this system."), React.createElement("section", {
-    className: "ot-workflow",
-    "aria-label": "Monthly OT export review"
-  }, React.createElement("div", {
-    className: "form-grid"
-  }, React.createElement("label", {
-    className: "field field--full"
-  }, React.createElement("span", {
-    className: "field__label"
-  }, "Export batch name *"), React.createElement("input", {
-    className: "input",
-    value: batchName,
-    disabled: actionState.status === "submitting",
-    onChange: event => changeBatchName(event.target.value),
-    placeholder: `Example: ${reportMonth} Team Lead verified OT`
-  }))), React.createElement("p", {
-    className: "muted"
-  }, selectedIds.length, " verified record", selectedIds.length === 1 ? "" : "s", " selected."), !reviewing ? React.createElement("div", {
+  }, "No verified OT records are ready for export."), loadState.status === "ready" && !!exportRows.length && React.createElement("div", {
     className: "ot-form__actions"
   }, React.createElement("button", {
     type: "button",
     className: "btn btn--primary",
-    disabled: !batchName.trim() || !selectedRows.length || actionState.status === "submitting",
-    onClick: () => setReviewing(true)
-  }, "Review export selection")) : React.createElement("section", {
-    className: "ot-export__review"
-  }, React.createElement("h3", null, "Confirm reviewed selection"), React.createElement("ul", null, selectedRows.map(row => React.createElement("li", {
-    key: row.id
-  }, otValue(row, "employeeEmail", "employee_email"), " · ", row.title, " · ", formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))))), React.createElement("label", {
-    className: "ot-consent"
-  }, React.createElement("input", {
-    type: "checkbox",
-    checked: confirmed,
     disabled: actionState.status === "submitting",
-    onChange: event => setConfirmed(event.target.checked)
-  }), React.createElement("span", null, "I reviewed the exact records and understand they become immutable after the server marks this idempotent batch exported.")), React.createElement("div", {
-    className: "ot-form__actions"
-  }, React.createElement("button", {
-    type: "button",
-    className: "btn btn--secondary",
-    disabled: actionState.status === "submitting",
-    onClick: () => {
-      setReviewing(false);
-      setConfirmed(false);
-    }
-  }, "Back"), React.createElement("button", {
-    type: "button",
-    className: "btn btn--primary",
-    disabled: !confirmed || actionState.status === "submitting",
-    onClick: exportSelected
-  }, intent?.downloaded ? "Retry server export mark" : "Download OT report and mark exported"))), actionState.message && React.createElement(OtWarning, {
+    onClick: exportMonthly
+  }, intent?.downloaded ? "Retry export status update" : "Export monthly CSV")), actionState.message && React.createElement(OtWarning, {
     kind: actionState.status === "error" ? "error" : "info",
     message: actionState.message
   })));
@@ -4626,39 +4551,6 @@ function OtAccessAdminPanel({
     className: "muted"
   }, "Normal plan and actual decisions remain assigned-approver only. This panel never impersonates an assigned approver."));
 }
-function OtOwnerDashboard({
-  access,
-  onOpenView
-}) {
-  if (!access.isOwner) return null;
-  const destinations = [{
-    view: "insights",
-    label: "OT insights",
-    detail: "Review owner-only charts and confirmed OT detail by individual."
-  }, {
-    view: "export",
-    label: "Monthly export",
-    detail: "Download Team Lead-verified OT records to send to HR outside this system."
-  }, {
-    view: "access",
-    label: "Access administration",
-    detail: "Manage only fixed OT identities with an audited reason."
-  }];
-  return React.createElement("div", {
-    className: "ot-owner"
-  }, React.createElement("section", {
-    className: "ot-manager-scope",
-    "aria-label": "OT Owner data scope"
-  }, React.createElement("strong", null, "OT Owner · All Functions and named OT records"), React.createElement("span", null, "This full visibility comes from the server OT access context and does not widen any other Workgrid module.")), React.createElement("section", {
-    className: "ot-owner__destinations",
-    "aria-label": "OT Owner operations"
-  }, destinations.map(item => React.createElement("button", {
-    type: "button",
-    className: "ot-action-card",
-    key: item.view,
-    onClick: () => onOpenView(item.view)
-  }, React.createElement("strong", null, item.label), React.createElement("small", null, item.detail)))));
-}
 function OtRequestShell({
   user,
   currentUserName,
@@ -4758,11 +4650,6 @@ function OtRequestShell({
       eyebrow: "Owner",
       title: "OT insights",
       detail: "Review 2026 confirmed-OT trends, Function comparison, and individual detail."
-    },
-    owner: {
-      eyebrow: "OT Owner",
-      title: "Owner operations",
-      detail: "Full named OT visibility across every Function, resolved and enforced by the OT server scope."
     },
     compliance: {
       eyebrow: "Compliance",
@@ -4871,14 +4758,6 @@ function OtRequestShell({
     className: "nav-section"
   }, "Owner"), React.createElement("button", {
     type: "button",
-    className: `nav-item ${visibleView === "owner" ? "is-active" : ""}`,
-    "aria-current": visibleView === "owner" ? "page" : undefined,
-    onClick: () => openView("owner")
-  }, React.createElement(Icon, {
-    name: "grid",
-    size: 16
-  }), " Owner overview"), React.createElement("button", {
-    type: "button",
     className: `nav-item ${visibleView === "insights" ? "is-active" : ""}`,
     "aria-current": visibleView === "insights" ? "page" : undefined,
     onClick: () => openView("insights")
@@ -4937,10 +4816,6 @@ function OtRequestShell({
     access: access,
     surface: "monthly-report",
     refreshToken: operationsRefreshKey
-  }), access.status === "ready" && access.isOwner && visibleView === "owner" && React.createElement(OtOwnerDashboard, {
-    access: access,
-    onOpenView: openView,
-    refreshKey: operationsRefreshKey
   }), access.status === "ready" && access.isOwner && visibleView === "insights" && React.createElement(OtOwnerInsightsPanel, {
     refreshKey: operationsRefreshKey
   }), access.status === "ready" && access.isOwner && visibleView === "export" && React.createElement(OtHrExportPanel, {

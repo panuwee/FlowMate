@@ -1929,7 +1929,7 @@ describe("OT Request static module integration", () => {
     expect(approval).toContain("if (!canTakeAction(kind, request)) return;");
   });
 
-  it("keeps plan revisions out of the manager queue and shares audited amendment action", () => {
+  it("keeps plan revisions out of the manager queue and shares the audited amendment action", () => {
     const screen = read("screens-ot.jsx");
     const approval = screen.slice(screen.indexOf("function OtApprovalQueue("), screen.indexOf("function OtEventPlanForm("));
     const amendment = screen.slice(screen.indexOf("function OtActualAmendmentAction("), screen.indexOf("function OtAuditTimeline("));
@@ -1943,13 +1943,12 @@ describe("OT Request static module integration", () => {
     expect(amendment).toContain("window.requestOtActualAmendment(requestId, normalizedReason, currentIntent.key)");
     expect(amendment).toContain("The existing actual time remains in audit until the employee submits a correction.");
     expect(amendment).toContain('disabled={actionState.status === "submitting"}');
-    expect(screen.match(/<OtActualAmendmentAction/g)).toHaveLength(2);
+    expect(screen.match(/<OtActualAmendmentAction/g)).toHaveLength(1);
   });
 
-  it("remounts the shared actual amendment action for each loaded request", () => {
+  it("remounts the shared actual amendment action for each selected approval", () => {
     const screen = read("screens-ot.jsx");
 
-    expect(screen).toContain('<OtActualAmendmentAction key={getOtManagerRequestId(selectedRow)} access={access} request={selectedRow}');
     expect(screen).toContain('<OtActualAmendmentAction key={getOtManagerRequestId(selected)} access={access} request={selected}');
   });
 
@@ -2113,15 +2112,15 @@ describe("OT Request static module integration", () => {
 
     expect(sql).toContain("panuwee.w@garena.com");
     expect(sql).toContain("ot_current_user_is_owner");
-    for (const component of ["OtOwnerDashboard", "OtAccessAdminPanel", "OtHrExportPanel"]) {
+    for (const component of ["OtAccessAdminPanel", "OtHrExportPanel", "OtOwnerInsightsPanel"]) {
       expect(screen).toContain(`function ${component}(`);
     }
-    expect(screen).toContain('owner: "ot-request/owner"');
+    expect(screen).not.toContain('owner: "ot-request/owner"');
     expect(screen).toContain('access: "ot-request/access"');
     expect(screen).toContain('export: "ot-request/export"');
     expect(screen).toContain('insights: "ot-request/insights"');
     expect(screen).toContain('access.status === "ready" && access.isOwner');
-    expect(screen).toContain('if (view === "owner" || view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
+    expect(screen).toContain('if (view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
     expect(screen).not.toContain("Compliance & HR");
     expect(screen).not.toMatch(/currentUserEmail\s*(?:===|==|\.includes|\.endsWith)/);
     expect(sql).not.toMatch(/create policy[^;]+on public\.(work_items|marketing_plans|product_book)/is);
@@ -2154,18 +2153,23 @@ describe("OT Request static module integration", () => {
     expect(compliance).not.toMatch(/type="(?:datetime-local|time)"/);
   });
 
-  it("exports only explicit HR-ready selections after a local CSV download succeeds", () => {
+  it("exports all HR-ready records for the selected month after a local CSV download succeeds", () => {
     const screen = read("screens-ot.jsx");
     const panel = screen.slice(screen.indexOf("function OtHrExportPanel("), screen.indexOf("function OtAccessAdminPanel("));
     const exactColumns = "request_id,employee_email,function,assignment,event_id,work_date,day_type,planned_start,planned_end,planned_break_minutes,planned_minutes,actual_start,actual_end,actual_break_minutes,actual_minutes,reason_code,reason_detail,approver_email,employee_confirmed_at,verified_at,compliance_outcome,hr_ready_at";
 
     expect(panel).toContain("window.loadOtHrReady(");
-    expect(panel).toContain("window.FlowMateOtHrExport.createLocalFile(selectedRows, batchName.trim(), downloadOtHrCsv)");
-    expect(panel).toContain("window.markOtExported(includedIds, batchName.trim(), intentKey)");
+    expect(panel).toContain("const exportRows = loadState.rows;");
+    expect(panel).toContain("const batchName = `${reportMonth} verified OT`;");
+    expect(panel).toContain("window.FlowMateOtHrExport.createLocalFile(exportRows, batchName, downloadOtHrCsv)");
+    expect(panel).toContain("window.markOtExported(includedIds, batchName, intentKey)");
     expect(panel.indexOf("window.FlowMateOtHrExport.createLocalFile(")).toBeLessThan(panel.indexOf("window.markOtExported("));
     expect(panel).toContain("local CSV exists, but server export status remains unchanged");
     expect(panel).toContain("The local file was not created, and the server was not marked exported.");
     expect(panel).toContain("window.FlowMateOtHrExport.createLocalFile(");
+    expect(panel).toContain("Export monthly CSV");
+    expect(panel).not.toContain("Review export selection");
+    expect(panel).not.toContain("selectedIds");
     expect(read("supabase-ot-request.js")).toContain(exactColumns);
     expect(panel).not.toMatch(/salary|pay rate|bank|password|gps/i);
   });
@@ -2173,7 +2177,7 @@ describe("OT Request static module integration", () => {
   it("keeps audit read-only and access administration restricted to audited server RPCs", () => {
     const screen = read("screens-ot.jsx");
     const audit = screen.slice(screen.indexOf("function OtAuditTimeline("), screen.indexOf("function OtComplianceQueue("));
-    const admin = screen.slice(screen.indexOf("function OtAccessAdminPanel("), screen.indexOf("function OtOwnerDashboard("));
+    const admin = screen.slice(screen.indexOf("function OtAccessAdminPanel("), screen.indexOf("function OtRequestShell("));
 
     for (const field of ["actorUserId", "action", "oldStatus", "newStatus", "changedFields", "note", "createdAt"]) {
       expect(audit).toContain(field);
@@ -2210,7 +2214,7 @@ describe("OT Request static module integration", () => {
 
   it("reassigns through an explicit refreshed Owner step before a separate deactivation call", () => {
     const screen = read("screens-ot.jsx");
-    const admin = screen.slice(screen.indexOf("function OtAccessAdminPanel("), screen.indexOf("function OtOwnerDashboard("));
+    const admin = screen.slice(screen.indexOf("function OtAccessAdminPanel("), screen.indexOf("function OtRequestShell("));
 
     expect(admin).toContain("Prepare deactivation");
     expect(admin).toContain("Reassignment destination *");
@@ -2283,15 +2287,17 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain('<th>Schedule</th>');
   });
 
-  it("keeps charts and monthly export in the Owner-only navigation", () => {
+  it("keeps charts, preview data, and monthly export in the Owner-only navigation", () => {
     const screen = read("screens-ot.jsx");
 
     expect(screen).toContain('insights: "ot-request/insights"');
-    expect(screen).toContain('if (view === "owner" || view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
+    expect(screen).toContain('if (view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
     expect(screen).toContain('OT insights');
     expect(screen).toContain('Monthly export');
     expect(screen).toContain('function OtOwnerInsightsPanel(');
     expect(screen).toContain('aria-label="Confirmed OT trend chart"');
+    expect(screen).toContain("Preview sample data");
+    expect(screen).toContain("Preview data — sample only; exports and live data remain unchanged.");
     expect(screen).toContain('min="2026-01" max="2026-12"');
   });
 
@@ -2315,11 +2321,25 @@ describe("OT Request static module integration", () => {
     expect(warning).toContain('? { role: "alert" }');
     expect(warning).toContain('{ role: "status", "aria-live": "polite" }');
     expect(navigation).toContain('aria-label="OT Request navigation"');
-    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(9);
-    for (const view of ["overview", "my-requests", "action-queue", "team-schedule", "monthly-report", "owner", "insights", "export", "access"]) {
+    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(8);
+    for (const view of ["overview", "my-requests", "action-queue", "team-schedule", "monthly-report", "insights", "export", "access"]) {
       expect(navigation).toContain(`aria-current={visibleView === "${view}" ? "page" : undefined}`);
     }
     expect(screen).not.toContain("function getOtCurrentPageProps(");
+  });
+
+  it("shows reason names in manager schedules and removes the expandable schedule detail", () => {
+    const screen = read("screens-ot.jsx");
+    const schedule = screen.slice(screen.indexOf("function OtTeamWeekTable("), screen.indexOf("function OtMonthlyTeamDetails("));
+    const monthlyDetails = screen.slice(screen.indexOf("function OtMonthlyTeamDetails("), screen.indexOf("function buildOtInsightRows("));
+    const manager = screen.slice(screen.indexOf("function OtManagerDashboard("), screen.indexOf("function OtApprovalQueue("));
+
+    expect(schedule).toContain("<th>Reason</th>");
+    expect(schedule).not.toContain("<th>Details</th>");
+    expect(schedule).not.toContain("onOpenRequest");
+    expect(monthlyDetails).toContain("<th>Reason</th>");
+    expect(monthlyDetails).toContain("getOtReasonLabel(request)");
+    expect(manager).not.toContain("selectedRow");
   });
 
   it("connects every personal OT action to its rendered submission feedback", () => {
@@ -2404,7 +2424,7 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain('type="month"');
     expect(screen).toContain("buildOtMonthlyFunctionReport");
     expect(screen).toContain("Monthly report");
-    expect(screen).toContain("Download OT report");
+    expect(screen).toContain("Export monthly CSV");
     expect(screen).not.toContain("Compliance & HR");
     expect(screen).not.toContain("HR export");
     expect(client).toContain("window.loadOtHrReady");

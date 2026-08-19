@@ -6,7 +6,6 @@ const OT_REQUEST_VIEW_ROUTES = {
   "monthly-report": "ot-request/monthly-report",
   "root-causes": "ot-request/root-causes",
   insights: "ot-request/insights",
-  owner: "ot-request/owner",
   compliance: "ot-request/compliance",
   audit: "ot-request/audit",
   access: "ot-request/access",
@@ -15,24 +14,24 @@ const OT_REQUEST_VIEW_ROUTES = {
 
 function getOtRequestHashView() {
   const route = String(window.location.hash || "").replace(/^#/, "").split("/");
-  if (route[0] !== "ot-request") return "overview";
+  if (route[0] !== "ot-request" || !route[1]) return null;
   if (route[1] === "manager") return "action-queue";
-  if (route[1] === "root-causes") return "insights";
-  return OT_REQUEST_VIEW_ROUTES[route[1]] ? route[1] : "overview";
+  if (route[1] === "root-causes" || route[1] === "owner") return "insights";
+  return OT_REQUEST_VIEW_ROUTES[route[1]] ? route[1] : null;
 }
 
 function canOpenOtRequestView(view, access) {
   if (!access) return false;
   if (view === "overview" || view === "my-requests") return Boolean(access.canRequestOt);
-  if (view === "owner" || view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);
+  if (view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);
   if (view === "compliance" || view === "audit") return false;
   return Boolean(access.canManage);
 }
 
 function getOtRequestFallbackView(access) {
   if (!access) return null;
+  if (access.isOwner) return "insights";
   if (access.canRequestOt) return "overview";
-  if (access.isOwner) return "owner";
   if (access.canManage) return "action-queue";
   return null;
 }
@@ -913,6 +912,11 @@ function isOtActualConfirmed(request) {
   return window.FlowMateOtRequestDomain.isConfirmedActual(request);
 }
 
+function getOtReasonLabel(request) {
+  const reasonCode = otValue(request, "reasonCode", "reason_code");
+  return window.FlowMateOtRequestDomain.REASON_OPTIONS.find(reason => reason.key === reasonCode)?.label || getOtStatusLabel(reasonCode);
+}
+
 function applyOtManagerFilters(rows, filters, employeeTotals) {
   return rows.filter(request => {
     const status = getOtRequestStatus(request);
@@ -953,7 +957,6 @@ function OtManagerDashboard({ access, surface = "action-queue", rootCauseOnly = 
   const [filters, setFilters] = useStateApp({ eventPlanId: "", reasonCode: "", status: "", nearLimit: false });
   const [loadState, setLoadState] = useStateApp({ status: "loading", queryKey: "", rows: [], peopleById: {}, message: "" });
   const [refreshKey, setRefreshKey] = useStateApp(0);
-  const [selectedRow, setSelectedRow] = useStateApp(null);
   const errorRef = useRefApp(null);
   const decisionIntentRef = useRefApp(null);
   const bulkIntentsRef = useRefApp({});
@@ -1051,11 +1054,7 @@ function OtManagerDashboard({ access, surface = "action-queue", rootCauseOnly = 
         <>
           {isMonthlyReport && <><section className="ot-metric-grid ot-metric-grid--manager" aria-label="Monthly OT summary">{OT_MANAGER_METRIC_LABELS.map((label, index) => <section className="ot-metric" key={label}><span>{label}</span><strong>{metricValues[index]}</strong></section>)}</section><OtMonthlyTeamReport rows={filteredRows} monthKey={reportMonth} /><OtMonthlyTeamDetails requests={filteredRows} peopleById={activeLoadState.peopleById} /></>}
           {surface === "action-queue" && <OtApprovalQueue access={access} requests={filteredCurrentRows} allRequests={currentRows} weekStart={weekStart} peopleById={activeLoadState.peopleById} decisionIntentRef={decisionIntentRef} bulkIntentsRef={bulkIntentsRef} onChanged={() => setRefreshKey(value => value + 1)} />}
-          {isTeamSchedule && <><OtTeamWeekTable requests={filteredCurrentRows} allRequests={currentRows} peopleById={activeLoadState.peopleById} onOpenRequest={setSelectedRow} />{selectedRow && <section className="ot-manager-detail" aria-label="Authorized OT details">
-            <div className="ot-section-head"><h2>{selectedRow.title}</h2><button type="button" className="btn btn--ghost" onClick={() => setSelectedRow(null)}>Close</button></div>
-            <div className="ot-detail-grid"><div><span>Employee</span><strong>{getOtManagerEmployeeName(selectedRow, activeLoadState.peopleById)}</strong></div><div><span>Function</span><strong>{String(otValue(selectedRow, "functionCode", "function_code") || "—").toUpperCase()}</strong></div><div><span>Reason</span><strong>{getOtStatusLabel(otValue(selectedRow, "reasonCode", "reason_code"))}</strong></div><div><span>Status</span><strong>{getOtStatusLabel(getOtRequestStatus(selectedRow))}</strong></div></div>
-            <OtActualAmendmentAction key={getOtManagerRequestId(selectedRow)} access={access} request={selectedRow} onChanged={() => { setSelectedRow(null); setRefreshKey(value => value + 1); }} />
-          </section>}</>}
+          {isTeamSchedule && <OtTeamWeekTable requests={filteredCurrentRows} allRequests={currentRows} peopleById={activeLoadState.peopleById} />}
           <div className="ot-manager-actions"><button type="button" className="btn btn--secondary" onClick={() => setRefreshKey(value => value + 1)}>Refresh {hasFullScope ? "OT scope" : "assigned scope"}</button></div>
         </>
       )}
@@ -1449,7 +1448,7 @@ function OtEventPlanForm({ access, onSuccess }) {
   );
 }
 
-function OtTeamWeekTable({ requests, allRequests, peopleById, onOpenRequest }) {
+function OtTeamWeekTable({ requests, allRequests, peopleById }) {
   const employeeTotals = getOtManagerTotals(allRequests);
   const sorted = requests.slice().sort((left, right) => {
     const leftFunction = String(otValue(left, "functionCode", "function_code") || "");
@@ -1478,7 +1477,7 @@ function OtTeamWeekTable({ requests, allRequests, peopleById, onOpenRequest }) {
   return (
     <section className="ot-list" aria-label="Assigned team weekly OT table">
       <div className="ot-section-head"><h2>Team week by Function</h2><span>{requests.length} authorized occurrence{requests.length === 1 ? "" : "s"}</span></div>
-      {!requests.length ? <div className="ot-state">No assigned OT rows match the current filters.</div> : <div className="ot-table-wrap"><table className="tbl ot-table ot-team-table"><thead><tr><th>Employee</th><th>Function</th><th>Assignment / event</th><th>Schedule</th><th>Planned</th><th>Actual</th><th>Weekly total</th><th>Remaining</th><th>Status</th><th>Details</th></tr></thead><tbody>{groups.map(functionGroup => <React.Fragment key={functionGroup.functionCode}><tr className="ot-table-group"><th colSpan="10" scope="rowgroup">{OT_FUNCTIONS.find(option => option.value === functionGroup.functionCode)?.label || String(functionGroup.functionCode).toUpperCase()}</th></tr>{functionGroup.employees.map(employeeGroup => employeeGroup.requests.map((request, index) => { const total = employeeTotals[employeeGroup.employeeId]?.countedMinutes || 0; const remaining = Math.max(0, OT_LIMIT_MINUTES - total); return <tr key={request.id}>{index === 0 && <th rowSpan={employeeGroup.requests.length} scope="row"><strong>{employeeGroup.name}</strong><small>{employeeGroup.requests.length} occurrence{employeeGroup.requests.length === 1 ? "" : "s"}</small></th>}<td>{String(functionGroup.functionCode).toUpperCase()}</td><td><strong>{request.title}</strong><small>{otValue(request, "eventPlanId", "event_plan_id") ? "Shared event" : "Individual request"}</small></td><td>{formatOtManagerSchedule(request)}</td><td>{formatOtHours(request.plannedMinutes)}</td><td>{request.actualMinutes ? formatOtHours(request.actualMinutes) : "—"}</td><td><strong>{formatOtHours(total)}</strong><OtLimitProgress totalMinutes={total} /></td><td>{formatOtHours(remaining)}</td><td><span className={`ot-status ot-status--${getOtRequestStatus(request)}`}>{getOtStatusLabel(getOtRequestStatus(request))}</span></td><td><button type="button" className="btn btn--sm btn--secondary" onClick={() => onOpenRequest(request)}>Open</button></td></tr>; }))}</React.Fragment>)}</tbody></table></div>}
+      {!requests.length ? <div className="ot-state">No assigned OT rows match the current filters.</div> : <div className="ot-table-wrap"><table className="tbl ot-table ot-team-table"><thead><tr><th>Employee</th><th>Function</th><th>Assignment / event</th><th>Schedule</th><th>Planned</th><th>Actual</th><th>Weekly total</th><th>Remaining</th><th>Status</th><th>Reason</th></tr></thead><tbody>{groups.map(functionGroup => <React.Fragment key={functionGroup.functionCode}><tr className="ot-table-group"><th colSpan="10" scope="rowgroup">{OT_FUNCTIONS.find(option => option.value === functionGroup.functionCode)?.label || String(functionGroup.functionCode).toUpperCase()}</th></tr>{functionGroup.employees.map(employeeGroup => employeeGroup.requests.map((request, index) => { const total = employeeTotals[employeeGroup.employeeId]?.countedMinutes || 0; const remaining = Math.max(0, OT_LIMIT_MINUTES - total); return <tr key={request.id}>{index === 0 && <th rowSpan={employeeGroup.requests.length} scope="row"><strong>{employeeGroup.name}</strong><small>{employeeGroup.requests.length} occurrence{employeeGroup.requests.length === 1 ? "" : "s"}</small></th>}<td>{String(functionGroup.functionCode).toUpperCase()}</td><td><strong>{request.title}</strong><small>{otValue(request, "eventPlanId", "event_plan_id") ? "Shared event" : "Individual request"}</small></td><td>{formatOtManagerSchedule(request)}</td><td>{formatOtHours(request.plannedMinutes)}</td><td>{request.actualMinutes ? formatOtHours(request.actualMinutes) : "—"}</td><td><strong>{formatOtHours(total)}</strong><OtLimitProgress totalMinutes={total} /></td><td>{formatOtHours(remaining)}</td><td><span className={`ot-status ot-status--${getOtRequestStatus(request)}`}>{getOtStatusLabel(getOtRequestStatus(request))}</span></td><td>{getOtReasonLabel(request)}</td></tr>; }))}</React.Fragment>)}</tbody></table></div>}
     </section>
   );
 }
@@ -1488,7 +1487,7 @@ function OtMonthlyTeamDetails({ requests, peopleById }) {
     String(otValue(left, "plannedStartAt", "planned_start_at") || "").localeCompare(String(otValue(right, "plannedStartAt", "planned_start_at") || ""))
     || getOtManagerEmployeeName(left, peopleById).localeCompare(getOtManagerEmployeeName(right, peopleById))
   ));
-  return <section className="ot-list" aria-label="Monthly OT details"><div className="ot-section-head"><div><h2>Monthly OT details</h2><p className="muted">Individual records for checking and export. Actual hours appear only after confirmation.</p></div><span>{rows.length} occurrence{rows.length === 1 ? "" : "s"}</span></div>{!rows.length ? <div className="ot-state">No OT records match this month.</div> : <div className="ot-table-wrap"><table className="tbl ot-table"><thead><tr><th>Employee</th><th>Function</th><th>Schedule</th><th>Assignment / event</th><th>Planned</th><th>Actual</th><th>Status</th></tr></thead><tbody>{rows.map(request => <tr key={request.id}><td>{getOtManagerEmployeeName(request, peopleById)}</td><td>{String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</td><td>{formatOtManagerSchedule(request)}</td><td>{request.title}</td><td>{formatOtHours(request.plannedMinutes)}</td><td>{request.actualMinutes ? formatOtHours(request.actualMinutes) : "—"}</td><td><span className={`ot-status ot-status--${getOtRequestStatus(request)}`}>{getOtStatusLabel(getOtRequestStatus(request))}</span></td></tr>)}</tbody></table></div>}</section>;
+  return <section className="ot-list" aria-label="Monthly OT details"><div className="ot-section-head"><div><h2>Monthly OT details</h2><p className="muted">Individual records for checking and export. Actual hours appear only after confirmation.</p></div><span>{rows.length} occurrence{rows.length === 1 ? "" : "s"}</span></div>{!rows.length ? <div className="ot-state">No OT records match this month.</div> : <div className="ot-table-wrap"><table className="tbl ot-table"><thead><tr><th>Employee</th><th>Function</th><th>Schedule</th><th>Assignment / event</th><th>Reason</th><th>Planned</th><th>Actual</th><th>Status</th></tr></thead><tbody>{rows.map(request => <tr key={request.id}><td>{getOtManagerEmployeeName(request, peopleById)}</td><td>{String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</td><td>{formatOtManagerSchedule(request)}</td><td>{request.title}</td><td>{getOtReasonLabel(request)}</td><td>{formatOtHours(request.plannedMinutes)}</td><td>{request.actualMinutes ? formatOtHours(request.actualMinutes) : "—"}</td><td><span className={`ot-status ot-status--${getOtRequestStatus(request)}`}>{getOtStatusLabel(getOtRequestStatus(request))}</span></td></tr>)}</tbody></table></div>}</section>;
 }
 
 function buildOtInsightRows(rows, recordIds) {
@@ -1814,6 +1813,31 @@ function downloadOtHrCsv(csv, batchName) {
   }
 }
 
+function buildOtInsightPreviewRows(reportMonth) {
+  const weeks = getOtMonthWeekStarts(reportMonth);
+  const samples = [
+    ["Aof", "ops", "Match operations", "live_incident", 180],
+    ["Folk", "ops", "Player support", "other", 120],
+    ["May", "mkt", "Campaign launch", "scope_change", 240],
+    ["Pim", "gdve", "Creative delivery", "rework", 150],
+    ["Nok", "esport", "Tournament support", "live_incident", 210],
+    ["Aof", "ops", "Post-event review", "other", 90],
+  ];
+  return samples.map(([employeeDisplayName, functionCode, title, reasonCode, actualMinutes], index) => ({
+    id: `preview-${reportMonth}-${index}`,
+    requestId: `preview-${reportMonth}-${index}`,
+    weekStart: weeks[index % Math.max(1, weeks.length)] || `${reportMonth}-01`,
+    employeeUserId: `preview-user-${index}`,
+    employeeDisplayName,
+    functionCode,
+    title,
+    reasonCode,
+    actualMinutes,
+    actualDecision: "approved",
+    status: "hr_ready",
+  }));
+}
+
 function OtOwnerInsightsPanel({ refreshKey = 0 }) {
   const [reportMonth, setReportMonth] = useStateApp(() => {
     const currentMonth = getCurrentOtMonthKey();
@@ -1821,6 +1845,7 @@ function OtOwnerInsightsPanel({ refreshKey = 0 }) {
   });
   const [localRefreshKey, setLocalRefreshKey] = useStateApp(0);
   const [loadState, setLoadState] = useStateApp({ status: "loading", rows: [], peopleById: {}, message: "" });
+  const [previewMode, setPreviewMode] = useStateApp(false);
 
   useEffectApp(() => {
     let alive = true;
@@ -1848,7 +1873,8 @@ function OtOwnerInsightsPanel({ refreshKey = 0 }) {
   if (loadState.status === "loading") return <div className="ot-state" role="status">Loading OT insights…</div>;
   if (loadState.status === "error") return <div className="ot-state" role="alert"><strong>OT insights could not be loaded.</strong><span>{loadState.message}</span><button type="button" className="btn btn--secondary" onClick={() => setLocalRefreshKey(value => value + 1)}>Retry</button></div>;
 
-  const confirmedRows = loadState.rows.filter(isOtActualConfirmed);
+  const insightRows = previewMode ? buildOtInsightPreviewRows(reportMonth) : loadState.rows;
+  const confirmedRows = insightRows.filter(isOtActualConfirmed);
   const weekStarts = getOtMonthWeekStarts(reportMonth);
   const weeklyTrend = weekStarts.map(weekStart => ({
     weekStart,
@@ -1874,7 +1900,8 @@ function OtOwnerInsightsPanel({ refreshKey = 0 }) {
 
   return <div className="ot-manager">
     <section className="ot-manager-scope" aria-label="Owner OT insight scope"><strong>2026 Owner-only OT insight</strong><span>Charts use only named OT records returned by the Owner server scope. Values are labelled directly; no hover is required.</span></section>
-    <section className="ot-manager-filters" aria-label="OT insight filters"><label className="field"><span className="field__label">Report month</span><input className="input" type="month" min="2026-01" max="2026-12" value={reportMonth} onChange={event => setReportMonth(event.target.value || OT_DISPLAY_MONTH_START)} /></label><button type="button" className="btn btn--secondary" onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh insights</button></section>
+    <section className="ot-manager-filters" aria-label="OT insight filters"><label className="field"><span className="field__label">Report month</span><input className="input" type="month" min="2026-01" max="2026-12" value={reportMonth} onChange={event => setReportMonth(event.target.value || OT_DISPLAY_MONTH_START)} /></label><button type="button" className="btn btn--secondary" onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh insights</button><button type="button" className="btn btn--secondary" aria-pressed={previewMode} onClick={() => setPreviewMode(value => !value)}>{previewMode ? "Show live data" : "Preview sample data"}</button></section>
+    {previewMode && <OtWarning kind="info" title="Preview data" message="Preview data — sample only; exports and live data remain unchanged." />}
     <section className="ot-analytics-card" aria-label="Confirmed OT trend chart"><div className="ot-section-head"><div><h2>Confirmed OT trend</h2><p className="muted">Actual hours confirmed in each Bangkok week of the selected month.</p></div></div><div className="ot-root-grid">{weeklyTrend.map(row => <div className="ot-root-bar" key={row.weekStart}><div><strong>{formatOtDate(row.weekStart)}</strong><span>{formatOtHours(row.actualMinutes)}</span></div><div className="ot-root-bar__track"><span style={{ width: `${Math.round((row.actualMinutes / maxTrendMinutes) * 100)}%` }} /></div></div>)}</div></section>
     <section className="ot-analytics-card" aria-label="Confirmed OT by Function chart"><div className="ot-section-head"><div><h2>Confirmed OT by Function</h2><p className="muted">Compare the confirmed actual-hours share for this month.</p></div></div>{functionRows.length ? <div className="ot-root-grid">{functionRows.map(row => <div className="ot-root-bar" key={row.value}><div><strong>{row.label}</strong><span>{formatOtHours(row.actualMinutes)}</span></div><div className="ot-root-bar__track"><span style={{ width: `${Math.round((row.actualMinutes / maxFunctionMinutes) * 100)}%` }} /></div></div>)}</div> : <div className="ot-state">No confirmed OT is available for this month.</div>}</section>
     <section className="ot-list"><div className="ot-section-head"><div><h2>Individual OT detail</h2><p className="muted">Confirmed OT only, sorted by highest actual hours.</p></div><span>{peopleRows.length} people</span></div>{peopleRows.length ? <div className="ot-table-wrap"><table className="tbl ot-table"><thead><tr><th>Employee</th><th>Function</th><th>Confirmed OT</th><th>Requests</th></tr></thead><tbody>{peopleRows.map(row => <tr key={row.employeeId}><td>{row.employee}</td><td>{row.functions || "—"}</td><td>{formatOtHours(row.actualMinutes)}</td><td>{row.requestCount}</td></tr>)}</tbody></table></div> : <div className="ot-state">No confirmed OT is available for this month.</div>}</section>
@@ -1888,10 +1915,6 @@ function OtHrExportPanel({ refreshKey = 0, onChanged }) {
   });
   const [localRefreshKey, setLocalRefreshKey] = useStateApp(0);
   const [loadState, setLoadState] = useStateApp({ status: "loading", rows: [], message: "" });
-  const [selectedIds, setSelectedIds] = useStateApp([]);
-  const [batchName, setBatchName] = useStateApp("");
-  const [reviewing, setReviewing] = useStateApp(false);
-  const [confirmed, setConfirmed] = useStateApp(false);
   const [intent, setIntent] = useStateApp(null);
   const [actionState, setActionState] = useStateApp({ status: "idle", message: "" });
   const exportSubmissionRef = useRefApp(false);
@@ -1902,8 +1925,6 @@ function OtHrExportPanel({ refreshKey = 0, onChanged }) {
     Promise.all(getOtMonthWeekStarts(reportMonth).map(weekStart => window.loadOtHrReady(weekStart))).then(resultSets => {
       if (!alive) return;
       const readyRows = Array.from(new Map(resultSets.flatMap(rows => Array.isArray(rows) ? rows : []).map(row => [row.id, row])).values()).filter(isOtRequestInDisplayYear);
-      const availableIds = new Set(readyRows.map(row => row.id));
-      setSelectedIds(current => current.filter(id => availableIds.has(id)));
       setLoadState({ status: "ready", rows: readyRows, message: "" });
     }).catch(error => {
       if (alive) setLoadState({ status: "error", rows: [], message: error.message || "HR-ready OT could not be loaded." });
@@ -1911,39 +1932,26 @@ function OtHrExportPanel({ refreshKey = 0, onChanged }) {
     return () => { alive = false; };
   }, [reportMonth, localRefreshKey, refreshKey]);
 
-  function resetReview() {
+  function resetExportState() {
     if (exportSubmissionRef.current || actionState.status === "submitting") return;
-    setReviewing(false);
-    setConfirmed(false);
     setIntent(window.FlowMateOtIntent.complete());
     setActionState({ status: "idle", message: "" });
   }
 
-  function toggleRequest(requestId) {
-    if (exportSubmissionRef.current || actionState.status === "submitting") return;
-    setSelectedIds(current => current.includes(requestId) ? current.filter(id => id !== requestId) : [...current, requestId]);
-    resetReview();
-  }
+  const exportRows = loadState.rows;
+  const batchName = `${reportMonth} verified OT`;
+  const selectionSignature = `${reportMonth}|${exportRows.map(row => row.id).sort().join("|")}`;
 
-  function changeBatchName(value) {
-    if (exportSubmissionRef.current || actionState.status === "submitting") return;
-    setBatchName(value);
-    resetReview();
-  }
-
-  const selectedRows = loadState.rows.filter(row => selectedIds.includes(row.id));
-  const selectionSignature = `${batchName.trim()}|${selectedIds.slice().sort().join("|")}`;
-
-  async function exportSelected() {
-    if (!confirmed || !batchName.trim() || !selectedRows.length || exportSubmissionRef.current || actionState.status === "submitting") return;
+  async function exportMonthly() {
+    if (!exportRows.length || exportSubmissionRef.current || actionState.status === "submitting") return;
     let currentIntent = window.FlowMateOtHrExport.establish(intent, selectionSignature, () => crypto.randomUUID());
     const intentKey = currentIntent.key;
-    const includedIds = selectedRows.map(row => row.id);
+    const includedIds = exportRows.map(row => row.id);
     setIntent(currentIntent);
     exportSubmissionRef.current = true;
-    setActionState({ status: "submitting", message: currentIntent.downloaded ? "Retrying the idempotent server export mark…" : "Creating the reviewed CSV…" });
+    setActionState({ status: "submitting", message: currentIntent.downloaded ? "Retrying the idempotent server export mark…" : "Creating the monthly CSV…" });
     if (window.FlowMateOtHrExport.phase(currentIntent) === "download") {
-      const localResult = window.FlowMateOtHrExport.createLocalFile(selectedRows, batchName.trim(), downloadOtHrCsv);
+      const localResult = window.FlowMateOtHrExport.createLocalFile(exportRows, batchName, downloadOtHrCsv);
       if (!localResult.ok) {
         setActionState({ status: "error", message: `The local file was not created, and the server was not marked exported. ${localResult.error?.message || "CSV creation or download initiation failed."}` });
         exportSubmissionRef.current = false;
@@ -1953,17 +1961,13 @@ function OtHrExportPanel({ refreshKey = 0, onChanged }) {
       setIntent(currentIntent);
     }
     try {
-      await window.markOtExported(includedIds, batchName.trim(), intentKey);
-      setActionState({ status: "success", message: `${includedIds.length} reviewed HR-ready record(s) were downloaded and marked exported.` });
-      setSelectedIds([]);
-      setBatchName("");
-      setReviewing(false);
-      setConfirmed(false);
+      await window.markOtExported(includedIds, batchName, intentKey);
+      setActionState({ status: "success", message: `${includedIds.length} verified record(s) were downloaded and marked exported.` });
       setIntent(window.FlowMateOtIntent.complete());
       setLocalRefreshKey(value => value + 1);
       if (onChanged) onChanged();
     } catch (error) {
-      setActionState({ status: "error", message: `The local CSV exists, but server export status remains unchanged. Retry the server mark with the same selection: ${error.message || "Export mark failed."}` });
+      setActionState({ status: "error", message: `The local CSV exists, but server export status remains unchanged. Retry the server mark with the same month: ${error.message || "Export mark failed."}` });
     } finally {
       exportSubmissionRef.current = false;
     }
@@ -1971,10 +1975,8 @@ function OtHrExportPanel({ refreshKey = 0, onChanged }) {
 
   return (
     <div className="ot-export">
-      <section className="ot-toolbar"><label className="field"><span className="field__label">Report month</span><input className="input" type="month" min="2026-01" max="2026-12" value={reportMonth} disabled={actionState.status === "submitting"} onChange={event => { setReportMonth(event.target.value || OT_DISPLAY_MONTH_START); resetReview(); }} /></label><button type="button" className="btn btn--secondary" disabled={actionState.status === "submitting"} onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh verified OT</button></section>
-      <section className="ot-list"><div className="ot-section-head"><div><h2>Monthly OT export</h2><p className="muted">Select Team Lead-verified daily OT records, then download the report to send to HR outside this system.</p></div><span>{loadState.rows.length} ready</span></div>{loadState.status === "loading" && <div className="ot-state" role="status">Loading verified OT records…</div>}{loadState.status === "error" && <OtWarning kind="error" message={loadState.message} />}{loadState.status === "ready" && !loadState.rows.length && <div className="ot-state">No verified OT records are ready for export.</div>}{loadState.status === "ready" && !!loadState.rows.length && <div className="ot-table-wrap"><table className="tbl ot-table ot-export__table"><thead><tr><th scope="col">Select</th><th>Employee</th><th>Function</th><th>Assignment</th><th>Work date</th><th>Actual</th></tr></thead><tbody>{loadState.rows.map(row => <tr key={row.id}><td><input type="checkbox" aria-label={`Select ${row.title}`} checked={selectedIds.includes(row.id)} disabled={actionState.status === "submitting"} onChange={() => toggleRequest(row.id)} /></td><td>{otValue(row, "employeeEmail", "employee_email")}</td><td>{String(otValue(row, "functionCode", "function_code") || "").toUpperCase()}</td><td><strong>{row.title}</strong><small>{row.id}</small></td><td>{formatOtDate(getOtBangkokParts(otValue(row, "actualStartAt", "actual_start_at")).date)}</td><td>{formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))}</td></tr>)}</tbody></table></div>}</section>
-      <p className="muted">Download OT report after Team Lead verification, then send the file to HR outside this system.</p>
-      <section className="ot-workflow" aria-label="Monthly OT export review"><div className="form-grid"><label className="field field--full"><span className="field__label">Export batch name *</span><input className="input" value={batchName} disabled={actionState.status === "submitting"} onChange={event => changeBatchName(event.target.value)} placeholder={`Example: ${reportMonth} Team Lead verified OT`} /></label></div><p className="muted">{selectedIds.length} verified record{selectedIds.length === 1 ? "" : "s"} selected.</p>{!reviewing ? <div className="ot-form__actions"><button type="button" className="btn btn--primary" disabled={!batchName.trim() || !selectedRows.length || actionState.status === "submitting"} onClick={() => setReviewing(true)}>Review export selection</button></div> : <section className="ot-export__review"><h3>Confirm reviewed selection</h3><ul>{selectedRows.map(row => <li key={row.id}>{otValue(row, "employeeEmail", "employee_email")} · {row.title} · {formatOtHours(otValue(row, "actualMinutes", "actual_minutes"))}</li>)}</ul><label className="ot-consent"><input type="checkbox" checked={confirmed} disabled={actionState.status === "submitting"} onChange={event => setConfirmed(event.target.checked)} /><span>I reviewed the exact records and understand they become immutable after the server marks this idempotent batch exported.</span></label><div className="ot-form__actions"><button type="button" className="btn btn--secondary" disabled={actionState.status === "submitting"} onClick={() => { setReviewing(false); setConfirmed(false); }}>Back</button><button type="button" className="btn btn--primary" disabled={!confirmed || actionState.status === "submitting"} onClick={exportSelected}>{intent?.downloaded ? "Retry server export mark" : "Download OT report and mark exported"}</button></div></section>}{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}</section>
+      <section className="ot-toolbar"><label className="field"><span className="field__label">Report month</span><input className="input" type="month" min="2026-01" max="2026-12" value={reportMonth} disabled={actionState.status === "submitting"} onChange={event => { setReportMonth(event.target.value || OT_DISPLAY_MONTH_START); resetExportState(); }} /></label><button type="button" className="btn btn--secondary" disabled={actionState.status === "submitting"} onClick={() => setLocalRefreshKey(value => value + 1)}>Refresh verified OT</button></section>
+      <section className="ot-list"><div className="ot-section-head"><div><h2>Monthly OT export</h2><p className="muted">Export every Team Lead-verified daily OT record for the selected month.</p></div><span>{exportRows.length} ready</span></div>{loadState.status === "loading" && <div className="ot-state" role="status">Loading verified OT records…</div>}{loadState.status === "error" && <OtWarning kind="error" message={loadState.message} />}{loadState.status === "ready" && !exportRows.length && <div className="ot-state">No verified OT records are ready for export.</div>}{loadState.status === "ready" && !!exportRows.length && <div className="ot-form__actions"><button type="button" className="btn btn--primary" disabled={actionState.status === "submitting"} onClick={exportMonthly}>{intent?.downloaded ? "Retry export status update" : "Export monthly CSV"}</button></div>}{actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}</section>
     </div>
   );
 }
@@ -2379,16 +2381,6 @@ function OtAccessAdminPanel({ access }) {
   );
 }
 
-function OtOwnerDashboard({ access, onOpenView }) {
-  if (!access.isOwner) return null;
-  const destinations = [
-    { view: "insights", label: "OT insights", detail: "Review owner-only charts and confirmed OT detail by individual." },
-    { view: "export", label: "Monthly export", detail: "Download Team Lead-verified OT records to send to HR outside this system." },
-    { view: "access", label: "Access administration", detail: "Manage only fixed OT identities with an audited reason." },
-  ];
-  return <div className="ot-owner"><section className="ot-manager-scope" aria-label="OT Owner data scope"><strong>OT Owner · All Functions and named OT records</strong><span>This full visibility comes from the server OT access context and does not widen any other Workgrid module.</span></section><section className="ot-owner__destinations" aria-label="OT Owner operations">{destinations.map(item => <button type="button" className="ot-action-card" key={item.view} onClick={() => onOpenView(item.view)}><strong>{item.label}</strong><small>{item.detail}</small></button>)}</section></div>;
-}
-
 function OtRequestShell({
   user,
   currentUserName,
@@ -2487,11 +2479,6 @@ function OtRequestShell({
       title: "OT insights",
       detail: "Review 2026 confirmed-OT trends, Function comparison, and individual detail.",
     },
-    owner: {
-      eyebrow: "OT Owner",
-      title: "Owner operations",
-      detail: "Full named OT visibility across every Function, resolved and enforced by the OT server scope.",
-    },
     compliance: {
       eyebrow: "Compliance",
       title: "Actual-hours compliance review",
@@ -2568,9 +2555,6 @@ function OtRequestShell({
         {access.status === "ready" && access.isOwner && (
           <>
             <div className="nav-section">Owner</div>
-            <button type="button" className={`nav-item ${visibleView === "owner" ? "is-active" : ""}`} aria-current={visibleView === "owner" ? "page" : undefined} onClick={() => openView("owner")}>
-              <Icon name="grid" size={16} /> Owner overview
-            </button>
             <button type="button" className={`nav-item ${visibleView === "insights" ? "is-active" : ""}`} aria-current={visibleView === "insights" ? "page" : undefined} onClick={() => openView("insights")}>
               <Icon name="chart" size={16} /> OT insights
             </button>
@@ -2599,7 +2583,6 @@ function OtRequestShell({
             {access.status === "ready" && visibleView === "action-queue" && <OtManagerDashboard access={access} surface="action-queue" refreshToken={operationsRefreshKey} />}
             {access.status === "ready" && visibleView === "team-schedule" && <OtManagerDashboard access={access} surface="team-schedule" refreshToken={operationsRefreshKey} />}
             {access.status === "ready" && visibleView === "monthly-report" && <OtManagerDashboard access={access} surface="monthly-report" refreshToken={operationsRefreshKey} />}
-            {access.status === "ready" && access.isOwner && visibleView === "owner" && <OtOwnerDashboard access={access} onOpenView={openView} refreshKey={operationsRefreshKey} />}
             {access.status === "ready" && access.isOwner && visibleView === "insights" && <OtOwnerInsightsPanel refreshKey={operationsRefreshKey} />}
             {access.status === "ready" && access.isOwner && visibleView === "export" && <OtHrExportPanel refreshKey={operationsRefreshKey} onChanged={() => setOperationsRefreshKey(value => value + 1)} />}
             {access.status === "ready" && access.isOwner && visibleView === "access" && <><OtRequesterAccessPanel access={access} /><OtAccessAdminPanel access={access} /></>}
