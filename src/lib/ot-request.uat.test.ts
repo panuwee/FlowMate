@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { transformSync } from "@babel/core";
@@ -441,6 +441,26 @@ describe("OT Request backend contract", () => {
     expect(accessContext).toContain("'requesterFunctionCode'");
     expect(accessContext).toContain("'requesterAccessStatus'");
     expect(verify).toContain("OT requester enforcement contract");
+  });
+
+  it("ships a one-time requester backfill from active primary FlowMate teams without reactivating Owner-deactivated people", () => {
+    const backfillPath = join(process.cwd(), "supabase", "ot_requester_access_backfill.sql");
+    const verifyPath = join(process.cwd(), "supabase", "ot_requester_access_backfill_verify.sql");
+
+    expect(existsSync(backfillPath)).toBe(true);
+    expect(existsSync(verifyPath)).toBe(true);
+
+    const backfill = readFileSync(backfillPath, "utf8");
+    const verify = readFileSync(verifyPath, "utf8");
+    expect(backfill).toContain("public.user_team_memberships");
+    expect(backfill).toContain("membership.is_primary");
+    expect(backfill).toContain("membership.team_code in ('gdve', 'ops', 'mkt', 'esport')");
+    expect(backfill).toContain("u.is_active = true");
+    expect(backfill).toContain("on conflict (email) do nothing");
+    expect(backfill).toContain("baseline_sync_requester_access");
+    expect(verify).toContain("OT requester backfill coverage");
+    expect(verify).toContain("Active users missing an OT requester access row");
+    expect(verify).not.toMatch(/^\s*(insert|update|delete|alter|create|drop|truncate)\b/im);
   });
 
   it("keeps Owner requester maintenance separate from Approvers and HR access", () => {
