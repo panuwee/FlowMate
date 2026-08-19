@@ -2328,14 +2328,46 @@ describe("OT Request static module integration", () => {
 
   it("keeps active entry pages on one OT release version", () => {
     const entries = [["index.html"], ["home", "index.html"], ["product-book", "index.html"]].map(parts => read(...parts));
+    const versionedAssets = ["ot-request-domain.js", "supabase-ot-request.js", "screens-ot.js", "app.js", "app.css"];
 
     for (const html of entries) {
-      expect(html).toContain("ot-request-domain.js?v=20260810-01");
-    expect(html).toContain("supabase-ot-request.js?v=20260818-seatalk-prod-01");
-    expect(html).toContain("screens-ot.js?v=20260818-seatalk-prod-01");
-      expect(html).toContain("app.js?v=20260810-01");
-      expect(html).toContain("app.css?v=20260810-01");
+      const stamps = versionedAssets.map(asset => {
+        const escapedAsset = asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const match = html.match(new RegExp(`${escapedAsset}\\?v=([0-9]{8}-[a-f0-9]{6})`));
+        expect(match).not.toBeNull();
+        return match?.[1];
+      });
+      expect(new Set(stamps).size).toBe(1);
     }
+  });
+
+  it("explains when an approved occurrence becomes available for actual confirmation", () => {
+    const screen = read("screens-ot.jsx");
+
+    expect(screen).toContain('>Confirm actual</button>');
+    expect(screen).toContain("disabled={Boolean(actualAvailableAt)}");
+    expect(screen).toContain("Available after");
+    expect(screen).toContain("formatOtDateTime(");
+  });
+
+  it("formats OT requester access changes in Bangkok time without raw ISO timestamps", () => {
+    const screen = read("screens-ot.jsx");
+
+    expect(screen).toContain("function formatOtAccessTimestamp(value)");
+    expect(screen).toContain("(GMT+7)");
+    expect(screen).toContain("formatOtAccessTimestamp(row.updatedAt || row.updated_at)");
+  });
+
+  it("automates one Bangkok release stamp across active entry pages before every commit", () => {
+    const releaseStamp = read("scripts", "release-stamp.cjs");
+    const preCommit = read(".husky", "pre-commit");
+
+    expect(releaseStamp).toContain('timeZone: "Asia/Bangkok"');
+    expect(releaseStamp).toContain("ENTRY_PAGES");
+    expect(releaseStamp).toContain("screens-ot.js");
+    expect(releaseStamp).toContain("app.js");
+    expect(preCommit).toContain("npm run release:stamp");
+    expect(preCommit).toContain("git add --");
   });
 
   it("uses labelled warnings and accessible OT navigation state", () => {

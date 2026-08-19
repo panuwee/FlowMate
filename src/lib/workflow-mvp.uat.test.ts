@@ -306,7 +306,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     ]) {
       const html = read(...entry);
       expect(html).toContain("workflow-mvp.js");
-      expect(html).toContain("app.js?v=20260810-01");
+      expect(html).toMatch(/app\.js\?v=[0-9]{8}-[a-f0-9]{6}/);
     }
   });
 

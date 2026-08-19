@@ -846,7 +846,8 @@ function OtMyRequestsTable({ requests, onAction }) {
             const revisionWorkflow = window.FlowMateOtRequestDomain.getRevisionWorkflow(request);
             const canRevise = revisionWorkflow === "plan";
             const canConfirm = status === "actual_confirmation_required" || revisionWorkflow === "actual";
-            return <tr key={request.id}><td>{formatOtDate(start.date)}</td><td><strong>{request.title}</strong><small>{String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</small></td><td>{formatOtHours(otValue(request, "plannedMinutes", "planned_minutes"))}</td><td>{otValue(request, "actualMinutes", "actual_minutes") ? formatOtHours(otValue(request, "actualMinutes", "actual_minutes")) : "—"}</td><td><span className={`ot-status ot-status--${status}`}>{getOtStatusLabel(status)}</span></td><td>{canConsent ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("consent", request)}>Review consent</button> : canRevise ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("revision", request)}>Edit and resubmit request</button> : canConfirm ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("actual", request)}>Confirm actual</button> : <span className="muted">No action</span>}</td></tr>;
+            const actualAvailableAt = status === "approved" ? otValue(request, "plannedEndAt", "planned_end_at") : null;
+            return <tr key={request.id}><td>{formatOtDate(start.date)}</td><td><strong>{request.title}</strong><small>{String(otValue(request, "functionCode", "function_code") || "").toUpperCase()}</small></td><td>{formatOtHours(otValue(request, "plannedMinutes", "planned_minutes"))}</td><td>{otValue(request, "actualMinutes", "actual_minutes") ? formatOtHours(otValue(request, "actualMinutes", "actual_minutes")) : "—"}</td><td><span className={`ot-status ot-status--${status}`}>{getOtStatusLabel(status)}</span></td><td>{canConsent ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("consent", request)}>Review consent</button> : canRevise ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("revision", request)}>Edit and resubmit request</button> : canConfirm ? <button type="button" className="btn btn--sm btn--secondary" onClick={() => onAction("actual", request)}>Confirm actual</button> : actualAvailableAt ? <span><button type="button" className="btn btn--sm btn--secondary" disabled={Boolean(actualAvailableAt)} title={`Available after ${formatOtDateTime(actualAvailableAt)} (GMT+7)`}>Confirm actual</button><small className="muted">Available after {formatOtDateTime(actualAvailableAt)} (GMT+7)</small></span> : <span className="muted">No action</span>}</td></tr>;
           })}</tbody>
         </table>
       </div>
@@ -1838,6 +1839,21 @@ function buildOtInsightPreviewRows(reportMonth) {
   }));
 }
 
+function formatOtAccessTimestamp(value) {
+  if (!value) return "—";
+  const fields = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value)).map(part => [part.type, part.value]));
+  return `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}:${fields.second} (GMT+7)`;
+}
+
 function OtOwnerInsightsPanel({ refreshKey = 0 }) {
   const [reportMonth, setReportMonth] = useStateApp(() => {
     const currentMonth = getCurrentOtMonthKey();
@@ -2118,7 +2134,7 @@ function OtRequesterAccessPanel({ access }) {
       {listState.status === "loading" && <div className="ot-state" role="status">Loading OT requesters…</div>}
       {listState.status === "error" && <OtWarning kind="error" message={listState.message} />}
       {listState.status === "ready" && !filteredRows.length && <div className="ot-state">No OT requesters match these filters.</div>}
-      {listState.status === "ready" && !!filteredRows.length && <div className="ot-table-wrap"><table className="tbl ot-table"><thead><tr><th>Person</th><th>Email</th><th>Function</th><th>Status</th><th>Last change</th><th>Actions</th></tr></thead><tbody>{filteredRows.map(row => { const status = row.status || "pending_sync"; return <tr key={row.id}><td><strong>{row.displayName || row.display_name}</strong></td><td>{row.email}</td><td>{String(row.functionCode || row.function_code || "").toUpperCase()}</td><td><span className="ot-status">{status.replace("_", " ")}</span></td><td>{row.updatedAt || row.updated_at || "—"}</td><td><div className="ot-access__actions"><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => openEdit(row)}>Edit</button><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => setRequesterActive(row, status !== "active")}>{status === "active" ? "Deactivate" : "Activate"}</button></div></td></tr>; })}</tbody></table></div>}
+      {listState.status === "ready" && !!filteredRows.length && <div className="ot-table-wrap"><table className="tbl ot-table"><thead><tr><th>Person</th><th>Email</th><th>Function</th><th>Status</th><th>Last change</th><th>Actions</th></tr></thead><tbody>{filteredRows.map(row => { const status = row.status || "pending_sync"; return <tr key={row.id}><td><strong>{row.displayName || row.display_name}</strong></td><td>{row.email}</td><td>{String(row.functionCode || row.function_code || "").toUpperCase()}</td><td><span className="ot-status">{status.replace("_", " ")}</span></td><td>{formatOtAccessTimestamp(row.updatedAt || row.updated_at)}</td><td><div className="ot-access__actions"><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => openEdit(row)}>Edit</button><button type="button" className="btn btn--sm btn--secondary" disabled={actionState.status === "submitting"} onClick={() => setRequesterActive(row, status !== "active")}>{status === "active" ? "Deactivate" : "Activate"}</button></div></td></tr>; })}</tbody></table></div>}
       {actionState.message && <OtWarning kind={actionState.status === "error" ? "error" : "info"} message={actionState.message} />}
     </section>
   );

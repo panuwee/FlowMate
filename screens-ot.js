@@ -1396,6 +1396,7 @@ function OtMyRequestsTable({
     const revisionWorkflow = window.FlowMateOtRequestDomain.getRevisionWorkflow(request);
     const canRevise = revisionWorkflow === "plan";
     const canConfirm = status === "actual_confirmation_required" || revisionWorkflow === "actual";
+    const actualAvailableAt = status === "approved" ? otValue(request, "plannedEndAt", "planned_end_at") : null;
     return React.createElement("tr", {
       key: request.id
     }, React.createElement("td", null, formatOtDate(start.date)), React.createElement("td", null, React.createElement("strong", null, request.title), React.createElement("small", null, String(otValue(request, "functionCode", "function_code") || "").toUpperCase())), React.createElement("td", null, formatOtHours(otValue(request, "plannedMinutes", "planned_minutes"))), React.createElement("td", null, otValue(request, "actualMinutes", "actual_minutes") ? formatOtHours(otValue(request, "actualMinutes", "actual_minutes")) : "—"), React.createElement("td", null, React.createElement("span", {
@@ -1412,7 +1413,14 @@ function OtMyRequestsTable({
       type: "button",
       className: "btn btn--sm btn--secondary",
       onClick: () => onAction("actual", request)
-    }, "Confirm actual") : React.createElement("span", {
+    }, "Confirm actual") : actualAvailableAt ? React.createElement("span", null, React.createElement("button", {
+      type: "button",
+      className: "btn btn--sm btn--secondary",
+      disabled: Boolean(actualAvailableAt),
+      title: `Available after ${formatOtDateTime(actualAvailableAt)} (GMT+7)`
+    }, "Confirm actual"), React.createElement("small", {
+      className: "muted"
+    }, "Available after ", formatOtDateTime(actualAvailableAt), " (GMT+7)")) : React.createElement("span", {
       className: "muted"
     }, "No action")));
   })))));
@@ -3457,6 +3465,20 @@ function buildOtInsightPreviewRows(reportMonth) {
     status: "hr_ready"
   }));
 }
+function formatOtAccessTimestamp(value) {
+  if (!value) return "—";
+  const fields = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date(value)).map(part => [part.type, part.value]));
+  return `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}:${fields.second} (GMT+7)`;
+}
 function OtOwnerInsightsPanel({
   refreshKey = 0
 }) {
@@ -4129,7 +4151,7 @@ function OtRequesterAccessPanel({
       key: row.id
     }, React.createElement("td", null, React.createElement("strong", null, row.displayName || row.display_name)), React.createElement("td", null, row.email), React.createElement("td", null, String(row.functionCode || row.function_code || "").toUpperCase()), React.createElement("td", null, React.createElement("span", {
       className: "ot-status"
-    }, status.replace("_", " "))), React.createElement("td", null, row.updatedAt || row.updated_at || "—"), React.createElement("td", null, React.createElement("div", {
+    }, status.replace("_", " "))), React.createElement("td", null, formatOtAccessTimestamp(row.updatedAt || row.updated_at)), React.createElement("td", null, React.createElement("div", {
       className: "ot-access__actions"
     }, React.createElement("button", {
       type: "button",

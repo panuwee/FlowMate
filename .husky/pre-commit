@@ -1,3 +1,6 @@
+npm run release:stamp
+git add -- index.html home/index.html product-book/index.html
+
 staged_env_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)\.env(\..+)?$' || true)
 if [ -n "$staged_env_files" ]; then
   echo "✖ Blocked: env file(s) staged for commit:"

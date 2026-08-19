@@ -548,7 +548,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(appCss).toContain(".app__brand-version");
     expect(appCss.replace(/\r\n/g, "\n")).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
     expect(appCss).not.toContain("box-shadow: 0 -28px");
-    expect(activeEntryHtml).toMatch(/app\.js\?v=\d{8}-\d+/);
+    expect(activeEntryHtml).toMatch(/app\.js\?v=\d{8}-[a-f0-9]{6}/);
     expect(activeEntryHtml).not.toContain("v20260709-6");
   });
 
@@ -561,7 +561,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(productBookIndexHtml).toContain('<base href="../" />');
     expect(productBookIndexHtml).toContain('window.location.hash = "product-book-latest"');
-    expect(productBookIndexHtml).toMatch(/app\.js\?v=\d{8}-\d+/);
+    expect(productBookIndexHtml).toMatch(/app\.js\?v=\d{8}-[a-f0-9]{6}/);
   });
 
   it("serves a GitHub Pages 404 fallback for direct deep links", () => {
