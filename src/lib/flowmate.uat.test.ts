@@ -2883,7 +2883,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
     expect(quickTaskSql).toContain("'body', trim(p_body)");
   });
 
-  it("treats Working Sheet rows with a Creative Request link as assigned and prevents duplicate brief creation", () => {
+  it("keeps Marketing Status editable after a Creative Request link and prevents duplicate brief creation", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const css = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const workingSheetSource = appJsx.slice(
@@ -2895,7 +2895,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
       workingSheetSource.indexOf("visibleRows.length === 0"),
     );
 
-    expect(rowRenderSource).toContain("const rowStatusValue = getMarketingPlanViewStatus(row);");
+    expect(rowRenderSource).toContain("const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);");
     expect(rowRenderSource).toContain("value: rowStatusValue");
     expect(rowRenderSource).toContain("const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || \"\").trim();");
     expect(rowRenderSource).toContain("rowNeedsBriefLinkRepair ? React.createElement");
@@ -3049,10 +3049,12 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
     expect(workingSheetSource).toContain("currentUser.can_manage_marketing_schedule === true");
     expect(appJsx).toContain('.rpc("marketing_plan_update_working_row_time"');
     expect(appJsx).toContain('.rpc("marketing_plan_update_working_row_status"');
-    expect(workingSheetSource).toContain("Linked FlowMate Review or Delivered can override the displayed Status.");
+    expect(appJsx).toContain("function getMarketingPlanWorkingSheetStatus(row)");
+    expect(workingSheetSource).toContain("Marketing Status remains editable after a Brief Link is created.");
     expect(workingSheetSource).toContain("Changing Marketing Status does not change the linked FlowMate task");
     expect(workingSheetSource).toContain("async function handleWorkingRowTimeChange(row, nextTime)");
     expect(rowRenderSource).toContain("const canManageSchedule = canManageMarketingPlanSchedule(row);");
+    expect(rowRenderSource).toContain("const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);");
     expect(rowRenderSource).toContain("disabled: !canManageSchedule || updatingRowId === row.contentItemId");
     expect(rowRenderSource).toContain('title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status."');
     expect(rowRenderSource).toContain("onChange: event => handleWorkingRowTimeChange(row, event.target.value)");

@@ -2848,7 +2848,7 @@ function filterMarketingPlanWorkingRows(rows, filters = {}) {
   const owner = filters.owner || "all";
   const search = String(filters.search || "").trim().toLowerCase();
   return (rows || []).filter(row => {
-    if (status !== "all" && getMarketingPlanViewStatus(row) !== status) return false;
+    if (status !== "all" && getMarketingPlanWorkingSheetStatus(row) !== status) return false;
     if (team !== "all" && getMarketingPlanWorkingRowTeam(row).toLowerCase() !== team.toLowerCase()) return false;
     if (owner !== "all" && !getMarketingPlanWorkingOwnerEntries(row).some(entry => entry.key === owner)) return false;
     if (!search) return true;
@@ -2897,6 +2897,9 @@ function getMarketingPlanViewStatus(row) {
   const normalized = normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
   if (normalized === "planned" && hasMarketingPlanLinkedCreativeRequest(row)) return "assigned";
   return normalized;
+}
+function getMarketingPlanWorkingSheetStatus(row) {
+  return normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
 }
 function getMarketingPlanStatusClass(status) {
   const normalized = normalizeMarketingPlanWorkingStatus(status);
@@ -5605,7 +5608,7 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }, React.createElement("span", {
     className: "strong"
-  }, "Status note: "), "Linked FlowMate Review or Delivered can override the displayed Status. Changing Marketing Status does not change the linked FlowMate task, so the displayed Status may remain unchanged until its FlowMate status changes."), loadState.status === "error" && React.createElement("div", {
+  }, "Status note: "), "Marketing Status remains editable after a Brief Link is created. Changing Marketing Status does not change the linked FlowMate task."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
   }, React.createElement("div", {
     className: "strong"
@@ -5912,7 +5915,7 @@ function MarketingPlanWorkingSheetScreen() {
   }, "Status"), React.createElement("th", {
     className: "col-actions"
   }, "Actions"))), React.createElement("tbody", null, visibleRows.map(row => {
-    const rowStatusValue = getMarketingPlanViewStatus(row);
+    const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);
     const rowHasLinkedCreativeRequest = hasMarketingPlanLinkedCreativeRequest(row);
     const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
     const canManageRow = canManageMarketingPlanWorkingRow(row);
