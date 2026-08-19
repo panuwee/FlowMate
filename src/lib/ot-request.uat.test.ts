@@ -906,6 +906,25 @@ describe("OT Request backend contract", () => {
     expect(verify).toContain("SeaTalk OT review RPC contract (Expected service_role only)");
   });
 
+  it("queues a compact Workgrid notification for Team Lead actual verification", () => {
+    const submitActual = functionSql(sql, "ot_submit_actual");
+    const claimDispatch = functionSql(sql, "ot_seatalk_claim_dispatch");
+    const callback = read("supabase", "functions", "seatalk-ot-callback", "index.ts");
+
+    expect(sql).toContain("notification_kind text not null check (notification_kind in ('plan_approval', 'actual_verification'))");
+    expect(submitActual).toContain("public.ot_enqueue_seatalk_notification(v_request.id, 'actual_verification')");
+    expect(claimDispatch).toContain("n.notification_kind = 'actual_verification'");
+    expect(claimDispatch).toContain("'notificationKind', v_notification.notification_kind");
+    expect(claimDispatch).toContain("'actualStartAt', v_request.actual_start_at");
+    expect(claimDispatch).toContain("'actualEndAt', v_request.actual_end_at");
+    expect(callback).toContain('notificationKind: "plan_approval" | "actual_verification"');
+    expect(callback).toContain('"น้องๆคอนเฟิร์มเวลา OT แล้ว"');
+    expect(callback).toContain("`Request: ${displayText(claim.title)} - ${displayText(claim.reasonCode)}`");
+    expect(callback).toContain("Schedule: ${bangkokSchedule(scheduleStart, scheduleEnd)}");
+    expect(callback).toContain('text: "Open in Workgrid"');
+    expect(verify).toContain("SeaTalk OT actual verification notification contract (Expected queued only after actual submission)");
+  });
+
   it("replays an applied SeaTalk review safely and closes pending SeaTalk actions after direct review", () => {
     const directReview = functionSql(sql, "ot_review_plan");
     const sharedPlanReview = functionSql(sql, "ot_apply_plan_review");
@@ -951,14 +970,14 @@ describe("OT Request backend contract", () => {
     expect(claimDispatch).toContain("interval '5 minutes'");
     expect(claimDispatch).toContain("attempt_count = attempt_count + 1");
     for (const safeField of [
-      "notificationId", "dispatchKey", "leaseExpiresAt", "recipientEmail", "recipientDisplayName",
+      "notificationId", "dispatchKey", "leaseExpiresAt", "notificationKind", "recipientEmail", "recipientDisplayName",
       "requestId", "employeeEmail", "employeeDisplayName", "functionCode", "title", "dayType",
       "workLocationType", "venue", "reasonCode", "reasonDetail", "plannedStartAt", "plannedEndAt",
-      "plannedBreakMinutes", "plannedMinutes",
+      "plannedBreakMinutes", "plannedMinutes", "actualStartAt", "actualEndAt",
     ]) {
       expect(claimDispatch).toContain(`'${safeField}'`);
     }
-    expect(claimDispatch).not.toMatch(/pg_catalog\.to_jsonb\(v_request\)|actual_start_at|actual_end_at|employee_consent|compliance_outcome/);
+    expect(claimDispatch).not.toMatch(/pg_catalog\.to_jsonb\(v_request\)|employee_consent|compliance_outcome/);
     expect(finishDispatch).not.toContain("public.ot_is_service_role_context()");
     expect(finishDispatch).toMatch(/where dispatch_key = p_dispatch_key\s+and status = 'dispatching'/);
     expect(finishDispatch).toContain("if found then");

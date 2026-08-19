@@ -192,7 +192,7 @@ create table if not exists public.ot_request_audit (
 create table if not exists public.ot_seatalk_notifications (
   id uuid primary key default gen_random_uuid(),
   request_id uuid not null references public.ot_requests(id) on delete restrict,
-  notification_kind text not null check (notification_kind in ('plan_approval')),
+  notification_kind text not null check (notification_kind in ('plan_approval', 'actual_verification')),
   status text not null default 'pending' check (status in ('pending', 'dispatching', 'sent', 'failed', 'applied', 'cancelled')),
   attempt_count integer not null default 0 check (attempt_count >= 0),
   seatalk_message_id text,
@@ -207,6 +207,12 @@ create table if not exists public.ot_seatalk_notifications (
 alter table public.ot_seatalk_notifications
   add column if not exists lease_expires_at timestamptz,
   add column if not exists last_error text;
+
+alter table public.ot_seatalk_notifications
+  drop constraint if exists ot_seatalk_notifications_notification_kind_check;
+alter table public.ot_seatalk_notifications
+  add constraint ot_seatalk_notifications_notification_kind_check
+  check (notification_kind in ('plan_approval', 'actual_verification'));
 
 alter table public.ot_seatalk_notifications drop constraint if exists ot_seatalk_notifications_status_check;
 alter table public.ot_seatalk_notifications
@@ -784,6 +790,7 @@ begin
     case when v_over_limit then 'Truthful actual recorded above 36 hours; compliance review is required before HR readiness' else null end,
     p_idempotency_key
   );
+  perform public.ot_enqueue_seatalk_notification(v_request.id, 'actual_verification');
   return pg_catalog.to_jsonb(v_request);
 end
 $function$;
@@ -1062,7 +1069,8 @@ as $function$
 declare
   v_notification_id uuid;
 begin
-  if p_notification_kind <> 'plan_approval' then
+  if p_notification_kind is null
+     or p_notification_kind not in ('plan_approval', 'actual_verification') then
     raise exception 'Unsupported OT SeaTalk notification kind';
   end if;
 
@@ -1125,8 +1133,17 @@ begin
 
   select n.* into v_notification
   from public.ot_seatalk_notifications n
+  join public.ot_requests r on r.id = n.request_id
   where n.request_id = p_request_id
-    and n.notification_kind = 'plan_approval'
+    and (
+      (n.notification_kind = 'plan_approval'
+        and r.source = 'employee_request'
+        and r.status = 'pending_approval')
+      or
+      (n.notification_kind = 'actual_verification'
+        and r.actual_submitted_at is not null
+        and r.status in ('pending_actual_verification', 'compliance_review_required'))
+    )
   for update of n;
   if not found then
     raise exception 'SeaTalk OT notification not found';
@@ -1152,7 +1169,15 @@ begin
      and v_request.approver_user_id <> p_actor_id then
     raise exception 'Only the request creator or assigned approver can dispatch this OT card';
   end if;
-  if v_request.source <> 'employee_request' or v_request.status <> 'pending_approval' then
+  if not (
+    (v_notification.notification_kind = 'plan_approval'
+      and v_request.source = 'employee_request'
+      and v_request.status = 'pending_approval')
+    or
+    (v_notification.notification_kind = 'actual_verification'
+      and v_request.actual_submitted_at is not null
+      and v_request.status in ('pending_actual_verification', 'compliance_review_required'))
+  ) then
     return pg_catalog.jsonb_build_object(
       'claimed', false,
       'status', v_notification.status
@@ -1212,6 +1237,7 @@ begin
     'notificationId', v_notification.id,
     'dispatchKey', v_dispatch_key,
     'leaseExpiresAt', v_lease_expires_at,
+    'notificationKind', v_notification.notification_kind,
     'recipientEmail', v_recipient_email,
     'recipientDisplayName', v_recipient_display_name,
     'requestId', v_request.id,
@@ -1227,7 +1253,9 @@ begin
     'plannedStartAt', v_request.planned_start_at,
     'plannedEndAt', v_request.planned_end_at,
     'plannedBreakMinutes', v_request.planned_break_minutes,
-    'plannedMinutes', v_request.planned_minutes
+    'plannedMinutes', v_request.planned_minutes,
+    'actualStartAt', v_request.actual_start_at,
+    'actualEndAt', v_request.actual_end_at
   );
 end
 $function$;

@@ -1184,22 +1184,28 @@ function OtActualConfirmationForm({
       varianceReason: form.varianceReason.trim() || null
     };
     try {
-      const result = await window.submitOtActual(request.id, payload, intent.key);
+      const {
+        result,
+        deliveryError
+      } = await window.runOtActualSubmission(() => window.submitOtActual(request.id, payload, intent.key));
       const status = otValue(result, "status", "status");
       setIntent({
         key: crypto.randomUUID(),
         attempted: false
       });
+      const deliveryMessage = deliveryError ? "SeaTalk delivery is still pending. Your actual OT was submitted successfully." : "";
       if (status === "compliance_review_required") {
         setSubmitState({
           status: "success",
           message: "Actual hours saved truthfully. Your Team Lead will verify this record before it is ready for export.",
+          deliveryMessage,
           result
         });
       } else {
         setSubmitState({
           status: "success",
           message: "Actual hours saved and sent to your approver for verification.",
+          deliveryMessage,
           result
         });
       }
@@ -1220,6 +1226,9 @@ function OtActualConfirmationForm({
       kind: savedStatus === "compliance_review_required" ? "critical" : "info",
       title: "Actual time saved",
       message: submitState.message
+    }), submitState.deliveryMessage && React.createElement(OtWarning, {
+      kind: "info",
+      message: submitState.deliveryMessage
     }), React.createElement("p", null, React.createElement("strong", null, "Saved status:"), " ", getOtStatusLabel(savedStatus)), React.createElement("button", {
       type: "button",
       className: "btn btn--primary",

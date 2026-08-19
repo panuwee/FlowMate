@@ -44,6 +44,15 @@ window.runOtIndividualSubmission = async submit => {
     return { result, deliveryError };
   }
 };
+window.runOtActualSubmission = async submit => {
+  const result = await submit();
+  try {
+    await window.dispatchOtSeaTalkNotification(result.id);
+    return { result, deliveryError: null };
+  } catch (deliveryError) {
+    return { result, deliveryError };
+  }
+};
 window.previewOtEventPlan = (payload, employeeUserIds) => callOtRequestRpc("ot_preview_event_plan", { p_payload: payload, p_employee_user_ids: employeeUserIds }, "OT event plan could not be previewed.");
 window.createOtEventPlan = (payload, employeeUserIds, key) => callOtRequestRpc("ot_create_event_plan", { p_payload: payload, p_employee_user_ids: employeeUserIds, p_idempotency_key: key }, "OT event plan could not be created.");
 window.recordOtConsent = (requestId, accepted, consentStatementVersion, key) => callOtRequestRpc("ot_record_consent", { p_request_id: requestId, p_accept: accepted, p_consent_statement_version: consentStatementVersion, p_idempotency_key: key }, "OT consent could not be recorded.");

@@ -138,6 +138,22 @@ join pg_catalog.pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
   and c.relname = 'ot_seatalk_notifications';
 
+select
+  'SeaTalk OT actual verification notification contract (Expected queued only after actual submission)' as check_name,
+  exists (
+    select 1
+    from pg_catalog.pg_constraint con
+    where con.conrelid = 'public.ot_seatalk_notifications'::regclass
+      and con.conname = 'ot_seatalk_notifications_notification_kind_check'
+      and pg_catalog.pg_get_constraintdef(con.oid) like '%actual_verification%'
+  ) as actual_notification_kind_allowed,
+  position('public.ot_enqueue_seatalk_notification(v_request.id, ''actual_verification'')' in pg_catalog.pg_get_functiondef(
+    'public.ot_submit_actual(uuid, jsonb, uuid)'::regprocedure
+  )) > 0 as submission_enqueues_notification,
+  position('v_notification.notification_kind = ''actual_verification''' in pg_catalog.pg_get_functiondef(
+    'public.ot_seatalk_claim_dispatch(uuid, uuid)'::regprocedure
+  )) > 0 as dispatch_claims_actual_notification;
+
 with rejection_functions(function_name, argument_types) as (
   values
     ('ot_seatalk_begin_rejection', 'uuid, text, uuid'),

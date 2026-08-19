@@ -39,6 +39,7 @@ type DispatchClaim = {
   dispatchKey: string;
   recipientEmail: string;
   recipientDisplayName: string;
+  notificationKind: "plan_approval" | "actual_verification";
   requestId: string;
   employeeDisplayName: string;
   functionCode: string;
@@ -52,6 +53,8 @@ type DispatchClaim = {
   plannedEndAt: string;
   plannedBreakMinutes: number | null;
   plannedMinutes: number | null;
+  actualStartAt: string;
+  actualEndAt: string;
 };
 
 type NoDispatchClaim = {
@@ -78,7 +81,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const seaTalkApiBase = "https://openapi.seatalk.io";
-const flowMateOtApprovalUrl = "https://workgrid.uat.seathailand.com/home#ot-request/manager";
+const workgridOtManagerUrl = "https://workgrid.uat.seathailand.com/home#ot-request/manager";
 const maxTokenTtlSeconds = 7200;
 const tokenRefreshSafetySeconds = 60;
 const runtimeTokenCache: AppTokenCache = { token: "", expiresAtMs: 0 };
@@ -450,25 +453,28 @@ function bangkokSchedule(start: unknown, end: unknown): string {
 }
 
 function buildCard(claim: DispatchClaim): Record<string, unknown> {
+  const isActualVerification = claim.notificationKind === "actual_verification";
+  const scheduleStart = isActualVerification ? claim.actualStartAt : claim.plannedStartAt;
+  const scheduleEnd = isActualVerification ? claim.actualEndAt : claim.plannedEndAt;
   const details = [
-    `Employee: ${displayText(claim.employeeDisplayName)} · ${displayText(claim.functionCode).toUpperCase()}`,
-    `Assignment / event: ${displayText(claim.title)}`,
-    `Schedule: ${bangkokSchedule(claim.plannedStartAt, claim.plannedEndAt)}`,
-    `Reason: ${displayText(claim.reasonCode)}`,
+    `Employee: ${displayText(claim.employeeDisplayName)}`,
+    `Function: ${displayText(claim.functionCode)}`,
+    `Request: ${displayText(claim.title)} - ${displayText(claim.reasonCode)}`,
+    `Schedule: ${bangkokSchedule(scheduleStart, scheduleEnd)}`,
   ].join("\n").slice(0, 1000);
   return {
     tag: "interactive_message",
     interactive_message: {
       elements: [
-        { element_type: "title", title: { text: "OT approval request" } },
+        { element_type: "title", title: { text: isActualVerification ? "น้องๆคอนเฟิร์มเวลา OT แล้ว" : "OT approval request" } },
         { element_type: "description", description: { text: details, format: 2 } },
         {
           element_type: "button",
           button: {
             button_type: "redirect",
-            text: "Open in FlowMate",
-            mobile_link: { type: "web", path: flowMateOtApprovalUrl },
-            desktop_link: { type: "web", path: flowMateOtApprovalUrl },
+            text: "Open in Workgrid",
+            mobile_link: { type: "web", path: workgridOtManagerUrl },
+            desktop_link: { type: "web", path: workgridOtManagerUrl },
           },
         },
       ],
@@ -506,17 +512,20 @@ function parseDispatchClaim(value: unknown): DispatchClaim | NoDispatchClaim | n
   }
   const notificationId = asTrimmedString(data.notificationId);
   const dispatchKey = asTrimmedString(data.dispatchKey);
+  const notificationKind = asTrimmedString(data.notificationKind);
   const recipientEmail = normalizedEmail(data.recipientEmail);
   const claimedRequestId = asTrimmedString(data.requestId);
   if (
     data.claimed !== true || !notificationId || !uuidPattern.test(notificationId) ||
-    !dispatchKey || !uuidPattern.test(dispatchKey) || !recipientEmail ||
+    !dispatchKey || !uuidPattern.test(dispatchKey) ||
+    (notificationKind !== "plan_approval" && notificationKind !== "actual_verification") || !recipientEmail ||
     !claimedRequestId || !uuidPattern.test(claimedRequestId)
   ) return null;
   return {
     claimed: true,
     notificationId: notificationId.toLowerCase(),
     dispatchKey: dispatchKey.toLowerCase(),
+    notificationKind,
     recipientEmail,
     recipientDisplayName: displayText(data.recipientDisplayName),
     requestId: claimedRequestId.toLowerCase(),
@@ -532,6 +541,8 @@ function parseDispatchClaim(value: unknown): DispatchClaim | NoDispatchClaim | n
     plannedEndAt: displayText(data.plannedEndAt),
     plannedBreakMinutes: typeof data.plannedBreakMinutes === "number" ? data.plannedBreakMinutes : null,
     plannedMinutes: typeof data.plannedMinutes === "number" ? data.plannedMinutes : null,
+    actualStartAt: displayText(data.actualStartAt),
+    actualEndAt: displayText(data.actualEndAt),
   };
 }
 
