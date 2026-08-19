@@ -2289,6 +2289,8 @@ describe("OT Request static module integration", () => {
 
   it("keeps charts, preview data, and monthly export in the Owner-only navigation", () => {
     const screen = read("screens-ot.jsx");
+    const css = read("app.css");
+    const ownerInsights = screen.slice(screen.indexOf("function OtOwnerInsightsPanel("), screen.indexOf("function OtHrExportPanel("));
 
     expect(screen).toContain('insights: "ot-request/insights"');
     expect(screen).toContain('if (view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
@@ -2299,6 +2301,9 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain("Preview sample data");
     expect(screen).toContain("Preview data — sample only; exports and live data remain unchanged.");
     expect(screen).toContain('min="2026-01" max="2026-12"');
+    expect(ownerInsights).toContain('className="ot-insight-chart"');
+    expect(ownerInsights).not.toContain('className="ot-root-grid">{weeklyTrend');
+    expect(css).toContain(".ot-insight-chart__row");
   });
 
   it("keeps active entry pages on one OT release version", () => {

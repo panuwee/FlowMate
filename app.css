@@ -3989,6 +3989,12 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .ot-root-bar { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(80px, 2fr) auto; align-items: center; gap: var(--s-2); margin-top: var(--s-3); font-size: 12px; }
 .ot-root-bar > div { height: 7px; overflow: hidden; border-radius: 99px; background: var(--garena-light-grey); }
 .ot-root-bar i { display: block; height: 100%; border-radius: inherit; background: var(--garena-iron); }
+.ot-insight-chart { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-4); }
+.ot-insight-chart__row { display: grid; gap: var(--s-2); min-width: 0; }
+.ot-insight-chart__label { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); color: var(--garena-iron); font-size: 12px; }
+.ot-insight-chart__label strong { color: var(--garena-black); }
+.ot-insight-chart__track { height: 8px; overflow: hidden; border-radius: 99px; background: var(--garena-light-grey); }
+.ot-insight-chart__track span { display: block; height: 100%; min-width: 4px; border-radius: inherit; background: var(--garena-red); }
 .ot-insights { display: grid; gap: var(--s-3); }
 .ot-insights .ot-section-head { margin-bottom: 0; }
 .ot-insight-row { margin-top: var(--s-2); }
@@ -4103,6 +4109,7 @@ html[data-theme="dark"] .product-book-cms__message--error {
   .ot-analytics-grid,
   .ot-concentration-grid,
   .ot-root-grid,
+  .ot-insight-chart,
   .ot-root-summary,
   .ot-participant-grid,
   .ot-owner__destinations,

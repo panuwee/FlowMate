@@ -3590,12 +3590,15 @@ function OtOwnerInsightsPanel({
   }, React.createElement("div", null, React.createElement("h2", null, "Confirmed OT trend"), React.createElement("p", {
     className: "muted"
   }, "Actual hours confirmed in each Bangkok week of the selected month."))), React.createElement("div", {
-    className: "ot-root-grid"
+    className: "ot-insight-chart"
   }, weeklyTrend.map(row => React.createElement("div", {
-    className: "ot-root-bar",
+    className: "ot-insight-chart__row",
     key: row.weekStart
-  }, React.createElement("div", null, React.createElement("strong", null, formatOtDate(row.weekStart)), React.createElement("span", null, formatOtHours(row.actualMinutes))), React.createElement("div", {
-    className: "ot-root-bar__track"
+  }, React.createElement("div", {
+    className: "ot-insight-chart__label"
+  }, React.createElement("strong", null, formatOtDate(row.weekStart)), React.createElement("span", null, formatOtHours(row.actualMinutes))), React.createElement("div", {
+    className: "ot-insight-chart__track",
+    "aria-label": `${formatOtDate(row.weekStart)}: ${formatOtHours(row.actualMinutes)}`
   }, React.createElement("span", {
     style: {
       width: `${Math.round(row.actualMinutes / maxTrendMinutes * 100)}%`
@@ -3608,12 +3611,15 @@ function OtOwnerInsightsPanel({
   }, React.createElement("div", null, React.createElement("h2", null, "Confirmed OT by Function"), React.createElement("p", {
     className: "muted"
   }, "Compare the confirmed actual-hours share for this month."))), functionRows.length ? React.createElement("div", {
-    className: "ot-root-grid"
+    className: "ot-insight-chart"
   }, functionRows.map(row => React.createElement("div", {
-    className: "ot-root-bar",
+    className: "ot-insight-chart__row",
     key: row.value
-  }, React.createElement("div", null, React.createElement("strong", null, row.label), React.createElement("span", null, formatOtHours(row.actualMinutes))), React.createElement("div", {
-    className: "ot-root-bar__track"
+  }, React.createElement("div", {
+    className: "ot-insight-chart__label"
+  }, React.createElement("strong", null, row.label), React.createElement("span", null, formatOtHours(row.actualMinutes))), React.createElement("div", {
+    className: "ot-insight-chart__track",
+    "aria-label": `${row.label}: ${formatOtHours(row.actualMinutes)}`
   }, React.createElement("span", {
     style: {
       width: `${Math.round(row.actualMinutes / maxFunctionMinutes * 100)}%`
