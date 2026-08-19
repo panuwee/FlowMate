@@ -29,6 +29,7 @@ describe("OT request browser client", () => {
       return { data, error: null };
     });
     const payload = { title: "Patch launch" };
+    const requesterPayload = { firstName: "Folk", lastName: "Tester", email: "folk@garena.com", functionCode: "ops" };
     const actualPayload = { actualStartAt: "2026-08-07T18:00:00Z" };
     const cases: Array<{ wrapper: string; args: unknown[]; name: string; params: unknown }> = [
       { wrapper: "loadOtAccessContext", args: [], name: "ot_get_access_context", params: {} },
@@ -38,6 +39,9 @@ describe("OT request browser client", () => {
       { wrapper: "loadOtEligibleApprovers", args: [], name: "ot_list_eligible_approvers", params: {} },
       { wrapper: "loadOtPeopleForEvent", args: [], name: "ot_list_people_for_event", params: {} },
       { wrapper: "loadOtAccessAdminIdentities", args: [], name: "ot_list_access_admin_identities", params: {} },
+      { wrapper: "loadOtRequesterAccess", args: [], name: "ot_list_requester_access", params: {} },
+      { wrapper: "upsertOtRequesterAccess", args: [requesterPayload, idempotencyKey], name: "ot_upsert_requester_access", params: { p_payload: requesterPayload, p_idempotency_key: idempotencyKey } },
+      { wrapper: "setOtRequesterAccess", args: [requestId, true, idempotencyKey], name: "ot_set_requester_access", params: { p_requester_access_id: requestId, p_active: true, p_idempotency_key: idempotencyKey } },
       { wrapper: "createOtRequest", args: [payload, idempotencyKey], name: "ot_create_request", params: { p_payload: payload, p_idempotency_key: idempotencyKey } },
       { wrapper: "resubmitOtPlan", args: [requestId, payload, consentStatementVersion, idempotencyKey], name: "ot_resubmit_plan", params: { p_request_id: requestId, p_payload: payload, p_consent_statement_version: consentStatementVersion, p_idempotency_key: idempotencyKey } },
       { wrapper: "previewOtEventPlan", args: [payload, [employeeId]], name: "ot_preview_event_plan", params: { p_payload: payload, p_employee_user_ids: [employeeId] } },

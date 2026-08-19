@@ -16,6 +16,9 @@ window.loadOtManagerDashboard = (weekStart, functionCode) => callOtRequestRpc("o
 window.loadOtEligibleApprovers = () => callOtRequestRpc("ot_list_eligible_approvers", {}, "OT approvers could not be loaded.");
 window.loadOtPeopleForEvent = () => callOtRequestRpc("ot_list_people_for_event", {}, "Event participants could not be loaded.");
 window.loadOtAccessAdminIdentities = () => callOtRequestRpc("ot_list_access_admin_identities", {}, "OT access identities could not be loaded.");
+window.loadOtRequesterAccess = () => callOtRequestRpc("ot_list_requester_access", {}, "OT requester access could not be loaded.");
+window.upsertOtRequesterAccess = (payload, key) => callOtRequestRpc("ot_upsert_requester_access", { p_payload: payload, p_idempotency_key: key }, "OT requester access could not be saved.");
+window.setOtRequesterAccess = (requesterAccessId, active, key) => callOtRequestRpc("ot_set_requester_access", { p_requester_access_id: requesterAccessId, p_active: active, p_idempotency_key: key }, "OT requester access could not be updated.");
 window.createOtRequest = (payload, key) => callOtRequestRpc("ot_create_request", { p_payload: payload, p_idempotency_key: key }, "OT request could not be submitted.");
 window.resubmitOtPlan = (requestId, payload, consentVersion, key) =>
   callOtRequestRpc("ot_resubmit_plan", {

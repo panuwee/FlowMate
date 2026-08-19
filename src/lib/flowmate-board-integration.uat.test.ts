@@ -96,6 +96,8 @@ describe("FlowMate Board integration contracts", () => {
       }
       if (assetName === "app.js") {
         expect(versions[0], "app.js must use the OT Request release token").toBe("20260810-01");
+      } else if (assetName === "supabase-list-data.js") {
+        expect(versions[0], "supabase-list-data.js must use the current release token").toBe("20260817-01");
       } else if (currentReleaseAssets.has(assetName)) {
         expect(versions[0], `${assetName} must use the current release token`).toBe("20260806-01");
       }

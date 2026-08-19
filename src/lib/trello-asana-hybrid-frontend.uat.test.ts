@@ -16,6 +16,7 @@ const css = read("app.css");
 const flowmate = read("src/lib/flowmate.ts");
 
 function sliceBetween(source: string, startMarker: string, endMarker: string): string {
+  source = source.replace(/\r\n/g, "\n");
   const start = source.indexOf(startMarker);
   expect(start, `missing start marker: ${startMarker}`).toBeGreaterThanOrEqual(0);
   const end = source.indexOf(endMarker, start + startMarker.length);

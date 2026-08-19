@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
+const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8").replace(/\r\n/g, "\n");
 
 const schema = read("supabase/schema.sql");
 const assignment = read("supabase/rpc_assignment.sql");

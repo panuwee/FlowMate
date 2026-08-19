@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync as nodeReadFileSync } from "node:fs";
 import { join } from "node:path";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
@@ -10,6 +10,10 @@ import {
   formatStatus,
   type WorkItemSummary,
 } from "./flowmate";
+
+const readFileSync = (...args: Parameters<typeof nodeReadFileSync>) => (
+  nodeReadFileSync(...args).replace(/\r\n/g, "\n")
+);
 
 // --- Fixture covering all MVP statuses + work types ---------------------------
 const PD_USER = "user-pond";
@@ -542,7 +546,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(appBrandSource).toContain('className: "app__brand-version"');
     expect(appBrandSource).toContain("FLOWMATE_APP_VERSION");
     expect(appCss).toContain(".app__brand-version");
-    expect(appCss).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
+    expect(appCss.replace(/\r\n/g, "\n")).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
     expect(appCss).not.toContain("box-shadow: 0 -28px");
     expect(activeEntryHtml).toMatch(/app\.js\?v=\d{8}-\d+/);
     expect(activeEntryHtml).not.toContain("v20260709-6");
@@ -666,7 +670,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).not.toContain("errors.requesterTeam");
   });
 
-  it("creative request auto-generates an effort-aware 1st Draft without moving past Launch", () => {
+  it("creative request generates fixed Launch milestones and flags capacity risk", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
@@ -675,23 +679,23 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(createScreenJsx).toContain("function subtractFlowMateWorkingDays");
     expect(createScreenJsx).toContain("function getFlowMateEarliestCreativeDraftDate(draft, now = new Date())");
-    expect(createScreenJsx).toContain("function getFlowMateAutoCreativeDraftDate(draft, now = new Date())");
+    expect(createScreenJsx).toContain("function getFlowMateAutoCreativeDraftDate(draft)");
     expect(createScreenJsx).toContain("dueDate: getFlowMateAutoCreativeDraftDate(nextValue)");
     expect(createScreenJsx).not.toContain("const shouldAutoFillDraftDate = !value.dueDate || value.dueDate === previousAutoDraftDate");
     expect(createScreenJsx).toContain('requireField("dueDate", "1st Draft is required.")');
-    expect(creativeFormSource).toContain("1st Draft");
+    expect(creativeFormSource).toContain("Asset First Draft Due");
     expect(creativeFormSource).toContain("readOnly");
     expect(creativeFormSource).toContain("disabled");
-    expect(creativeFormSource).toContain("Generated from effort, current production cutoff, and Launch Date review buffer.");
+    expect(creativeFormSource).toContain("Generated as T-7 weekdays before Launch Date.");
     expect(creativeFormSource).not.toContain("Due date");
     expect(quickTaskFormSource).toContain("1st Review / Draft");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(assignmentSql).toContain("create or replace function public.flowmate_earliest_capacity_date(");
     expect(assignmentSql).toContain("v_earliest_feasible_due_date := public.flowmate_earliest_capacity_date(");
-    expect(assignmentSql).toContain("v_due_date := least(");
-    expect(assignmentSql).toContain("coalesce(p_due_date, v_review_target_date, v_production_start)");
+    expect(assignmentSql).toContain("v_due_date := public.flowmate_subtract_working_days(v_launch_date, 7)");
+    expect(assignmentSql).toContain("v_final_approved_due_date := public.flowmate_subtract_working_days(v_launch_date, 5)");
     expect(assignmentSql).toContain("v_review_buffer_working_days integer := 2");
-    expect(assignmentSql).toContain("v_review_buffer_at_risk := v_due_date > v_review_target_date");
+    expect(assignmentSql).toContain("'code', 'review_buffer_risk'");
   });
 
   it("creative request form has a Brief Note field that is submitted to description", () => {
@@ -785,7 +789,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(assignmentSql).toContain("v_time_pressure_effort");
     expect(assignmentSql).toContain("v_time_pressure_capacity := public.flowmate_count_capacity_buckets(v_production_start, v_production_start_half, v_due_date) * 4");
     expect(assignmentSql).toContain("v_requested_priority := 'urgent'");
-    expect(assignmentSql).toContain("v_review_buffer_at_risk");
+    expect(assignmentSql).toContain("v_first_draft_at_risk := v_earliest_feasible_due_date > v_due_date");
     expect(assignmentSql).toContain("Auto urgent:");
   });
 
@@ -909,7 +913,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(detailSource).not.toContain("<div className=\"meta-row__lbl\">Publish Date</div>");
   });
 
-  it("detail side panel orders Created, 1st Draft, Launch date, then AI Tag and hides Publish Date", () => {
+  it("detail side panel orders Created, Asset First Draft Due, Launch date, then AI Tag and hides Publish Date", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
     const creativeDetailsSource = detailSource.slice(detailSource.indexOf("{hasCreativeDetails"), detailSource.indexOf("Link zone"));
@@ -917,8 +921,8 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(sideSource.indexOf("Created")).toBeGreaterThan(-1);
     expect(sideSource).not.toContain("Publish Date");
-    expect(sideSource.indexOf("1st Draft")).toBeGreaterThan(sideSource.indexOf("Created"));
-    expect(sideSource.indexOf("Launch date")).toBeGreaterThan(sideSource.indexOf("1st Draft"));
+    expect(sideSource.indexOf("Asset First Draft Due")).toBeGreaterThan(sideSource.indexOf("Created"));
+    expect(sideSource.indexOf("Launch date")).toBeGreaterThan(sideSource.indexOf("Asset First Draft Due"));
     expect(sideSource.indexOf("AI Tag")).toBeGreaterThan(sideSource.indexOf("Launch date"));
     expect(creativeDetailsSource).not.toContain("Launch date");
   });
@@ -934,9 +938,9 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).toContain("Campaign");
     expect(creativeFormSource).toContain("Channel Tag");
     expect(creativeFormSource).not.toContain("Publish Date");
-    expect(creativeFormSource).toContain("1st Draft");
+    expect(creativeFormSource).toContain("Asset First Draft Due");
     expect(creativeFormSource).toContain("Launch date");
-    expect(creativeFormSource).toContain("Generated from effort, current production cutoff, and Launch Date review buffer.");
+    expect(creativeFormSource).toContain("Generated as T-7 weekdays before Launch Date.");
     expect(quickTaskJs).toContain("p_publish_date:    input.publishDate || null");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(quickTaskJs).toContain("p_launch_date:      input.launchDate || null");
@@ -980,7 +984,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(exportSource).toContain("\"Channel\"");
     expect(exportSource).toContain("\"Publish Date\"");
     expect(exportSource).toContain("\"Launch Date\"");
-    expect(exportSource).toContain("\"1st Draft\"");
+    expect(exportSource).toContain("\"Due / First Draft\"");
     expect(exportSource).toContain("\"Type / Skill\"");
     expect(exportSource).toContain("\"Asset Count\"");
   });
@@ -1710,8 +1714,8 @@ describe("MVP 1.3 planning backend SQL", () => {
     expect(schemaSql).toContain("add column if not exists publish_date date");
     expect(schemaSql).toMatch(/update\s+public\.work_items\s+wi[\s\S]*set\s+publish_date\s+=\s+wi\.launch_date[\s\S]*wi\.work_type\s+=\s+'creative_request'[\s\S]*wi\.publish_date\s+is\s+null[\s\S]*wi\.launch_date\s+is\s+not\s+null/i);
     expect(assignmentSql).toContain("p_publish_date date default null");
-    expect(assignmentSql).toContain("due_date, launch_date, publish_date");
-    expect(assignmentSql).toContain("v_due_date, v_launch_date, p_publish_date");
+    expect(assignmentSql).toContain("due_date, final_approved_due_date, launch_date, publish_date");
+    expect(assignmentSql).toContain("v_due_date, v_final_approved_due_date, v_launch_date, p_publish_date");
   });
 
   it("provides signed-in planning rows with normalized channel arrays and no archived rows", () => {
@@ -3739,7 +3743,8 @@ describe("MVP 1.2 List filters and refresh controls", () => {
 
   it("removes Saved views and orders Team before Assignee filters with scoped assignee options", () => {
     const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
-    const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
+    const normalizedScreensB = screensB.replace(/\r\n/g, "\n");
+    const listSource = normalizedScreensB.slice(normalizedScreensB.indexOf("function ListScreen"), normalizedScreensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
 
     expect(listSource).not.toContain("Saved views");
     expect(listSource).not.toContain("All owners");
@@ -3754,7 +3759,8 @@ describe("MVP 1.2 List filters and refresh controls", () => {
 
   it("removes unused New and Need Brief statuses from the List status dropdown", () => {
     const screensB = readFileSync(join(process.cwd(), "screens-b.jsx"), "utf8");
-    const listSource = screensB.slice(screensB.indexOf("function ListScreen"), screensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
+    const normalizedScreensB = screensB.replace(/\r\n/g, "\n");
+    const listSource = normalizedScreensB.slice(normalizedScreensB.indexOf("function ListScreen"), normalizedScreensB.indexOf("/* ============================================================\n   KANBAN BOARD"));
 
     expect(listSource).toContain("const LIST_STATUS_FILTER_KEYS =");
     expect(listSource).toContain("LIST_STATUS_FILTER_KEYS.map");

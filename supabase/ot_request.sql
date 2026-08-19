@@ -26,6 +26,60 @@ create table if not exists public.ot_approvers (
   created_at timestamptz not null default now()
 );
 
+-- OT requester access is deliberately separate from Workgrid application roles.
+-- A row may be created before the employee has a public.users identity so an
+-- Owner can provision a Garena email ahead of first sign-in.
+create table if not exists public.ot_requester_access (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid unique references public.users(id) on delete set null,
+  email text not null unique,
+  first_name text,
+  last_name text,
+  display_name text not null,
+  function_code text not null check (function_code in ('gdve', 'ops', 'mkt', 'esport')),
+  status text not null check (status in ('active', 'pending_sync', 'deactivated')),
+  note text,
+  created_by_user_id uuid references public.users(id) on delete restrict,
+  updated_by_user_id uuid references public.users(id) on delete restrict,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deactivated_at timestamptz,
+  constraint ot_requester_access_email_canonical check (
+    email = pg_catalog.lower(pg_catalog.btrim(email))
+    and email like '%@garena.com'
+    and pg_catalog.length(email) > pg_catalog.length('@garena.com')
+  ),
+  constraint ot_requester_access_display_name_required check (
+    pg_catalog.length(pg_catalog.btrim(display_name)) > 0
+  ),
+  constraint ot_requester_access_deactivation_state check (
+    (status = 'deactivated' and deactivated_at is not null)
+    or (status <> 'deactivated' and deactivated_at is null)
+  )
+);
+
+create table if not exists public.ot_requester_access_audit (
+  id uuid primary key default gen_random_uuid(),
+  requester_access_id uuid not null references public.ot_requester_access(id) on delete restrict,
+  actor_user_id uuid not null references public.users(id) on delete restrict,
+  action text not null,
+  old_values jsonb not null default '{}'::jsonb,
+  new_values jsonb not null default '{}'::jsonb,
+  reason text,
+  idempotency_key uuid not null,
+  created_at timestamptz not null default now(),
+  constraint ot_requester_access_audit_action_required check (
+    pg_catalog.length(pg_catalog.btrim(action)) > 0
+  ),
+  constraint ot_requester_access_audit_old_values_object check (
+    pg_catalog.jsonb_typeof(old_values) = 'object'
+  ),
+  constraint ot_requester_access_audit_new_values_object check (
+    pg_catalog.jsonb_typeof(new_values) = 'object'
+  ),
+  unique (actor_user_id, action, idempotency_key)
+);
+
 create table if not exists public.ot_event_plans (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -268,6 +322,21 @@ create trigger ot_request_audit_append_only
 before update or delete on public.ot_request_audit
 for each row execute function public.ot_guard_audit_append_only();
 
+create or replace function public.ot_guard_requester_access_audit_append_only()
+returns trigger
+language plpgsql
+set search_path = ''
+as $function$
+begin
+  raise exception 'OT requester access audit is append-only';
+end
+$function$;
+
+drop trigger if exists ot_requester_access_audit_append_only on public.ot_requester_access_audit;
+create trigger ot_requester_access_audit_append_only
+before update or delete on public.ot_requester_access_audit
+for each row execute function public.ot_guard_requester_access_audit_append_only();
+
 create table if not exists public.ot_export_batches (
   id uuid primary key default gen_random_uuid(),
   batch_name text not null,
@@ -310,6 +379,8 @@ create index if not exists ot_audit_request_idx
 on public.ot_request_audit(request_id, created_at, id);
 create index if not exists ot_audit_event_plan_idx
 on public.ot_request_audit(event_plan_id, created_at, id) where event_plan_id is not null;
+create index if not exists ot_requester_access_audit_access_idx
+on public.ot_requester_access_audit(requester_access_id, created_at desc, id);
 create unique index if not exists ot_audit_idempotency_uidx
 on public.ot_request_audit(
   actor_user_id,
@@ -425,6 +496,7 @@ declare
   v_counted_segments jsonb;
   v_consent_statement_version text := nullif(pg_catalog.btrim(p_consent_statement_version), '');
 begin
+  perform public.ot_require_current_requester_access();
   perform public.ot_lock_idempotency('record_consent', p_idempotency_key);
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
@@ -581,6 +653,7 @@ declare
   v_variance_minutes integer;
   v_variance_reason text;
 begin
+  perform public.ot_require_current_requester_access();
   perform public.ot_lock_idempotency('submit_actual', p_idempotency_key);
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
@@ -2029,21 +2102,99 @@ begin
 end
 $function$;
 
-create or replace function public.ot_get_access_context()
-returns jsonb
+create or replace function public.ot_resolve_current_requester_access()
+returns public.ot_requester_access
 language plpgsql
-stable
 security definer
 set search_path = ''
 as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
+  v_email text;
+  v_access public.ot_requester_access;
+  v_previous jsonb;
+begin
+  select pg_catalog.lower(pg_catalog.btrim(u.email))
+  into v_email
+  from public.users u
+  where u.id = v_actor_id;
+
+  select r.*
+  into v_access
+  from public.ot_requester_access r
+  where r.email = v_email
+  for update;
+
+  if not found then
+    return null;
+  end if;
+
+  if v_access.user_id is not null and v_access.user_id <> v_actor_id then
+    raise exception 'OT requester access identity does not match the current sign-in';
+  end if;
+
+  if v_access.user_id is null or v_access.status = 'pending_sync' then
+    v_previous := pg_catalog.to_jsonb(v_access);
+    update public.ot_requester_access r
+    set user_id = v_actor_id,
+        status = case when r.status = 'pending_sync' then 'active' else r.status end,
+        updated_at = pg_catalog.clock_timestamp()
+    where r.id = v_access.id
+    returning r.* into v_access;
+
+    insert into public.ot_requester_access_audit (
+      requester_access_id, actor_user_id, action, old_values, new_values, idempotency_key
+    ) values (
+      v_access.id,
+      v_actor_id,
+      'sync_requester_access_identity',
+      v_previous,
+      pg_catalog.to_jsonb(v_access),
+      gen_random_uuid()
+    );
+  end if;
+
+  return v_access;
+end
+$function$;
+
+create or replace function public.ot_require_current_requester_access()
+returns public.ot_requester_access
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_access public.ot_requester_access := public.ot_resolve_current_requester_access();
+begin
+  if v_access.id is null
+     or v_access.user_id is distinct from v_actor_id
+     or v_access.status <> 'active' then
+    raise exception 'OT requester access is not active';
+  end if;
+  return v_access;
+end
+$function$;
+
+create or replace function public.ot_get_access_context()
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_requester_access public.ot_requester_access := public.ot_resolve_current_requester_access();
 begin
   return pg_catalog.jsonb_build_object(
     'userId', v_actor_id,
     'isOwner', public.ot_current_user_is_owner(),
     'isHrAdmin', public.ot_current_user_is_hr_admin(),
     'isEligibleApprover', public.ot_current_user_is_eligible_approver(),
+    'canRequestOt', coalesce(v_requester_access.user_id = v_actor_id and v_requester_access.status = 'active', false),
+    'requesterFunctionCode', v_requester_access.function_code,
+    'requesterAccessStatus', v_requester_access.status,
     'weeklyLimitMinutes', 2160,
     'timezone', 'Asia/Bangkok',
     'weekStartsOn', 'monday'
@@ -2054,13 +2205,13 @@ $function$;
 create or replace function public.ot_list_my_requests(p_week_start date default null)
 returns setof public.ot_requests
 language plpgsql
-stable
 security definer
 set search_path = ''
 as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
 begin
+  perform public.ot_require_current_requester_access();
   return query
   select r.*
   from public.ot_requests r
@@ -2077,7 +2228,6 @@ $function$;
 create or replace function public.ot_get_my_dashboard(p_week_start date)
 returns jsonb
 language plpgsql
-stable
 security definer
 set search_path = ''
 as $function$
@@ -2088,6 +2238,7 @@ declare
   v_actual integer;
   v_counted integer;
 begin
+  perform public.ot_require_current_requester_access();
   if p_week_start is null or pg_catalog.date_part('isodow', p_week_start)::integer <> 1 then
     raise exception 'Week start must be a Monday date in the Bangkok workweek';
   end if;
@@ -2259,6 +2410,315 @@ begin
 end
 $function$;
 
+create or replace function public.ot_list_requester_access()
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_result jsonb;
+begin
+  if not public.ot_current_user_is_owner() then
+    raise exception 'Only the OT Owner can list requester access';
+  end if;
+
+  select coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'id', r.id,
+        'userId', r.user_id,
+        'email', r.email,
+        'firstName', r.first_name,
+        'lastName', r.last_name,
+        'displayName', r.display_name,
+        'functionCode', r.function_code,
+        'status', r.status,
+        'note', r.note,
+        'createdAt', r.created_at,
+        'updatedAt', r.updated_at,
+        'deactivatedAt', r.deactivated_at
+      ) order by r.display_name, r.email
+    ),
+    '[]'::jsonb
+  ) into v_result
+  from public.ot_requester_access r;
+
+  return v_result;
+end
+$function$;
+
+create or replace function public.ot_upsert_requester_access(
+  p_payload jsonb,
+  p_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_access_id uuid;
+  v_email text;
+  v_first_name text;
+  v_last_name text;
+  v_display_name text;
+  v_function_code text;
+  v_note text;
+  v_matched_user_id uuid;
+  v_previous public.ot_requester_access;
+  v_access public.ot_requester_access;
+  v_existing boolean := false;
+  v_status text;
+  v_action text;
+  v_result jsonb;
+begin
+  if not public.ot_current_user_is_owner() then
+    raise exception 'Only the OT Owner can manage requester access';
+  end if;
+  if p_payload is null or pg_catalog.jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'Requester access payload must be an object';
+  end if;
+
+  perform public.ot_lock_idempotency('upsert_requester_access', p_idempotency_key);
+  select a.new_values->'result'
+  into v_result
+  from public.ot_requester_access_audit a
+  where a.actor_user_id = v_actor_id
+    and a.idempotency_key = p_idempotency_key
+  order by a.created_at desc, a.id desc
+  limit 1;
+  if found then
+    return v_result;
+  end if;
+
+  v_email := pg_catalog.lower(pg_catalog.btrim(coalesce(p_payload->>'email', '')));
+  v_first_name := nullif(pg_catalog.btrim(coalesce(p_payload->>'firstName', '')), '');
+  v_last_name := nullif(pg_catalog.btrim(coalesce(p_payload->>'lastName', '')), '');
+  v_function_code := pg_catalog.lower(pg_catalog.btrim(coalesce(p_payload->>'functionCode', '')));
+  v_note := nullif(pg_catalog.btrim(coalesce(p_payload->>'note', '')), '');
+
+  if v_email !~ '^[^@[:space:]]+@garena[.]com$' then
+    raise exception 'Requester email must use the exact @garena.com domain';
+  end if;
+  if v_first_name is null or v_last_name is null then
+    raise exception 'Requester first name and last name are required';
+  end if;
+  if v_function_code not in ('gdve', 'ops', 'mkt', 'esport') then
+    raise exception 'Requester Function is invalid';
+  end if;
+  v_display_name := v_first_name || ' ' || v_last_name;
+
+  if nullif(pg_catalog.btrim(coalesce(p_payload->>'id', '')), '') is not null then
+    v_access_id := (p_payload->>'id')::uuid;
+    select r.* into v_previous
+    from public.ot_requester_access r
+    where r.id = v_access_id
+    for update;
+    if not found then
+      raise exception 'OT requester access record was not found';
+    end if;
+    v_existing := true;
+
+    if exists (
+      select 1
+      from public.ot_requester_access duplicate_access
+      where duplicate_access.email = v_email
+        and duplicate_access.id <> v_access_id
+      for update
+    ) then
+      raise exception 'Requester email is already registered for OT access';
+    end if;
+  else
+    select r.* into v_previous
+    from public.ot_requester_access r
+    where r.email = v_email
+    for update;
+    v_existing := found;
+    if v_existing then
+      v_access_id := v_previous.id;
+    end if;
+  end if;
+
+  select u.id into v_matched_user_id
+  from public.users u
+  where u.is_active = true
+    and pg_catalog.lower(pg_catalog.btrim(u.email)) = v_email
+  order by u.id
+  limit 1;
+
+  if v_existing and v_previous.user_id is not null
+     and v_matched_user_id is not null
+     and v_previous.user_id <> v_matched_user_id then
+    raise exception 'Requester email resolves to a different Workgrid identity';
+  end if;
+
+  v_status := case
+    when v_existing and v_previous.status = 'deactivated' then 'deactivated'
+    when v_matched_user_id is not null then 'active'
+    else 'pending_sync'
+  end;
+
+  if v_existing then
+    update public.ot_requester_access r
+    set email = v_email,
+        user_id = v_matched_user_id,
+        first_name = v_first_name,
+        last_name = v_last_name,
+        display_name = v_display_name,
+        function_code = v_function_code,
+        status = v_status,
+        note = v_note,
+        updated_by_user_id = v_actor_id,
+        updated_at = pg_catalog.clock_timestamp(),
+        deactivated_at = case
+          when v_status = 'deactivated' then coalesce(r.deactivated_at, pg_catalog.clock_timestamp())
+          else null
+        end
+    where r.id = v_access_id
+    returning r.* into v_access;
+    v_action := case
+      when v_previous.user_id is null and v_access.user_id is not null then 'sync_requester_access_identity'
+      else 'update_requester_access'
+    end;
+  else
+    insert into public.ot_requester_access (
+      user_id, email, first_name, last_name, display_name, function_code, status, note,
+      created_by_user_id, updated_by_user_id
+    ) values (
+      v_matched_user_id, v_email, v_first_name, v_last_name, v_display_name, v_function_code, v_status, v_note,
+      v_actor_id, v_actor_id
+    )
+    returning * into v_access;
+    v_action := 'create_requester_access';
+  end if;
+
+  v_result := pg_catalog.jsonb_build_object('requesterAccess', pg_catalog.to_jsonb(v_access));
+  insert into public.ot_requester_access_audit (
+    requester_access_id, actor_user_id, action, old_values, new_values, reason, idempotency_key
+  ) values (
+    v_access.id,
+    v_actor_id,
+    v_action,
+    case when v_existing then pg_catalog.to_jsonb(v_previous) else '{}'::jsonb end,
+    pg_catalog.jsonb_build_object('requesterAccess', pg_catalog.to_jsonb(v_access), 'result', v_result),
+    v_note,
+    p_idempotency_key
+  );
+  return v_result;
+end
+$function$;
+
+create or replace function public.ot_set_requester_access(
+  p_requester_access_id uuid,
+  p_active boolean,
+  p_idempotency_key uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  v_actor_id uuid := public.ot_require_current_user();
+  v_access public.ot_requester_access;
+  v_previous jsonb;
+  v_matched_user_id uuid;
+  v_actionable_count integer;
+  v_actionable_request_ids jsonb;
+  v_next_status text;
+  v_action text;
+  v_result jsonb;
+begin
+  if not public.ot_current_user_is_owner() then
+    raise exception 'Only the OT Owner can manage requester access';
+  end if;
+  if p_requester_access_id is null or p_active is null then
+    raise exception 'Requester access record and active state are required';
+  end if;
+
+  perform public.ot_lock_idempotency('set_requester_access', p_idempotency_key);
+  select a.new_values->'result'
+  into v_result
+  from public.ot_requester_access_audit a
+  where a.actor_user_id = v_actor_id
+    and a.idempotency_key = p_idempotency_key
+    and a.action in ('activate_requester_access', 'deactivate_requester_access')
+  order by a.created_at desc, a.id desc
+  limit 1;
+  if found then
+    return v_result;
+  end if;
+
+  select r.* into v_access
+  from public.ot_requester_access r
+  where r.id = p_requester_access_id
+  for update;
+  if not found then
+    raise exception 'OT requester access record was not found';
+  end if;
+  v_previous := pg_catalog.to_jsonb(v_access);
+
+  if not p_active and v_access.user_id is not null then
+    select
+      pg_catalog.count(*)::integer,
+      coalesce(pg_catalog.jsonb_agg(r.id order by r.planned_start_at, r.id), '[]'::jsonb)
+    into v_actionable_count, v_actionable_request_ids
+    from public.ot_requests r
+    where r.employee_user_id = v_access.user_id
+      and (
+        r.status in (
+          'pending_approval', 'awaiting_consent', 'revision_required',
+          'actual_confirmation_required', 'pending_actual_verification',
+          'compliance_review_required'
+        )
+        or (r.status = 'approved' and r.planned_end_at > pg_catalog.clock_timestamp())
+      );
+    if v_actionable_count > 0 then
+      raise exception 'Requester has % unresolved OT request(s); resolve them before deactivation: %',
+        v_actionable_count, v_actionable_request_ids;
+    end if;
+  end if;
+
+  if p_active then
+    select u.id into v_matched_user_id
+    from public.users u
+    where u.is_active = true
+      and pg_catalog.lower(pg_catalog.btrim(u.email)) = v_access.email
+    order by u.id
+    limit 1;
+    v_next_status := case when v_matched_user_id is null then 'pending_sync' else 'active' end;
+  else
+    v_next_status := 'deactivated';
+  end if;
+
+  update public.ot_requester_access r
+  set user_id = case when p_active then v_matched_user_id else r.user_id end,
+      status = v_next_status,
+      updated_by_user_id = v_actor_id,
+      updated_at = pg_catalog.clock_timestamp(),
+      deactivated_at = case when p_active then null else pg_catalog.clock_timestamp() end
+  where r.id = v_access.id
+  returning r.* into v_access;
+
+  v_action := case when p_active then 'activate_requester_access' else 'deactivate_requester_access' end;
+  v_result := pg_catalog.jsonb_build_object('requesterAccess', pg_catalog.to_jsonb(v_access));
+  insert into public.ot_requester_access_audit (
+    requester_access_id, actor_user_id, action, old_values, new_values, idempotency_key
+  ) values (
+    v_access.id,
+    v_actor_id,
+    v_action,
+    v_previous,
+    pg_catalog.jsonb_build_object('requesterAccess', pg_catalog.to_jsonb(v_access), 'result', v_result),
+    p_idempotency_key
+  );
+  return v_result;
+end
+$function$;
+
 create or replace function public.ot_create_request(
   p_payload jsonb,
   p_idempotency_key uuid
@@ -2270,6 +2730,7 @@ set search_path = ''
 as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
+  v_requester_access public.ot_requester_access;
   v_approver_user_id uuid;
   v_function_code text;
   v_start_at timestamptz;
@@ -2282,6 +2743,7 @@ declare
   v_reason_detail text;
   v_request public.ot_requests;
 begin
+  v_requester_access := public.ot_require_current_requester_access();
   perform public.ot_lock_idempotency('create_request', p_idempotency_key);
   select * into v_request
   from public.ot_requests r
@@ -2301,9 +2763,10 @@ begin
   end if;
   perform public.ot_assert_consent_version(v_consent_statement_version);
 
-  v_function_code := nullif(pg_catalog.btrim(coalesce(
-    p_payload->>'functionCode', p_payload->>'function_code'
-  )), '');
+  if p_payload is null or pg_catalog.jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'OT request payload must be an object';
+  end if;
+  v_function_code := v_requester_access.function_code;
   v_approver_user_id := public.ot_function_approver_id(v_function_code);
   v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
@@ -2387,6 +2850,7 @@ set search_path = ''
 as $function$
 declare
   v_actor_id uuid := public.ot_require_current_user();
+  v_requester_access public.ot_requester_access;
   v_request public.ot_requests;
   v_approver_user_id uuid;
   v_function_code text;
@@ -2404,6 +2868,7 @@ declare
   v_old_approver_user_id uuid;
   v_replay_result jsonb;
 begin
+  v_requester_access := public.ot_require_current_requester_access();
   perform public.ot_lock_idempotency('resubmit_plan', p_idempotency_key);
   perform pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('ot-request:' || p_request_id::text, 2)
@@ -2440,9 +2905,10 @@ begin
   end if;
   perform public.ot_assert_consent_version(v_consent_statement_version);
 
-  v_function_code := nullif(pg_catalog.btrim(coalesce(
-    p_payload->>'functionCode', p_payload->>'function_code'
-  )), '');
+  if p_payload is null or pg_catalog.jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'OT request payload must be an object';
+  end if;
+  v_function_code := v_requester_access.function_code;
   v_approver_user_id := public.ot_function_approver_id(v_function_code);
   v_reason_code := nullif(pg_catalog.btrim(coalesce(
     p_payload->>'reasonCode', p_payload->>'reason_code'
@@ -3492,6 +3958,8 @@ $function$;
 
 alter table public.ot_system_roles enable row level security;
 alter table public.ot_approvers enable row level security;
+alter table public.ot_requester_access enable row level security;
+alter table public.ot_requester_access_audit enable row level security;
 alter table public.ot_event_plans enable row level security;
 alter table public.ot_requests enable row level security;
 alter table public.ot_request_audit enable row level security;
@@ -3524,6 +3992,8 @@ revoke all on table public.ot_system_roles, public.ot_approvers,
   public.ot_event_plans, public.ot_requests, public.ot_request_audit,
   public.ot_export_batches, public.ot_seatalk_notifications,
   public.ot_seatalk_pending_rejections from public, anon, authenticated;
+revoke all on table public.ot_requester_access from public, anon, authenticated;
+revoke all on table public.ot_requester_access_audit from public, anon, authenticated;
 grant select on public.ot_requests to authenticated;
 revoke insert, update, delete on public.ot_request_audit from authenticated;
 
@@ -3550,6 +4020,7 @@ revoke all on function public.ot_assert_no_employee_overlap(uuid, timestamptz, t
 revoke all on function public.ot_actual_week_minutes(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_assert_planned_limit(uuid, jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_guard_audit_append_only() from public, anon, authenticated;
+revoke all on function public.ot_guard_requester_access_audit_append_only() from public, anon, authenticated;
 revoke all on function public.ot_lock_idempotency(text, uuid) from public, anon, authenticated;
 
 revoke all on function public.ot_current_user_is_owner() from public, anon, authenticated;
@@ -3559,12 +4030,17 @@ revoke all on function public.ot_current_user_can_read_request(uuid) from public
 revoke all on function public.ot_calculate_occurrence_minutes(timestamptz, timestamptz, integer) from public, anon, authenticated;
 revoke all on function public.ot_projected_week_minutes(uuid, date, uuid) from public, anon, authenticated;
 revoke all on function public.ot_get_access_context() from public, anon, authenticated;
+revoke all on function public.ot_resolve_current_requester_access() from public, anon, authenticated;
+revoke all on function public.ot_require_current_requester_access() from public, anon, authenticated;
 revoke all on function public.ot_get_my_dashboard(date) from public, anon, authenticated;
 revoke all on function public.ot_list_my_requests(date) from public, anon, authenticated;
 revoke all on function public.ot_get_manager_dashboard(date, text) from public, anon, authenticated;
 revoke all on function public.ot_list_eligible_approvers() from public, anon, authenticated;
 revoke all on function public.ot_list_people_for_event() from public, anon, authenticated;
 revoke all on function public.ot_list_access_admin_identities() from public, anon, authenticated;
+revoke all on function public.ot_list_requester_access() from public, anon, authenticated;
+revoke all on function public.ot_upsert_requester_access(jsonb, uuid) from public, anon, authenticated;
+revoke all on function public.ot_set_requester_access(uuid, boolean, uuid) from public, anon, authenticated;
 revoke all on function public.ot_create_request(jsonb, uuid) from public, anon, authenticated;
 revoke all on function public.ot_resubmit_plan(uuid, jsonb, text, uuid) from public, anon, authenticated;
 revoke all on function public.ot_preview_event_plan(jsonb, uuid[]) from public, anon, authenticated;
@@ -3590,12 +4066,16 @@ grant execute on function public.ot_current_user_is_eligible_approver() to authe
 grant execute on function public.ot_current_user_can_read_request(uuid) to authenticated;
 grant execute on function public.ot_calculate_occurrence_minutes(timestamptz, timestamptz, integer) to authenticated;
 grant execute on function public.ot_get_access_context() to authenticated;
+grant execute on function public.ot_resolve_current_requester_access() to authenticated;
 grant execute on function public.ot_get_my_dashboard(date) to authenticated;
 grant execute on function public.ot_list_my_requests(date) to authenticated;
 grant execute on function public.ot_get_manager_dashboard(date, text) to authenticated;
 grant execute on function public.ot_list_eligible_approvers() to authenticated;
 grant execute on function public.ot_list_people_for_event() to authenticated;
 grant execute on function public.ot_list_access_admin_identities() to authenticated;
+grant execute on function public.ot_list_requester_access() to authenticated;
+grant execute on function public.ot_upsert_requester_access(jsonb, uuid) to authenticated;
+grant execute on function public.ot_set_requester_access(uuid, boolean, uuid) to authenticated;
 grant execute on function public.ot_create_request(jsonb, uuid) to authenticated;
 grant execute on function public.ot_resubmit_plan(uuid, jsonb, text, uuid) to authenticated;
 grant execute on function public.ot_preview_event_plan(jsonb, uuid[]) to authenticated;

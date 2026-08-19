@@ -136,7 +136,7 @@ describe("Product Book Mini CMS", () => {
     expect(css).toContain("@media (max-width: 760px)");
     expect(css).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(css).not.toContain("box-shadow: 0 -28px");
-    expect(css).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
+    expect(css.replace(/\r\n/g, "\n")).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
   });
 
   it("removes native patch-button rectangles while preserving the active left indicator", () => {

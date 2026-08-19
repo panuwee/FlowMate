@@ -373,6 +373,92 @@ function renderedButton(node: unknown, label: string, exact = true) {
 }
 
 describe("OT Request backend contract", () => {
+  it("defines an OT-only requester registry with an unmapped-user preflight", () => {
+    const sql = read("supabase", "ot_request.sql");
+    const verify = read("supabase", "ot_request_verify.sql");
+
+    expect(sql).toContain("create table if not exists public.ot_requester_access");
+    expect(sql).toContain("create table if not exists public.ot_requester_access_audit");
+    expect(sql).toContain("email text not null unique");
+    expect(sql).toContain("email = pg_catalog.lower(pg_catalog.btrim(email))");
+    expect(sql).toContain("email like '%@garena.com'");
+    expect(sql).toContain("function_code text not null check (function_code in ('gdve', 'ops', 'mkt', 'esport'))");
+    expect(sql).toContain("alter table public.ot_requester_access enable row level security");
+    expect(sql).toMatch(/revoke all on table public\.ot_requester_access from public, anon, authenticated/);
+    expect(sql).toMatch(/revoke all on table public\.ot_requester_access_audit from public, anon, authenticated/);
+    expect(verify).toContain("OT requester access preflight");
+  });
+
+  it("defines Owner-only requester maintenance and pending identity sync RPCs", () => {
+    const requesterList = functionSql(sql, "ot_list_requester_access");
+    const requesterUpsert = functionSql(sql, "ot_upsert_requester_access");
+    const requesterState = functionSql(sql, "ot_set_requester_access");
+    const requesterResolve = functionSql(sql, "ot_resolve_current_requester_access");
+
+    for (const source of [requesterList, requesterUpsert, requesterState]) {
+      expect(source).toContain("public.ot_current_user_is_owner()");
+    }
+    expect(requesterUpsert).toContain("@garena.com");
+    expect(requesterUpsert).toContain("for update");
+    expect(requesterUpsert).toContain("public.ot_requester_access_audit");
+    expect(requesterUpsert).toContain("'pending_sync'");
+    expect(requesterState).toContain("public.ot_requester_access_audit");
+    expect(requesterState).toContain("for update");
+    expect(requesterResolve).toContain("public.ot_requester_access_audit");
+    expect(requesterResolve).toContain("pending_sync");
+    for (const signature of [
+      "public.ot_list_requester_access()",
+      "public.ot_upsert_requester_access(jsonb, uuid)",
+      "public.ot_set_requester_access(uuid, boolean, uuid)",
+      "public.ot_resolve_current_requester_access()",
+    ]) {
+      expect(sql).toContain(`revoke all on function ${signature} from public, anon, authenticated`);
+      expect(sql).toContain(`grant execute on function ${signature} to authenticated`);
+    }
+    expect(verify).toContain("OT requester access RPC contract");
+  });
+
+  it("enforces active requester access and locks personal OT Function server-side", () => {
+    const requesterGate = functionSql(sql, "ot_require_current_requester_access");
+    const accessContext = functionSql(sql, "ot_get_access_context");
+
+    expect(requesterGate).toContain("public.ot_resolve_current_requester_access()");
+    expect(requesterGate).toContain("OT requester access is not active");
+    for (const name of [
+      "ot_get_my_dashboard",
+      "ot_list_my_requests",
+      "ot_create_request",
+      "ot_resubmit_plan",
+      "ot_record_consent",
+      "ot_submit_actual",
+    ]) {
+      expect(functionSql(sql, name)).toContain("public.ot_require_current_requester_access()");
+    }
+    for (const name of ["ot_create_request", "ot_resubmit_plan"]) {
+      expect(functionSql(sql, name)).toContain("v_requester_access.function_code");
+    }
+    expect(accessContext).toContain("'canRequestOt'");
+    expect(accessContext).toContain("'requesterFunctionCode'");
+    expect(accessContext).toContain("'requesterAccessStatus'");
+    expect(verify).toContain("OT requester enforcement contract");
+  });
+
+  it("keeps Owner requester maintenance separate from Approvers and HR access", () => {
+    const clientSource = read("supabase-ot-request.js");
+    const screen = read("screens-ot.jsx");
+
+    expect(clientSource).toContain('window.loadOtRequesterAccess = () => callOtRequestRpc("ot_list_requester_access"');
+    expect(clientSource).toContain("window.upsertOtRequesterAccess = (payload, key)");
+    expect(clientSource).toContain("window.setOtRequesterAccess = (requesterAccessId, active, key)");
+    expect(screen).toContain("function OtRequesterAccessPanel(");
+    expect(screen).toContain("Add OT requester");
+    expect(screen).toContain("@garena.com");
+    expect(screen).toContain("Approvers / HR access");
+    expect(screen).toContain("window.loadOtRequesterAccess()");
+    expect(screen).toContain("window.upsertOtRequesterAccess(");
+    expect(screen).toContain("window.setOtRequesterAccess(");
+  });
+
   it("uses unqualified SQL conditional expressions so installer and verifier compile", () => {
     for (const script of [
       read("supabase", "ot_request.sql"),
@@ -1728,6 +1814,7 @@ describe("OT Request static module integration", () => {
       status: "pending_actual_verification",
       approverUserId: "approver-1",
       employeeUserId: "employee-1",
+      plannedStartAt: `${harness.weekStart}T19:00:00+07:00`,
       plannedMinutes: 60,
       actualMinutes: 60,
       actualSubmittedAt: "2026-08-10T12:00:00Z",
@@ -1783,6 +1870,7 @@ describe("OT Request static module integration", () => {
       status: "pending_actual_verification",
       approverUserId: "approver-1",
       employeeUserId: "employee-1",
+      plannedStartAt: `${harness.weekStart}T19:00:00+07:00`,
       plannedMinutes: 60,
       actualMinutes: 60,
       plannedWeekSegments: [{ weekStart: harness.weekStart, minutes: 60 }],
@@ -2031,8 +2119,9 @@ describe("OT Request static module integration", () => {
     expect(screen).toContain('owner: "ot-request/owner"');
     expect(screen).toContain('access: "ot-request/access"');
     expect(screen).toContain('export: "ot-request/export"');
+    expect(screen).toContain('insights: "ot-request/insights"');
     expect(screen).toContain('access.status === "ready" && access.isOwner');
-    expect(screen).toContain('access.status === "ready" && access.canExport');
+    expect(screen).toContain('if (view === "owner" || view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
     expect(screen).not.toContain("Compliance & HR");
     expect(screen).not.toMatch(/currentUserEmail\s*(?:===|==|\.includes|\.endsWith)/);
     expect(sql).not.toMatch(/create policy[^;]+on public\.(work_items|marketing_plans|product_book)/is);
@@ -2168,11 +2257,42 @@ describe("OT Request static module integration", () => {
     const screen = read("screens-ot.jsx");
     expect(screen).toContain("function OtRequestShell(");
     expect(screen).toContain("window.OtRequestShell = OtRequestShell");
-    expect(screen).toContain('"ot-request/manager"');
+    expect(screen).toContain('"ot-request/action-queue"');
     expect(screen).toContain('"ot-request/root-causes"');
-    expect(screen).toContain("access.isEligibleApprover");
-    expect(screen).toContain('if (access.status === "loading") return;');
-    expect(screen).toContain('const visibleView = canOpenOtRequestView(activeView, access) ? activeView : "overview";');
+    expect(screen).toContain("access.canManage");
+    expect(screen).toContain('if (access.status !== "ready") return;');
+    expect(screen).toContain("if (view === \"overview\" || view === \"my-requests\") return Boolean(access.canRequestOt);");
+    expect(screen).toContain('access.status === "ready" && access.canRequestOt');
+    expect(screen).toContain("function getOtRequestFallbackView(access)");
+    expect(screen).toContain('const visibleView = canOpenOtRequestView(activeView, access) ? activeView : getOtRequestFallbackView(access);');
+    expect(screen).toContain('visibleView === "overview" || visibleView === "my-requests"');
+  });
+
+  it("separates Team OT into action, schedule, and monthly views for 2026 only", () => {
+    const screen = read("screens-ot.jsx");
+
+    expect(screen).toContain('"action-queue": "ot-request/action-queue"');
+    expect(screen).toContain('"team-schedule": "ot-request/team-schedule"');
+    expect(screen).toContain('"monthly-report": "ot-request/monthly-report"');
+    expect(screen).toContain('const OT_DISPLAY_YEAR = 2026;');
+    expect(screen).toContain('min="2026-01" max="2026-12"');
+    expect(screen).toContain('Action queue');
+    expect(screen).toContain('Team schedule');
+    expect(screen).toContain('Monthly report');
+    expect(screen).toContain('function OtMonthlyTeamDetails(');
+    expect(screen).toContain('<th>Schedule</th>');
+  });
+
+  it("keeps charts and monthly export in the Owner-only navigation", () => {
+    const screen = read("screens-ot.jsx");
+
+    expect(screen).toContain('insights: "ot-request/insights"');
+    expect(screen).toContain('if (view === "owner" || view === "access" || view === "insights" || view === "export") return Boolean(access.isOwner);');
+    expect(screen).toContain('OT insights');
+    expect(screen).toContain('Monthly export');
+    expect(screen).toContain('function OtOwnerInsightsPanel(');
+    expect(screen).toContain('aria-label="Confirmed OT trend chart"');
+    expect(screen).toContain('min="2026-01" max="2026-12"');
   });
 
   it("keeps active entry pages on one OT release version", () => {
@@ -2195,8 +2315,8 @@ describe("OT Request static module integration", () => {
     expect(warning).toContain('? { role: "alert" }');
     expect(warning).toContain('{ role: "status", "aria-live": "polite" }');
     expect(navigation).toContain('aria-label="OT Request navigation"');
-    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(7);
-    for (const view of ["overview", "my-requests", "manager", "root-causes", "export", "owner", "access"]) {
+    expect(navigation.match(/aria-current=\{visibleView ===/g)).toHaveLength(9);
+    for (const view of ["overview", "my-requests", "action-queue", "team-schedule", "monthly-report", "owner", "insights", "export", "access"]) {
       expect(navigation).toContain(`aria-current={visibleView === "${view}" ? "page" : undefined}`);
     }
     expect(screen).not.toContain("function getOtCurrentPageProps(");

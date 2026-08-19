@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const repo = (...parts: string[]) => readFileSync(resolve(process.cwd(), ...parts), "utf8");
+const repo = (...parts: string[]) => readFileSync(resolve(process.cwd(), ...parts), "utf8").replace(/\r\n/g, "\n");
 const functionBody = (source: string, signature: string) => {
   const start = source.indexOf(signature);
   const end = source.indexOf("$$;", start);

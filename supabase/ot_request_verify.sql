@@ -3,7 +3,7 @@
 -- inspection only; this file intentionally performs no DDL or DML.
 
 select
-  'OT tables (Expected = 6)' as check_name,
+  'OT tables (Expected = 10)' as check_name,
   pg_catalog.count(*) as actual_count,
   pg_catalog.array_agg(c.relname order by c.relname) as found_tables
 from pg_catalog.pg_class c
@@ -11,8 +11,9 @@ join pg_catalog.pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
   and c.relkind = 'r'
   and c.relname in (
-    'ot_system_roles', 'ot_approvers', 'ot_event_plans',
-    'ot_requests', 'ot_request_audit', 'ot_export_batches'
+    'ot_system_roles', 'ot_approvers', 'ot_requester_access', 'ot_requester_access_audit', 'ot_event_plans',
+    'ot_requests', 'ot_request_audit', 'ot_export_batches',
+    'ot_seatalk_notifications', 'ot_seatalk_pending_rejections'
   );
 
 select
@@ -23,10 +24,250 @@ from pg_catalog.pg_class c
 join pg_catalog.pg_namespace n on n.oid = c.relnamespace
 where n.nspname = 'public'
   and c.relname in (
-    'ot_system_roles', 'ot_approvers', 'ot_event_plans',
-    'ot_requests', 'ot_request_audit', 'ot_export_batches'
+    'ot_system_roles', 'ot_approvers', 'ot_requester_access', 'ot_requester_access_audit', 'ot_event_plans',
+    'ot_requests', 'ot_request_audit', 'ot_export_batches',
+    'ot_seatalk_notifications', 'ot_seatalk_pending_rejections'
   )
 order by c.relname;
+
+select
+  'OT requester access storage contract (Expected = RLS enabled, browser access denied)' as check_name,
+  c.relname as table_name,
+  c.relrowsecurity as rls_enabled,
+  not pg_catalog.has_table_privilege('anon', c.oid, 'SELECT, INSERT, UPDATE, DELETE') as anon_access_denied,
+  not pg_catalog.has_table_privilege('authenticated', c.oid, 'SELECT, INSERT, UPDATE, DELETE') as authenticated_access_denied
+from pg_catalog.pg_class c
+join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname in ('ot_requester_access', 'ot_requester_access_audit')
+order by c.relname;
+
+select
+  'SeaTalk OT outbox table contract (Expected = RLS enabled, browser writes denied)' as check_name,
+  c.relrowsecurity as rls_enabled,
+  not pg_catalog.has_table_privilege('anon', 'public.ot_seatalk_notifications', 'INSERT, UPDATE, DELETE')
+    as anon_writes_denied,
+  not pg_catalog.has_table_privilege('authenticated', 'public.ot_seatalk_notifications', 'INSERT, UPDATE, DELETE')
+    as authenticated_writes_denied
+from pg_catalog.pg_class c
+join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname = 'ot_seatalk_notifications';
+
+select
+  'SeaTalk OT review RPC contract (Expected service_role only)' as check_name,
+  pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
+  pg_catalog.pg_get_function_result(p.oid) as result_type,
+  p.prosecdef as security_definer,
+  coalesce(pg_catalog.array_position(p.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  position('v_notification.status not in (''pending'', ''dispatching'', ''sent'', ''failed'')' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as actionable_notification_guard,
+  position('p_sender_email' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as assigned_sender_guard,
+  position('public.ot_apply_plan_review(' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as shared_review_transition,
+  pg_catalog.has_function_privilege('service_role', 'public.ot_seatalk_apply_review(uuid, text, text, text, uuid)', 'EXECUTE')
+    as service_role_execute,
+  not pg_catalog.has_function_privilege('anon', 'public.ot_seatalk_apply_review(uuid, text, text, text, uuid)', 'EXECUTE')
+    as anon_execute_denied,
+  not pg_catalog.has_function_privilege('authenticated', 'public.ot_seatalk_apply_review(uuid, text, text, text, uuid)', 'EXECUTE')
+    as authenticated_execute_denied
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_seatalk_apply_review'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, text, uuid';
+
+with dispatch_functions(function_name, argument_types) as (
+  values
+    ('ot_seatalk_claim_dispatch', 'uuid, uuid'),
+    ('ot_seatalk_finish_dispatch', 'uuid, boolean, text, text')
+), function_contracts as (
+  select
+    p.oid,
+    p.proname,
+    pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
+    pg_catalog.pg_get_functiondef(p.oid) as definition,
+    p.prosecdef,
+    p.proconfig
+  from dispatch_functions expected
+  join pg_catalog.pg_proc p on p.proname = expected.function_name
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and pg_catalog.oidvectortypes(p.proargtypes) = expected.argument_types
+)
+select
+  'SeaTalk OT dispatch RPC contract (Expected leased grant-gated service role and compare-and-set finish)' as check_name,
+  f.proname as function_name,
+  f.arguments,
+  f.prosecdef as security_definer,
+  coalesce(pg_catalog.array_position(f.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  case when f.proname = 'ot_seatalk_claim_dispatch' then
+    position('v_request.created_by_user_id <> p_actor_id' in f.definition) > 0
+    and position('v_request.approver_user_id <> p_actor_id' in f.definition) > 0
+    and position('for update of n' in f.definition) > 0
+    and position('lease_expires_at <= pg_catalog.clock_timestamp()' in f.definition) > 0
+    and position('attempt_count = attempt_count + 1' in f.definition) > 0
+  else
+    position('where dispatch_key = p_dispatch_key' in f.definition) > 0
+    and position('and status = ''dispatching''' in f.definition) > 0
+  end as atomic_state_contract,
+  pg_catalog.has_function_privilege('service_role', f.oid, 'EXECUTE') as service_role_execute,
+  not pg_catalog.has_function_privilege('anon', f.oid, 'EXECUTE') as anon_execute_denied,
+  not pg_catalog.has_function_privilege('authenticated', f.oid, 'EXECUTE') as authenticated_execute_denied
+from function_contracts f
+order by f.proname;
+
+select
+  'SeaTalk OT dispatch storage contract (Expected unique key, lease state, no browser writes)' as check_name,
+  c.relrowsecurity as rls_enabled,
+  exists (
+    select 1
+    from pg_catalog.pg_index i
+    where i.indrelid = c.oid
+      and i.indisunique
+      and pg_catalog.pg_get_indexdef(i.indexrelid) like '%(dispatch_key)%'
+  ) as unique_dispatch_key,
+  exists (
+    select 1
+    from pg_catalog.pg_constraint con
+    where con.conrelid = c.oid
+      and con.conname = 'ot_seatalk_notifications_lease_state_check'
+  ) as lease_state_constraint,
+  not pg_catalog.has_table_privilege('anon', c.oid, 'INSERT, UPDATE, DELETE') as anon_writes_denied,
+  not pg_catalog.has_table_privilege('authenticated', c.oid, 'INSERT, UPDATE, DELETE') as authenticated_writes_denied
+from pg_catalog.pg_class c
+join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname = 'ot_seatalk_notifications';
+
+with rejection_functions(function_name, argument_types) as (
+  values
+    ('ot_seatalk_begin_rejection', 'uuid, text, uuid'),
+    ('ot_seatalk_apply_rejection_reason', 'text, text, uuid')
+), function_contracts as (
+  select
+    p.oid,
+    p.proname,
+    pg_catalog.pg_get_function_identity_arguments(p.oid) as arguments,
+    pg_catalog.pg_get_functiondef(p.oid) as definition,
+    p.prosecdef,
+    p.proconfig
+  from rejection_functions expected
+  join pg_catalog.pg_proc p on p.proname = expected.function_name
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and pg_catalog.oidvectortypes(p.proargtypes) = expected.argument_types
+)
+select
+  'SeaTalk OT pending rejection contract (Expected expiring sender binding and service_role only)' as check_name,
+  f.proname as function_name,
+  f.arguments,
+  f.prosecdef as security_definer,
+  coalesce(pg_catalog.array_position(f.proconfig, 'search_path=""'), 0) > 0 as fixed_search_path,
+  position('SeaTalk sender is not the assigned OT approver' in f.definition) > 0 as assigned_sender_guard,
+  case when f.proname = 'ot_seatalk_begin_rejection' then
+    position('interval ''10 minutes''' in f.definition) > 0
+    and position('pg_catalog.pg_advisory_xact_lock' in f.definition) > 0
+    and position('v_action.begin_event_idempotency_key = p_event_idempotency_key' in f.definition) > 0
+  else
+    position('a.sender_email = v_sender_email' in f.definition) > 0
+    and position('a.apply_event_idempotency_key = p_event_idempotency_key' in f.definition) > 0
+    and position('public.ot_apply_plan_review(' in f.definition) > 0
+  end as rejection_state_contract,
+  pg_catalog.has_function_privilege('service_role', f.oid, 'EXECUTE') as service_role_execute,
+  not pg_catalog.has_function_privilege('anon', f.oid, 'EXECUTE') as anon_execute_denied,
+  not pg_catalog.has_function_privilege('authenticated', f.oid, 'EXECUTE') as authenticated_execute_denied
+from function_contracts f
+order by f.proname;
+
+select
+  'SeaTalk OT pending rejection table contract (Expected RLS, sender uniqueness, browser writes denied)' as check_name,
+  c.relrowsecurity as rls_enabled,
+  exists (
+    select 1
+    from pg_catalog.pg_index i
+    where i.indrelid = c.oid
+      and i.indisunique
+      and pg_catalog.pg_get_indexdef(i.indexrelid) like '%(sender_email)%WHERE (status = ''pending''::text)%'
+  ) as one_pending_per_sender,
+  not pg_catalog.has_table_privilege('anon', c.oid, 'INSERT, UPDATE, DELETE') as anon_writes_denied,
+  not pg_catalog.has_table_privilege('authenticated', c.oid, 'INSERT, UPDATE, DELETE') as authenticated_writes_denied
+from pg_catalog.pg_class c
+join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname = 'ot_seatalk_pending_rejections';
+
+select
+  'Direct OT review notification compatibility (Expected cancels every actionable dispatch state)' as check_name,
+  position('n.status in (''pending'', ''dispatching'', ''sent'', ''failed'')' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as locks_actionable_notification,
+  position('set status = ''cancelled''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as cancels_notification,
+  position('update public.ot_seatalk_pending_rejections' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as cancels_pending_rejection
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_review_plan'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, uuid';
+
+select
+  'SeaTalk direct review decision gate (Expected approval only)' as check_name,
+  position('if p_decision is distinct from ''approved'' then' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as rejects_non_approval,
+  position('v_notification.request_id,' || chr(10) || '    ''approved'',' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as hard_coded_approval_transition
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_seatalk_apply_review'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, text, uuid';
+
+select
+  'SeaTalk terminal dispatch replay identity (Expected matching status, message ID, and failure detail)' as check_name,
+  position('n.seatalk_message_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as reads_message_id,
+  position('n.last_error' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as reads_failure_detail,
+  position('v_stored_message_id is distinct from v_message_id' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as message_id_conflict_guard,
+  position('v_stored_error is distinct from v_expected_error' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as failure_detail_conflict_guard
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_seatalk_finish_dispatch'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, boolean, text, text';
+
+select
+  'SeaTalk rejection replay precedence (Expected applied event before active pending)' as check_name,
+  position('select a.result into v_result' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as exact_replay_lookup,
+  position('select a.result into v_result' in pg_catalog.pg_get_functiondef(p.oid))
+    < position('and a.status = ''pending''' in pg_catalog.pg_get_functiondef(p.oid))
+    as replay_before_pending,
+  position('order by case when a.status = ''pending''' in pg_catalog.pg_get_functiondef(p.oid)) = 0
+    as no_pending_first_union
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_seatalk_apply_rejection_reason'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'text, text, uuid';
+
+select
+  'OT approver reassignment SeaTalk reset (Expected notification-first lock and requeue)' as check_name,
+  position('from public.ot_seatalk_notifications n' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as notification_lock_present,
+  position('for update of n' in pg_catalog.pg_get_functiondef(p.oid))
+    < position('for update of a' in pg_catalog.pg_get_functiondef(p.oid))
+    as notification_before_approver,
+  position('update public.ot_seatalk_pending_rejections' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as pending_rejection_cancelled,
+  position('when v_request.status = ''pending_approval'' then ''pending''' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as pending_plan_requeued,
+  position('dispatch_key = null' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    and position('lease_expires_at = null' in pg_catalog.pg_get_functiondef(p.oid)) > 0
+    as leased_dispatch_invalidated
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_reassign_pending_approver'
+  and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, uuid, text, uuid';
 
 select
   'OT request consent and variance fields (Expected = 2)' as check_name,
@@ -198,8 +439,10 @@ with decision_functions as (
   from pg_catalog.pg_proc p
   join pg_catalog.pg_namespace n on n.oid = p.pronamespace
   where n.nspname = 'public'
-    and p.proname in ('ot_review_plan', 'ot_verify_actual')
-    and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, uuid'
+    and (
+      (p.proname = 'ot_apply_plan_review' and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, uuid, uuid')
+      or (p.proname = 'ot_verify_actual' and pg_catalog.oidvectortypes(p.proargtypes) = 'uuid, text, text, uuid')
+    )
 )
 select
   'OT decision authority serialization contract (Expected = valid)' as check_name,
@@ -210,14 +453,20 @@ select
   position('public.ot_lock_employee_weeks' in d.definition)
     < position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition) as week_before_request_lock,
   position(
-    'v_request.approver_user_id <> v_actor_id'
+    case
+      when d.proname = 'ot_apply_plan_review' then 'v_request.approver_user_id <> p_actor_id'
+      else 'v_request.approver_user_id <> v_actor_id'
+    end
     in substring(
       d.definition
       from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
     )
   ) > 0 as refreshed_assignment_guard,
   position(
-    'not public.ot_current_user_is_eligible_approver()'
+    case
+      when d.proname = 'ot_apply_plan_review' then 'not exists ('
+      else 'not public.ot_current_user_is_eligible_approver()'
+    end
     in substring(
       d.definition
       from position('select * into v_request from public.ot_requests r where r.id = p_request_id for update;' in d.definition)
@@ -427,8 +676,8 @@ select
 with expected_transition_functions(function_name, argument_types, replay_marker, future_guard_marker) as (
   values
     (
-      'ot_review_plan',
-      'uuid, text, text, uuid',
+      'ot_apply_plan_review',
+      'uuid, text, text, uuid, uuid',
       'a.action = ''review_plan'' and a.idempotency_key = p_idempotency_key',
       'if p_decision = ''approved'' and v_request.planned_start_at <= pg_catalog.clock_timestamp() then'
     ),
@@ -527,8 +776,99 @@ select
     where rp.specific_schema = 'public'
       and rp.routine_name = 'ot_list_access_admin_identities'
       and rp.privilege_type = 'EXECUTE'
-      and rp.grantee in ('anon', 'PUBLIC')
+    and rp.grantee in ('anon', 'PUBLIC')
   ) as public_and_anon_revoked;
+
+with requester_functions(function_name, argument_types, owner_only) as (
+  values
+    ('ot_list_requester_access', '', true),
+    ('ot_upsert_requester_access', 'jsonb, uuid', true),
+    ('ot_set_requester_access', 'uuid, boolean, uuid', true),
+    ('ot_resolve_current_requester_access', '', false)
+), function_contracts as (
+  select
+    expected.function_name,
+    expected.owner_only,
+    p.oid,
+    pg_catalog.pg_get_functiondef(p.oid) as definition
+  from requester_functions expected
+  join pg_catalog.pg_proc p on p.proname = expected.function_name
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and pg_catalog.oidvectortypes(p.proargtypes) = expected.argument_types
+)
+select
+  'OT requester access RPC contract (Expected = Owner-only maintenance, pending identity sync, authenticated execute)' as check_name,
+  f.function_name,
+  case when f.owner_only then
+    position('if not public.ot_current_user_is_owner() then' in f.definition) > 0
+  else
+    position('for update' in f.definition) > 0
+      and position('sync_requester_access_identity' in f.definition) > 0
+  end as authority_and_sync_contract,
+  case when f.function_name = 'ot_upsert_requester_access' then
+    position('@garena.com' in f.definition) > 0
+      and position('ot_requester_access_audit' in f.definition) > 0
+      and position('for update' in f.definition) > 0
+  when f.function_name = 'ot_set_requester_access' then
+    position('ot_requester_access_audit' in f.definition) > 0
+      and position('unresolved OT request' in f.definition) > 0
+  else true end as lifecycle_contract,
+  pg_catalog.has_function_privilege('authenticated', f.oid, 'EXECUTE') as authenticated_execute,
+  not pg_catalog.has_function_privilege('anon', f.oid, 'EXECUTE') as anon_execute_denied,
+  not exists (
+    select 1
+    from information_schema.routine_privileges rp
+    where rp.specific_schema = 'public'
+      and rp.routine_name = f.function_name
+      and rp.privilege_type = 'EXECUTE'
+      and rp.grantee = 'PUBLIC'
+  ) as public_execute_denied
+from function_contracts f
+order by f.function_name;
+
+with personal_functions(function_name, argument_types) as (
+  values
+    ('ot_get_my_dashboard', 'date'),
+    ('ot_list_my_requests', 'date'),
+    ('ot_create_request', 'jsonb, uuid'),
+    ('ot_resubmit_plan', 'uuid, jsonb, text, uuid'),
+    ('ot_record_consent', 'uuid, boolean, text, uuid'),
+    ('ot_submit_actual', 'uuid, jsonb, uuid')
+), function_contracts as (
+  select
+    expected.function_name,
+    p.oid,
+    pg_catalog.pg_get_functiondef(p.oid) as definition
+  from personal_functions expected
+  join pg_catalog.pg_proc p on p.proname = expected.function_name
+  join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'public'
+    and pg_catalog.oidvectortypes(p.proargtypes) = expected.argument_types
+)
+select
+  'OT requester enforcement contract (Expected = active access required and server-locked Function)' as check_name,
+  f.function_name,
+  position('public.ot_require_current_requester_access()' in f.definition) > 0 as active_requester_required,
+  case when f.function_name in ('ot_create_request', 'ot_resubmit_plan') then
+    position('v_requester_access.function_code' in f.definition) > 0
+      and position('v_function_code := nullif(pg_catalog.btrim(coalesce(' in f.definition) = 0
+  else true end as server_function_lock
+from function_contracts f
+order by f.function_name;
+
+select
+  'OT requester access context contract (Expected = capability, locked Function, status)' as check_name,
+  p.provolatile <> 's' as can_sync_pending_identity,
+  position('public.ot_resolve_current_requester_access()' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as resolves_identity,
+  position('''canRequestOt''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as exposes_capability,
+  position('''requesterFunctionCode''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as exposes_function,
+  position('''requesterAccessStatus''' in pg_catalog.pg_get_functiondef(p.oid)) > 0 as exposes_status
+from pg_catalog.pg_proc p
+join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname = 'ot_get_access_context'
+  and pg_catalog.oidvectortypes(p.proargtypes) = '';
 
 select
   'OT RPC signatures' as check_name,
@@ -542,11 +882,17 @@ where n.nspname = 'public'
   and p.proname in (
     'ot_current_user_is_owner', 'ot_current_user_is_hr_admin',
     'ot_current_user_is_eligible_approver', 'ot_current_user_can_read_request',
+    'ot_function_approver_id', 'ot_enqueue_seatalk_notification',
+    'ot_is_service_role_context', 'ot_seatalk_claim_dispatch', 'ot_seatalk_finish_dispatch',
+    'ot_seatalk_begin_rejection', 'ot_seatalk_apply_rejection_reason',
+    'ot_apply_plan_review', 'ot_seatalk_apply_review',
     'ot_calculate_occurrence_minutes', 'ot_projected_week_minutes',
     'ot_counted_week_minutes_unchecked',
     'ot_get_access_context', 'ot_get_my_dashboard', 'ot_list_my_requests',
     'ot_get_manager_dashboard', 'ot_list_eligible_approvers',
     'ot_list_people_for_event', 'ot_list_access_admin_identities',
+    'ot_list_requester_access', 'ot_upsert_requester_access', 'ot_set_requester_access',
+    'ot_resolve_current_requester_access', 'ot_require_current_requester_access',
     'ot_create_request', 'ot_resubmit_plan', 'ot_preview_event_plan',
     'ot_create_event_plan', 'ot_record_consent', 'ot_review_plan',
     'ot_submit_actual', 'ot_request_actual_amendment', 'ot_verify_actual', 'ot_list_compliance_queue',
@@ -587,8 +933,9 @@ select
 from information_schema.role_table_grants
 where table_schema = 'public'
   and table_name in (
-    'ot_system_roles', 'ot_approvers', 'ot_event_plans',
-    'ot_requests', 'ot_request_audit', 'ot_export_batches'
+    'ot_system_roles', 'ot_approvers', 'ot_requester_access', 'ot_requester_access_audit', 'ot_event_plans',
+    'ot_requests', 'ot_request_audit', 'ot_export_batches',
+    'ot_seatalk_notifications', 'ot_seatalk_pending_rejections'
   )
   and grantee in ('authenticated', 'anon', 'PUBLIC')
 order by table_name, grantee, privilege_type;
@@ -771,3 +1118,45 @@ where p.schemaname = 'public'
     or pg_catalog.lower(coalesce(p.qual, '')) like '%ot\_%' escape '\'
     or pg_catalog.lower(coalesce(p.with_check, '')) like '%ot\_%' escape '\'
   );
+
+with active_users as (
+  select
+    u.id,
+    pg_catalog.lower(pg_catalog.btrim(coalesce(u.email, ''))) as email,
+    nullif(pg_catalog.btrim(u.display_name), '') as display_name,
+    pg_catalog.lower(pg_catalog.btrim(coalesce(u.requester_team, ''))) as requester_team
+  from public.users u
+  where u.is_active = true
+), normalized as (
+  select
+    a.*,
+    case
+      when a.requester_team in ('gdve', 'ops', 'mkt', 'esport') then a.requester_team
+      else null
+    end as mapped_function_code,
+    (
+      a.email like '%@garena.com'
+      and pg_catalog.length(a.email) > pg_catalog.length('@garena.com')
+    ) as has_garena_email
+  from active_users a
+)
+select
+  'OT requester access preflight (Expected = 0 active users without a valid Garena email and recognized Function)' as check_name,
+  pg_catalog.count(*) filter (
+    where mapped_function_code is null or not has_garena_email
+  ) as actual_count,
+  coalesce(
+    pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'user_id', id,
+        'email', email,
+        'display_name', display_name,
+        'requester_team', requester_team,
+        'suggested_function_code', mapped_function_code,
+        'has_garena_email', has_garena_email
+      )
+      order by email, id
+    ) filter (where mapped_function_code is null or not has_garena_email),
+    '[]'::jsonb
+  ) as violations
+from normalized;
