@@ -397,7 +397,8 @@ function getFlowMateListRowsWorkspaceKey() {
     : window.FLOWMATE_ACTIVE_TEAM;
   const workspace = String(activeTeam || "").trim().toLowerCase() || "no-workspace";
   const userId = String(window.FLOWMATE_CURRENT_USER?.id || "signed-out").trim() || "signed-out";
-  return `${userId}:${workspace}`;
+  const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate";
+  return `${userId}:${workspace}:${product}`;
 }
 
 function invalidateFlowMateListRowsCache(options = {}) {
@@ -673,8 +674,9 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
       requesterTeam: requesterTeam || "No team",
       requesterUserId: item.requester_user_id,
       assigneeUserId: item.assignee_user_id,
-      assignee: owner ? owner.id : otherAssigneeId,
+      assignee: owner ? owner.id : (item.assignee_user_id || otherAssigneeId),
       assigneeOtherName,
+      ownerName: owner?.display_name || usersById[item.assignee_user_id]?.display_name || assigneeOtherName || "Unassigned",
       requester: requester.display_name || "-",
       reviewRound: item.review_round || 0,
       needsSplit: Boolean(item.needs_split),
@@ -1188,6 +1190,63 @@ function normalizeFlowMateDeliveredRow(row) {
   };
 }
 
+function taskAssignDeliveredFilterOptions(rows) {
+  const campaigns = new Map();
+  const owners = new Map();
+  rows.forEach((row) => {
+    if (row.campaign) campaigns.set(row.campaign, { value: row.campaign, label: row.campaign });
+    if (row.assignee) owners.set(row.assignee, { id: row.assignee, name: row.ownerName || "Unassigned" });
+  });
+  return {
+    campaigns: Array.from(campaigns.values()).sort((a, b) => a.label.localeCompare(b.label)),
+    owners: Array.from(owners.values()).sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+async function loadTaskAssignDeliveredHistory({ scope, search, deliveredMonth, campaign, ownerId, cursor, limit }) {
+  const { data, error } = await window.flowmateSupabase
+    .from("work_items")
+    .select(FLOWMATE_BOARD_WORK_ITEM_COLUMNS)
+    .eq("work_type", "quick_task")
+    .eq("status", "delivered")
+    .order("delivered_at", { ascending: false, nullsFirst: false })
+    .order("id", { ascending: false })
+    .limit(1000);
+  if (error) throw error;
+
+  const related = await loadFlowMateBoardRelatedData(data || []);
+  const normalizedRows = (data || []).map((row) => {
+    const item = normalizeFlowMateBoardWorkItem(row, related);
+    return { ...item, status: "delivered", dueResult: "", legacyMissingDeliveredAt: !item.deliveredAt };
+  });
+  const recentCutoff = new Date();
+  recentCutoff.setUTCDate(recentCutoff.getUTCDate() - 60);
+  const searchText = String(search || "").trim().toLowerCase();
+  const monthKey = flowMateNormalizeDeliveredMonth(deliveredMonth)?.slice(0, 7) || "";
+  const filteredRows = normalizedRows.filter((row) => {
+    if (scope === "archived" ? !row.archivedAt : (row.archivedAt || !row.deliveredAt || new Date(row.deliveredAt) < recentCutoff)) return false;
+    if (searchText && ![row.id, row.title, row.campaign].some((value) => String(value || "").toLowerCase().includes(searchText))) return false;
+    if (monthKey && String(row.deliveredAt || "").slice(0, 7) !== monthKey) return false;
+    if (campaign && row.campaign !== campaign) return false;
+    if (ownerId && row.assignee !== ownerId) return false;
+    return true;
+  });
+  const cursorIndex = cursor
+    ? filteredRows.findIndex((row) => row.workItemId === cursor.id && row.deliveredAt === cursor.deliveredAt)
+    : -1;
+  const pageRows = filteredRows.slice(cursorIndex + 1, cursorIndex + 1 + limit);
+  const lastRow = pageRows[pageRows.length - 1];
+  const hasMore = cursorIndex + 1 + pageRows.length < filteredRows.length;
+  return {
+    rows: pageRows,
+    total: filteredRows.length,
+    nextCursor: hasMore && lastRow ? { deliveredAt: lastRow.deliveredAt, id: lastRow.workItemId } : null,
+    hasMore,
+    filterOptions: taskAssignDeliveredFilterOptions(normalizedRows),
+    asOf: new Date().toISOString(),
+  };
+}
+
 function flowMateNormalizeDeliveredMonth(value) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -1197,6 +1256,9 @@ function flowMateNormalizeDeliveredMonth(value) {
 async function loadFlowMateDeliveredHistory({ scope = "recent", search = "", deliveredMonth = null, campaign = null, ownerId = null, cursor = null, limit = 50 } = {}) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   if (!["recent", "archived"].includes(scope)) throw new Error("Delivered scope must be recent or archived.");
+  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") {
+    return loadTaskAssignDeliveredHistory({ scope, search, deliveredMonth, campaign, ownerId, cursor, limit: flowMateClampPageSize(limit) });
+  }
   const { data, error } = await window.flowmateSupabase.rpc("flowmate_list_delivered_history", {
     p_scope: scope,
     p_search: String(search || "").trim() || null,
@@ -1435,6 +1497,20 @@ async function loadFlowMateCalendarRows() {
 
 async function loadFlowMateTeamScheduleRows() {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") {
+    const rows = await loadFlowMateOperationalRows();
+    return rows
+      .filter((row) => row.type === "quick")
+      .map((row) => ({
+        ...row,
+        type: "quick",
+        assignee: row.assignee || row.assigneeUserId || "unassigned",
+        assigneeOtherName: row.ownerName || row.assigneeOtherName || "Unassigned",
+        assetType: "",
+        subtype: "",
+        effort: 0,
+      }));
+  }
   const { data, error } = await window.flowmateSupabase
     .from("flowmate_team_schedule_v")
     .select("work_item_id,display_id,title,status,priority,effort_point,owner_member_id,first_draft_date,final_approved_due_date,launch_date,first_assigned_at,actual_started_at,suggested_start_date,asset_type,asset_subtype")

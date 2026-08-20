@@ -1113,12 +1113,14 @@ function App() {
     onOpen: open,
     searchQuery: searchQuery
   }), allowedRoute && route === "board" && React.createElement(BoardScreen, {
+    key: `board-${activeProduct || "flowmate"}`,
     onOpen: open,
     searchQuery: searchQuery
   }), allowedRoute && route === "calendar" && React.createElement(CalendarScreen, {
     onOpen: open
-  }), allowedRoute && route === "gantt" && React.createElement(isTaskAssignProduct ? TaskAssignScheduleScreen : TeamGanttScreen, {
-    onOpen: open
+  }), allowedRoute && route === "gantt" && React.createElement(TeamGanttScreen, {
+    onOpen: open,
+    product: isTaskAssignProduct ? "task-assign" : "flowmate"
   }), allowedRoute && route === "attention" && React.createElement(isTaskAssignProduct ? TaskAssignAttentionScreen : QueueScreen, {
     onOpen: open,
     searchQuery: searchQuery

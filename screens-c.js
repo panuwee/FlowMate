@@ -2930,8 +2930,10 @@ function LegacyTeamGanttScreen({
   }, "Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity."), React.createElement(Source, null, loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data", " - ", capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable", " - Team Gantt Chart - ", flowMateMonthLabelC(selectedGanttMonth), " plus next month"));
 }
 function TeamGanttScreen({
-  onOpen
+  onOpen,
+  product = "flowmate"
 }) {
+  const isTaskAssignProduct = product === "task-assign";
   const [sourceRows, setSourceRows] = useStateC([]);
   const [members, setMembers] = useStateC([]);
   const [capacityRows, setCapacityRows] = useStateC([]);
@@ -2942,6 +2944,7 @@ function TeamGanttScreen({
   });
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
   const [viewMode, setViewMode] = useStateC(() => {
+    if (isTaskAssignProduct) return "timeline";
     try {
       return sessionStorage.getItem("flowmate:team-schedule:view") || "timeline";
     } catch (error) {
@@ -2965,7 +2968,7 @@ function TeamGanttScreen({
         return;
       }
       try {
-        const [rows, memberRows] = await Promise.all([taskLoader(), window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve([])]);
+        const [rows, memberRows] = await Promise.all([taskLoader(), !isTaskAssignProduct && window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve([])]);
         if (!alive) return;
         setSourceRows(rows || []);
         setMembers(memberRows || []);
@@ -2988,13 +2991,20 @@ function TeamGanttScreen({
       alive = false;
       cleanup();
     };
-  }, []);
+  }, [isTaskAssignProduct]);
   const monthOptions = teamScheduleMonthOptionsC(sourceRows, monthKey);
   const ganttWindow = ganttTimelineWindowC(monthKey);
   useEffectC(() => {
     let alive = true;
     async function loadCapacityAndHolidays() {
       try {
+        if (isTaskAssignProduct) {
+          if (alive) {
+            setCapacityRows([]);
+            setHolidays([]);
+          }
+          return;
+        }
         const [allocationRows, holidayRows] = await Promise.all([window.loadFlowMateCapacityAllocationRows ? window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey) : Promise.resolve([]), window.loadFlowMateNonWorkingDays ? window.loadFlowMateNonWorkingDays(ganttWindow.startKey, ganttWindow.endKey) : Promise.resolve([])]);
         if (!alive) return;
         setCapacityRows(allocationRows || []);
@@ -3010,7 +3020,7 @@ function TeamGanttScreen({
     return () => {
       alive = false;
     };
-  }, [monthKey]);
+  }, [monthKey, isTaskAssignProduct]);
   useEffectC(() => {
     try {
       sessionStorage.setItem("flowmate:team-schedule:view", viewMode);
@@ -3050,7 +3060,7 @@ function TeamGanttScreen({
   });
   const visibleMembers = Array.from(memberMap.values()).filter(member => assigneeFilter === "all" || member.id === assigneeFilter).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   const cellsByMember = new Map(visibleMembers.map(member => [member.id, weeks.map(week => teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows))]));
-  const visibleMembersAfterOverFilter = overOnly ? visibleMembers.filter(member => (cellsByMember.get(member.id) || []).some(cell => cell.stateClass === "is-over")) : visibleMembers;
+  const visibleMembersAfterOverFilter = !isTaskAssignProduct && overOnly ? visibleMembers.filter(member => (cellsByMember.get(member.id) || []).some(cell => cell.stateClass === "is-over")) : visibleMembers;
   const overCapacityWeeks = new Set();
   cellsByMember.forEach(cells => cells.forEach(cell => {
     if (cell.stateClass === "is-over") overCapacityWeeks.add(cell.week.key);
@@ -3079,7 +3089,7 @@ function TeamGanttScreen({
     className: "page__title"
   }, "Team Schedule"), React.createElement("div", {
     className: "page__sub"
-  }, "Production timing and weekly capacity for GD/VE - ", loadState.message)), React.createElement("select", {
+  }, isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch date" : "Production timing and weekly capacity for GD/VE", " - ", loadState.message)), React.createElement("select", {
     className: "select",
     value: monthKey,
     onChange: event => setMonthKey(event.target.value),
@@ -3101,7 +3111,7 @@ function TeamGanttScreen({
     className: viewMode === "timeline" ? "is-active" : "",
     onClick: () => setViewMode("timeline"),
     "data-testid": "flowmate-team-schedule-timeline-tab"
-  }, "Timeline"), React.createElement("button", {
+  }, "Timeline"), !isTaskAssignProduct && React.createElement("button", {
     type: "button",
     role: "tab",
     "aria-selected": viewMode === "workload",
@@ -3135,7 +3145,7 @@ function TeamGanttScreen({
     value: "review"
   }, "Review"), React.createElement("option", {
     value: "blocked"
-  }, "Blocked")), React.createElement("select", {
+  }, "Blocked")), !isTaskAssignProduct && React.createElement("select", {
     className: "select",
     value: skillFilter,
     onChange: event => setSkillFilter(event.target.value),
@@ -3145,7 +3155,7 @@ function TeamGanttScreen({
   }, "All skills"), skillOptions.map(skill => React.createElement("option", {
     key: skill,
     value: skill
-  }, skill))), React.createElement("label", {
+  }, skill))), !isTaskAssignProduct && React.createElement("label", {
     className: "team-schedule__over-filter"
   }, React.createElement("input", {
     type: "checkbox",
@@ -3173,9 +3183,9 @@ function TeamGanttScreen({
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, overCapacityWeeks.size), React.createElement("div", {
+  }, isTaskAssignProduct ? tasks.filter(task => task.launchKey && task.launchKey < todayKey).length : overCapacityWeeks.size), React.createElement("div", {
     className: "stat__lbl"
-  }, "Over-capacity weeks")), React.createElement("div", {
+  }, isTaskAssignProduct ? "Past launch" : "Over-capacity weeks")), React.createElement("div", {
     className: "stat stat--ok"
   }, React.createElement("div", {
     className: "stat__num mono"
@@ -3194,7 +3204,7 @@ function TeamGanttScreen({
     className: "schedule-legend is-blocked"
   }), "Blocked"), React.createElement("span", null, React.createElement("i", {
     className: "team-schedule__legend-draft-marker"
-  }), "Asset First Draft"), React.createElement("span", null, React.createElement("i", {
+  }), isTaskAssignProduct ? "1st Review / Draft" : "Asset First Draft"), !isTaskAssignProduct && React.createElement("span", null, React.createElement("i", {
     className: "team-schedule__legend-final-approved-marker"
   }), "Final/Approved"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
@@ -3378,7 +3388,7 @@ function TeamGanttScreen({
     className: "muted"
   }, "Select a week to see every contributing task and point allocation."))), React.createElement("div", {
     className: "reason-box team-schedule__rule"
-  }, "Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes."), React.createElement(Source, null, "Team Schedule - ", flowMateMonthLabelC(monthKey), " - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days"));
+  }, isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch. GD/VE capacity and leave calculations do not apply." : "Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes."), React.createElement(Source, null, isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days`));
 }
 function CalendarScreen({
   onOpen

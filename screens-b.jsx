@@ -14,7 +14,8 @@ function getFlowMateBoardWorkspaceKey() {
     : window.FLOWMATE_ACTIVE_TEAM;
   const workspace = String(activeTeam || "").trim().toLowerCase() || "no-workspace";
   const userId = String(window.FLOWMATE_CURRENT_USER?.id || "signed-out").trim() || "signed-out";
-  return `${userId}:${workspace}`;
+  const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate";
+  return `${userId}:${workspace}:${product}`;
 }
 
 function cloneFlowMateBoardData(value) {
@@ -1008,12 +1009,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
       setCardErrors(current => ({ ...current, [row.id]: "Creative work can be delivered from Review." }));
       return false;
     }
-    const deliveryLink = await window.flowmatePrompt({
-      title: "Mark Delivered", label: "Delivery link", placeholder: "https://drive.google.com/...", required: true,
-      validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link.",
-    });
-    if (!deliveryLink) return false;
-    return runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, "delivered", { deliveryLink, currentStatus: row.status }), `${row.id} marked Delivered.`);
+    return runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, "delivered", { currentStatus: row.status }), `${row.id} approved Delivered.`);
   }
 
   function handleDragStart(event, row) {
@@ -1166,7 +1162,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
                         {row.blockReason && <div className="kcard__row kcard__row--meta board-card__blocked"><Icon name="alert" size={11} /> Blocked: {row.blockReason}</div>}
                         <div className="board-card__actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
                           {row.type === "quick" && canTransitionBoardWork(row) && <button type="button" className="btn btn--xs btn--secondary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark done"}</button>}
-                          {row.type === "creative" && row.status === "review" && canTransitionBoardTarget(row, "delivered") && <button type="button" className="btn btn--xs btn--primary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark Delivered"}</button>}
+                          {row.type === "creative" && row.status === "review" && canTransitionBoardTarget(row, "delivered") && <button type="button" className="btn btn--xs btn--primary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Approve delivered"}</button>}
                           <details className="board-card-menu">
                             <summary aria-label={`Actions for ${row.id}`}>Actions</summary>
                             <div className="board-card-menu__items">

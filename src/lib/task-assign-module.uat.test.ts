@@ -53,4 +53,39 @@ describe("Task Assign module separation", () => {
     expect(board).toContain('window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" && row.type === "quick"');
     expect(board).toContain("row.owningTeamKey === ownFunction");
   });
+
+  it("keeps Creative Requests out of Task Assign Delivered history", () => {
+    const listData = readRepo("supabase-list-data.js");
+
+    expect(listData).toContain("async function loadTaskAssignDeliveredHistory");
+    expect(listData).toContain('.eq("work_type", "quick_task")');
+    expect(listData).toContain('window.FLOWMATE_ACTIVE_PRODUCT === "task-assign"');
+  });
+
+  it("uses the FlowMate timeline presentation for Task Assign Team Schedule", () => {
+    const app = readRepo("app.jsx");
+    const schedule = readRepo("screens-c.jsx");
+
+    expect(app).toContain("React.createElement(TeamGanttScreen");
+    expect(app).toContain('product: isTaskAssignProduct ? "task-assign" : "flowmate"');
+    expect(schedule).toContain('function TeamGanttScreen({ onOpen, product = "flowmate" })');
+    expect(schedule).toContain("Quick Task delivery timeline: 1st Review / Draft to Launch date");
+  });
+
+  it("refreshes Board when switching between Task Assign and FlowMate", () => {
+    const app = readRepo("app.jsx");
+    const listData = readRepo("supabase-list-data.js");
+
+    expect(app).toContain('key: `board-${activeProduct || "flowmate"}`');
+    expect(listData).toContain('const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate"');
+  });
+
+  it("uses the same no-link approval transition for Board Delivered", () => {
+    const board = readRepo("screens-b.jsx");
+    const completeWork = board.slice(board.indexOf("async function completeWork"), board.indexOf("function handleDragStart"));
+
+    expect(completeWork).toContain('window.transitionFlowMateWorkStatus(row.id, "delivered", { currentStatus: row.status })');
+    expect(completeWork).not.toContain('title: "Mark Delivered"');
+    expect(board).toContain('"Approve delivered"');
+  });
 });

@@ -15,7 +15,8 @@ function getFlowMateBoardWorkspaceKey() {
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : window.FLOWMATE_ACTIVE_TEAM;
   const workspace = String(activeTeam || "").trim().toLowerCase() || "no-workspace";
   const userId = String(window.FLOWMATE_CURRENT_USER?.id || "signed-out").trim() || "signed-out";
-  return `${userId}:${workspace}`;
+  const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate";
+  return `${userId}:${workspace}:${product}`;
 }
 function cloneFlowMateBoardData(value) {
   if (Array.isArray(value)) return value.map(cloneFlowMateBoardData);
@@ -1254,18 +1255,9 @@ function BoardScreen({
       }));
       return false;
     }
-    const deliveryLink = await window.flowmatePrompt({
-      title: "Mark Delivered",
-      label: "Delivery link",
-      placeholder: "https://drive.google.com/...",
-      required: true,
-      validate: value => window.flowmateSafeHttpUrl(value) ? null : "Enter a valid http(s) link."
-    });
-    if (!deliveryLink) return false;
     return runCardMutation(row, () => window.transitionFlowMateWorkStatus(row.id, "delivered", {
-      deliveryLink,
       currentStatus: row.status
-    }), `${row.id} marked Delivered.`);
+    }), `${row.id} approved Delivered.`);
   }
   function handleDragStart(event, row) {
     if (!canTransitionBoardWork(row) || row.type === "quick" || cardPending[row.id]) return event.preventDefault();
@@ -1540,7 +1532,7 @@ function BoardScreen({
         className: "btn btn--xs btn--primary",
         disabled: pending,
         onClick: () => completeWork(row)
-      }, pending ? "Working..." : "Mark Delivered"), React.createElement("details", {
+      }, pending ? "Working..." : "Approve delivered"), React.createElement("details", {
         className: "board-card-menu"
       }, React.createElement("summary", {
         "aria-label": `Actions for ${row.id}`

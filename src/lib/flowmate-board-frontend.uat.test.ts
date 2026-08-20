@@ -905,7 +905,7 @@ describe("FlowMate Board and Delivered frontend", () => {
     expect(board).toContain("Load more");
     expect(board).toContain("View all in List");
     expect(board).toContain("Mark done");
-    expect(board).toContain("Mark Delivered");
+    expect(board).toContain("Approve delivered");
     expect(board).toContain('aria-live="polite"');
     expect(board).not.toContain("window.loadFlowMateListRows");
     expect(board).not.toContain('{ key: "delivered",   label: "Delivered" }');

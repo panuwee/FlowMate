@@ -2663,7 +2663,8 @@ function LegacyTeamGanttScreen({ onOpen }) {
   );
 }
 
-function TeamGanttScreen({ onOpen }) {
+function TeamGanttScreen({ onOpen, product = "flowmate" }) {
+  const isTaskAssignProduct = product === "task-assign";
   const [sourceRows, setSourceRows] = useStateC([]);
   const [members, setMembers] = useStateC([]);
   const [capacityRows, setCapacityRows] = useStateC([]);
@@ -2671,6 +2672,7 @@ function TeamGanttScreen({ onOpen }) {
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Team Schedule..." });
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
   const [viewMode, setViewMode] = useStateC(() => {
+    if (isTaskAssignProduct) return "timeline";
     try { return sessionStorage.getItem("flowmate:team-schedule:view") || "timeline"; } catch (error) { return "timeline"; }
   });
   const [assigneeFilter, setAssigneeFilter] = useStateC("all");
@@ -2690,7 +2692,7 @@ function TeamGanttScreen({ onOpen }) {
       try {
         const [rows, memberRows] = await Promise.all([
           taskLoader(),
-          window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve([]),
+          !isTaskAssignProduct && window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve([]),
         ]);
         if (!alive) return;
         setSourceRows(rows || []);
@@ -2705,7 +2707,7 @@ function TeamGanttScreen({ onOpen }) {
     loadSchedule();
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadSchedule) : () => {};
     return () => { alive = false; cleanup(); };
-  }, []);
+  }, [isTaskAssignProduct]);
 
   const monthOptions = teamScheduleMonthOptionsC(sourceRows, monthKey);
   const ganttWindow = ganttTimelineWindowC(monthKey);
@@ -2714,6 +2716,10 @@ function TeamGanttScreen({ onOpen }) {
     let alive = true;
     async function loadCapacityAndHolidays() {
       try {
+        if (isTaskAssignProduct) {
+          if (alive) { setCapacityRows([]); setHolidays([]); }
+          return;
+        }
         const [allocationRows, holidayRows] = await Promise.all([
           window.loadFlowMateCapacityAllocationRows
             ? window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey)
@@ -2734,7 +2740,7 @@ function TeamGanttScreen({ onOpen }) {
     }
     loadCapacityAndHolidays();
     return () => { alive = false; };
-  }, [monthKey]);
+  }, [monthKey, isTaskAssignProduct]);
 
   useEffectC(() => {
     try { sessionStorage.setItem("flowmate:team-schedule:view", viewMode); } catch (error) {}
@@ -2784,7 +2790,7 @@ function TeamGanttScreen({ onOpen }) {
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   const cellsByMember = new Map(visibleMembers.map(member => [member.id, weeks.map(week =>
     teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows))]));
-  const visibleMembersAfterOverFilter = overOnly
+  const visibleMembersAfterOverFilter = !isTaskAssignProduct && overOnly
     ? visibleMembers.filter(member => (cellsByMember.get(member.id) || []).some(cell => cell.stateClass === "is-over"))
     : visibleMembers;
   const overCapacityWeeks = new Set();
@@ -2816,7 +2822,7 @@ function TeamGanttScreen({ onOpen }) {
       <div className="page__header team-schedule__header">
         <div>
           <h1 className="page__title">Team Schedule</h1>
-          <div className="page__sub">Production timing and weekly capacity for GD/VE - {loadState.message}</div>
+          <div className="page__sub">{isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch date" : "Production timing and weekly capacity for GD/VE"} - {loadState.message}</div>
         </div>
         <select className="select" value={monthKey} onChange={event => setMonthKey(event.target.value)} data-testid="flowmate-gantt-month" aria-label="Schedule month">
           {monthOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
@@ -2826,7 +2832,7 @@ function TeamGanttScreen({ onOpen }) {
       <div className="team-schedule__controls">
         <div className="team-schedule__view-tabs" role="tablist" aria-label="Team Schedule view">
           <button type="button" role="tab" aria-selected={viewMode === "timeline"} className={viewMode === "timeline" ? "is-active" : ""} onClick={() => setViewMode("timeline")} data-testid="flowmate-team-schedule-timeline-tab">Timeline</button>
-          <button type="button" role="tab" aria-selected={viewMode === "workload"} className={viewMode === "workload" ? "is-active" : ""} onClick={() => setViewMode("workload")} data-testid="flowmate-team-schedule-workload-tab">Workload</button>
+          {!isTaskAssignProduct && <button type="button" role="tab" aria-selected={viewMode === "workload"} className={viewMode === "workload" ? "is-active" : ""} onClick={() => setViewMode("workload")} data-testid="flowmate-team-schedule-workload-tab">Workload</button>}
         </div>
         <div className="team-schedule__filters">
           <select className="select" value={assigneeFilter} onChange={event => setAssigneeFilter(event.target.value)} aria-label="Filter assignee">
@@ -2837,11 +2843,11 @@ function TeamGanttScreen({ onOpen }) {
             <option value="all">All active statuses</option>
             <option value="assigned">Assigned</option><option value="in_progress">In Progress</option><option value="review">Review</option><option value="blocked">Blocked</option>
           </select>
-          <select className="select" value={skillFilter} onChange={event => setSkillFilter(event.target.value)} aria-label="Filter skill">
+          {!isTaskAssignProduct && <select className="select" value={skillFilter} onChange={event => setSkillFilter(event.target.value)} aria-label="Filter skill">
             <option value="all">All skills</option>
             {skillOptions.map(skill => <option key={skill} value={skill}>{skill}</option>)}
-          </select>
-          <label className="team-schedule__over-filter"><input type="checkbox" checked={overOnly} onChange={event => setOverOnly(event.target.checked)} /> Over capacity only</label>
+          </select>}
+          {!isTaskAssignProduct && <label className="team-schedule__over-filter"><input type="checkbox" checked={overOnly} onChange={event => setOverOnly(event.target.checked)} /> Over capacity only</label>}
           <button type="button" className="btn btn--sm" onClick={resetFilters}>Clear</button>
         </div>
       </div>
@@ -2849,14 +2855,14 @@ function TeamGanttScreen({ onOpen }) {
       <div className="stat-strip team-schedule__stats">
         <div className="stat"><div className="stat__num mono">{tasks.length}</div><div className="stat__lbl">Active tasks</div></div>
         <div className="stat stat--info"><div className="stat__num mono">{visibleMembersAfterOverFilter.length}</div><div className="stat__lbl">Assignees</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{overCapacityWeeks.size}</div><div className="stat__lbl">Over-capacity weeks</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{isTaskAssignProduct ? tasks.filter(task => task.launchKey && task.launchKey < todayKey).length : overCapacityWeeks.size}</div><div className="stat__lbl">{isTaskAssignProduct ? "Past launch" : "Over-capacity weeks"}</div></div>
         <div className="stat stat--ok"><div className="stat__num mono">{dueSoonCount}</div><div className="stat__lbl">Due in 7 days</div></div>
       </div>
 
       {viewMode === "timeline" ? (
         <>
           <div className="team-schedule__legend" aria-label="Timeline legend">
-            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>Asset First Draft</span><span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span><span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
+            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>{isTaskAssignProduct ? "1st Review / Draft" : "Asset First Draft"}</span>{!isTaskAssignProduct && <span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span>}<span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
           </div>
           <div className="gantt team-schedule__timeline" data-testid="flowmate-team-gantt-chart">
             <div className="gantt__header">
@@ -2919,8 +2925,8 @@ function TeamGanttScreen({ onOpen }) {
         </div>
       )}
 
-      <div className="reason-box team-schedule__rule">Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes.</div>
-      <Source>Team Schedule - {flowMateMonthLabelC(monthKey)} - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days</Source>
+      <div className="reason-box team-schedule__rule">{isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch. GD/VE capacity and leave calculations do not apply." : "Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes."}</div>
+      <Source>{isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days`}</Source>
     </div>
   );
 }
