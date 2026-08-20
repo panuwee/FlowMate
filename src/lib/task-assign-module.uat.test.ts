@@ -88,4 +88,15 @@ describe("Task Assign module separation", () => {
     expect(completeWork).not.toContain('title: "Mark Delivered"');
     expect(board).toContain('"Approve delivered"');
   });
+
+  it("keeps Task Assign available in every product switcher", () => {
+    const app = readRepo("app.jsx");
+    const ot = readRepo("screens-ot.jsx");
+
+    expect(app.match(/onSwitchTaskAssign: chooseTaskAssignProduct/g)?.length).toBe(4);
+    expect(app).toContain("function ProductBookShell({");
+    expect(app).toContain("function MarketingPlanShell({");
+    expect(ot).toContain("function OtRequestShell({");
+    expect(ot).toContain("onSwitchTaskAssign={onSwitchTaskAssign}");
+  });
 });

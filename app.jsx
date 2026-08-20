@@ -887,6 +887,7 @@ function App() {
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
       onHome: returnToProductHome,
+      onSwitchTaskAssign: chooseTaskAssignProduct,
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
       onSwitchProductBook: chooseProductBookProduct,
@@ -901,6 +902,7 @@ function App() {
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
       onHome: returnToProductHome,
+      onSwitchTaskAssign: chooseTaskAssignProduct,
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
       onSwitchProductBook: chooseProductBookProduct,
@@ -915,6 +917,7 @@ function App() {
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
       onHome: returnToProductHome,
+      onSwitchTaskAssign: chooseTaskAssignProduct,
       onSwitchFlowMate: chooseFlowMateProduct,
       onSwitchMarketingPlan: chooseMarketingPlanProduct,
       onSwitchProductBook: chooseProductBookProduct,
@@ -1560,6 +1563,7 @@ function ProductBookShell({
   currentUserEmail,
   avatarMemberId,
   onHome,
+  onSwitchTaskAssign,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
@@ -1648,6 +1652,7 @@ function ProductBookShell({
     onHome: onHome
   }), React.createElement(ProductSwitch, {
     activeProduct: PRODUCT_BOOK_PRODUCT_KEY,
+    onSwitchTaskAssign: onSwitchTaskAssign,
     onSwitchFlowMate: onSwitchFlowMate,
     onSwitchMarketingPlan: onSwitchMarketingPlan,
     onSwitchProductBook: onSwitchProductBook,
@@ -6549,6 +6554,7 @@ function MarketingPlanShell({
   currentUserEmail,
   avatarMemberId,
   onHome,
+  onSwitchTaskAssign,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
@@ -6628,6 +6634,7 @@ function MarketingPlanShell({
     onHome: onHome
   }), React.createElement(ProductSwitch, {
     activeProduct: "marketing-plan",
+    onSwitchTaskAssign: onSwitchTaskAssign,
     onSwitchFlowMate: onSwitchFlowMate,
     onSwitchMarketingPlan: onSwitchMarketingPlan,
     onSwitchProductBook: onSwitchProductBook,

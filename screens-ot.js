@@ -4594,6 +4594,7 @@ function OtRequestShell({
   currentUserEmail,
   avatarMemberId,
   onHome,
+  onSwitchTaskAssign,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
@@ -4726,6 +4727,7 @@ function OtRequestShell({
     onHome: onHome
   }), React.createElement(ProductSwitch, {
     activeProduct: "ot-request",
+    onSwitchTaskAssign: onSwitchTaskAssign,
     onSwitchFlowMate: onSwitchFlowMate,
     onSwitchMarketingPlan: onSwitchMarketingPlan,
     onSwitchProductBook: onSwitchProductBook,

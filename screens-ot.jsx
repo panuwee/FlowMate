@@ -2405,6 +2405,7 @@ function OtRequestShell({
   currentUserEmail,
   avatarMemberId,
   onHome,
+  onSwitchTaskAssign,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
@@ -2531,6 +2532,7 @@ function OtRequestShell({
         <HomeButton onHome={onHome} />
         <ProductSwitch
           activeProduct="ot-request"
+          onSwitchTaskAssign={onSwitchTaskAssign}
           onSwitchFlowMate={onSwitchFlowMate}
           onSwitchMarketingPlan={onSwitchMarketingPlan}
           onSwitchProductBook={onSwitchProductBook}
