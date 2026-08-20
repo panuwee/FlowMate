@@ -335,6 +335,8 @@ async function loadFlowMateAiTagRowsForList(workItemIds = []) {
 
 async function loadFlowMateWorkItemsForList(options = {}) {
   const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,final_approved_due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
+  const isTaskAssignProduct = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign";
+  const workType = isTaskAssignProduct ? "quick_task" : "creative_request";
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
   const isGdveCreativeWorkspace = activeTeam === "gdve";
   const actorUserId = window.FLOWMATE_CURRENT_USER?.id;
@@ -347,10 +349,9 @@ async function loadFlowMateWorkItemsForList(options = {}) {
     .from("work_items")
     .select(`${baseColumns},owning_team_code`)
     .is("archived_at", null)
+    .eq("work_type", workType)
     .order("due_date", { ascending: true });
-  if (isGdveCreativeWorkspace) {
-    query = query.eq("work_type", "creative_request");
-  } else if (activeTeam) {
+  if (!isTaskAssignProduct && !isGdveCreativeWorkspace && activeTeam) {
     query = query.eq("owning_team_code", activeTeam);
   }
   if (ownerFilters.length) query = query.or(ownerFilters.join(","));
@@ -362,10 +363,11 @@ async function loadFlowMateWorkItemsForList(options = {}) {
       .from("work_items")
       .select(baseColumns)
       .is("archived_at", null)
+      .eq("work_type", workType)
       .order("due_date", { ascending: true });
     if (ownerFilters.length) fallbackQuery = fallbackQuery.or(ownerFilters.join(","));
     result = await fallbackQuery;
-    if (!result.error && activeTeam) {
+    if (!result.error && activeTeam && !isTaskAssignProduct) {
       result.data = (result.data || []).filter((item) => {
         if (isGdveCreativeWorkspace) {
           return item.work_type === "creative_request";
@@ -797,10 +799,11 @@ function flowMateClampPageSize(value, fallback = 50) {
 }
 
 function flowMateApplyWorkspaceScope(query) {
+  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") return query.eq("work_type", "quick_task");
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
   if (activeTeam === "gdve") return query.eq("work_type", "creative_request");
-  if (activeTeam) return query.eq("owning_team_code", activeTeam);
-  return query;
+  const creativeQuery = query.eq("work_type", "creative_request");
+  return activeTeam ? creativeQuery.eq("owning_team_code", activeTeam) : creativeQuery;
 }
 
 function flowMateApplyBoardCursor(query, cursor) {
@@ -1069,6 +1072,18 @@ async function loadFlowMateBoardLane({ status, cursor = null, limit = 50, total 
 
 async function loadFlowMateBoardSummary() {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") {
+    const rows = await loadFlowMateOperationalRows();
+    const counts = Object.fromEntries(FLOWMATE_ACTIVE_BOARD_STATUSES.map(status => [
+      status,
+      (rows || []).filter(row => row.status === status).length,
+    ]));
+    return {
+      counts,
+      wip: { inProgressByOwner: {}, reviewTeamCount: counts.review || 0, reviewTeamLimit: 0 },
+      asOf: new Date().toISOString(),
+    };
+  }
   const result = await window.flowmateSupabase.rpc("flowmate_board_summary");
   if (result.error) throw result.error;
   const payload = Array.isArray(result.data) ? (result.data[0] || {}) : (result.data || {});
@@ -1269,7 +1284,7 @@ async function loadFlowMateWorkItemById(displayId, { includeArchived = false } =
   const normalizedId = String(displayId || "").trim().toUpperCase();
   if (!normalizedId) throw new Error("Work item ID is required.");
   let query = window.flowmateSupabase.from("work_items").select(FLOWMATE_BOARD_WORK_ITEM_COLUMNS).eq("display_id", normalizedId);
-  query = flowMateApplyWorkspaceScope(query);
+  query = query.eq("work_type", window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "quick_task" : "creative_request");
   if (!includeArchived) query = query.is("archived_at", null);
   const { data, error } = await query.maybeSingle();
   if (error) throw error;

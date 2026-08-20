@@ -1099,15 +1099,15 @@ async function syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, cr
   );
 }
 
-function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
-  const [mode, setMode] = useState(() => initialMode === "quick" ? "quick" : "creative");
+function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flowmate" }) {
+  const isTaskAssignProduct = product === "task-assign";
+  const [mode, setMode] = useState(() => isTaskAssignProduct || initialMode === "quick" ? "quick" : "creative");
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
   const [createAlert, setCreateAlert] = useState("");
   const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
-  const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
   function withCreativeDraftTitle(draftInput) {
     const draft = normalizeFlowMateCreativeDraft(draftInput);
     return {
@@ -1175,26 +1175,10 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   }, []);
 
   useEffect(() => {
-    if (initialMode === "quick" || initialMode === "creative") {
-      switchCreateMode(initialMode);
+    if (isTaskAssignProduct || initialMode === "quick" || initialMode === "creative") {
+      switchCreateMode(isTaskAssignProduct ? "quick" : initialMode);
     }
-  }, [initialMode]);
-
-  useEffect(() => {
-    let alive = true;
-    if (!window.loadFlowMateRequesterTeams) return () => {};
-
-    window.loadFlowMateRequesterTeams()
-      .then((options) => {
-        if (!alive || !options.length) return;
-        setRequesterTeamOptions(options);
-      })
-      .catch((error) => {
-        console.warn("[FlowMate Create] requester team load failed:", error);
-      });
-
-    return () => { alive = false; };
-  }, []);
+  }, [initialMode, isTaskAssignProduct]);
 
   async function openCreatedDetail(created, id) {
     const detailId = id || window.getFlowMateCreatedDisplayId(created);
@@ -1374,12 +1358,12 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Create</h1>
-          <div className="page__sub">Pick the right entry point - Quick task is notebook-style, Creative request enters the assignment engine.</div>
+          <div className="page__sub">{isTaskAssignProduct ? "Create an operational Quick Task. Function is set automatically from your signed-in account." : "Create a Creative Request for the assignment engine."}</div>
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        <button className={`choice-card ${mode === "quick" ? "is-active" : ""}`} onClick={() => switchCreateMode("quick")}>
+        {isTaskAssignProduct && <button className={`choice-card ${mode === "quick" ? "is-active" : ""}`} onClick={() => switchCreateMode("quick")}>
           <div className="choice-card__title"><Icon name="zap" /> Quick task</div>
           <div className="choice-card__sub">Small internal task, follow-up, or reminder. Stays in your team's quick-task list.</div>
           <ul className="choice-card__list">
@@ -1387,15 +1371,15 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
             <li>Self-assign or pick a teammate</li>
             <li>Counted separately from creative capacity</li>
           </ul>
-        </button>
-        <button className={`choice-card ${mode === "creative" ? "is-active" : ""}`} onClick={() => switchCreateMode("creative")}>
+        </button>}
+        {!isTaskAssignProduct && <button className={`choice-card ${mode === "creative" ? "is-active" : ""}`} onClick={() => switchCreateMode("creative")}>
           <div className="choice-card__title"><Icon name="layers" /> Creative request</div>
           <div className="choice-card__sub">Structured request for production creative - banner, video, motion, esport pack.</div>
           <ul className="choice-card__list">
             <li>Brief validation, auto effort point, auto routing</li>
             <li>Owner is decided by the engine - no preferred owner</li>
           </ul>
-        </button>
+        </button>}
       </div>
 
       <div className="card">
@@ -1410,7 +1394,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
             </div>
           )}
           {mode === "quick"
-            ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} requesterTeamOptions={requesterTeamOptions} errors={validationErrors} />
+            ? <QuickTaskForm value={quickDraft} onChange={updateQuickDraft} assigneeOptions={assigneeOptions} product={product} errors={validationErrors} />
             : <CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} errors={validationErrors} />}
         </div>
       </div>
@@ -1425,7 +1409,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative" }) {
   );
 }
 
-function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions = TEAMS, errors = {} }) {
+function QuickTaskForm({ value, onChange, assigneeOptions, product = "task-assign", errors = {} }) {
   const options = assigneeOptions || FLOWMATE_ASSIGNEE_FALLBACK;
   const selectedAssignee = options.find((option) => option.userId === value.assigneeUserId) || null;
   const [assigneeQuery, setAssigneeQuery] = useState(selectedAssignee ? selectedAssignee.name : "");
@@ -1472,13 +1456,13 @@ function QuickTaskForm({ value, onChange, assigneeOptions, requesterTeamOptions 
         <label className="field__label">Note</label>
         <textarea className="textarea" value={value.note} onChange={(e) => update("note", e.target.value)} placeholder="Short description - what needs doing, any context, link to the doc."></textarea>
       </div>
-      <div className={`field ${errors.requesterTeam ? "field--error" : ""}`}>
+      {product !== "task-assign" && <div className={`field ${errors.requesterTeam ? "field--error" : ""}`}>
         <label className="field__label">Requester Team / Function <span className="req">*</span></label>
         <select className="select" value={value.requesterTeam} onChange={(e) => update("requesterTeam", e.target.value)}>
-          {requesterTeamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+          {TEAMS.map((team) => <option key={team} value={team}>{team}</option>)}
         </select>
         {errors.requesterTeam && <div className="field__error">{errors.requesterTeam}</div>}
-      </div>
+      </div>}
       <div className={`field ${errors.projectName ? "field--error" : ""}`}>
         <label className="field__label">Project / campaign <span className="req">*</span></label>
         <input className="input" value={value.projectName} onChange={(e) => update("projectName", e.target.value)} placeholder="e.g. FCO S24 Launch" />

@@ -1064,6 +1064,10 @@ function BoardScreen({
   function canTransitionBoardWork(row) {
     if (!row?.isSupabaseRow || row.archivedAt) return false;
     const currentUser = window.FLOWMATE_CURRENT_USER || {};
+    if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" && row.type === "quick" && currentUser.role !== "admin") {
+      const ownFunction = window.normalizeFlowMateWorkspaceTeam ? window.normalizeFlowMateWorkspaceTeam(currentUser.requester_team) : String(currentUser.requester_team || "").trim().toLowerCase();
+      return Boolean(ownFunction && row.owningTeamKey === ownFunction);
+    }
     const owner = window.MEMBERS_BY_ID?.[row.assignee];
     if (row.type !== "quick" && window.canFlowMateTransitionWorkItem) {
       return ["in_progress", "review", "delivered", "blocked", "assigned"].some(target => window.canFlowMateTransitionWorkItem(row, target, currentUser, window.MEMBERS_BY_ID || {}));

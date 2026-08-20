@@ -3632,4 +3632,108 @@ function SettingsScreen() {
   );
 }
 
-Object.assign(window, { WorkloadScreen, PlanningChannelViewScreen, PlanningCampaignViewScreen, PlanningContentCalendarScreen, KpiScreen, CalendarScreen, TeamGanttScreen, SettingsScreen });
+function TaskAssignScheduleScreen({ onOpen }) {
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Task Assign schedule..." });
+
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      if (!window.loadFlowMateOperationalRows) {
+        if (alive) setLoadState({ status: "error", message: "Task Assign loader is not ready." });
+        return;
+      }
+      try {
+        const loaded = await window.loadFlowMateOperationalRows();
+        if (!alive) return;
+        setRows((loaded || []).filter(row => row.type === "quick"));
+        setLoadState({ status: "live", message: "Live Quick Task data" });
+      } catch (error) {
+        if (alive) setLoadState({ status: "error", message: window.flowmateUserError(error, "Could not load Task Assign schedule.") });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => { alive = false; cleanup(); };
+  }, []);
+
+  return (
+    <div className="page" data-testid="task-assign-team-schedule">
+      <div className="page__header">
+        <div>
+          <h1 className="page__title">Team Schedule</h1>
+          <div className="page__sub">Quick Task delivery timeline: 1st Review / Draft to Launch date - {loadState.message}</div>
+        </div>
+      </div>
+      <div className="card">
+        <div className="card__body" style={{ padding: 0, overflowX: "auto" }}>
+          <table className="tbl">
+            <thead><tr><th>ID</th><th>Task</th><th>Function</th><th>Assignee</th><th>1st Review / Draft</th><th>Launch date</th><th>Status</th></tr></thead>
+            <tbody>
+              {rows.map(row => (
+                <tr key={row.id} onClick={() => onOpen(row.id)} style={{ cursor: "pointer" }}>
+                  <td className="mono">{row.id}</td>
+                  <td>{row.title}</td>
+                  <td>{row.requesterTeam || "-"}</td>
+                  <td>{row.ownerName || row.assignee || "Unassigned"}</td>
+                  <td>{row.dueLabel || "-"}</td>
+                  <td>{row.launchDate || "-"}</td>
+                  <td><StatusBadge status={row.status} /></td>
+                </tr>
+              ))}
+              {rows.length === 0 && loadState.status !== "loading" && <tr><td colSpan="7" className="muted">No Quick Tasks match this schedule.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="reason-box team-schedule__rule">This schedule is for Task Assign only. It does not include Creative Request capacity, GD/VE workload, or brief milestones.</div>
+    </div>
+  );
+}
+
+function TaskAssignAttentionScreen({ onOpen }) {
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Task Assign risks..." });
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      try {
+        const loaded = await window.loadFlowMateOperationalRows();
+        if (!alive) return;
+        setRows((loaded || []).filter(row => row.type === "quick"));
+        setLoadState({ status: "live", message: "Live Quick Task data" });
+      } catch (error) {
+        if (alive) setLoadState({ status: "error", message: window.flowmateUserError(error, "Could not load Task Assign risks.") });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => { alive = false; cleanup(); };
+  }, []);
+
+  const attentionRows = rows.filter(row => {
+    if (["delivered", "cancelled"].includes(row.status)) return false;
+    return row.status === "blocked" || !row.dueDate || !row.launchDate || row.dueDate < today || row.launchDate < today;
+  });
+  function reasonFor(row) {
+    if (row.status === "blocked") return "Blocked";
+    if (!row.dueDate || !row.launchDate) return "Missing 1st Review / Draft or Launch date";
+    if (row.launchDate < today) return "Launch date is overdue";
+    return "1st Review / Draft is overdue";
+  }
+
+  return (
+    <div className="page" data-testid="task-assign-attention">
+      <div className="page__header"><div><h1 className="page__title">Attention Needed</h1><div className="page__sub">Quick Task delivery exceptions only - {loadState.message}</div></div></div>
+      <div className="card"><div className="card__body" style={{ padding: 0, overflowX: "auto" }}><table className="tbl">
+        <thead><tr><th>ID</th><th>Task</th><th>Function</th><th>Status</th><th>Reason</th><th>Action</th></tr></thead>
+        <tbody>{attentionRows.map(row => <tr key={row.id}><td className="mono">{row.id}</td><td>{row.title}</td><td>{row.requesterTeam || "-"}</td><td><StatusBadge status={row.status} /></td><td>{reasonFor(row)}</td><td><button type="button" className="btn btn--xs btn--secondary" onClick={() => onOpen(row.id)}>Open detail</button></td></tr>)}
+        {attentionRows.length === 0 && loadState.status !== "loading" && <tr><td colSpan="6" className="muted">No Quick Tasks currently need attention.</td></tr>}</tbody>
+      </table></div></div>
+    </div>
+  );
+}
+
+Object.assign(window, { WorkloadScreen, PlanningChannelViewScreen, PlanningCampaignViewScreen, PlanningContentCalendarScreen, KpiScreen, CalendarScreen, TeamGanttScreen, TaskAssignScheduleScreen, TaskAssignAttentionScreen, SettingsScreen });

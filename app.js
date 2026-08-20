@@ -6,7 +6,7 @@ const {
   useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260803-8";
+  const fallbackVersion = "v20260820-01";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -22,6 +22,7 @@ function getFlowMateAppVersion() {
 const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const OT_REQUEST_PRODUCT_KEY = "ot-request";
+const TASK_ASSIGN_PRODUCT_KEY = "task-assign";
 const FLOWMATE_APPEARANCE_KEY = "flowmate:appearance:v1";
 const FLOWMATE_ACTIVE_TEAM_KEY = "flowmate:activeTeam:v1";
 const FLOWMATE_TEAM_WORKSPACES = [{
@@ -142,6 +143,34 @@ const ADMIN_NAV_GROUP = {
   }]
 };
 const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team");
+const TASK_ASSIGN_NAV = [{
+  group: "Task Assign",
+  items: [{
+    key: "create",
+    label: "Create",
+    icon: "plus"
+  }, {
+    key: "board",
+    label: "Board",
+    icon: "board"
+  }, {
+    key: "list",
+    label: "List",
+    icon: "list"
+  }, {
+    key: "calendar",
+    label: "Calendar",
+    icon: "calendar"
+  }, {
+    key: "gantt",
+    label: "Team Schedule",
+    icon: "chart"
+  }, {
+    key: "attention",
+    label: "Attention Needed",
+    icon: "queue"
+  }]
+}];
 const TITLE_MAP = {
   "my-work": "My work",
   "create": "Create",
@@ -163,15 +192,33 @@ const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const OT_REQUEST_HASH_KEYS = new Set([OT_REQUEST_PRODUCT_KEY]);
-const VALID_PRODUCT_KEYS = new Set(["flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY, OT_REQUEST_PRODUCT_KEY]);
+const TASK_ASSIGN_HASH_KEYS = new Set(["task-assign-create", "task-assign-board", "task-assign-list", "task-assign-calendar", "task-assign-schedule", "task-assign-attention", "task-assign-detail"]);
+const TASK_ASSIGN_HASH_TO_ROUTE = {
+  "task-assign-create": "create",
+  "task-assign-board": "board",
+  "task-assign-list": "list",
+  "task-assign-calendar": "calendar",
+  "task-assign-schedule": "gantt",
+  "task-assign-attention": "attention",
+  "task-assign-detail": "detail"
+};
+const TASK_ASSIGN_ROUTE_TO_HASH = Object.fromEntries(Object.entries(TASK_ASSIGN_HASH_TO_ROUTE).map(([hashKey, routeKey]) => [routeKey, hashKey]));
+const VALID_PRODUCT_KEYS = new Set([TASK_ASSIGN_PRODUCT_KEY, "flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY, OT_REQUEST_PRODUCT_KEY]);
 function getFlowMateHashRouteKey(hashValue) {
   const routeKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+  if (TASK_ASSIGN_HASH_TO_ROUTE[routeKey]) return TASK_ASSIGN_HASH_TO_ROUTE[routeKey];
   return routeKey === "queue" ? "attention" : routeKey;
+}
+function getProductHashRoute(productKey, routeKey, id = "") {
+  const hashKey = productKey === TASK_ASSIGN_PRODUCT_KEY ? TASK_ASSIGN_ROUTE_TO_HASH[routeKey] : routeKey;
+  return id ? `${hashKey}/${id}` : hashKey;
 }
 function isProductChoicePath() {
   return /\/home\/?$/.test(String(window.location.pathname || ""));
 }
 function getProductFromHashRouteKey(hashValue) {
+  const rawHashKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
+  if (TASK_ASSIGN_HASH_KEYS.has(rawHashKey)) return TASK_ASSIGN_PRODUCT_KEY;
   const hashKey = getFlowMateHashRouteKey(hashValue);
   if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
   if (PRODUCT_BOOK_HASH_KEYS.has(hashKey)) return PRODUCT_BOOK_PRODUCT_KEY;
@@ -235,6 +282,11 @@ function App() {
     } catch (e) {}
     return null;
   });
+  useEffectApp(() => {
+    window.FLOWMATE_ACTIVE_PRODUCT = activeProduct || "";
+    if (window.invalidateFlowMateListRowsCache) window.invalidateFlowMateListRowsCache();
+    if (window.clearFlowMateBoardSnapshots) window.clearFlowMateBoardSnapshots();
+  }, [activeProduct]);
   const [activeTeamKey, setActiveTeamKey] = useStateApp(getStoredFlowMateActiveTeam);
   const [authState, setAuthState] = useStateApp({
     status: "loading",
@@ -252,7 +304,7 @@ function App() {
   });
   function nav(key) {
     setRoute(key);
-    window.location.hash = key;
+    window.location.hash = getProductHashRoute(activeProduct, key);
   }
   function open(id, options = {}) {
     if (!options.preserveBackContext && window.saveFlowMateDetailBackContext && route !== "detail") {
@@ -263,7 +315,7 @@ function App() {
     }
     setFocusId(id);
     setRoute("detail");
-    window.location.hash = `detail/${id}`;
+    window.location.hash = getProductHashRoute(activeProduct, "detail", id);
   }
   async function refreshNotifications(options = {}) {
     if (!window.loadFlowMateNotifications) {
@@ -406,7 +458,12 @@ function App() {
       if (h.split("/")[0] === "queue") {
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#attention`);
       }
-      if (MARKETING_PLAN_HASH_KEYS.has(r)) {
+      if (TASK_ASSIGN_HASH_KEYS.has(h.split("/")[0])) {
+        setActiveProduct(TASK_ASSIGN_PRODUCT_KEY);
+        try {
+          sessionStorage.setItem("flowmate:activeProduct", TASK_ASSIGN_PRODUCT_KEY);
+        } catch (e) {}
+      } else if (MARKETING_PLAN_HASH_KEYS.has(r)) {
         setActiveProduct("marketing-plan");
         try {
           sessionStorage.setItem("flowmate:activeProduct", "marketing-plan");
@@ -559,8 +616,17 @@ function App() {
     try {
       sessionStorage.setItem("flowmate:activeProduct", "flowmate");
     } catch (e) {}
-    if (MARKETING_PLAN_HASH_KEYS.has(getFlowMateHashRouteKey()) || OT_REQUEST_HASH_KEYS.has(getFlowMateHashRouteKey())) {
+    if (getProductFromHashRouteKey() !== "flowmate") {
       window.location.hash = route && TITLE_MAP[route] ? route : "my-work";
+    }
+  }
+  function chooseTaskAssignProduct() {
+    setActiveProduct(TASK_ASSIGN_PRODUCT_KEY);
+    try {
+      sessionStorage.setItem("flowmate:activeProduct", TASK_ASSIGN_PRODUCT_KEY);
+    } catch (e) {}
+    if (getProductFromHashRouteKey() !== TASK_ASSIGN_PRODUCT_KEY) {
+      window.location.hash = "task-assign-board";
     }
   }
   function chooseMarketingPlanProduct() {
@@ -761,8 +827,9 @@ function App() {
   const currentUserEmail = user.email || "";
   const avatarMemberId = user.team_member_id || null;
   const isAdminUser = user.role === "admin";
-  const visibleNavGroups = getVisibleNavGroups(user.role);
-  const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route);
+  const isTaskAssignProduct = activeProduct === TASK_ASSIGN_PRODUCT_KEY;
+  const visibleNavGroups = isTaskAssignProduct ? TASK_ASSIGN_NAV : getVisibleNavGroups(user.role);
+  const allowedRoute = isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route);
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
   const accessibleTeams = getFlowMateAccessibleTeams(user);
@@ -808,6 +875,7 @@ function App() {
       currentUserName: currentUserName,
       currentUserEmail: currentUserEmail,
       avatarMemberId: avatarMemberId,
+      onChooseTaskAssign: chooseTaskAssignProduct,
       onChooseFlowMate: chooseFlowMateProduct,
       onChooseMarketingPlan: chooseMarketingPlanProduct,
       onChooseProductBook: chooseProductBookProduct,
@@ -867,19 +935,26 @@ function App() {
     alt: "Garena"
   }), React.createElement("span", {
     className: "app__brand-name"
-  }, "FlowMate"), React.createElement("span", {
+  }, isTaskAssignProduct ? "Task Assign" : "FlowMate"), React.createElement("span", {
     className: "app__brand-version"
   }, FLOWMATE_APP_VERSION)), React.createElement("div", {
     className: "app__topbar"
   }, React.createElement(HomeButton, {
     onHome: returnToProductHome
   }), React.createElement(ProductSwitch, {
-    activeProduct: "flowmate",
+    activeProduct: isTaskAssignProduct ? TASK_ASSIGN_PRODUCT_KEY : "flowmate",
+    onSwitchTaskAssign: chooseTaskAssignProduct,
     onSwitchFlowMate: chooseFlowMateProduct,
     onSwitchMarketingPlan: chooseMarketingPlanProduct,
     onSwitchProductBook: chooseProductBookProduct,
     onSwitchOtRequest: chooseOtRequestProduct
-  }), React.createElement(TeamWorkspaceSelector, {
+  }), isTaskAssignProduct ? React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginRight: 10
+    }
+  }, "All functions · cross-function view is read-only") : React.createElement(TeamWorkspaceSelector, {
     teams: accessibleTeams,
     activeTeamKey: activeTeamKey,
     onChange: handleActiveTeamChange
@@ -936,8 +1011,8 @@ function App() {
   }, React.createElement(Icon, {
     name: "plus"
   }), " Create"), isCreateMenuOpen && React.createElement(CreateMenuPanel, {
-    onQuick: () => handleTopbarCreateChoice("quick"),
-    onCreative: () => handleTopbarCreateChoice("creative"),
+    onQuick: isTaskAssignProduct ? () => handleTopbarCreateChoice("quick") : null,
+    onCreative: isTaskAssignProduct ? null : () => handleTopbarCreateChoice("creative"),
     onLeave: () => handleTopbarCreateChoice("leave"),
     onClose: () => setIsCreateMenuOpen(false)
   })), React.createElement("button", {
@@ -1028,7 +1103,8 @@ function App() {
   }), allowedRoute && route === "create" && React.createElement(CreateScreen, {
     onNav: nav,
     onOpen: open,
-    initialMode: createModeIntent
+    initialMode: isTaskAssignProduct ? "quick" : "creative",
+    product: isTaskAssignProduct ? "task-assign" : "flowmate"
   }), allowedRoute && route === "detail" && React.createElement(DetailScreen, {
     onNav: nav,
     onOpen: open,
@@ -1041,9 +1117,9 @@ function App() {
     searchQuery: searchQuery
   }), allowedRoute && route === "calendar" && React.createElement(CalendarScreen, {
     onOpen: open
-  }), allowedRoute && route === "gantt" && React.createElement(TeamGanttScreen, {
+  }), allowedRoute && route === "gantt" && React.createElement(isTaskAssignProduct ? TaskAssignScheduleScreen : TeamGanttScreen, {
     onOpen: open
-  }), allowedRoute && route === "attention" && React.createElement(QueueScreen, {
+  }), allowedRoute && route === "attention" && React.createElement(isTaskAssignProduct ? TaskAssignAttentionScreen : QueueScreen, {
     onOpen: open,
     searchQuery: searchQuery
   }), allowedRoute && route === "planning-channel" && React.createElement(PlanningChannelViewScreen, {
@@ -1062,6 +1138,7 @@ function App() {
 }
 function ProductSwitch({
   activeProduct,
+  onSwitchTaskAssign,
   onSwitchFlowMate,
   onSwitchMarketingPlan,
   onSwitchProductBook,
@@ -1076,7 +1153,13 @@ function ProductSwitch({
     },
     "aria-label": "Product switch",
     "data-testid": "product-switch"
-  }, React.createElement("button", {
+  }, onSwitchTaskAssign && React.createElement("button", {
+    type: "button",
+    className: `btn btn--xs ${activeProduct === TASK_ASSIGN_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
+    onClick: onSwitchTaskAssign,
+    "aria-pressed": activeProduct === TASK_ASSIGN_PRODUCT_KEY,
+    "data-testid": "product-switch-task-assign"
+  }, "Task Assign"), React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === "flowmate" ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchFlowMate,
@@ -1169,6 +1252,7 @@ function ProductChoiceScreen({
   currentUserName,
   currentUserEmail,
   avatarMemberId,
+  onChooseTaskAssign,
   onChooseFlowMate,
   onChooseMarketingPlan,
   onChooseProductBook,
@@ -1256,9 +1340,34 @@ function ProductChoiceScreen({
       margin: 0,
       maxWidth: 620
     }
-  }, "FlowMate handles task execution. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team. OT Request coordinates overtime workflows."), React.createElement("div", {
+  }, "Task Assign handles operational Quick Tasks. FlowMate handles Creative Requests. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team. OT Request coordinates overtime workflows."), React.createElement("div", {
     style: gridStyle
   }, React.createElement("button", {
+    type: "button",
+    style: cardStyle,
+    onClick: onChooseTaskAssign
+  }, React.createElement("div", {
+    className: "row",
+    style: {
+      justifyContent: "space-between",
+      alignItems: "flex-start"
+    }
+  }, React.createElement("span", {
+    className: "badge badge--quick"
+  }, "Execution"), React.createElement(Icon, {
+    name: "inbox",
+    size: 18
+  })), React.createElement("h2", {
+    style: {
+      fontSize: 22,
+      margin: "18px 0 8px"
+    }
+  }, "Task Assign"), React.createElement("p", {
+    className: "muted",
+    style: {
+      lineHeight: 1.55
+    }
+  }, "Create and track operational Quick Tasks across Ops, MKT, and eSport.")), React.createElement("button", {
     type: "button",
     style: cardStyle,
     onClick: onChooseFlowMate
@@ -1283,7 +1392,7 @@ function ProductChoiceScreen({
     style: {
       lineHeight: 1.55
     }
-  }, "Create requests, assign GD/VE work, track status, workload, calendar, and KPI.")), React.createElement("button", {
+  }, "Create Creative Requests, assign GD/VE work, and track creative production.")), React.createElement("button", {
     type: "button",
     style: cardStyle,
     onClick: onChooseMarketingPlan
@@ -6874,7 +6983,7 @@ function CreateMenuPanel({
   }, React.createElement(Icon, {
     name: "x",
     size: 12
-  }))), React.createElement("button", {
+  }))), onQuick && React.createElement("button", {
     type: "button",
     className: "topbar__create-option",
     role: "menuitem",
@@ -6886,7 +6995,7 @@ function CreateMenuPanel({
     size: 14
   }), " Quick Task"), React.createElement("span", {
     className: "topbar__create-option-sub"
-  }, "Small task or reminder")), React.createElement("button", {
+  }, "Small task or reminder")), onCreative && React.createElement("button", {
     type: "button",
     className: "topbar__create-option",
     role: "menuitem",

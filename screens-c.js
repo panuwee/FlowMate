@@ -4391,6 +4391,162 @@ function SettingsScreen() {
     disabled: saveState.status === "saving"
   }, saveState.status === "saving" ? "Saving..." : "Save changes")))));
 }
+function TaskAssignScheduleScreen({
+  onOpen
+}) {
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({
+    status: "loading",
+    message: "Loading Task Assign schedule..."
+  });
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      if (!window.loadFlowMateOperationalRows) {
+        if (alive) setLoadState({
+          status: "error",
+          message: "Task Assign loader is not ready."
+        });
+        return;
+      }
+      try {
+        const loaded = await window.loadFlowMateOperationalRows();
+        if (!alive) return;
+        setRows((loaded || []).filter(row => row.type === "quick"));
+        setLoadState({
+          status: "live",
+          message: "Live Quick Task data"
+        });
+      } catch (error) {
+        if (alive) setLoadState({
+          status: "error",
+          message: window.flowmateUserError(error, "Could not load Task Assign schedule.")
+        });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
+  return React.createElement("div", {
+    className: "page",
+    "data-testid": "task-assign-team-schedule"
+  }, React.createElement("div", {
+    className: "page__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Team Schedule"), React.createElement("div", {
+    className: "page__sub"
+  }, "Quick Task delivery timeline: 1st Review / Draft to Launch date - ", loadState.message))), React.createElement("div", {
+    className: "card"
+  }, React.createElement("div", {
+    className: "card__body",
+    style: {
+      padding: 0,
+      overflowX: "auto"
+    }
+  }, React.createElement("table", {
+    className: "tbl"
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "ID"), React.createElement("th", null, "Task"), React.createElement("th", null, "Function"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "1st Review / Draft"), React.createElement("th", null, "Launch date"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
+    key: row.id,
+    onClick: () => onOpen(row.id),
+    style: {
+      cursor: "pointer"
+    }
+  }, React.createElement("td", {
+    className: "mono"
+  }, row.id), React.createElement("td", null, row.title), React.createElement("td", null, row.requesterTeam || "-"), React.createElement("td", null, row.ownerName || row.assignee || "Unassigned"), React.createElement("td", null, row.dueLabel || "-"), React.createElement("td", null, row.launchDate || "-"), React.createElement("td", null, React.createElement(StatusBadge, {
+    status: row.status
+  })))), rows.length === 0 && loadState.status !== "loading" && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "7",
+    className: "muted"
+  }, "No Quick Tasks match this schedule.")))))), React.createElement("div", {
+    className: "reason-box team-schedule__rule"
+  }, "This schedule is for Task Assign only. It does not include Creative Request capacity, GD/VE workload, or brief milestones."));
+}
+function TaskAssignAttentionScreen({
+  onOpen
+}) {
+  const [rows, setRows] = useStateC([]);
+  const [loadState, setLoadState] = useStateC({
+    status: "loading",
+    message: "Loading Task Assign risks..."
+  });
+  const today = new Date().toLocaleDateString("en-CA", {
+    timeZone: "Asia/Bangkok"
+  });
+  useEffectC(() => {
+    let alive = true;
+    async function loadRows() {
+      try {
+        const loaded = await window.loadFlowMateOperationalRows();
+        if (!alive) return;
+        setRows((loaded || []).filter(row => row.type === "quick"));
+        setLoadState({
+          status: "live",
+          message: "Live Quick Task data"
+        });
+      } catch (error) {
+        if (alive) setLoadState({
+          status: "error",
+          message: window.flowmateUserError(error, "Could not load Task Assign risks.")
+        });
+      }
+    }
+    loadRows();
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    return () => {
+      alive = false;
+      cleanup();
+    };
+  }, []);
+  const attentionRows = rows.filter(row => {
+    if (["delivered", "cancelled"].includes(row.status)) return false;
+    return row.status === "blocked" || !row.dueDate || !row.launchDate || row.dueDate < today || row.launchDate < today;
+  });
+  function reasonFor(row) {
+    if (row.status === "blocked") return "Blocked";
+    if (!row.dueDate || !row.launchDate) return "Missing 1st Review / Draft or Launch date";
+    if (row.launchDate < today) return "Launch date is overdue";
+    return "1st Review / Draft is overdue";
+  }
+  return React.createElement("div", {
+    className: "page",
+    "data-testid": "task-assign-attention"
+  }, React.createElement("div", {
+    className: "page__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Attention Needed"), React.createElement("div", {
+    className: "page__sub"
+  }, "Quick Task delivery exceptions only - ", loadState.message))), React.createElement("div", {
+    className: "card"
+  }, React.createElement("div", {
+    className: "card__body",
+    style: {
+      padding: 0,
+      overflowX: "auto"
+    }
+  }, React.createElement("table", {
+    className: "tbl"
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "ID"), React.createElement("th", null, "Task"), React.createElement("th", null, "Function"), React.createElement("th", null, "Status"), React.createElement("th", null, "Reason"), React.createElement("th", null, "Action"))), React.createElement("tbody", null, attentionRows.map(row => React.createElement("tr", {
+    key: row.id
+  }, React.createElement("td", {
+    className: "mono"
+  }, row.id), React.createElement("td", null, row.title), React.createElement("td", null, row.requesterTeam || "-"), React.createElement("td", null, React.createElement(StatusBadge, {
+    status: row.status
+  })), React.createElement("td", null, reasonFor(row)), React.createElement("td", null, React.createElement("button", {
+    type: "button",
+    className: "btn btn--xs btn--secondary",
+    onClick: () => onOpen(row.id)
+  }, "Open detail")))), attentionRows.length === 0 && loadState.status !== "loading" && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "6",
+    className: "muted"
+  }, "No Quick Tasks currently need attention.")))))));
+}
 Object.assign(window, {
   WorkloadScreen,
   PlanningChannelViewScreen,
@@ -4399,5 +4555,7 @@ Object.assign(window, {
   KpiScreen,
   CalendarScreen,
   TeamGanttScreen,
+  TaskAssignScheduleScreen,
+  TaskAssignAttentionScreen,
   SettingsScreen
 });

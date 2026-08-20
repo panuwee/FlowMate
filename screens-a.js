@@ -1331,16 +1331,17 @@ async function syncMarketingPlanBriefLinkAfterCreativeSubmit(submissionDraft, cr
 function CreateScreen({
   onNav,
   onOpen,
-  initialMode = "creative"
+  initialMode = "creative",
+  product = "flowmate"
 }) {
-  const [mode, setMode] = useState(() => initialMode === "quick" ? "quick" : "creative");
+  const isTaskAssignProduct = product === "task-assign";
+  const [mode, setMode] = useState(() => isTaskAssignProduct || initialMode === "quick" ? "quick" : "creative");
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
   const [createAlert, setCreateAlert] = useState("");
   const [assigneeOptions, setAssigneeOptions] = useState(FLOWMATE_ASSIGNEE_FALLBACK);
-  const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS);
   function withCreativeDraftTitle(draftInput) {
     const draft = normalizeFlowMateCreativeDraft(draftInput);
     return {
@@ -1407,23 +1408,10 @@ function CreateScreen({
     };
   }, []);
   useEffect(() => {
-    if (initialMode === "quick" || initialMode === "creative") {
-      switchCreateMode(initialMode);
+    if (isTaskAssignProduct || initialMode === "quick" || initialMode === "creative") {
+      switchCreateMode(isTaskAssignProduct ? "quick" : initialMode);
     }
-  }, [initialMode]);
-  useEffect(() => {
-    let alive = true;
-    if (!window.loadFlowMateRequesterTeams) return () => {};
-    window.loadFlowMateRequesterTeams().then(options => {
-      if (!alive || !options.length) return;
-      setRequesterTeamOptions(options);
-    }).catch(error => {
-      console.warn("[FlowMate Create] requester team load failed:", error);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  }, [initialMode, isTaskAssignProduct]);
   async function openCreatedDetail(created, id) {
     const detailId = id || window.getFlowMateCreatedDisplayId(created);
     if (!detailId) {
@@ -1614,14 +1602,14 @@ function CreateScreen({
     className: "page__title"
   }, "Create"), React.createElement("div", {
     className: "page__sub"
-  }, "Pick the right entry point - Quick task is notebook-style, Creative request enters the assignment engine."))), React.createElement("div", {
+  }, isTaskAssignProduct ? "Create an operational Quick Task. Function is set automatically from your signed-in account." : "Create a Creative Request for the assignment engine."))), React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
       gap: 16,
       marginBottom: 24
     }
-  }, React.createElement("button", {
+  }, isTaskAssignProduct && React.createElement("button", {
     className: `choice-card ${mode === "quick" ? "is-active" : ""}`,
     onClick: () => switchCreateMode("quick")
   }, React.createElement("div", {
@@ -1632,7 +1620,7 @@ function CreateScreen({
     className: "choice-card__sub"
   }, "Small internal task, follow-up, or reminder. Stays in your team's quick-task list."), React.createElement("ul", {
     className: "choice-card__list"
-  }, React.createElement("li", null, "No effort calculation, no auto-assignment"), React.createElement("li", null, "Self-assign or pick a teammate"), React.createElement("li", null, "Counted separately from creative capacity"))), React.createElement("button", {
+  }, React.createElement("li", null, "No effort calculation, no auto-assignment"), React.createElement("li", null, "Self-assign or pick a teammate"), React.createElement("li", null, "Counted separately from creative capacity"))), !isTaskAssignProduct && React.createElement("button", {
     className: `choice-card ${mode === "creative" ? "is-active" : ""}`,
     onClick: () => switchCreateMode("creative")
   }, React.createElement("div", {
@@ -1662,7 +1650,7 @@ function CreateScreen({
     value: quickDraft,
     onChange: updateQuickDraft,
     assigneeOptions: assigneeOptions,
-    requesterTeamOptions: requesterTeamOptions,
+    product: product,
     errors: validationErrors
   }) : React.createElement(CreativeRequestForm, {
     value: creativeDraft,
@@ -1690,7 +1678,7 @@ function QuickTaskForm({
   value,
   onChange,
   assigneeOptions,
-  requesterTeamOptions = TEAMS,
+  product = "task-assign",
   errors = {}
 }) {
   const options = assigneeOptions || FLOWMATE_ASSIGNEE_FALLBACK;
@@ -1751,7 +1739,7 @@ function QuickTaskForm({
     value: value.note,
     onChange: e => update("note", e.target.value),
     placeholder: "Short description - what needs doing, any context, link to the doc."
-  })), React.createElement("div", {
+  })), product !== "task-assign" && React.createElement("div", {
     className: `field ${errors.requesterTeam ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -1761,7 +1749,7 @@ function QuickTaskForm({
     className: "select",
     value: value.requesterTeam,
     onChange: e => update("requesterTeam", e.target.value)
-  }, requesterTeamOptions.map(team => React.createElement("option", {
+  }, TEAMS.map(team => React.createElement("option", {
     key: team,
     value: team
   }, team))), errors.requesterTeam && React.createElement("div", {
