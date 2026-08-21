@@ -83,6 +83,7 @@ create table if not exists public.marketing_content_items (
   sub_pic_name text,
   note text,
   brief_link text,
+  requires_brief boolean not null default true,
   source_start_date date,
   source_start_time time,
   source_sheet_row text,
@@ -109,6 +110,8 @@ alter table public.marketing_content_items
   add column if not exists sub_pic_user_id uuid references public.users(id) on update cascade on delete set null;
 alter table public.marketing_content_items
   add column if not exists sub_pic_name text;
+alter table public.marketing_content_items
+  add column if not exists requires_brief boolean not null default true;
 
 create table if not exists public.marketing_channel_placements (
   id uuid primary key default gen_random_uuid(),
@@ -386,6 +389,7 @@ select
   mci.pic_name,
   mci.note as content_note,
   mci.brief_link,
+  mci.requires_brief,
   mci.source_start_date,
   mci.source_start_time,
   mci.flowmate_work_item_id,

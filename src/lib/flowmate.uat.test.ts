@@ -548,7 +548,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(appCss).toContain(".app__brand-version");
     expect(appCss.replace(/\r\n/g, "\n")).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
     expect(appCss).not.toContain("box-shadow: 0 -28px");
-    expect(activeEntryHtml).toMatch(/app\.js\?v=\d{8}-[a-f0-9]{6}/);
+    expect(activeEntryHtml).toMatch(/app\.js\?v=\d{8}-[0-9]{2}/);
     expect(activeEntryHtml).not.toContain("v20260709-6");
   });
 
@@ -561,7 +561,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(productBookIndexHtml).toContain('<base href="../" />');
     expect(productBookIndexHtml).toContain('window.location.hash = "product-book-latest"');
-    expect(productBookIndexHtml).toMatch(/app\.js\?v=\d{8}-[a-f0-9]{6}/);
+    expect(productBookIndexHtml).toMatch(/app\.js\?v=\d{8}-[0-9]{2}/);
   });
 
   it("serves a GitHub Pages 404 fallback for direct deep links", () => {
@@ -597,7 +597,7 @@ describe("quick task Other assignee SQL support", () => {
     const quickTaskSql = readFileSync(join(process.cwd(), "supabase", "rpc_quick_task.sql"), "utf8");
 
     expect(quickTaskJs).toContain("p_launch_date: input.launchDate");
-    expect(quickTaskJs).toContain("p_requester_team: input.requesterTeam");
+    expect(quickTaskJs).toMatch(/p_requester_team:\s*input\.requesterTeam/);
     expect(quickTaskSql).toContain("p_launch_date date");
     expect(quickTaskSql).toContain("p_requester_team text");
     expect(quickTaskSql).toContain("nullif(trim(coalesce(p_requester_team, '')), '')");
@@ -665,7 +665,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(createScreenJsx).toContain("requesterTeam: getDefaultRequesterTeam()");
     expect(createScreenJsx).not.toContain('requireField("requesterTeam", "Requester team is required.");\n  requireField("campaignName"');
-    expect(quickTaskFormSource).toContain("requesterTeamOptions.map");
+    expect(quickTaskFormSource).toContain("{TEAMS.map((team) =>");
     expect(creativeFormSource).not.toContain("requesterTeamOptions");
     expect(creativeFormSource).not.toContain("errors.requesterTeam");
   });
@@ -1552,7 +1552,7 @@ describe("requester function sync", () => {
     expect(syncSql).not.toMatch(/\('Gear'[\s\S]*?'PM'[\s\S]*?'gear'\)/);
   });
 
-  it("frontend restricts requester teams to the four canonical teams across Create and List", () => {
+  it("frontend keeps requester teams to the four canonical teams across FlowMate Create and List", () => {
     const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
     const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const screensA = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
@@ -1568,12 +1568,10 @@ describe("requester function sync", () => {
     expect(listDataJs).toContain(".select(\"requester_team\")");
     expect(listDataJs).toContain("window.loadFlowMateRequesterTeams = loadFlowMateRequesterTeams");
     expect(listDataJs).not.toContain("return Array.from(new Set([...fallback, ...liveTeams]))");
-    expect(screensA).toContain("const [requesterTeamOptions, setRequesterTeamOptions] = useState(TEAMS)");
     expect(screensA).toContain("function getDefaultRequesterTeam()");
     expect(screensA).toContain("window.normalizeFlowMateRequesterTeam?.(window.FLOWMATE_CURRENT_USER?.requester_team)");
-    expect(screensA).toContain("window.loadFlowMateRequesterTeams()");
-    expect(screensA).toContain("assigneeOptions={assigneeOptions} requesterTeamOptions={requesterTeamOptions}");
-    expect(screensA).toContain("{requesterTeamOptions.map");
+    expect(screensA).toContain('product !== "task-assign"');
+    expect(screensA).toContain("{TEAMS.map((team) =>");
     expect(screensA).not.toContain("CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions}");
     expect(screensB).toContain("const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS)");
     expect(screensB).toContain("window.loadFlowMateRequesterTeams()");
@@ -1932,7 +1930,7 @@ describe("Marketing Plan Supervisor backend SQL", () => {
     expect(sql).not.toContain("wi.display_id = substring(mci.brief_link from '#detail/([^/?#]+)'");
     expect(sql).toContain("when base.flowmate_status = 'review' then 'review'");
     expect(sql).toContain("when base.flowmate_status = 'delivered' then 'ready_to_post'");
-    expect(sql).toContain("when base.stored_status = 'planned' and base.missing_brief_link = false then 'assigned'");
+    expect(sql).toContain("when base.stored_status = 'planned' and base.requires_brief and base.missing_brief_link = false then 'assigned'");
     for (const field of [
       "working_days_before_launch",
       "calendar_days_before_launch",
@@ -2901,14 +2899,42 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
 
     expect(rowRenderSource).toContain("const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);");
     expect(rowRenderSource).toContain("value: rowStatusValue");
-    expect(rowRenderSource).toContain("const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || \"\").trim();");
+    expect(rowRenderSource).toContain("const rowNeedsBriefLinkRepair = row.requiresBrief && rowHasLinkedCreativeRequest && !String(row.briefLink || \"\").trim();");
     expect(rowRenderSource).toContain("rowNeedsBriefLinkRepair ? React.createElement");
     expect(rowRenderSource).toContain("Repair Link");
-    expect(rowRenderSource).toContain("rowHasLinkedCreativeRequest ? null : React.createElement");
+    expect(rowRenderSource).toContain("rowHasLinkedCreativeRequest || !row.requiresBrief ? null : React.createElement");
     expect(rowRenderSource).toContain("Create Brief");
     expect(css).toContain("min-height: 36px;");
     expect(css).toContain("line-height: 20px;");
     expect(css).toContain("padding: 7px 28px 7px 10px;");
+  });
+
+  it("lets a Working Sheet row declare whether a Brief is required", () => {
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const marketingPlanSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan.sql"), "utf8");
+    const supervisorSqlSource = readFileSync(join(process.cwd(), "supabase", "marketing_plan_supervisor.sql"), "utf8");
+    const briefRequirementPatch = readFileSync(join(process.cwd(), "supabase", "marketing_plan_brief_requirement.sql"), "utf8");
+    const workingSheetSource = appJsx.slice(
+      appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
+      appJsx.indexOf("function MarketingPlanSupervisorScreen"),
+    );
+
+    expect(appJsx).toContain("requiresBrief: true");
+    expect(appJsx).toContain("requiresBrief: row.requires_brief !== false");
+    expect(appJsx).toContain("requires_brief: form.requiresBrief !== false");
+    expect(workingSheetSource).toContain("Brief requirement");
+    expect(workingSheetSource).toContain("Brief required");
+    expect(workingSheetSource).toContain("No Brief required");
+    expect(marketingPlanSql).toContain("requires_brief boolean not null default true");
+    expect(marketingPlanSql).toContain("mci.requires_brief");
+    expect(supervisorSqlSource).toContain("mci.requires_brief");
+    expect(supervisorSqlSource).toContain("when base.stored_status = 'planned' and base.requires_brief and base.missing_brief_link = false then 'assigned'");
+    expect(supervisorSqlSource).toContain("mci.requires_brief and not public.marketing_plan_is_non_empty_text(mci.brief_link) as missing_brief_link");
+    expect(briefRequirementPatch).toContain("add column if not exists requires_brief boolean not null default true");
+    expect(briefRequirementPatch).toContain("create or replace view public.marketing_plan_timeline_v");
+    expect(briefRequirementPatch).toContain("when base.stored_status = 'planned' and base.requires_brief and base.missing_brief_link = false then 'assigned'");
+    expect(briefRequirementPatch).toContain("mci.requires_brief and not public.marketing_plan_is_non_empty_text(mci.brief_link) as missing_brief_link");
+    expect(briefRequirementPatch).toContain("select pg_notify('pgrst', 'reload schema')");
   });
 
   it("limits Working Sheet actions to the row PIC, Sub PIC, or admin and cancels linked FlowMate work before row deletion", () => {
@@ -3907,7 +3933,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appJsx).toContain('route === "gantt"');
     expect(appJsx).toContain("React.createElement(TeamGanttScreen");
     expect(appJsx).toContain("onOpen: open");
-    expect(ganttSource).toContain("function TeamGanttScreen({ onOpen })");
+    expect(ganttSource).toContain('function TeamGanttScreen({ onOpen, product = "flowmate" })');
     expect(ganttSource).toContain("data-testid=\"flowmate-team-gantt-route\"");
     expect(ganttSource).toContain("data-testid=\"flowmate-team-gantt-chart\"");
     expect(ganttSource).not.toContain("Trello Power-Up Lite");
@@ -4362,16 +4388,16 @@ describe("MVP 1.2 topbar create menu", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
 
-    expect(appJsx).toContain('onQuick: () => handleTopbarCreateChoice("quick")');
-    expect(appJsx).toContain('onCreative: () => handleTopbarCreateChoice("creative")');
+    expect(appJsx).toContain('onQuick: isTaskAssignProduct ? () => handleTopbarCreateChoice("quick") : null');
+    expect(appJsx).toContain('onCreative: isTaskAssignProduct ? null : () => handleTopbarCreateChoice("creative")');
     expect(appJsx).toContain('onLeave: () => handleTopbarCreateChoice("leave")');
     expect(appJsx).toContain("setCreateModeIntent(choice)");
     expect(appJsx).toContain("setIsGlobalLeaveModalOpen(true)");
     expect(appJsx).toContain("React.createElement(GlobalLeaveRequestModal");
-    expect(appJsx).toContain("initialMode: createModeIntent");
-    expect(createScreenJsx).toContain("function CreateScreen({ onNav, onOpen, initialMode = \"creative\" })");
-    expect(createScreenJsx).toContain("useState(() => initialMode === \"quick\" ? \"quick\" : \"creative\")");
-    expect(createScreenJsx).toContain("if (initialMode === \"quick\" || initialMode === \"creative\")");
+    expect(appJsx).toContain('initialMode: isTaskAssignProduct ? "quick" : "creative"');
+    expect(createScreenJsx).toContain('function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flowmate" })');
+    expect(createScreenJsx).toContain('useState(() => isTaskAssignProduct || initialMode === "quick" ? "quick" : "creative")');
+    expect(createScreenJsx).toContain('const isTaskAssignProduct = product === "task-assign"');
   });
 });
 
@@ -4622,7 +4648,7 @@ describe("MVP 1.2 collaboration/admin frontend", () => {
     }
 
     const workingRowsSource = appJsx.slice(appJsx.indexOf("const rowHasLinkedCreativeRequest"));
-    expect(workingRowsSource).toContain("rowHasLinkedCreativeRequest ? null");
+    expect(workingRowsSource).toContain("rowHasLinkedCreativeRequest || !row.requiresBrief ? null");
     expect(workingRowsSource).toContain("Create Brief");
   });
 });
@@ -4671,7 +4697,8 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
     expect(appJsx).toContain("const isAdminUser = user.role === \"admin\"");
     expect(appJsx).toContain("getVisibleNavGroups(user.role)");
     expect(appJsx).toContain("function isFlowMateRouteAllowedForRole(role, routeKey)");
-    expect(appJsx).toContain("const allowedRoute = isFlowMateRouteAllowedForRole(user.role, route)");
+    expect(appJsx).toContain("const allowedRoute = isTaskAssignProduct");
+    expect(appJsx).toContain(": isFlowMateRouteAllowedForRole(user.role, route);");
     expect(appJsx).toContain('allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null)');
     expect(appJsx).toContain("!allowedRoute && React.createElement(AccessDeniedScreen");
     expect(appJsx).toContain("onNav: nav");

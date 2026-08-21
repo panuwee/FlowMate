@@ -24,6 +24,7 @@ function renderProductSwitch(activeProduct: string) {
     },
     props: {
       activeProduct,
+      onSwitchTaskAssign() {},
       onSwitchFlowMate() {},
       onSwitchMarketingPlan() {},
       onSwitchProductBook() {},
@@ -31,6 +32,7 @@ function renderProductSwitch(activeProduct: string) {
     },
   };
   runInNewContext(`
+    const TASK_ASSIGN_PRODUCT_KEY = "task-assign";
     const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
     const OT_REQUEST_PRODUCT_KEY = "ot-request";
     ${source}
@@ -2347,16 +2349,17 @@ describe("OT Request static module integration", () => {
 
   it("keeps active entry pages on one OT release version", () => {
     const entries = [["index.html"], ["home", "index.html"], ["product-book", "index.html"]].map(parts => read(...parts));
-    const versionedAssets = ["ot-request-domain.js", "supabase-ot-request.js", "screens-ot.js", "app.js", "app.css"];
+    const otAssets = ["ot-request-domain.js", "supabase-ot-request.js", "screens-ot.js", "app.css"];
 
     for (const html of entries) {
-      const stamps = versionedAssets.map(asset => {
+      const stamps = otAssets.map(asset => {
         const escapedAsset = asset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const match = html.match(new RegExp(`${escapedAsset}\\?v=([0-9]{8}-[a-f0-9]{6})`));
         expect(match).not.toBeNull();
         return match?.[1];
       });
       expect(new Set(stamps).size).toBe(1);
+      expect(html).toMatch(/app\.js\?v=[0-9]{8}-[0-9]{2}/);
     }
   });
 
@@ -2443,12 +2446,12 @@ describe("OT Request static module integration", () => {
   });
 
   it("exposes the current module as aria-pressed on every ProductSwitch button", () => {
-    const productKeys = ["flowmate", "marketing-plan", "product-book", "ot-request"];
+    const productKeys = ["task-assign", "flowmate", "marketing-plan", "product-book", "ot-request"];
 
     for (const activeProduct of productKeys) {
       const rendered = renderProductSwitch(activeProduct);
       const buttons = rendered.children;
-      expect(buttons).toHaveLength(4);
+      expect(buttons).toHaveLength(5);
       expect(buttons.map((button: any) => button.props["aria-pressed"])).toEqual(
         productKeys.map(productKey => productKey === activeProduct),
       );

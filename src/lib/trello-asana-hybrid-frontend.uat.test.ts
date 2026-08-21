@@ -42,7 +42,7 @@ describe("FlowMate Trello + Asana hybrid frontend static UAT", () => {
     expect(app).toContain('return routeKey === "queue" ? "attention" : routeKey;');
     expect(app).toContain('h.split("/")[0] === "queue"');
     expect(app).toContain('#attention`);');
-    expect(app).toContain('route === "attention" && React.createElement(QueueScreen');
+    expect(app).toContain('route === "attention" && React.createElement(isTaskAssignProduct ? TaskAssignAttentionScreen : QueueScreen');
     expect(withoutComments(app)).not.toMatch(/["'`]Central Queue["'`]/i);
     expect(withoutComments(screensB)).not.toMatch(/>\s*Central Queue\s*</i);
   });

@@ -5,7 +5,7 @@ const {
   useMemo: useMemoApp
 } = React;
 function getFlowMateAppVersion() {
-  const fallbackVersion = "v20260820-01";
+  const fallbackVersion = "v20260821-01";
   try {
     const scripts = Array.from(document.scripts || []);
     const appScript = scripts.find(script => {
@@ -2409,6 +2409,7 @@ function normalizeMarketingPlanTimelineRow(row) {
     subPicUserId: row.sub_pic_user_id || "",
     subPicName: row.sub_pic_name || "",
     briefLink: row.brief_link || "",
+    requiresBrief: row.requires_brief !== false,
     flowmateWorkItemId: row.flowmate_work_item_id || "",
     flowmateDisplayId: row.flowmate_display_id || "",
     flowmateStatus: row.flowmate_status || "",
@@ -2763,6 +2764,7 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     subPicUserId: "",
     subPicName: "",
     briefLink: "",
+    requiresBrief: true,
     channels: ["facebook"],
     note: ""
   };
@@ -3112,7 +3114,7 @@ function MarketingPlanFunctionFilter({
     onChange: () => toggleFunction(option.code)
   }), React.createElement("span", null, option.label))));
 }
-const MARKETING_PLAN_TIMELINE_SELECT_COLUMNS = ["plan_id", "month_key", "plan_title", "market", "audience_scope", "campaign_id", "campaign_name", "campaign_team", "campaign_sort_order", "content_item_id", "content_title", "content_team", "format", "content_tier", "pic_user_id", "pic_name", "sub_pic_user_id", "sub_pic_name", "brief_link", "flowmate_work_item_id", "flowmate_display_id", "flowmate_status", "content_status", "content_sort_order", "placement_id", "channel", "publish_date", "publish_time", "placement_status", "placement_note"].join(",");
+const MARKETING_PLAN_TIMELINE_SELECT_COLUMNS = ["plan_id", "month_key", "plan_title", "market", "audience_scope", "campaign_id", "campaign_name", "campaign_team", "campaign_sort_order", "content_item_id", "content_title", "content_team", "format", "content_tier", "pic_user_id", "pic_name", "sub_pic_user_id", "sub_pic_name", "brief_link", "requires_brief", "flowmate_work_item_id", "flowmate_display_id", "flowmate_status", "content_status", "content_sort_order", "placement_id", "channel", "publish_date", "publish_time", "placement_status", "placement_note"].join(",");
 const MARKETING_PLAN_REFRESH_REASONS = [
   "work_items", "work_status_changed", "admin_work_status_changed",
   "marketing_plan_creative_request_link", "marketing_plan_working_sheet_updated",
@@ -3451,6 +3453,7 @@ async function createMarketingPlanWorkingSheetRow(form) {
     sub_pic_user_id: form.subPicUserId || null,
     sub_pic_name: form.subPicUserId ? String(form.subPicName || "").trim() || null : null,
     brief_link: String(form.briefLink || "").trim() || null,
+    requires_brief: form.requiresBrief !== false,
     source_start_date: form.launchDate || null,
     source_start_time: form.publishTime || null,
     note: String(form.note || "").trim() || null
@@ -3618,6 +3621,7 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
     format: form.assetType || null,
     content_tier: form.contentTier || null,
     brief_link: String(form.briefLink || "").trim() || null,
+    requires_brief: form.requiresBrief !== false,
     source_start_date: form.publishDate || null,
     source_start_time: normalizedTime
   };
@@ -5460,6 +5464,7 @@ function MarketingPlanWorkingSheetScreen() {
       subPicUserId: row.subPicUserId || "",
       subPicName: row.subPicName || "",
       briefLink: row.briefLink || "",
+      requiresBrief: row.requiresBrief !== false,
       channels: selectedChannels
     });
     setExportMessage("");
@@ -5843,6 +5848,18 @@ function MarketingPlanWorkingSheetScreen() {
       subPicName: selection.name
     }))
   })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Brief requirement"), React.createElement("select", {
+    className: "select",
+    value: sheetForm.requiresBrief ? "required" : "not_required",
+    onChange: event => updateSheetForm("requiresBrief", event.target.value === "required")
+  }, React.createElement("option", {
+    value: "required"
+  }, "Brief required"), React.createElement("option", {
+    value: "not_required"
+  }, "No Brief required"))), React.createElement("label", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"
@@ -6039,7 +6056,7 @@ function MarketingPlanWorkingSheetScreen() {
   }, "Actions"))), React.createElement("tbody", null, visibleRows.map(row => {
     const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);
     const rowHasLinkedCreativeRequest = hasMarketingPlanLinkedCreativeRequest(row);
-    const rowNeedsBriefLinkRepair = rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
+    const rowNeedsBriefLinkRepair = row.requiresBrief && rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
     const canManageRow = canManageMarketingPlanWorkingRow(row);
     const canManageSchedule = canManageMarketingPlanSchedule(row);
     return React.createElement("tr", {
@@ -6071,7 +6088,7 @@ function MarketingPlanWorkingSheetScreen() {
       rel: "noreferrer"
     }, "Open") : React.createElement("span", {
       className: "muted"
-    }, "-")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, row.subPicName || "-"), React.createElement("td", null, React.createElement("select", {
+    }, row.requiresBrief ? "-" : "No Brief required")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, row.subPicName || "-"), React.createElement("td", null, React.createElement("select", {
       className: "select marketing-working-status",
       value: rowStatusValue,
       disabled: !canManageSchedule || updatingRowId === row.contentItemId,
@@ -6094,7 +6111,7 @@ function MarketingPlanWorkingSheetScreen() {
       disabled: !canManageRow || updatingRowId === row.contentItemId,
       title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
       onClick: () => handleRepairWorkingRowBriefLink(row)
-    }, "Repair Link") : rowHasLinkedCreativeRequest ? null : React.createElement("button", {
+    }, "Repair Link") : rowHasLinkedCreativeRequest || !row.requiresBrief ? null : React.createElement("button", {
       type: "button",
       className: "btn btn--primary btn--xs",
       disabled: !canManageRow || updatingRowId === row.contentItemId,
@@ -6210,7 +6227,19 @@ function MarketingPlanWorkingSheetScreen() {
     value: editForm.briefLink,
     onChange: event => updateEditForm("briefLink", event.target.value),
     placeholder: "https://..."
-  })), React.createElement("div", {
+  })), React.createElement("label", {
+    className: "field field--full"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Brief requirement"), React.createElement("select", {
+    className: "select",
+    value: editForm.requiresBrief ? "required" : "not_required",
+    onChange: event => updateEditForm("requiresBrief", event.target.value === "required")
+  }, React.createElement("option", {
+    value: "required"
+  }, "Brief required"), React.createElement("option", {
+    value: "not_required"
+  }, "No Brief required"))), React.createElement("div", {
     className: "field field--full"
   }, React.createElement("span", {
     className: "field__label"

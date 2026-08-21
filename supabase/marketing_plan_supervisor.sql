@@ -337,11 +337,12 @@ with base as (
     coalesce(mcp.placement_status, mci.status) as stored_status,
     wi.status as flowmate_status,
     mci.brief_link,
+    mci.requires_brief,
     coalesce(mci.first_assigned_at, mcp.first_assigned_at, mci.brief_link_added_at) as first_assigned_at,
     coalesce(mci.first_assigned_by_user_id, mci.brief_link_added_by_user_id) as assigned_by_user_id,
     mci.created_at,
     mci.updated_at,
-    not public.marketing_plan_is_non_empty_text(mci.brief_link) as missing_brief_link
+    mci.requires_brief and not public.marketing_plan_is_non_empty_text(mci.brief_link) as missing_brief_link
   from public.marketing_plans mp
   join public.marketing_campaigns mc on mc.plan_id = mp.id
   join public.marketing_content_items mci on mci.campaign_id = mc.id
@@ -358,7 +359,7 @@ enriched as (
     case
       when base.flowmate_status = 'review' then 'review'
       when base.flowmate_status = 'delivered' then 'ready_to_post'
-      when base.stored_status = 'planned' and base.missing_brief_link = false then 'assigned'
+      when base.stored_status = 'planned' and base.requires_brief and base.missing_brief_link = false then 'assigned'
       else base.stored_status
     end as effective_status,
     case
