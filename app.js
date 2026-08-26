@@ -735,7 +735,7 @@ function App() {
       alive = false;
       window.removeEventListener("flowmate:refresh-counts", refreshNavCounts);
     };
-  }, [authState.status, authState.user && authState.user.id, activeTeamKey]);
+  }, [authState.status, authState.user && authState.user.id, activeTeamKey, activeProduct]);
   useEffectApp(() => {
     if (authState.status !== "signed-in") {
       setNotifications([]);

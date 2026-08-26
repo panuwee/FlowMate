@@ -1972,14 +1972,14 @@ describe("Marketing Plan Supervisor backend SQL", () => {
 // Operational performance regressions
 // ============================================================================
 describe("FlowMate operational performance", () => {
-  it("refreshes nav counts for identity or workspace changes, not route-only transitions", () => {
+  it("refreshes nav counts for identity, workspace, or product changes", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const refreshStart = appJsx.indexOf("async function refreshNavCounts(event)");
     const effectEnd = appJsx.indexOf("  useEffectApp(() => {", refreshStart);
     const navEffect = appJsx.slice(refreshStart, effectEnd);
 
     expect(navEffect).toContain('window.addEventListener("flowmate:refresh-counts", refreshNavCounts)');
-    expect(navEffect).toContain("}, [authState.status, authState.user && authState.user.id, activeTeamKey]);");
+    expect(navEffect).toContain("}, [authState.status, authState.user && authState.user.id, activeTeamKey, activeProduct]);");
     expect(navEffect).not.toContain("route");
   });
 });

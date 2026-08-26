@@ -80,6 +80,17 @@ describe("Task Assign module separation", () => {
     expect(listData).toContain('const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate"');
   });
 
+  it("refreshes Attention Needed counts when switching between Task Assign and FlowMate", () => {
+    const app = readRepo("app.jsx");
+    const navCountsEffect = app.slice(
+      app.indexOf("async function refreshNavCounts"),
+      app.indexOf("useEffectApp(() => {", app.indexOf("async function refreshNavCounts") + 1),
+    );
+
+    expect(navCountsEffect).toContain("activeProduct");
+    expect(navCountsEffect).toContain("loadFlowMateNavigationRows");
+  });
+
   it("uses the same no-link approval transition for Board Delivered", () => {
     const board = readRepo("screens-b.jsx");
     const completeWork = board.slice(board.indexOf("async function completeWork"), board.indexOf("function handleDragStart"));
