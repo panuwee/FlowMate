@@ -661,6 +661,7 @@ function App() {
       if (TITLE_MAP[routeKey]) {
         setRoute(routeKey);
         window.location.hash = routeKey;
+        if (event && event.detail) event.detail.handled = true;
       }
     }
     window.addEventListener("flowmate:switch-flowmate-product", onSwitchFlowMateProduct);
@@ -2477,26 +2478,25 @@ function applyMarketingPlanCampaignVisibility(campaigns, includeHidden = false) 
   const hiddenKeys = new Set(getHiddenMarketingPlanCampaignKeys());
   return (campaigns || []).filter(campaign => !hiddenKeys.has(getMarketingPlanCampaignKey(campaign.name)));
 }
+function normalizeWholeHourTime(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^((?:[01]\d|2[0-3]):00)(?::00)?$/);
+  return match ? match[1] : "";
+}
 function formatMarketingPlanTime(value) {
-  if (!value) return "";
-  return String(value).slice(0, 5);
+  const text = String(value || "").trim();
+  if (!text) return "N/A";
+  return normalizeWholeHourTime(text) || text;
 }
 function normalizeMarketingPlanTimeInput(value) {
-  const text = String(value || "").trim();
-  const compactMatch = text.match(/^(\d{1,2})(\d{2})$/);
-  const colonMatch = text.match(/^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/);
-  const match = colonMatch || compactMatch;
-  if (!match) return "";
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return "";
-  }
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return normalizeWholeHourTime(value);
 }
 function normalizeMarketingPlanPublishTimeOption(value) {
-  const normalized = normalizeMarketingPlanTimeInput(value);
-  return MARKETING_PLAN_PUBLISH_TIME_OPTIONS.includes(normalized) ? normalized : "";
+  return normalizeWholeHourTime(value);
+}
+function getMarketingPlanLegacyPublishTimeOption(value) {
+  const text = String(value || "").trim();
+  return text && !normalizeWholeHourTime(text) ? text : "";
 }
 function formatMarketingPlanDate(value) {
   if (!value) return "-";
@@ -2558,6 +2558,16 @@ function getMarketingPlanCalendarViewDays(selectedMonth, viewMode) {
     }, (_, index) => addMarketingPlanDays(start, index));
   }
   return getMarketingPlanTimelineWindow(selectedMonth).days.map(day => day.key);
+}
+function sortMarketingPlanCalendarRowsByTime(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const aTime = normalizeWholeHourTime(a && a.publishTime);
+    const bTime = normalizeWholeHourTime(b && b.publishTime);
+    if (!aTime && !bTime) return 0;
+    if (!aTime) return 1;
+    if (!bTime) return -1;
+    return aTime.localeCompare(bTime);
+  });
 }
 function getMarketingPlanCalendarRangeLabel(days, viewMode, selectedMonth) {
   if (viewMode === "month" || viewMode === "schedule" && (!days || days.length > 1)) {
@@ -2713,7 +2723,13 @@ const MARKETING_PLAN_FUNCTION_FILTER_OPTIONS = [{
 }];
 const MARKETING_PLAN_ASSET_TYPES = ["Banner", "Video", "Shorts/Reels", "Story", "Album", "Cover/Profile", "PR", "GIF", "Live"];
 const MARKETING_PLAN_CONTENT_TIERS = ["S", "A", "B", "C"];
-const MARKETING_PLAN_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
+const MARKETING_PLAN_PUBLISH_TIME_OPTIONS = [
+  { value: "", label: "N/A" },
+  ...Array.from({ length: 24 }, (_, hour) => {
+    const value = `${String(hour).padStart(2, "0")}:00`;
+    return { value, label: value };
+  })
+];
 const MARKETING_PLAN_WORKING_STATUS_OPTIONS = [{
   value: "planned",
   label: "Planned"
@@ -2756,7 +2772,7 @@ function getDefaultMarketingPlanWorkingSheetForm() {
     productEvent: "",
     team: "",
     launchDate: today,
-    publishTime: "11:00",
+    publishTime: "",
     assetType: "Banner",
     details: "",
     contentTier: "B",
@@ -2802,14 +2818,14 @@ function getFlowMateCreativeAssetTypeFromSubtype(subtype) {
   return "static-graphic";
 }
 function getMarketingPlanWorkingRowPublishTime(row) {
-  const directTime = normalizeMarketingPlanTimeInput(row && row.publishTime);
+  const directTime = row && row.publishTime ? formatMarketingPlanTime(row.publishTime) : "";
   if (directTime) return directTime;
   const placements = Array.isArray(row && row.placements) ? row.placements : [];
   for (const placement of placements) {
-    const placementTime = normalizeMarketingPlanTimeInput(placement && placement.publishTime);
+    const placementTime = placement && placement.publishTime ? formatMarketingPlanTime(placement.publishTime) : "";
     if (placementTime) return placementTime;
   }
-  return "11:00";
+  return "";
 }
 function createFlowMateDraftFromMarketingPlanRow(row) {
   const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
@@ -2864,11 +2880,146 @@ function openFlowMateCreativeBriefFromMarketingRow(row) {
   if (window.sessionStorage) {
     window.sessionStorage.setItem("flowmate:activeProduct", "flowmate");
   }
+  const switchDetail = {
+    route: "create",
+    handled: false
+  };
   window.dispatchEvent(new CustomEvent("flowmate:switch-flowmate-product", {
-    detail: {
-      route: "create"
-    }
+    detail: switchDetail
   }));
+  if (!switchDetail.handled) {
+    throw new Error("Create Brief navigation was not handled.");
+  }
+}
+function canDuplicateMarketingWorkingRow(row, currentUser) {
+  if (!row || row.requiresBrief !== true || !currentUser) return false;
+  if (currentUser.role === "admin") return true;
+  const currentUserId = String(currentUser.id || "");
+  return Boolean(currentUserId && (row.picUserId === currentUserId || row.subPicUserId === currentUserId));
+}
+function getMarketingWorkingDuplicateDraft(row) {
+  return {
+    launchDate: String(row && row.publishDate || ""),
+    publishTime: normalizeMarketingPlanPublishTimeOption(row && row.publishTime) || getMarketingPlanLegacyPublishTimeOption(row && row.publishTime)
+  };
+}
+function createMarketingWorkingDuplicateActionGuard() {
+  let sourceId = "";
+  let inFlight = false;
+  return {
+    activate(nextSourceId) {
+      const normalizedSourceId = String(nextSourceId || "");
+      if (!normalizedSourceId || inFlight) return false;
+      sourceId = normalizedSourceId;
+      return true;
+    },
+    cancel() {
+      if (inFlight) return false;
+      sourceId = "";
+      return true;
+    },
+    async run(requestSourceId, action) {
+      const normalizedSourceId = String(requestSourceId || "");
+      if (!normalizedSourceId || normalizedSourceId !== sourceId || inFlight) {
+        return {
+          status: "ignored"
+        };
+      }
+      inFlight = true;
+      try {
+        return await action();
+      } finally {
+        sourceId = "";
+        inFlight = false;
+      }
+    },
+    getState() {
+      return {
+        sourceId,
+        inFlight
+      };
+    }
+  };
+}
+async function runMarketingWorkingRowDuplicate(sourceRow, launchDate, publishTime, dependencies = {}) {
+  const rpc = dependencies.rpc || ((name, params) => window.flowmateSupabase.rpc(name, params));
+  const refreshRows = dependencies.refreshRows || (() => Promise.resolve([]));
+  const openBrief = dependencies.openBrief || openFlowMateCreativeBriefFromMarketingRow;
+  const unknownResult = {
+    status: "unknown",
+    message: "The duplicate result could not be confirmed. Check the refreshed Working Sheet before retrying."
+  };
+  async function forceRefresh() {
+    try {
+      const refreshedRows = await refreshRows();
+      return {
+        ok: true,
+        rows: Array.isArray(refreshedRows) ? refreshedRows : []
+      };
+    } catch (error) {
+      console.error("[Marketing Plan] Duplicate refresh failed:", error);
+      return {
+        ok: false,
+        rows: [],
+        error
+      };
+    }
+  }
+  let rpcResult;
+  try {
+    rpcResult = await rpc("marketing_plan_duplicate_working_row", {
+      p_source_content_item_id: sourceRow && sourceRow.contentItemId,
+      p_launch_date: launchDate,
+      p_publish_time: publishTime || null
+    });
+  } catch (error) {
+    console.error("[Marketing Plan] Duplicate RPC outcome is unknown:", error);
+    await forceRefresh();
+    return unknownResult;
+  }
+  const rpcData = Array.isArray(rpcResult && rpcResult.data) ? rpcResult.data[0] : rpcResult && rpcResult.data;
+  const contentItemId = String(rpcData && rpcData.content_item_id || "");
+  if (rpcResult && rpcResult.error || !contentItemId) {
+    if (rpcResult && rpcResult.error) console.error("[Marketing Plan] Duplicate RPC outcome is unknown:", rpcResult.error);
+    await forceRefresh();
+    return unknownResult;
+  }
+  const refreshResult = await forceRefresh();
+  if (!refreshResult.ok) {
+    return {
+      status: "created_refresh_failed",
+      contentItemId,
+      message: "The duplicate row was created, but the Working Sheet could not refresh. Refresh the Working Sheet before using Create Brief."
+    };
+  }
+  const createdRow = refreshResult.rows.find(row => String(row && row.contentItemId || "") === contentItemId);
+  if (!createdRow) {
+    return {
+      status: "created_not_found",
+      contentItemId,
+      message: "The duplicate row was created but is not in the current timeline window. Find it by Launch Date before using Create Brief."
+    };
+  }
+  const safeCreatedRow = {
+    ...createdRow,
+    briefLink: "",
+    flowmateWorkItemId: "",
+    flowmateDisplayId: ""
+  };
+  try {
+    await openBrief(safeCreatedRow);
+    return {
+      status: "opened",
+      contentItemId
+    };
+  } catch (error) {
+    console.error("[Marketing Plan] Duplicate row was created but Create Brief could not open:", error);
+    return {
+      status: "created_not_opened",
+      contentItemId,
+      message: "The duplicate row was created. Use its Create Brief action from the refreshed Working Sheet."
+    };
+  }
 }
 function getMarketingPlanChannelOptions(rows, selectedMonth) {
   return MARKETING_PLAN_CHANNELS.map(channel => channel.key);
@@ -2918,55 +3069,54 @@ function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel
 function getMarketingPlanWorkingRowTeam(row) {
   return String(row && (row.contentTeam || row.campaignTeam || row.market) || "").trim();
 }
-function getMarketingPlanWorkingOwnerEntries(row) {
-  const entries = [{
-    id: row && row.picUserId || "",
-    name: row && row.picName || ""
-  }, {
-    id: row && row.subPicUserId || "",
-    name: row && row.subPicName || ""
-  }];
-  const seen = new Set();
-  return entries.map(owner => {
-    const name = String(owner.name || "").trim();
-    const key = owner.id ? `id:${owner.id}` : name ? `name:${name.toLowerCase()}` : "";
-    return {
-      key,
-      name
-    };
-  }).filter(owner => owner.key && !seen.has(owner.key) && seen.add(owner.key));
-}
-function getMarketingPlanWorkingFilterOptions(rows) {
-  const teamsByKey = new Map();
-  const ownersByKey = new Map();
-  (rows || []).forEach(row => {
-    const team = getMarketingPlanWorkingRowTeam(row);
-    if (team && !teamsByKey.has(team.toLowerCase())) teamsByKey.set(team.toLowerCase(), team);
-    getMarketingPlanWorkingOwnerEntries(row).forEach(owner => {
-      if (!ownersByKey.has(owner.key)) ownersByKey.set(owner.key, owner.name);
-    });
-  });
-  return {
-    teams: Array.from(teamsByKey.values()).sort((a, b) => a.localeCompare(b)),
-    owners: Array.from(ownersByKey.entries()).map(([key, name]) => ({
-      key,
-      name
-    })).sort((a, b) => a.name.localeCompare(b.name))
-  };
-}
 function filterMarketingPlanWorkingRows(rows, filters = {}) {
-  const status = filters.status || "all";
-  const team = filters.team || "all";
-  const owner = filters.owner || "all";
+  const currentUserId = String(filters.currentUserId || "");
+  const myTasksOnly = filters.myTasksOnly === true;
+  const startDate = String(filters.startDate || "");
+  const endDate = String(filters.endDate || "");
   const search = String(filters.search || "").trim().toLowerCase();
+  if (startDate && endDate && endDate < startDate) return [];
   return (rows || []).filter(row => {
-    if (status !== "all" && getMarketingPlanWorkingSheetStatus(row) !== status) return false;
-    if (team !== "all" && getMarketingPlanWorkingRowTeam(row).toLowerCase() !== team.toLowerCase()) return false;
-    if (owner !== "all" && !getMarketingPlanWorkingOwnerEntries(row).some(entry => entry.key === owner)) return false;
+    if (myTasksOnly && (!currentUserId || row.picUserId !== currentUserId && row.subPicUserId !== currentUserId)) return false;
+    const launchDate = String(row.publishDate || "").slice(0, 10);
+    if (startDate && (!launchDate || launchDate < startDate)) return false;
+    if (endDate && (!launchDate || launchDate > endDate)) return false;
     if (!search) return true;
     const searchable = [row.campaignName, row.contentTitle, row.format, row.contentTier, row.picName, row.subPicName, row.briefLink, getMarketingPlanWorkingRowTeam(row), ...(row.channels || []).map(getMarketingPlanChannelLabel)].filter(Boolean).join(" ").toLowerCase();
     return searchable.includes(search);
   });
+}
+function resolveMarketingPlanWorkingRowsView(rows, filters = {}, lastValidDateState = {}) {
+  const requestedStartDate = String(filters.startDate || "");
+  const requestedEndDate = String(filters.endDate || "");
+  const hasInvalidDateRange = Boolean(requestedStartDate && requestedEndDate && requestedEndDate < requestedStartDate);
+  const appliedStartDate = hasInvalidDateRange ? String(lastValidDateState.startDate || "") : requestedStartDate;
+  const appliedEndDate = hasInvalidDateRange ? String(lastValidDateState.endDate || "") : requestedEndDate;
+  const appliedFilters = {
+    currentUserId: filters.currentUserId,
+    myTasksOnly: filters.myTasksOnly,
+    startDate: appliedStartDate,
+    endDate: appliedEndDate,
+    search: filters.search
+  };
+  const visibleRows = filterMarketingPlanWorkingRows(rows, appliedFilters);
+  const rowsBeforeSearch = filterMarketingPlanWorkingRows(rows, {
+    ...appliedFilters,
+    search: ""
+  });
+  const currentUserId = String(filters.currentUserId || "");
+  const myTasksOnly = filters.myTasksOnly === true;
+  const hasAssignedRowsForCurrentUser = !myTasksOnly || Boolean(currentUserId && (rows || []).some(row => row.picUserId === currentUserId || row.subPicUserId === currentUserId));
+  const nextEmptyReason = myTasksOnly && !hasAssignedRowsForCurrentUser ? "No tasks are assigned to you in this month." : (appliedStartDate || appliedEndDate) && rowsBeforeSearch.length === 0 ? "No tasks match the selected Launch Date range." : "No rows match the selected filters.";
+  return {
+    visibleRows,
+    emptyReason: hasInvalidDateRange ? lastValidDateState.emptyReason || nextEmptyReason : nextEmptyReason,
+    nextValidDateState: hasInvalidDateRange ? lastValidDateState : {
+      startDate: requestedStartDate,
+      endDate: requestedEndDate,
+      emptyReason: nextEmptyReason
+    }
+  };
 }
 function getMarketingPlanChannelLabel(channel) {
   const normalized = channel || "other";
@@ -3012,6 +3162,27 @@ function getMarketingPlanViewStatus(row) {
 }
 function getMarketingPlanWorkingSheetStatus(row) {
   return normalizeMarketingPlanWorkingStatus(row && row.placementStatus);
+}
+function getMarketingPlanTierClass(tier) {
+  const normalized = String(tier || "").trim().toUpperCase();
+  return {
+    S: "marketing-tier--s",
+    A: "marketing-tier--a",
+    B: "marketing-tier--b",
+    C: "marketing-tier--c"
+  }[normalized] || "";
+}
+function getMarketingPlanWorkingStatusClass(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  const canonical = normalized === "ready" ? "ready_to_post" : normalized === "schedule" ? "scheduled" : normalized;
+  return {
+    planned: "marketing-status--planned",
+    assigned: "marketing-status--assigned",
+    review: "marketing-status--review",
+    ready_to_post: "marketing-status--ready-to-post",
+    scheduled: "marketing-status--schedule",
+    posted: "marketing-status--posted"
+  }[canonical] || "marketing-status--planned";
 }
 function getMarketingPlanStatusClass(status) {
   const normalized = normalizeMarketingPlanWorkingStatus(status);
@@ -3147,6 +3318,94 @@ function sortMarketingPlanTimelineRows(rows, orderBy = "publish_date") {
 function invalidateMarketingPlanDataCache() {
   marketingPlanTimelineCache.clear();
   marketingPlanMonthOptionsCache = null;
+}
+async function loadMarketingWorkingMyTasksPreference(userId) {
+  if (!userId) return false;
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const result = await window.flowmateSupabase.from("user_ui_preferences").select("marketing_working_my_tasks").eq("user_id", userId).maybeSingle();
+  if (result.error) throw result.error;
+  return Boolean(result.data && result.data.marketing_working_my_tasks);
+}
+async function saveMarketingWorkingMyTasksPreference(userId, enabled) {
+  if (!userId) return;
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready. Please refresh after the app loads.");
+  }
+  const result = await window.flowmateSupabase.from("user_ui_preferences").upsert({
+    user_id: userId,
+    marketing_working_my_tasks: Boolean(enabled)
+  }, {
+    onConflict: "user_id"
+  });
+  if (result.error) throw result.error;
+}
+function createMarketingWorkingMyTasksPreferenceController(options = {}) {
+  const loadPreference = options.loadPreference || loadMarketingWorkingMyTasksPreference;
+  const savePreference = options.savePreference || saveMarketingWorkingMyTasksPreference;
+  const onValue = options.onValue || (() => {});
+  const onMessage = options.onMessage || (() => {});
+  let accountId = "";
+  let accountVersion = 0;
+  let localChangeVersion = 0;
+  let saveSequence = 0;
+  let saveChain = Promise.resolve();
+  function isCurrentAccount(requestAccountId, requestAccountVersion) {
+    return accountId === requestAccountId && accountVersion === requestAccountVersion;
+  }
+  function setAccount(nextAccountId) {
+    accountId = String(nextAccountId || "");
+    accountVersion += 1;
+    localChangeVersion += 1;
+    saveSequence += 1;
+    const requestAccountId = accountId;
+    const requestAccountVersion = accountVersion;
+    const requestLocalChangeVersion = localChangeVersion;
+    onValue(false);
+    onMessage("");
+    if (!requestAccountId) return Promise.resolve();
+    return Promise.resolve(loadPreference(requestAccountId)).then(enabled => {
+      if (!isCurrentAccount(requestAccountId, requestAccountVersion) || localChangeVersion !== requestLocalChangeVersion) return;
+      onValue(Boolean(enabled));
+    }).catch(error => {
+      if (!isCurrentAccount(requestAccountId, requestAccountVersion) || localChangeVersion !== requestLocalChangeVersion) return;
+      console.warn("[Marketing Plan] My Tasks preference load failed:", error && error.message);
+      onValue(false);
+      onMessage("My Tasks preference could not be loaded. It is off for this account.");
+    });
+  }
+  function setLocalValue(nextEnabled) {
+    const enabled = Boolean(nextEnabled);
+    localChangeVersion += 1;
+    saveSequence += 1;
+    const requestAccountId = accountId;
+    const requestAccountVersion = accountVersion;
+    const requestSaveSequence = saveSequence;
+    onValue(enabled);
+    onMessage("");
+    if (!requestAccountId) return Promise.resolve();
+    const saveRequest = saveChain.then(() => savePreference(requestAccountId, enabled));
+    const guardedRequest = saveRequest.catch(error => {
+      if (!isCurrentAccount(requestAccountId, requestAccountVersion) || saveSequence !== requestSaveSequence) return;
+      console.warn("[Marketing Plan] My Tasks preference save failed:", error && error.message);
+      onMessage(enabled ? "My Tasks is active, but the preference could not be saved." : "My Tasks preference could not be saved.");
+    });
+    saveChain = guardedRequest.then(() => undefined);
+    return guardedRequest;
+  }
+  function invalidateAccount(invalidatedAccountId) {
+    if (accountId !== String(invalidatedAccountId || "")) return;
+    accountId = "";
+    accountVersion += 1;
+    localChangeVersion += 1;
+    saveSequence += 1;
+  }
+  return {
+    setAccount,
+    setLocalValue,
+    invalidateAccount
+  };
 }
 async function loadMarketingPlanAvailableMonths(options = {}) {
   const force = options.force === true;
@@ -3529,13 +3788,14 @@ async function updateMarketingPlanWorkingSheetTime(contentItemId, publishTime) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
   if (!contentItemId) throw new Error("Content item is missing.");
-  const normalizedTime = normalizeMarketingPlanPublishTimeOption(publishTime);
-  if (!normalizedTime) {
-    throw new Error("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
+  const rawTime = String(publishTime || "").trim();
+  const normalizedTime = normalizeWholeHourTime(rawTime);
+  if (rawTime && !normalizedTime) {
+    throw new Error("Time must be N/A or a whole hour.");
   }
   const result = await window.flowmateSupabase.rpc("marketing_plan_update_working_row_time", {
     p_content_item_id: contentItemId,
-    p_publish_time: normalizedTime
+    p_publish_time: normalizedTime || null
   });
   if (result.error) throw result.error;
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
@@ -3613,8 +3873,10 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!row || !row.contentItemId) throw new Error("Content item is missing.");
   const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : [];
   if (selectedChannels.length === 0) throw new Error("Select at least one Channel Tag.");
-  const normalizedTime = normalizeMarketingPlanTimeInput(form.publishTime);
-  if (!normalizedTime) throw new Error("Time must use HH:MM, for example 15:00.");
+  const rawTime = String(form.publishTime || "").trim();
+  const normalizedTime = normalizeWholeHourTime(rawTime);
+  if (rawTime && !normalizedTime) throw new Error("Time must be N/A or a whole hour.");
+  const publishTime = normalizedTime || null;
   const contentPayload = {
     title: String(form.contentTitle || "").trim(),
     details: String(form.details || form.contentTitle || "").trim(),
@@ -3623,7 +3885,7 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
     brief_link: String(form.briefLink || "").trim() || null,
     requires_brief: form.requiresBrief !== false,
     source_start_date: form.publishDate || null,
-    source_start_time: normalizedTime
+    source_start_time: publishTime
   };
   if (!contentPayload.title) throw new Error("Content is required.");
   const contentResult = await window.flowmateSupabase.from("marketing_content_items").update(contentPayload).eq("id", row.contentItemId);
@@ -3635,8 +3897,8 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
     });
     if (subPicResult.error) throw subPicResult.error;
   }
-  await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, normalizedTime);
-  await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime);
+  await syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selectedChannels, publishTime);
+  await syncMarketingPlanLinkedFlowMateSchedule(row, form, publishTime);
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
     detail: {
       reason: "marketing_plan_working_sheet_row_edited"
@@ -3660,16 +3922,13 @@ async function deleteMarketingPlanWorkingSheetRow(row) {
   }));
   return true;
 }
-function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all", matchingGroupedRows = null) {
-  const matchingContentIds = Array.isArray(matchingGroupedRows) ? new Set(matchingGroupedRows.map(row => row.contentItemId).filter(Boolean)) : null;
-  const visibleRows = filterMarketingPlanRows(rows, selectedMonth, selectedChannel).filter(row => !matchingContentIds || matchingContentIds.has(row.contentItemId));
-  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channel", "Publish Date", "Publish Time", "Placement Status", "Note"];
-  const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName, row.campaignTeam || row.contentTeam || row.market || "", row.contentTitle, row.format, row.contentTier, row.picName, row.subPicName, getMarketingPlanChannelLabel(row.channel), row.publishDate, formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(row.placementStatus), row.placementNote]);
-  const channelSuffix = selectedChannel === "all" ? "all-channels" : selectedChannel;
-  const filename = `marketing-plan-${selectedMonth || "no-month"}-${channelSuffix}.csv`;
+function exportMarketingPlanRowsCsv(visibleRows, selectedMonth) {
+  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channels", "Launch Date", "Publish Time", "Marketing Status", "Note"];
+  const dataRows = (visibleRows || []).map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName || "", getMarketingPlanWorkingRowTeam(row), row.contentTitle || "", row.format || "", row.contentTier || "", row.picName || "", row.subPicName || "", (row.channels || []).map(getMarketingPlanChannelLabel).join(" | "), row.publishDate || "", formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(getMarketingPlanWorkingSheetStatus(row)), row.placementNote || ""]);
+  const filename = `marketing-plan-${selectedMonth || "no-month"}-current-working.csv`;
   if (window.flowmateDownloadCsv) {
     window.flowmateDownloadCsv(filename, headerLabels, dataRows);
-    return visibleRows.length;
+    return (visibleRows || []).length;
   }
   const csv = [headerLabels, ...dataRows].map(row => row.map(value => `"${String(value == null ? "" : value).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], {
@@ -3683,7 +3942,7 @@ function exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel = "all"
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-  return visibleRows.length;
+  return (visibleRows || []).length;
 }
 function MarketingPlanSubPicSearch({
   inputId,
@@ -5064,7 +5323,7 @@ function MarketingPlanCalendarScreen() {
   })), ...monthDays];
   const filteredRows = filterMarketingPlanRows(publishableRows, selectedMonth, selectedChannel, "", true);
   const visibleRows = filterMarketingPlanRowsByVisibleCampaignTags(filteredRows, campaignCatalogRows);
-  const rowsByDate = visibleRows.reduce((map, row) => {
+  const rowsByDate = sortMarketingPlanCalendarRowsByTime(visibleRows).reduce((map, row) => {
     if (!map.has(row.publishDate)) map.set(row.publishDate, []);
     map.get(row.publishDate).push(row);
     return map;
@@ -5099,6 +5358,18 @@ function MarketingPlanCalendarScreen() {
     }, formatMarketingPlanTime(row.publishTime) || "-"), renderStatusBadge(getMarketingPlanViewStatus(row)), row.picName && React.createElement("span", {
       className: "muted"
     }, row.picName)));
+  }
+  function renderCalendarScheduleRow(row, timeLabel) {
+    return React.createElement("div", {
+      key: row.placementId || `${row.contentItemId}-${row.channel}-${row.publishTime}`,
+      className: "marketing-calendar-schedule__item"
+    }, React.createElement("span", {
+      className: "mono"
+    }, timeLabel), React.createElement("span", {
+      className: "badge badge--neutral"
+    }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
+      className: "strong"
+    }, row.campaignName), React.createElement("span", null, row.contentTitle), renderStatusBadge(getMarketingPlanViewStatus(row)));
   }
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
@@ -5214,7 +5485,9 @@ function MarketingPlanCalendarScreen() {
   }, calendarViewMode === "schedule" ? React.createElement("div", {
     className: "marketing-calendar-schedule"
   }, scheduleDayKeys.map(dayKey => {
-    const dayRows = (rowsByDate.get(dayKey) || []).sort((a, b) => String(a.publishTime || "").localeCompare(String(b.publishTime || "")));
+    const dayRows = sortMarketingPlanCalendarRowsByTime(rowsByDate.get(dayKey) || []);
+    const timedRows = dayRows.filter(row => normalizeWholeHourTime(row.publishTime));
+    const timeNotSetRows = dayRows.filter(row => !normalizeWholeHourTime(row.publishTime));
     if (dayRows.length === 0) return null;
     return React.createElement("div", {
       key: dayKey,
@@ -5227,16 +5500,11 @@ function MarketingPlanCalendarScreen() {
       className: "muted"
     }, formatMarketingPlanShortWeekday(dayKey))), React.createElement("div", {
       className: "marketing-calendar-schedule__items"
-    }, dayRows.map(row => React.createElement("div", {
-      key: row.placementId || `${row.contentItemId}-${row.channel}-${row.publishTime}`,
-      className: "marketing-calendar-schedule__item"
-    }, React.createElement("span", {
-      className: "mono"
-    }, formatMarketingPlanTime(row.publishTime) || "All day"), React.createElement("span", {
-      className: "badge badge--neutral"
-    }, getMarketingPlanChannelLabel(row.channel)), React.createElement("span", {
-      className: "strong"
-    }, row.campaignName), React.createElement("span", null, row.contentTitle), renderStatusBadge(getMarketingPlanViewStatus(row))))));
+    }, timedRows.map(row => renderCalendarScheduleRow(row, formatMarketingPlanTime(row.publishTime))), timeNotSetRows.length > 0 && React.createElement("div", {
+      className: "marketing-calendar-schedule__time-not-set"
+    }, React.createElement("div", {
+      className: "muted strong"
+    }, "Time not set"), timeNotSetRows.map(row => renderCalendarScheduleRow(row, formatMarketingPlanTime(row.publishTime))))));
   })) : calendarViewMode === "month" ? React.createElement("div", {
     className: "marketing-calendar-month-grid"
   }, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(dayName => React.createElement("div", {
@@ -5300,24 +5568,41 @@ function MarketingPlanCalendarScreen() {
   }, React.createElement("div", {
     className: "marketing-calendar-time-grid__hour"
   }, String(hour).padStart(2, "0"), ":00"), viewDays.map(dayKey => {
-    const dayRows = (rowsByDate.get(dayKey) || []).filter(row => Number(String(row.publishTime || "00").slice(0, 2)) === hour);
+    const dayRows = (rowsByDate.get(dayKey) || []).filter(row => {
+      const wholeHour = normalizeWholeHourTime(row.publishTime);
+      return wholeHour && Number(wholeHour.slice(0, 2)) === hour;
+    });
     return React.createElement("div", {
       key: `${dayKey}-${hour}`,
       className: "marketing-calendar-time-grid__slot"
     }, dayRows.map(row => renderCalendarPlacement(row, {
       compact: true
     })));
-  })))))));
+  }))), React.createElement(React.Fragment, {
+    key: "time-not-set"
+  }, React.createElement("div", {
+    className: "marketing-calendar-time-grid__hour"
+  }, "Time not set"), viewDays.map(dayKey => {
+    const dayRows = (rowsByDate.get(dayKey) || []).filter(row => !normalizeWholeHourTime(row.publishTime));
+    return React.createElement("div", {
+      key: `${dayKey}-time-not-set`,
+      className: "marketing-calendar-time-grid__slot marketing-calendar-time-grid__time-not-set",
+      "data-date": dayKey
+    }, dayRows.map(row => renderCalendarPlacement(row, {
+      compact: true
+    })));
+  }))))));
 }
 function MarketingPlanWorkingSheetScreen() {
   const [rows, setRows] = useStateApp([]);
   const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
   const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
-  const [selectedChannel, setSelectedChannel] = useStateApp("all");
-  const [selectedWorkingStatus, setSelectedWorkingStatus] = useStateApp("all");
-  const [selectedWorkingTeam, setSelectedWorkingTeam] = useStateApp("all");
-  const [selectedWorkingOwner, setSelectedWorkingOwner] = useStateApp("all");
+  const [myTasksOnly, setMyTasksOnly] = useStateApp(false);
+  const [workingStartDate, setWorkingStartDate] = useStateApp("");
+  const [workingEndDate, setWorkingEndDate] = useStateApp("");
+  const [workingDateError, setWorkingDateError] = useStateApp("");
   const [workingSearch, setWorkingSearch] = useStateApp("");
+  const [workingPreferenceMessage, setWorkingPreferenceMessage] = useStateApp("");
   const [campaignOptions, setCampaignOptions] = useStateApp(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
   const [subPicUsers, setSubPicUsers] = useStateApp(() => window.FLOWMATE_MENTION_USERS || []);
   const [exportMessage, setExportMessage] = useStateApp("");
@@ -5333,25 +5618,31 @@ function MarketingPlanWorkingSheetScreen() {
     status: "loading",
     message: "Loading Marketing Plan working sheet..."
   });
+  const [duplicateSourceRow, setDuplicateSourceRow] = useStateApp(null);
+  const [duplicateLaunchDate, setDuplicateLaunchDate] = useStateApp("");
+  const [duplicatePublishTime, setDuplicatePublishTime] = useStateApp("");
+  const [duplicateSameDateConfirmed, setDuplicateSameDateConfirmed] = useStateApp(false);
+  const [duplicateInFlightContentItemId, setDuplicateInFlightContentItemId] = useStateApp("");
   async function loadWorkingSheetRows(aliveRef, options = {}) {
     try {
       const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, options);
       if (aliveRef && !aliveRef.alive) return;
       setRows(normalizedRows);
-      setSelectedChannel("all");
       setLoadState({
         status: normalizedRows.length ? "live" : "empty",
         message: normalizedRows.length ? "Live Marketing Plan working sheet data" : "No Marketing Plan data yet. Add the first row below."
       });
+      return normalizedRows;
     } catch (error) {
       if (aliveRef && !aliveRef.alive) return;
       console.error("[Marketing Plan] Working Sheet load failed:", error);
       setRows([]);
-      setSelectedChannel("all");
       setLoadState({
         status: "error",
         message: window.flowmateUserError ? window.flowmateUserError(error, "Marketing Plan working sheet load failed. Run supabase/marketing_plan.sql first.") : "Marketing Plan working sheet load failed. Run supabase/marketing_plan.sql first."
       });
+      if (options.throwOnError) throw error;
+      return [];
     }
   }
   useEffectApp(() => {
@@ -5408,19 +5699,43 @@ function MarketingPlanWorkingSheetScreen() {
       window.removeEventListener("flowmate:marketing-campaigns-updated", syncCampaignOptions);
     };
   }, []);
-  const channelOptions = useMemoApp(() => getMarketingPlanChannelOptions(rows, selectedMonth), [rows, selectedMonth]);
-  const groupedWorkingRows = useMemoApp(() => groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel), [rows, selectedMonth, selectedChannel]);
-  const workingFilterOptions = useMemoApp(() => getMarketingPlanWorkingFilterOptions(groupedWorkingRows), [groupedWorkingRows]);
-  const visibleRows = useMemoApp(() => filterMarketingPlanWorkingRows(groupedWorkingRows, {
-    status: selectedWorkingStatus,
-    team: selectedWorkingTeam,
-    owner: selectedWorkingOwner,
+  const currentUser = window.FLOWMATE_CURRENT_USER || {};
+  const currentUserId = currentUser.id || "";
+  const duplicateActionGuardRef = useRefApp(null);
+  if (!duplicateActionGuardRef.current) duplicateActionGuardRef.current = createMarketingWorkingDuplicateActionGuard();
+  const myTasksPreferenceControllerRef = useRefApp(null);
+  if (!myTasksPreferenceControllerRef.current) {
+    myTasksPreferenceControllerRef.current = createMarketingWorkingMyTasksPreferenceController({
+      onValue: setMyTasksOnly,
+      onMessage: setWorkingPreferenceMessage
+    });
+  }
+  useEffectApp(() => {
+    const preferenceController = myTasksPreferenceControllerRef.current;
+    preferenceController.setAccount(currentUserId);
+    return () => {
+      preferenceController.invalidateAccount(currentUserId);
+    };
+  }, [currentUserId]);
+  const groupedWorkingRows = useMemoApp(() => groupMarketingPlanWorkingSheetRows(rows, selectedMonth, "all"), [rows, selectedMonth]);
+  const hasInvalidWorkingDateRange = Boolean(workingStartDate && workingEndDate && workingEndDate < workingStartDate);
+  const lastValidWorkingDateStateRef = useRefApp({
+    startDate: "",
+    endDate: "",
+    emptyReason: "No rows match the selected filters."
+  });
+  const workingRowsView = useMemoApp(() => resolveMarketingPlanWorkingRowsView(groupedWorkingRows, {
+    currentUserId,
+    myTasksOnly,
+    startDate: workingStartDate,
+    endDate: workingEndDate,
     search: workingSearch
-  }), [groupedWorkingRows, selectedWorkingStatus, selectedWorkingTeam, selectedWorkingOwner, workingSearch]);
-  const visibleContentIds = useMemoApp(() => new Set(visibleRows.map(row => row.contentItemId).filter(Boolean)), [visibleRows]);
-  const visiblePlacementRows = useMemoApp(() => filterMarketingPlanRows(rows, selectedMonth, selectedChannel).filter(row => visibleContentIds.has(row.contentItemId)), [rows, selectedMonth, selectedChannel, visibleContentIds]);
-  const activeWorkingFilters = [selectedMonth ? getMarketingPlanMonthLabel(selectedMonth) : "", selectedChannel !== "all" ? getMarketingPlanChannelLabel(selectedChannel) : "", selectedWorkingStatus !== "all" ? getMarketingPlanStatusLabel(selectedWorkingStatus) : "", selectedWorkingTeam !== "all" ? selectedWorkingTeam : "", selectedWorkingOwner !== "all" ? (workingFilterOptions.owners.find(owner => owner.key === selectedWorkingOwner) || {}).name : "", workingSearch.trim() ? `Search: ${workingSearch.trim()}` : ""].filter(Boolean);
-  const hasClearableWorkingFilters = selectedChannel !== "all" || selectedWorkingStatus !== "all" || selectedWorkingTeam !== "all" || selectedWorkingOwner !== "all" || Boolean(workingSearch.trim());
+  }, lastValidWorkingDateStateRef.current), [groupedWorkingRows, currentUserId, myTasksOnly, workingStartDate, workingEndDate, workingSearch]);
+  if (!hasInvalidWorkingDateRange) lastValidWorkingDateStateRef.current = workingRowsView.nextValidDateState;
+  const visibleRows = workingRowsView.visibleRows;
+  const workingEmptyMessage = workingRowsView.emptyReason;
+  const activeWorkingFilters = [selectedMonth ? getMarketingPlanMonthLabel(selectedMonth) : "", myTasksOnly ? "My Tasks" : "", workingStartDate ? `From: ${workingStartDate}` : "", workingEndDate ? `To: ${workingEndDate}` : "", workingSearch.trim() ? `Search: ${workingSearch.trim()}` : ""].filter(Boolean);
+  const hasClearableWorkingFilters = Boolean(workingStartDate || workingEndDate || workingDateError || workingSearch.trim());
   function canManageMarketingPlanWorkingRow(row) {
     const currentUser = window.FLOWMATE_CURRENT_USER || {};
     if (currentUser.role === "admin") return true;
@@ -5446,7 +5761,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function normalizeSheetTimeValue() {
     const normalizedTime = normalizeMarketingPlanPublishTimeOption(sheetForm.publishTime);
-    updateSheetForm("publishTime", normalizedTime || "11:00");
+    updateSheetForm("publishTime", normalizedTime || "");
   }
   function startEditWorkingRow(row) {
     if (!canManageMarketingPlanWorkingRow(row)) {
@@ -5458,7 +5773,7 @@ function MarketingPlanWorkingSheetScreen() {
     setEditForm({
       contentTitle: row.contentTitle || "",
       publishDate: row.publishDate || flowMateTodayDateKey(),
-      publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || "",
+      publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || getMarketingPlanLegacyPublishTimeOption(row.publishTime),
       assetType: row.format || "Banner",
       contentTier: row.contentTier || "B",
       subPicUserId: row.subPicUserId || "",
@@ -5486,9 +5801,10 @@ function MarketingPlanWorkingSheetScreen() {
   async function handleSaveEditWorkingRow(event) {
     event.preventDefault();
     if (!editingWorkingRow || !editForm) return;
+    const rawTime = String(editForm.publishTime || "").trim();
     const normalizedTime = normalizeMarketingPlanPublishTimeOption(editForm.publishTime);
-    if (!normalizedTime) {
-      setExportMessage("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
+    if (rawTime && !normalizedTime) {
+      setExportMessage("Time must be N/A or a whole hour.");
       return;
     }
     if (!String(editForm.contentTitle || "").trim()) {
@@ -5572,7 +5888,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   async function handleSaveWorkingSheetRow(event) {
     event.preventDefault();
-    const required = [["campaignName", "Campaign is required."], ["productEvent", "Product / Event is required."], ["launchDate", "Launch Date is required."], ["publishTime", "Time is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
+    const required = [["campaignName", "Campaign is required."], ["productEvent", "Product / Event is required."], ["launchDate", "Launch Date is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
     const missing = required.find(([key]) => !String(sheetForm[key] || "").trim());
     if (missing) {
       setSaveState({
@@ -5588,11 +5904,12 @@ function MarketingPlanWorkingSheetScreen() {
       });
       return;
     }
+    const rawTime = String(sheetForm.publishTime || "").trim();
     const normalizedTime = normalizeMarketingPlanPublishTimeOption(sheetForm.publishTime);
-    if (!normalizedTime) {
+    if (rawTime && !normalizedTime) {
       setSaveState({
         status: "error",
-        message: "Select a posting time: 11:00, 14:00, 18:00, or 21:00."
+        message: "Time must be N/A or a whole hour."
       });
       return;
     }
@@ -5619,7 +5936,7 @@ function MarketingPlanWorkingSheetScreen() {
       setSheetForm(current => ({
         ...getDefaultMarketingPlanWorkingSheetForm(),
         launchDate: current.launchDate,
-        publishTime: normalizedTime,
+        publishTime: "",
         campaignName: current.campaignName
       }));
       const reloadPromise = loadWorkingSheetRows({
@@ -5641,25 +5958,104 @@ function MarketingPlanWorkingSheetScreen() {
       });
     }
   }
+  function handleWorkingStartDateChange(nextStartDate) {
+    setWorkingStartDate(nextStartDate);
+    setWorkingDateError(nextStartDate && workingEndDate && workingEndDate < nextStartDate ? "End Date must be on or after Start Date." : "");
+  }
+  function handleWorkingEndDateChange(nextEndDate) {
+    setWorkingEndDate(nextEndDate);
+    setWorkingDateError(workingStartDate && nextEndDate && nextEndDate < workingStartDate ? "End Date must be on or after Start Date." : "");
+  }
+  function toggleMarketingWorkingMyTasks() {
+    const nextEnabled = !myTasksOnly;
+    myTasksPreferenceControllerRef.current.setLocalValue(nextEnabled);
+  }
   function handleExportCsv() {
-    const exportedCount = exportMarketingPlanRowsCsv(rows, selectedMonth, selectedChannel, visibleRows);
+    const exportedCount = exportMarketingPlanRowsCsv(visibleRows, selectedMonth);
     setExportMessage(`Exported ${exportedCount} visible Marketing Plan rows.`);
   }
   function clearWorkingFilters() {
-    setSelectedChannel("all");
-    setSelectedWorkingStatus("all");
-    setSelectedWorkingTeam("all");
-    setSelectedWorkingOwner("all");
+    setWorkingStartDate("");
+    setWorkingEndDate("");
+    setWorkingDateError("");
     setWorkingSearch("");
+  }
+  function clearMarketingWorkingDuplicateState() {
+    setDuplicateSourceRow(null);
+    setDuplicateLaunchDate("");
+    setDuplicatePublishTime("");
+    setDuplicateSameDateConfirmed(false);
+  }
+  function openMarketingWorkingDuplicate(row) {
+    if (!canDuplicateMarketingWorkingRow(row, currentUser)) return;
+    if (!duplicateActionGuardRef.current.activate(row.contentItemId)) return;
+    const draft = getMarketingWorkingDuplicateDraft(row);
+    setDuplicateSourceRow(row);
+    setDuplicateLaunchDate(draft.launchDate);
+    setDuplicatePublishTime(draft.publishTime);
+    setDuplicateSameDateConfirmed(false);
+    setExportMessage("");
+  }
+  function closeMarketingWorkingDuplicate() {
+    if (duplicateInFlightContentItemId || !duplicateActionGuardRef.current.cancel()) return;
+    clearMarketingWorkingDuplicateState();
+  }
+  function handleDuplicateLaunchDateChange(nextLaunchDate) {
+    setDuplicateLaunchDate(nextLaunchDate);
+    setDuplicateSameDateConfirmed(false);
+  }
+  async function handleCreateMarketingWorkingDuplicate(event) {
+    event.preventDefault();
+    const sourceRow = duplicateSourceRow;
+    const sourceId = String(sourceRow && sourceRow.contentItemId || "");
+    if (!sourceId || duplicateInFlightContentItemId) return;
+    const rawTime = String(duplicatePublishTime || "").trim();
+    const normalizedTime = normalizeMarketingPlanPublishTimeOption(rawTime);
+    if (!duplicateLaunchDate) {
+      setExportMessage("Launch Date is required.");
+      return;
+    }
+    if (rawTime && !normalizedTime) {
+      setExportMessage("Time must be N/A or a whole hour before duplicating.");
+      return;
+    }
+    if (duplicateLaunchDate === sourceRow.publishDate && !duplicateSameDateConfirmed) return;
+    let result;
+    let ownsDuplicateUi = false;
+    try {
+      result = await duplicateActionGuardRef.current.run(sourceId, () => {
+        ownsDuplicateUi = true;
+        setDuplicateInFlightContentItemId(sourceId);
+        setExportMessage("");
+        return runMarketingWorkingRowDuplicate(sourceRow, duplicateLaunchDate, normalizedTime, {
+          rpc: (name, params) => window.flowmateSupabase.rpc(name, params),
+          refreshRows: () => loadWorkingSheetRows({
+            alive: true
+          }, {
+            force: true,
+            throwOnError: true
+          }),
+          openBrief: row => openFlowMateCreativeBriefFromMarketingRow(row)
+        });
+      });
+    } finally {
+      if (ownsDuplicateUi) {
+        clearMarketingWorkingDuplicateState();
+        setDuplicateInFlightContentItemId("");
+      }
+    }
+    if (!ownsDuplicateUi) return;
+    if (result && result.message) setExportMessage(result.message);
   }
   async function handleWorkingRowTimeChange(row, nextTime) {
     if (!canManageMarketingPlanSchedule(row)) {
       setExportMessage("Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.");
       return;
     }
+    const rawTime = String(nextTime || "").trim();
     const normalizedTime = normalizeMarketingPlanPublishTimeOption(nextTime);
-    if (!normalizedTime) {
-      setExportMessage("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
+    if (rawTime && !normalizedTime) {
+      setExportMessage("Time must be N/A or a whole hour.");
       return;
     }
     setUpdatingRowId(row.contentItemId);
@@ -5726,6 +6122,13 @@ function MarketingPlanWorkingSheetScreen() {
       setUpdatingRowId("");
     }
   }
+  const editLegacyPublishTime = getMarketingPlanLegacyPublishTimeOption(editForm && editForm.publishTime);
+  const duplicateLegacyPublishTime = getMarketingPlanLegacyPublishTimeOption(duplicatePublishTime);
+  const duplicateRawPublishTime = String(duplicatePublishTime || "").trim();
+  const duplicatePublishTimeIsValid = !duplicateRawPublishTime || Boolean(normalizeMarketingPlanPublishTimeOption(duplicateRawPublishTime));
+  const duplicateUsesSameDate = Boolean(duplicateSourceRow && duplicateLaunchDate === duplicateSourceRow.publishDate);
+  const duplicateIsInFlight = Boolean(duplicateSourceRow && duplicateInFlightContentItemId === duplicateSourceRow.contentItemId);
+  const duplicateCanSubmit = Boolean(duplicateSourceRow && duplicateLaunchDate && duplicatePublishTimeIsValid && (!duplicateUsesSameDate || duplicateSameDateConfirmed) && !duplicateIsInFlight);
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
   }, React.createElement("div", null, React.createElement("h1", null, "Working Sheet"), React.createElement("p", null, "Recurring monthly plan entry. Views read from these Campaign, Content Item, and Channel Placement records."))), React.createElement("div", {
@@ -5804,14 +6207,14 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Time *"), React.createElement("select", {
+  }, "Time"), React.createElement("select", {
     className: "select",
     value: sheetForm.publishTime,
     onChange: event => updateSheetForm("publishTime", event.target.value)
-  }, MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time => React.createElement("option", {
-    key: time,
-    value: time
-  }, time)))), React.createElement("label", {
+  }, MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label)))), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
@@ -5926,12 +6329,7 @@ function MarketingPlanWorkingSheetScreen() {
   }, React.createElement("select", {
     className: "input",
     value: selectedMonth,
-    onChange: event => {
-      setSelectedMonth(event.target.value);
-      setSelectedChannel("all");
-      setSelectedWorkingTeam("all");
-      setSelectedWorkingOwner("all");
-    },
+    onChange: event => setSelectedMonth(event.target.value),
     disabled: monthOptions.length === 0,
     "aria-label": "Month",
     "data-testid": "working-month-filter"
@@ -5940,52 +6338,39 @@ function MarketingPlanWorkingSheetScreen() {
   }, "No data"), monthOptions.map(monthKey => React.createElement("option", {
     key: monthKey,
     value: monthKey
-  }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("select", {
-    className: "input",
-    value: selectedChannel,
-    onChange: event => setSelectedChannel(event.target.value),
-    disabled: monthOptions.length === 0,
-    "aria-label": "Channel",
-    "data-testid": "working-channel-filter"
-  }, React.createElement("option", {
-    value: "all"
-  }, "All channels"), channelOptions.map(channel => React.createElement("option", {
-    key: channel,
-    value: channel
-  }, getMarketingPlanChannelLabel(channel)))), React.createElement("select", {
-    className: "input",
-    value: selectedWorkingStatus,
-    onChange: event => setSelectedWorkingStatus(event.target.value),
-    "aria-label": "Status",
-    "data-testid": "working-status-filter"
-  }, React.createElement("option", {
-    value: "all"
-  }, "All statuses"), MARKETING_PLAN_WORKING_STATUS_OPTIONS.map(option => React.createElement("option", {
-    key: option.value,
-    value: option.value
-  }, option.label))), React.createElement("select", {
-    className: "input",
-    value: selectedWorkingTeam,
-    onChange: event => setSelectedWorkingTeam(event.target.value),
-    "aria-label": "Team",
-    "data-testid": "working-team-filter"
-  }, React.createElement("option", {
-    value: "all"
-  }, "All teams"), workingFilterOptions.teams.map(team => React.createElement("option", {
-    key: team,
-    value: team
-  }, team))), React.createElement("select", {
-    className: "input",
-    value: selectedWorkingOwner,
-    onChange: event => setSelectedWorkingOwner(event.target.value),
-    "aria-label": "PIC or Sub PIC",
-    "data-testid": "working-owner-filter"
-  }, React.createElement("option", {
-    value: "all"
-  }, "All owners"), workingFilterOptions.owners.map(owner => React.createElement("option", {
-    key: owner.key,
-    value: owner.key
-  }, owner.name))), React.createElement("input", {
+  }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("button", {
+    type: "button",
+    className: `btn btn--secondary marketing-working-my-tasks${myTasksOnly ? " is-active" : ""}`,
+    onClick: toggleMarketingWorkingMyTasks,
+    "aria-pressed": myTasksOnly,
+    "data-testid": "marketing-working-my-tasks"
+  }, myTasksOnly && React.createElement("span", null, "✓"), " My Tasks"), React.createElement("label", {
+    className: "field marketing-working-filter-field marketing-working-start-date"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Start Date"), React.createElement("input", {
+    id: "marketing-working-start-date",
+    className: "input marketing-working-start-date__input",
+    type: "date",
+    value: workingStartDate,
+    onChange: event => handleWorkingStartDateChange(event.target.value),
+    "aria-invalid": Boolean(workingDateError),
+    "aria-describedby": workingDateError ? "marketing-working-date-error" : undefined,
+    "data-testid": "working-start-date"
+  })), React.createElement("label", {
+    className: "field marketing-working-filter-field marketing-working-end-date"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "End Date"), React.createElement("input", {
+    id: "marketing-working-end-date",
+    className: "input marketing-working-end-date__input",
+    type: "date",
+    value: workingEndDate,
+    onChange: event => handleWorkingEndDateChange(event.target.value),
+    "aria-invalid": Boolean(workingDateError),
+    "aria-describedby": workingDateError ? "marketing-working-date-error" : undefined,
+    "data-testid": "working-end-date"
+  })), React.createElement("input", {
     className: "input marketing-working-filters__search",
     type: "search",
     value: workingSearch,
@@ -5999,11 +6384,11 @@ function MarketingPlanWorkingSheetScreen() {
     onClick: clearWorkingFilters,
     disabled: !hasClearableWorkingFilters,
     "data-testid": "working-filter-reset"
-  }, "Clear filters"), React.createElement("button", {
+  }, "Clear"), React.createElement("button", {
     type: "button",
     className: "btn btn--secondary",
     onClick: handleExportCsv,
-    disabled: visiblePlacementRows.length === 0,
+    disabled: visibleRows.length === 0,
     "data-testid": "working-export"
   }, React.createElement(Icon, {
     name: "download"
@@ -6011,7 +6396,14 @@ function MarketingPlanWorkingSheetScreen() {
     className: "marketing-working-count",
     "aria-live": "polite",
     "data-testid": "working-row-count"
-  }, visibleRows.length, visibleRows.length === 1 ? " request" : " requests")), React.createElement("div", {
+  }, "Showing ", visibleRows.length, " rows")), workingDateError && React.createElement("div", {
+    id: "marketing-working-date-error",
+    className: "marketing-working-date-error",
+    role: "alert"
+  }, workingDateError), workingPreferenceMessage && React.createElement("div", {
+    className: "reason-box",
+    role: "status"
+  }, workingPreferenceMessage), React.createElement("div", {
     className: "marketing-working-active-filters",
     "data-testid": "working-active-filters"
   }, React.createElement("span", {
@@ -6059,11 +6451,14 @@ function MarketingPlanWorkingSheetScreen() {
     const rowNeedsBriefLinkRepair = row.requiresBrief && rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
     const canManageRow = canManageMarketingPlanWorkingRow(row);
     const canManageSchedule = canManageMarketingPlanSchedule(row);
+    const legacyPublishTime = getMarketingPlanLegacyPublishTimeOption(row.publishTime);
     return React.createElement("tr", {
       key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`,
       "data-testid": "working-row",
       "data-status": rowStatusValue
-    }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, row.contentTier || "-"), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
+    }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.campaignName), React.createElement("td", null, row.contentTitle), React.createElement("td", null, React.createElement("span", {
+      className: `marketing-tier ${getMarketingPlanTierClass(row.contentTier)}`.trim()
+    }, row.contentTier || "-")), React.createElement("td", null, row.format || "-"), React.createElement("td", null, React.createElement("div", {
       className: "marketing-channel-tags"
     }, (row.channels || []).map(channel => React.createElement("span", {
       key: channel,
@@ -6071,17 +6466,17 @@ function MarketingPlanWorkingSheetScreen() {
       title: getMarketingPlanChannelLabel(channel)
     }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("select", {
       className: "select mono marketing-working-time-text",
-      value: normalizeMarketingPlanPublishTimeOption(row.publishTime),
+      value: normalizeMarketingPlanPublishTimeOption(row.publishTime) || legacyPublishTime,
       disabled: !canManageSchedule || updatingRowId === row.contentItemId,
       title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.",
       onChange: event => handleWorkingRowTimeChange(row, event.target.value)
-    }, !normalizeMarketingPlanPublishTimeOption(row.publishTime) && React.createElement("option", {
-      value: "",
+    }, legacyPublishTime && React.createElement("option", {
+      value: legacyPublishTime,
       disabled: true
-    }, formatMarketingPlanTime(row.publishTime) || "Select time"), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time => React.createElement("option", {
-      key: time,
-      value: time
-    }, time)))), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+    }, legacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
+      key: option.value,
+      value: option.value
+    }, option.label)))), React.createElement("td", null, row.briefLink ? React.createElement("a", {
       className: "marketing-working-link",
       href: row.briefLink,
       target: "_blank",
@@ -6089,7 +6484,7 @@ function MarketingPlanWorkingSheetScreen() {
     }, "Open") : React.createElement("span", {
       className: "muted"
     }, row.requiresBrief ? "-" : "No Brief required")), React.createElement("td", null, row.picName || "-"), React.createElement("td", null, row.subPicName || "-"), React.createElement("td", null, React.createElement("select", {
-      className: "select marketing-working-status",
+      className: `select marketing-working-status ${getMarketingPlanWorkingStatusClass(rowStatusValue)}`,
       value: rowStatusValue,
       disabled: !canManageSchedule || updatingRowId === row.contentItemId,
       title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.",
@@ -6105,7 +6500,12 @@ function MarketingPlanWorkingSheetScreen() {
       disabled: !canManageRow || updatingRowId === row.contentItemId,
       title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row.",
       onClick: () => startEditWorkingRow(row)
-    }, "Edit"), rowNeedsBriefLinkRepair ? React.createElement("button", {
+    }, "Edit"), canDuplicateMarketingWorkingRow(row, currentUser) ? React.createElement("button", {
+      type: "button",
+      className: "btn btn--secondary btn--xs marketing-working-duplicate",
+      disabled: duplicateInFlightContentItemId === row.contentItemId,
+      onClick: () => openMarketingWorkingDuplicate(row)
+    }, duplicateInFlightContentItemId === row.contentItemId ? "Duplicating..." : "Duplicate") : null, rowNeedsBriefLinkRepair ? React.createElement("button", {
       type: "button",
       className: "btn btn--secondary btn--xs",
       disabled: !canManageRow || updatingRowId === row.contentItemId,
@@ -6121,7 +6521,107 @@ function MarketingPlanWorkingSheetScreen() {
   }), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
     colSpan: "13",
     className: "muted"
-  }, "No rows match the selected filters."))))))), editingWorkingRow && editForm && React.createElement("div", {
+  }, workingEmptyMessage))))))), duplicateSourceRow && React.createElement("div", {
+    className: "modal-backdrop marketing-working-duplicate-backdrop",
+    role: "presentation",
+    onMouseDown: closeMarketingWorkingDuplicate
+  }, React.createElement("form", {
+    className: "modal marketing-working-duplicate-modal",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "marketing-working-duplicate-title",
+    "aria-describedby": "marketing-working-duplicate-explanation",
+    onMouseDown: event => event.stopPropagation(),
+    onKeyDown: event => {
+      if (event.key !== "Escape" || duplicateIsInFlight) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMarketingWorkingDuplicate();
+    },
+    onSubmit: handleCreateMarketingWorkingDuplicate
+  }, React.createElement("div", {
+    className: "modal__head"
+  }, React.createElement("div", null, React.createElement("h2", {
+    id: "marketing-working-duplicate-title"
+  }, "Duplicate Brief"), React.createElement("div", {
+    className: "muted"
+  }, "Create another Working Sheet row from this approved brief context.")), React.createElement("button", {
+    type: "button",
+    className: "iconbtn",
+    disabled: duplicateIsInFlight,
+    "aria-label": "Close Duplicate Brief dialog",
+    onClick: closeMarketingWorkingDuplicate
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), React.createElement("div", {
+    className: "marketing-working-duplicate-context"
+  }, React.createElement("div", null, React.createElement("span", {
+    className: "field__label"
+  }, "Campaign"), React.createElement("div", {
+    className: "strong"
+  }, duplicateSourceRow.campaignName || "-")), React.createElement("div", null, React.createElement("span", {
+    className: "field__label"
+  }, "Product / Event"), React.createElement("div", {
+    className: "strong"
+  }, duplicateSourceRow.contentTitle || "-"))), React.createElement("p", {
+    id: "marketing-working-duplicate-explanation",
+    className: "reason-box"
+  }, "A new Working Sheet row will be created without the previous Brief Link."), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Launch Date *"), React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: duplicateLaunchDate,
+    autoFocus: true,
+    disabled: duplicateIsInFlight,
+    onClick: openNativeTimePicker,
+    onFocus: openNativeTimePicker,
+    onChange: event => handleDuplicateLaunchDateChange(event.target.value),
+    "data-testid": "marketing-working-duplicate-date"
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Publish Time"), React.createElement("select", {
+    className: "select",
+    value: duplicatePublishTime,
+    disabled: duplicateIsInFlight,
+    onChange: event => setDuplicatePublishTime(event.target.value),
+    "aria-invalid": !duplicatePublishTimeIsValid,
+    "data-testid": "marketing-working-duplicate-time"
+  }, duplicateLegacyPublishTime && React.createElement("option", {
+    value: duplicateLegacyPublishTime,
+    disabled: true
+  }, duplicateLegacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))))), !duplicatePublishTimeIsValid && React.createElement("div", {
+    className: "reason-box reason-box--need",
+    role: "alert"
+  }, "Select N/A or a whole-hour Publish Time before duplicating."), duplicateUsesSameDate && React.createElement("label", {
+    className: "check-pill marketing-working-duplicate-confirm"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: duplicateSameDateConfirmed,
+    disabled: duplicateIsInFlight,
+    onChange: event => setDuplicateSameDateConfirmed(event.target.checked),
+    "data-testid": "marketing-working-duplicate-same-date"
+  }), React.createElement("span", null, "I confirm this duplicate should use the same Launch Date.")), React.createElement("div", {
+    className: "modal__actions"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    disabled: duplicateIsInFlight,
+    onClick: closeMarketingWorkingDuplicate
+  }, "Cancel"), React.createElement("button", {
+    type: "submit",
+    className: "btn btn--primary",
+    disabled: !duplicateCanSubmit
+  }, duplicateIsInFlight ? "Duplicating..." : "Create Duplicate")))), editingWorkingRow && editForm && React.createElement("div", {
     className: "modal-backdrop",
     role: "presentation",
     onMouseDown: () => {
@@ -6172,16 +6672,17 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Time *"), React.createElement("select", {
+  }, "Time"), React.createElement("select", {
     className: "select",
     value: editForm.publishTime,
     onChange: event => updateEditForm("publishTime", event.target.value)
-  }, React.createElement("option", {
-    value: ""
-  }, "Select time"), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time => React.createElement("option", {
-    key: time,
-    value: time
-  }, time)))), React.createElement("label", {
+  }, editLegacyPublishTime && React.createElement("option", {
+    value: editLegacyPublishTime,
+    disabled: true
+  }, editLegacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label)))), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"

@@ -857,7 +857,18 @@ const FLOWMATE_CREATIVE_FORMAT_LABELS = {
   custom: "Custom"
 };
 const FLOWMATE_CREATIVE_FORMAT_DISPLAY_ORDER = ["1200x1200", "1200x1500", "1080x1920", "1920x1080", "custom"];
-const FLOWMATE_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];
+const FLOWMATE_PUBLISH_TIME_OPTIONS = [{
+  value: "",
+  label: "N/A"
+}, ...Array.from({
+  length: 24
+}, (_, hour) => {
+  const value = `${String(hour).padStart(2, "0")}:00`;
+  return {
+    value,
+    label: value
+  };
+})];
 function getFlowMateCreativeTypeOption(typeKey) {
   return FLOWMATE_CREATIVE_TYPE_OPTIONS.find(option => option.key === typeKey) || FLOWMATE_CREATIVE_TYPE_OPTIONS[0];
 }
@@ -924,8 +935,10 @@ const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
 const FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET = 4;
 const FLOWMATE_MIDDAY_CUTOFF_HOUR = 12;
 const FLOWMATE_PRODUCTION_CUTOFF_HOUR = 15;
-const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 7;
-const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 5;
+const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 5;
+const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 1;
+const FLOWMATE_TH_COMPLETE_CALENDAR_YEARS = new Set([2025, 2026, 2027]);
+const FLOWMATE_TH_HOLIDAY_DATES = new Set(["2025-01-01", "2025-02-12", "2025-04-07", "2025-04-14", "2025-04-15", "2025-05-01", "2025-05-05", "2025-05-12", "2025-06-02", "2025-06-03", "2025-07-10", "2025-07-28", "2025-08-11", "2025-08-12", "2025-10-13", "2025-10-23", "2025-12-05", "2025-12-10", "2025-12-31", "2026-01-01", "2026-01-02", "2026-03-03", "2026-04-06", "2026-04-13", "2026-04-14", "2026-04-15", "2026-05-01", "2026-05-04", "2026-06-01", "2026-06-03", "2026-07-28", "2026-07-29", "2026-08-12", "2026-10-13", "2026-10-23", "2026-12-07", "2026-12-10", "2026-12-31", "2027-01-01", "2027-02-22", "2027-04-06", "2027-04-13", "2027-04-14", "2027-04-15", "2027-05-03", "2027-05-04", "2027-05-20", "2027-06-03", "2027-07-19", "2027-07-28", "2027-08-12", "2027-10-13", "2027-10-25", "2027-12-06", "2027-12-10", "2027-12-31"]);
 const FLOWMATE_CREATIVE_UNIT_EFFORT = {
   banner: 2,
   "hero-album": 16,
@@ -953,7 +966,8 @@ function subtractFlowMateWorkingDays(dateValue, workingDays) {
   while (remaining > 0) {
     date.setUTCDate(date.getUTCDate() - 1);
     const day = date.getUTCDay();
-    if (day !== 0 && day !== 6) remaining -= 1;
+    const dateKey = date.toISOString().slice(0, 10);
+    if (day !== 0 && day !== 6 && !FLOWMATE_TH_HOLIDAY_DATES.has(dateKey)) remaining -= 1;
   }
   return date.toISOString().slice(0, 10);
 }
@@ -980,13 +994,11 @@ function clampFlowMateDateToToday(dateValue) {
 }
 function getFlowMateDraftDateForLaunchDate(launchDate) {
   const nextLaunchDate = clampFlowMateDateToToday(launchDate);
-  const draftDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS);
-  return clampFlowMateDateToToday(draftDate);
+  return subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS);
 }
 function getFlowMateFinalApprovedDateForLaunchDate(launchDate) {
   const nextLaunchDate = clampFlowMateDateToToday(launchDate);
-  const finalApprovedDate = subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS);
-  return clampFlowMateDateToToday(finalApprovedDate);
+  return subtractFlowMateWorkingDays(nextLaunchDate, FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS);
 }
 function getFlowMateEarliestCreativeDraftDate(draft, now = new Date()) {
   const productionStart = getFlowMateProductionStartBucket(now);
@@ -1058,7 +1070,7 @@ function getFlowMateCreativeEffortEstimate(draft) {
 }
 function getFlowMateCreativeTimePressure(draft) {
   const launchDate = clampFlowMateDateToToday(draft?.launchDate);
-  const dueDate = clampFlowMateDateToToday(draft?.dueDate || getFlowMateAutoCreativeDraftDate(draft));
+  const dueDate = draft?.dueDate || getFlowMateAutoCreativeDraftDate(draft);
   const productionStart = getFlowMateProductionStartBucket();
   const bucketCount = countFlowMateCapacityBucketsInclusive(productionStart.date, productionStart.half, dueDate);
   const workingDays = bucketCount / 2;
@@ -1125,7 +1137,7 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetType2: creativeType2 ? creativeType2.assetType : "",
     assetSubtype2: creativeType2 ? creativeType2.key : "",
     assetCount2,
-    publishTime: normalizeFlowMatePublishTimeInput(nextDraft.publishTime) || FLOWMATE_PUBLISH_TIME_OPTIONS[0],
+    publishTime: normalizeWholeHourTime(nextDraft.publishTime) || getFlowMateLegacyPublishTimeOption(nextDraft.publishTime),
     launchDate
   };
   return {
@@ -1134,11 +1146,17 @@ function normalizeFlowMateCreativeDraft(draft) {
     finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(launchDate)
   };
 }
-function normalizeFlowMatePublishTimeInput(value) {
+function normalizeWholeHourTime(value) {
   const text = String(value || "").trim();
-  const match = text.match(/^([01]?[0-9]|2[0-3]):([0-5][0-9])(?::\d{2}(?:\.\d+)?)?$/);
-  if (match) return `${match[1].padStart(2, "0")}:${match[2]}`;
-  return "";
+  const match = text.match(/^((?:[01]\d|2[0-3]):00)(?::00)?$/);
+  return match ? match[1] : "";
+}
+function normalizeFlowMatePublishTimeInput(value) {
+  return normalizeWholeHourTime(value);
+}
+function getFlowMateLegacyPublishTimeOption(value) {
+  const text = String(value || "").trim();
+  return text && !normalizeWholeHourTime(text) ? text : "";
 }
 const FLOWMATE_INVALID_BRIEF_LINK_MESSAGE = "กรุณาใส่ Brief Link ที่ถูกต้อง";
 function isFlowMateValidHttpUrl(value) {
@@ -1195,7 +1213,7 @@ function getDefaultCreativeDraft() {
     dueDate: getFlowMateDraftDateForLaunchDate(todayDate),
     finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(todayDate),
     launchDate: todayDate,
-    publishTime: FLOWMATE_PUBLISH_TIME_OPTIONS[0],
+    publishTime: "",
     marketingPlanContentItemId: "",
     marketingPlanOriginalBriefLink: "",
     marketingPlanProductEvent: "",
@@ -1274,7 +1292,13 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
   requireField("launchDate", "Launch date is required.");
-  requireTime("publishTime", "Publish Time must use hh:mm format.");
+  const launchCalendarYear = Number(String(row.launchDate || "").slice(0, 4));
+  if (Number.isInteger(launchCalendarYear) && !FLOWMATE_TH_COMPLETE_CALENDAR_YEARS.has(launchCalendarYear)) {
+    errors.launchDate = `Thai holiday calendar for ${launchCalendarYear} is not available. Ask an administrator to review that year before creating this request.`;
+  }
+  if (String(row.publishTime || "").trim() && !normalizeWholeHourTime(row.publishTime)) {
+    errors.publishTime = "Publish Time must be N/A or a whole hour.";
+  }
   requireNotPast("launchDate", "Launch date cannot be before today.");
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
@@ -1368,6 +1392,21 @@ function CreateScreen({
   const [creativeDraft, setCreativeDraft] = useState(() => {
     return withCreativeDraftTitle(readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
   });
+  function resetSubmittedDraft() {
+    if (mode === "quick") {
+      const draft = normalizeFlowMateQuickDraft(getDefaultQuickDraft());
+      setQuickDraft({
+        ...draft,
+        title: window.buildFlowMateTemplateTitle({
+          launchDate: draft.launchDate,
+          requesterTeam: draft.requesterTeam,
+          projectName: draft.projectName
+        })
+      });
+      return;
+    }
+    setCreativeDraft(withCreativeDraftTitle(getDefaultCreativeDraft()));
+  }
   useEffect(() => {
     function onExternalCreateDraftUpdated(event) {
       const detail = event && event.detail ? event.detail : {};
@@ -1448,7 +1487,7 @@ function CreateScreen({
         });
       }
       setValidationErrors(nextValidationErrors);
-      setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please complete the highlighted required fields.");
+      setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please correct the highlighted fields.");
       return;
     }
     const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
@@ -1512,6 +1551,7 @@ function CreateScreen({
         };
       }
       clearFlowMateCreateDraft(mode);
+      resetSubmittedDraft();
       if (nextResult.warning) {
         setResult({
           kind: "sync_warning",
@@ -1858,6 +1898,7 @@ function CreativeRequestForm({
 }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const selectedCreativeType2Key = String(value.assetSubtype2 || "").trim();
+  const legacyPublishTime = getFlowMateLegacyPublishTimeOption(value.publishTime);
   const todayDate = getFlowMateTodayDateKey();
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
   const [formatPrompt, setFormatPrompt] = useState("");
@@ -2207,7 +2248,7 @@ function CreativeRequestForm({
       fontSize: 12,
       marginTop: 6
     }
-  }, "Generated as T-7 weekdays before Launch Date."), errors.dueDate && React.createElement("div", {
+  }, "First Draft: T-5 Thai working days before Launch Date."), errors.dueDate && React.createElement("div", {
     className: "field__error"
   }, errors.dueDate)), React.createElement("div", {
     className: "field"
@@ -2226,7 +2267,7 @@ function CreativeRequestForm({
       fontSize: 12,
       marginTop: 6
     }
-  }, "Generated as T-5 weekdays before Launch Date.")), React.createElement("div", {
+  }, "Final/Approved: T-1 Thai working day before Launch Date.")), React.createElement("div", {
     className: `field ${errors.launchDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -2244,16 +2285,17 @@ function CreativeRequestForm({
     className: `field ${errors.publishTime ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "Publish Time ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("select", {
+  }, "Publish Time"), React.createElement("select", {
     className: "select",
     value: value.publishTime,
     onChange: e => update("publishTime", e.target.value)
-  }, FLOWMATE_PUBLISH_TIME_OPTIONS.map(time => React.createElement("option", {
-    key: time,
-    value: time
-  }, time))), errors.publishTime && React.createElement("div", {
+  }, legacyPublishTime && React.createElement("option", {
+    value: legacyPublishTime,
+    disabled: true
+  }, legacyPublishTime), FLOWMATE_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), errors.publishTime && React.createElement("div", {
     className: "field__error"
   }, errors.publishTime)), React.createElement("div", {
     className: "field field--full"

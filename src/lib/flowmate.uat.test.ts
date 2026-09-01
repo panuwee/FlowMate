@@ -15,6 +15,41 @@ const readFileSync = (...args: Parameters<typeof nodeReadFileSync>) => (
   nodeReadFileSync(...args).replace(/\r\n/g, "\n")
 );
 
+function extractNamedFunction(source: string, functionName: string) {
+  const functionStart = source.indexOf(`function ${functionName}(`);
+  if (functionStart < 0) return "";
+  const start = source.slice(Math.max(0, functionStart - 6), functionStart) === "async " ? functionStart - 6 : functionStart;
+  const signatureEnd = source.indexOf(") {", functionStart);
+  const bodyStart = signatureEnd < 0 ? -1 : signatureEnd + 2;
+  if (bodyStart < 0) return "";
+  let depth = 0;
+  let quote = "";
+  let escaped = false;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  return "";
+}
+
 // --- Fixture covering all MVP statuses + work types ---------------------------
 const PD_USER = "user-pond";
 const JO_USER = "user-jo";
@@ -278,6 +313,1671 @@ describe("UAT-005 quick tasks do not contribute to creative effort", () => {
     expect(next.creativeEffort).toBe(base.creativeEffort);
     expect(next.quickTaskCount).toBe(base.quickTaskCount + 2);
   });
+});
+
+describe("Marketing Plan Current Working approved contracts", () => {
+  const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+  const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+  const workingStart = appJsx.indexOf("function MarketingPlanWorkingSheetScreen");
+  const workingEnd = appJsx.indexOf("function MarketingPlanSupervisorScreen", workingStart);
+  const workingSource = appJsx.slice(workingStart, workingEnd);
+  const calendarSource = appJsx.slice(appJsx.indexOf("function MarketingPlanCalendarScreen"), workingStart);
+  const css = readFileSync(join(process.cwd(), "app.css"), "utf8");
+
+  function extractCssBlock(selector: string) {
+    const start = css.indexOf(`${selector} {`);
+    expect(start, selector).toBeGreaterThanOrEqual(0);
+    const end = css.indexOf("}", start);
+    expect(end, selector).toBeGreaterThan(start);
+    return css.slice(start, end + 1);
+  }
+
+  function readCssHex(block: string, property: "color" | "background") {
+    return block.match(new RegExp(`(?:^|\\n)\\s*${property}:\\s*(#[0-9A-F]{6})`, "i"))?.[1].toUpperCase() || "";
+  }
+
+  function getContrastRatio(foreground: string, background: string) {
+    const luminance = (hex: string) => {
+      const channels = hex.slice(1).match(/.{2}/g)?.map((value) => parseInt(value, 16) / 255) || [];
+      const linear = channels.map((value) => value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+    };
+    const lighter = Math.max(luminance(foreground), luminance(background));
+    const darker = Math.min(luminance(foreground), luminance(background));
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+
+  function loadGeneratedOptions(source: string, constantName: string) {
+    const declaration = source.match(new RegExp(`const ${constantName} = \\[[\\s\\S]*?\\n\\];`))?.[0] || "";
+    expect(declaration).not.toBe("");
+    const sandbox = {} as { options?: Array<{ value: string; label: string }> };
+    vm.runInNewContext(`${declaration}\nthis.options = ${constantName};`, sandbox);
+    return Array.from(sandbox.options || [], (option) => ({ value: option.value, label: option.label }));
+  }
+
+  function loadWholeHourNormalizer(source: string) {
+    const functionSource = extractNamedFunction(source, "normalizeWholeHourTime");
+    expect(functionSource).not.toBe("");
+    return vm.runInNewContext(`(${functionSource})`, {}) as (value: unknown) => string;
+  }
+
+  function loadWorkingRowsFilter() {
+    const functionSource = extractNamedFunction(appJsx, "filterMarketingPlanWorkingRows");
+    expect(functionSource).not.toBe("");
+    return vm.runInNewContext(`(${functionSource})`, {
+      getMarketingPlanChannelLabel: (channel: string) => ({ facebook: "Facebook", tiktok: "TikTok" })[channel] || channel,
+      getMarketingPlanWorkingRowTeam: (row: Record<string, unknown>) => String(row.contentTeam || row.campaignTeam || row.market || "").trim(),
+    }) as (rows: Array<Record<string, unknown>>, criteria?: Record<string, unknown>) => Array<Record<string, unknown>>;
+  }
+
+  function loadWorkingRowsView() {
+    const functionSource = extractNamedFunction(appJsx, "resolveMarketingPlanWorkingRowsView");
+    expect(functionSource).not.toBe("");
+    return vm.runInNewContext(`(${functionSource})`, {
+      filterMarketingPlanWorkingRows: loadWorkingRowsFilter(),
+    }) as (
+      rows: Array<Record<string, unknown>>,
+      criteria: Record<string, unknown>,
+      lastValidDateState?: { startDate: string; endDate: string; emptyReason: string },
+    ) => {
+      visibleRows: Array<Record<string, unknown>>;
+      emptyReason: string;
+      nextValidDateState: { startDate: string; endDate: string; emptyReason: string };
+    };
+  }
+
+  function loadPreferenceController(options: Record<string, unknown>) {
+    const functionSource = extractNamedFunction(appJsx, "createMarketingWorkingMyTasksPreferenceController");
+    expect(functionSource).not.toBe("");
+    return vm.runInNewContext(`(${functionSource})`, {})(options) as {
+      setAccount: (userId: string) => Promise<void>;
+      setLocalValue: (enabled: boolean) => Promise<void>;
+      invalidateAccount: (userId: string) => void;
+    };
+  }
+
+  function loadCsvExporter(downloads: Array<{ filename: string; headers: string[]; rows: string[][] }>) {
+    const functionSource = extractNamedFunction(appJsx, "exportMarketingPlanRowsCsv");
+    expect(functionSource).not.toBe("");
+    return vm.runInNewContext(`(${functionSource})`, {
+      window: {
+        flowmateDownloadCsv: (filename: string, headers: string[], rows: string[][]) => downloads.push({ filename, headers, rows }),
+      },
+      getMarketingPlanMonthLabel: (monthKey: string) => ({ "2026-09": "Sep 2026", "2026-10": "Oct 2026" })[monthKey] || monthKey,
+      getMarketingPlanWorkingRowTeam: (row: Record<string, unknown>) => String(row.contentTeam || row.campaignTeam || row.market || ""),
+      getMarketingPlanChannelLabel: (channel: string) => ({ facebook: "Facebook", tiktok: "TikTok" })[channel] || channel,
+      formatMarketingPlanTime: (value: string) => value || "N/A",
+      getMarketingPlanStatusLabel: (value: string) => ({ ready_to_post: "Ready to Post", planned: "Planned" })[value] || value,
+      getMarketingPlanWorkingSheetStatus: (row: Record<string, unknown>) => row.placementStatus || "planned",
+    }) as (visibleRows: Array<Record<string, unknown>>, selectedMonth: string) => number;
+  }
+
+  type RenderedElement = {
+    type: unknown;
+    props: Record<string, unknown>;
+    children: unknown[];
+  };
+
+  function findRenderedElement(node: unknown, predicate: (element: RenderedElement) => boolean): RenderedElement | undefined {
+    if (!node || typeof node !== "object") return undefined;
+    const element = node as RenderedElement;
+    if (element.type && predicate(element)) return element;
+    for (const child of element.children || []) {
+      const match = findRenderedElement(child, predicate);
+      if (match) return match;
+    }
+    return undefined;
+  }
+
+  function findRenderedElements(node: unknown, predicate: (element: RenderedElement) => boolean): RenderedElement[] {
+    if (Array.isArray(node)) return node.flatMap((child) => findRenderedElements(child, predicate));
+    if (!node || typeof node !== "object") return [];
+    const element = node as RenderedElement;
+    return [
+      ...(element.type && predicate(element) ? [element] : []),
+      ...(element.children || []).flatMap((child) => findRenderedElements(child, predicate)),
+    ];
+  }
+
+  function getRenderedText(node: unknown): string {
+    if (node == null || node === false) return "";
+    if (Array.isArray(node)) return node.map(getRenderedText).filter(Boolean).join(" ");
+    if (typeof node !== "object") return String(node);
+    return ((node as RenderedElement).children || []).map(getRenderedText).filter(Boolean).join(" ");
+  }
+
+  function renderMarketingCalendarTree(viewMode: "day" | "week" | "4_days" | "schedule") {
+    const functionSource = extractNamedFunction(appJsx, "MarketingPlanCalendarScreen");
+    expect(functionSource).not.toBe("");
+    const rows = [
+      { placementId: "timed", contentItemId: "content-timed", publishDate: "2026-09-01", publishTime: "09:00", channel: "facebook", campaignName: "Timed campaign", contentTitle: "Timed row" },
+      { placementId: "db-timed", contentItemId: "content-db-timed", publishDate: "2026-09-01", publishTime: "10:00:00", channel: "facebook", campaignName: "DB timed campaign", contentTitle: "DB timed row" },
+      { placementId: "untimed", contentItemId: "content-untimed", publishDate: "2026-09-01", publishTime: null, channel: "facebook", campaignName: "Untimed campaign", contentTitle: "Untimed row" },
+      { placementId: "legacy-junk", contentItemId: "content-legacy-junk", publishDate: "2026-09-01", publishTime: "14:00junk", channel: "facebook", campaignName: "Legacy junk campaign", contentTitle: "Legacy junk row" },
+      { placementId: "legacy-seconds", contentItemId: "content-legacy-seconds", publishDate: "2026-09-01", publishTime: "14:00:30", channel: "facebook", campaignName: "Legacy seconds campaign", contentTitle: "Legacy seconds row" },
+      { placementId: "untimed-next", contentItemId: "content-untimed-next", publishDate: "2026-09-02", publishTime: "", channel: "facebook", campaignName: "Next campaign", contentTitle: "Next untimed row" },
+    ];
+    const stateSlots: unknown[] = [
+      rows,
+      "2026-09",
+      ["2026-09"],
+      "all",
+      ["mkt"],
+      [],
+      viewMode,
+      "",
+      { status: "live", message: "Live" },
+    ];
+    let stateIndex = 0;
+    const normalize = loadWholeHourNormalizer(appJsx);
+    const formatSource = extractNamedFunction(appJsx, "formatMarketingPlanTime");
+    const formatTime = vm.runInNewContext(`(${formatSource})`, { normalizeWholeHourTime: normalize });
+    const sortSource = extractNamedFunction(appJsx, "sortMarketingPlanCalendarRowsByTime");
+    const sortRows = vm.runInNewContext(`(${sortSource})`, { normalizeWholeHourTime: normalize });
+    const viewDays = viewMode === "day"
+      ? ["2026-09-01"]
+      : viewMode === "4_days"
+        ? ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]
+        : ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07"];
+    const sandbox = {
+      React: {
+        Fragment: "fragment",
+        createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => ({ type, props: props || {}, children }),
+      },
+      useStateApp(initialValue: unknown) {
+        const index = stateIndex++;
+        return [index in stateSlots ? stateSlots[index] : typeof initialValue === "function" ? (initialValue as () => unknown)() : initialValue, () => undefined];
+      },
+      useEffectApp: () => undefined,
+      window: { dispatchEvent: () => undefined },
+      CustomEvent: class {},
+      getMarketingPlanCurrentMonthKey: () => "2026-09",
+      MARKETING_PLAN_FUNCTION_FILTER_OPTIONS: [{ code: "mkt" }],
+      MARKETING_PLAN_CALENDAR_VIEW_OPTIONS: [
+        { value: "day", label: "Day" },
+        { value: "week", label: "Week" },
+        { value: "4_days", label: "4 Days" },
+        { value: "schedule", label: "Schedule" },
+      ],
+      MARKETING_PLAN_WORKING_STATUS_OPTIONS: [{ value: "planned", label: "Planned" }],
+      MARKETING_PLAN_REFRESH_REASONS: [],
+      filterMarketingPlanRowsByFunctions: (input: unknown[]) => input,
+      isMarketingPlanPublishableChannel: () => true,
+      getMarketingPlanChannelOptions: () => [],
+      getMarketingPlanTimelineWindow: () => ({
+        days: viewDays.map((key) => ({ key, day: Number(key.slice(-2)), isWeekend: false })),
+        monthGroups: [{ label: "Sep 2026" }],
+      }),
+      getMarketingPlanCalendarViewDays: () => viewDays,
+      filterMarketingPlanRows: (input: unknown[]) => input,
+      filterMarketingPlanRowsByVisibleCampaignTags: (input: unknown[]) => input,
+      sortMarketingPlanCalendarRowsByTime: sortRows,
+      normalizeWholeHourTime: normalize,
+      getMarketingPlanStatusClass: () => "badge--neutral",
+      getMarketingPlanStatusLabel: () => "Planned",
+      getMarketingPlanViewStatus: () => "planned",
+      getMarketingPlanChannelLabel: () => "Facebook",
+      formatMarketingPlanTime: formatTime,
+      formatMarketingPlanShortWeekday: (value: string) => value,
+      getMarketingPlanMonthLabel: (value: string) => value,
+      getMarketingPlanCalendarRangeLabel: () => viewMode,
+      MarketingPlanFunctionFilter: () => null,
+      Icon: () => null,
+    };
+    const screen = vm.runInNewContext(`(${functionSource})`, sandbox) as () => RenderedElement;
+    return screen();
+  }
+
+  function renderWorkingSheetTree(options: {
+    rows?: Array<Record<string, unknown>>;
+    currentUser?: Record<string, unknown>;
+    updatingRowId?: string;
+    duplicateSourceRow?: Record<string, unknown> | null;
+    duplicateLaunchDate?: string;
+    duplicatePublishTime?: string;
+    duplicateSameDateConfirmed?: boolean;
+    duplicateInFlightContentItemId?: string;
+    duplicateGuardActivatedSourceId?: string;
+    onStateChange?: (index: number, value: unknown) => void;
+    runDuplicate?: (...args: unknown[]) => Promise<Record<string, unknown>>;
+    loadTimelineRows?: (...args: unknown[]) => Promise<Array<Record<string, unknown>>>;
+    rpc?: (name: string, params: Record<string, unknown>) => Promise<{ data?: unknown; error?: unknown }>;
+    suppressConsoleError?: boolean;
+  } = {}) {
+    const functionSource = extractNamedFunction(appJsx, "MarketingPlanWorkingSheetScreen");
+    expect(functionSource).not.toBe("");
+    const rows = options.rows || [];
+    const stateSlots: unknown[] = [
+      rows,
+      "2026-09",
+      ["2026-09"],
+      false,
+      "",
+      "",
+      "",
+      "",
+      "",
+      [],
+      [],
+      "",
+      {
+        campaignName: "",
+        productEvent: "",
+        launchDate: "",
+        publishTime: "",
+        assetType: "",
+        contentTier: "",
+        subPicUserId: "",
+        subPicName: "",
+        requiresBrief: true,
+        details: "",
+        channels: [],
+        note: "",
+      },
+      { status: "idle", message: "" },
+      options.updatingRowId || "",
+      null,
+      null,
+      { status: "live", message: "Live" },
+      options.duplicateSourceRow || null,
+      options.duplicateLaunchDate || "",
+      options.duplicatePublishTime || "",
+      options.duplicateSameDateConfirmed || false,
+      options.duplicateInFlightContentItemId || "",
+    ];
+    let stateIndex = 0;
+    const normalizeWholeHour = loadWholeHourNormalizer(appJsx);
+    const normalizeWorkingStatus = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "normalizeMarketingPlanWorkingStatus")})`,
+      {},
+    );
+    const getWorkingSheetStatus = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "getMarketingPlanWorkingSheetStatus")})`,
+      { normalizeMarketingPlanWorkingStatus: normalizeWorkingStatus },
+    );
+    const getTierClass = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "getMarketingPlanTierClass")})`,
+      {},
+    );
+    const getWorkingStatusClass = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "getMarketingPlanWorkingStatusClass")})`,
+      {},
+    );
+    const getLegacyPublishTime = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "getMarketingPlanLegacyPublishTimeOption")})`,
+      { normalizeWholeHourTime: normalizeWholeHour },
+    );
+    const sandbox = {
+      React: {
+        createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => ({ type, props: props || {}, children }),
+      },
+      useStateApp(initialValue: unknown) {
+        const index = stateIndex++;
+        if (!(index in stateSlots)) stateSlots[index] = typeof initialValue === "function" ? (initialValue as () => unknown)() : initialValue;
+        return [stateSlots[index], (nextValue: unknown) => {
+          stateSlots[index] = typeof nextValue === "function"
+            ? (nextValue as (current: unknown) => unknown)(stateSlots[index])
+            : nextValue;
+          options.onStateChange?.(index, stateSlots[index]);
+        }];
+      },
+      useEffectApp: () => undefined,
+      useMemoApp: (factory: () => unknown) => factory(),
+      useRefApp: (value: unknown) => ({ current: value }),
+      window: {
+        FLOWMATE_CURRENT_USER: options.currentUser || { id: "user-a", role: "member" },
+        FLOWMATE_MARKETING_CAMPAIGNS: [],
+        FLOWMATE_MENTION_USERS: [],
+        flowmateSupabase: { rpc: options.rpc || (async () => ({ data: null, error: null })) },
+        dispatchEvent: () => undefined,
+      },
+      console: options.suppressConsoleError ? { ...console, error: () => undefined } : console,
+      CustomEvent: class {},
+      getMarketingPlanCurrentMonthKey: () => "2026-09",
+      getDefaultMarketingPlanWorkingSheetForm: () => stateSlots[12],
+      createMarketingWorkingMyTasksPreferenceController: () => ({ setAccount() {}, setLocalValue() {}, invalidateAccount() {} }),
+      groupMarketingPlanWorkingSheetRows: (input: unknown[]) => input,
+      resolveMarketingPlanWorkingRowsView: (input: unknown[]) => ({
+        visibleRows: input,
+        emptyReason: "No rows match the selected filters.",
+        nextValidDateState: { startDate: "", endDate: "", emptyReason: "No rows match the selected filters." },
+      }),
+      getMarketingPlanMonthLabel: (monthKey: string) => monthKey,
+      MARKETING_PLAN_PUBLISH_TIME_OPTIONS: loadGeneratedOptions(appJsx, "MARKETING_PLAN_PUBLISH_TIME_OPTIONS"),
+      MARKETING_PLAN_ASSET_TYPES: [],
+      MARKETING_PLAN_CONTENT_TIERS: [],
+      MARKETING_PLAN_CHANNELS: [],
+      MARKETING_PLAN_WORKING_STATUS_OPTIONS: [
+        { value: "planned", label: "Planned" },
+        { value: "assigned", label: "Assigned" },
+        { value: "review", label: "Review" },
+        { value: "ready_to_post", label: "Ready to Post" },
+        { value: "scheduled", label: "Schedule" },
+        { value: "posted", label: "Posted" },
+      ],
+      getMarketingPlanWorkingSheetStatus: getWorkingSheetStatus,
+      getMarketingPlanTierClass: getTierClass,
+      getMarketingPlanWorkingStatusClass: getWorkingStatusClass,
+      normalizeMarketingPlanPublishTimeOption: normalizeWholeHour,
+      getMarketingPlanLegacyPublishTimeOption: getLegacyPublishTime,
+      canDuplicateMarketingWorkingRow: (() => {
+        const source = extractNamedFunction(appJsx, "canDuplicateMarketingWorkingRow");
+        return source ? vm.runInNewContext(`(${source})`, {}) : () => false;
+      })(),
+      createMarketingWorkingDuplicateActionGuard: (() => {
+        const source = extractNamedFunction(appJsx, "createMarketingWorkingDuplicateActionGuard");
+        if (!source) return () => ({ activate: () => false, cancel: () => true, run: async () => ({ status: "ignored" }) });
+        const createGuard = vm.runInNewContext(`(${source})`, {}) as () => {
+          activate: (sourceId: string) => boolean;
+          cancel: () => boolean;
+          run: <T>(sourceId: string, action: () => Promise<T>) => Promise<T | { status: "ignored" }>;
+        };
+        return () => {
+          const guard = createGuard();
+          if (options.duplicateGuardActivatedSourceId) guard.activate(options.duplicateGuardActivatedSourceId);
+          return guard;
+        };
+      })(),
+      getMarketingWorkingDuplicateDraft: (() => {
+        const source = extractNamedFunction(appJsx, "getMarketingWorkingDuplicateDraft");
+        return source ? vm.runInNewContext(`(${source})`, {
+          normalizeMarketingPlanPublishTimeOption: normalizeWholeHour,
+          getMarketingPlanLegacyPublishTimeOption: getLegacyPublishTime,
+        }) : () => ({ launchDate: "", publishTime: "" });
+      })(),
+      runMarketingWorkingRowDuplicate: options.runDuplicate || (async () => ({ status: "unknown", message: "Unknown" })),
+      loadMarketingPlanTimelineRows: options.loadTimelineRows || (async () => rows),
+      hasMarketingPlanLinkedCreativeRequest: () => false,
+      getMarketingPlanChannelLabel: (channel: string) => channel,
+      getMarketingPlanChannelAbbrev: (channel: string) => channel.toUpperCase(),
+      formatMarketingPlanDate: (date: string) => date,
+      MarketingPlanSubPicSearch: () => null,
+      Icon: () => null,
+      openNativeTimePicker: () => undefined,
+      openFlowMateCreativeBriefFromMarketingRow: () => undefined,
+    };
+    const screen = vm.runInNewContext(`(${functionSource})`, sandbox) as () => RenderedElement;
+    return screen();
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+  }
+
+  function loadDuplicatePermission() {
+    const functionSource = extractNamedFunction(appJsx, "canDuplicateMarketingWorkingRow");
+    expect(functionSource).not.toBe("");
+    if (!functionSource) return null;
+    return vm.runInNewContext(`(${functionSource})`, {}) as (
+      row: Record<string, unknown> | null,
+      currentUser: Record<string, unknown> | null,
+    ) => boolean;
+  }
+
+  function loadDuplicateDraftBuilder() {
+    const functionSource = extractNamedFunction(appJsx, "getMarketingWorkingDuplicateDraft");
+    expect(functionSource).not.toBe("");
+    if (!functionSource) return null;
+    const normalize = loadWholeHourNormalizer(appJsx);
+    const getLegacy = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "getMarketingPlanLegacyPublishTimeOption")})`,
+      { normalizeWholeHourTime: normalize },
+    );
+    return vm.runInNewContext(`(${functionSource})`, {
+      normalizeMarketingPlanPublishTimeOption: normalize,
+      getMarketingPlanLegacyPublishTimeOption: getLegacy,
+    }) as (row: Record<string, unknown>) => { launchDate: string; publishTime: string };
+  }
+
+  function loadDuplicateActionGuard() {
+    const functionSource = extractNamedFunction(appJsx, "createMarketingWorkingDuplicateActionGuard");
+    expect(functionSource).not.toBe("");
+    if (!functionSource) return null;
+    return vm.runInNewContext(`(${functionSource})`, {}) as () => {
+      activate: (sourceId: string) => boolean;
+      cancel: () => boolean;
+      run: <T>(sourceId: string, action: () => Promise<T>) => Promise<T | { status: "ignored" }>;
+      getState: () => { sourceId: string; inFlight: boolean };
+    };
+  }
+
+  function loadDuplicateRunner() {
+    const functionSource = extractNamedFunction(appJsx, "runMarketingWorkingRowDuplicate");
+    expect(functionSource).not.toBe("");
+    if (!functionSource) return null;
+    return vm.runInNewContext(`(${functionSource})`, { console: { error: () => undefined } }) as (
+      sourceRow: Record<string, unknown>,
+      launchDate: string,
+      publishTime: string,
+      dependencies: {
+        rpc: (name: string, params: Record<string, unknown>) => Promise<{ data?: unknown; error?: unknown }>;
+        refreshRows: () => Promise<Array<Record<string, unknown>>>;
+        openBrief: (row: Record<string, unknown>) => void | Promise<void>;
+      },
+    ) => Promise<{ status: string; contentItemId?: string; message?: string }>;
+  }
+
+  function loadCreativeBriefNavigationContract() {
+    const openSource = extractNamedFunction(appJsx, "openFlowMateCreativeBriefFromMarketingRow");
+    const listenerSource = extractNamedFunction(appJsx, "onSwitchFlowMateProduct");
+    expect(openSource).not.toBe("");
+    expect(listenerSource).not.toBe("");
+    if (!openSource || !listenerSource) return null;
+    const listeners = new Map<string, Array<(event: { type: string; detail: Record<string, unknown> }) => void>>();
+    const events: Array<{ type: string; detail: Record<string, unknown> }> = [];
+    const localStorageValues = new Map<string, string>();
+    const sessionStorageValues = new Map<string, string>();
+    const testWindow = {
+      location: { hash: "#marketing-working" },
+      localStorage: { setItem: (key: string, value: string) => localStorageValues.set(key, value) },
+      sessionStorage: { setItem: (key: string, value: string) => sessionStorageValues.set(key, value) },
+      addEventListener(type: string, listener: (event: { type: string; detail: Record<string, unknown> }) => void) {
+        listeners.set(type, [...(listeners.get(type) || []), listener]);
+      },
+      dispatchEvent(event: { type: string; detail: Record<string, unknown> }) {
+        events.push(event);
+        for (const listener of listeners.get(event.type) || []) listener(event);
+        return true;
+      },
+    };
+    class TestCustomEvent {
+      type: string;
+      detail: Record<string, unknown>;
+
+      constructor(type: string, init: { detail: Record<string, unknown> }) {
+        this.type = type;
+        this.detail = init.detail;
+      }
+    }
+    const routeChanges: string[] = [];
+    const productChanges: string[] = [];
+    const listener = vm.runInNewContext(`(${listenerSource})`, {
+      window: testWindow,
+      sessionStorage: testWindow.sessionStorage,
+      TITLE_MAP: { create: "Create" },
+      setActiveProduct: (value: string) => productChanges.push(value),
+      setRoute: (value: string) => routeChanges.push(value),
+    }) as (event: { type: string; detail: Record<string, unknown> }) => void;
+    const openBrief = vm.runInNewContext(`(${openSource})`, {
+      window: testWindow,
+      CustomEvent: TestCustomEvent,
+      createFlowMateDraftFromMarketingPlanRow: (row: Record<string, unknown>) => ({ sourceId: row.contentItemId }),
+    }) as (row: Record<string, unknown>) => void;
+    return { testWindow, listener, events, localStorageValues, sessionStorageValues, routeChanges, productChanges, openBrief };
+  }
+
+  function loadPreferenceFunctions(flowmateSupabase: unknown) {
+    const loadSource = extractNamedFunction(appJsx, "loadMarketingWorkingMyTasksPreference");
+    const saveSource = extractNamedFunction(appJsx, "saveMarketingWorkingMyTasksPreference");
+    expect(loadSource).not.toBe("");
+    expect(saveSource).not.toBe("");
+    if (!loadSource || !saveSource) return null;
+    return {
+      load: vm.runInNewContext(`(${loadSource})`, { window: { flowmateSupabase } }) as (userId?: string) => Promise<boolean>,
+      save: vm.runInNewContext(`(${saveSource})`, { window: { flowmateSupabase } }) as (userId: string, enabled: boolean) => Promise<void>,
+    };
+  }
+
+  const workingRows = [
+    { id: "pic-boundary", picUserId: "user-a", subPicUserId: "", picName: "Shared Name", publishDate: "2026-09-01", contentTitle: "Alpha launch", channels: ["facebook"] },
+    { id: "sub-boundary", picUserId: "user-b", subPicUserId: "user-a", subPicName: "Shared Name", publishDate: "2026-09-15", contentTitle: "Beta launch", channels: ["tiktok"] },
+    { id: "same-name-other-id", picUserId: "user-c", subPicUserId: "", picName: "Shared Name", publishDate: "2026-09-30", contentTitle: "Gamma launch", channels: ["facebook"] },
+    { id: "unassigned", picUserId: "", subPicUserId: "", publishDate: "2026-09-20", contentTitle: "Delta launch", channels: [] },
+  ];
+
+  it("Current Working filters My Tasks by exact PIC or Sub PIC id, including missing-user and same-name cases", () => {
+    const filterRows = loadWorkingRowsFilter();
+
+    expect(filterRows(workingRows, { currentUserId: "user-a", myTasksOnly: true }).map((row) => row.id)).toEqual([
+      "pic-boundary",
+      "sub-boundary",
+    ]);
+    expect(filterRows(workingRows, { currentUserId: "", myTasksOnly: true })).toEqual([]);
+  });
+
+  it("Launch Date supports empty, start-only, end-only, inclusive bounds, and rejects an invalid range", () => {
+    const filterRows = loadWorkingRowsFilter();
+
+    expect(filterRows(workingRows, {}).map((row) => row.id)).toEqual(workingRows.map((row) => row.id));
+    expect(filterRows(workingRows, { startDate: "2026-09-15" }).map((row) => row.id)).toEqual([
+      "sub-boundary",
+      "same-name-other-id",
+      "unassigned",
+    ]);
+    expect(filterRows(workingRows, { endDate: "2026-09-15" }).map((row) => row.id)).toEqual([
+      "pic-boundary",
+      "sub-boundary",
+    ]);
+    expect(filterRows(workingRows, { startDate: "2026-09-01", endDate: "2026-09-30" }).map((row) => row.id)).toEqual(
+      workingRows.map((row) => row.id),
+    );
+    expect(filterRows(workingRows, { startDate: "2026-09-30", endDate: "2026-09-01" })).toEqual([]);
+  });
+
+  it("Current Working filters combine My Tasks, Launch Date, and existing text search", () => {
+    const filterRows = loadWorkingRowsFilter();
+
+    expect(filterRows(workingRows, {
+      currentUserId: "user-a",
+      myTasksOnly: true,
+      startDate: "2026-09-15",
+      endDate: "2026-09-30",
+      search: "launch",
+    }).map((row) => row.id)).toEqual(["sub-boundary"]);
+  });
+
+  it("Current Working CSV exports each supplied grouped visible row exactly once with joined Channels and N/A", () => {
+    const downloads: Array<{ filename: string; headers: string[]; rows: string[][] }> = [];
+    const exportRows = loadCsvExporter(downloads);
+    const groupedVisibleRows = [
+      {
+        contentItemId: "group-a",
+        monthKey: "2026-09",
+        campaignName: "Campaign A",
+        contentTeam: "Brand",
+        contentTitle: "Hero post",
+        format: "Banner",
+        contentTier: "S",
+        picName: "Alice",
+        subPicName: "Bob",
+        channels: ["facebook", "tiktok"],
+        publishDate: "2026-09-10",
+        publishTime: "11:00",
+        placementStatus: "ready_to_post",
+        placementNote: "Grouped note",
+      },
+      {
+        contentItemId: "group-b",
+        monthKey: "2026-10",
+        campaignName: "Campaign B",
+        contentTitle: "Clip",
+        channels: [],
+        publishDate: "2026-10-02",
+        publishTime: "",
+        placementStatus: "planned",
+      },
+    ];
+
+    expect(exportRows(groupedVisibleRows, "2099-01")).toBe(2);
+    expect(downloads).toEqual([{
+      filename: "marketing-plan-2099-01-current-working.csv",
+      headers: ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channels", "Launch Date", "Publish Time", "Marketing Status", "Note"],
+      rows: [
+        ["Sep 2026", "Campaign A", "Brand", "Hero post", "Banner", "S", "Alice", "Bob", "Facebook | TikTok", "2026-09-10", "11:00", "Ready to Post", "Grouped note"],
+        ["Oct 2026", "Campaign B", "", "Clip", "", "", "", "", "", "2026-10-02", "N/A", "Planned", ""],
+      ],
+    }]);
+  });
+
+  it("My Tasks preference client defaults missing data off and uses the account-scoped select/upsert contract", async () => {
+    const calls: Array<[string, ...unknown[]]> = [];
+    let readResult: { data: unknown; error: unknown } = { data: null, error: null };
+    let writeResult: { error: unknown } = { error: null };
+    const query = {
+      select: (...args: unknown[]) => { calls.push(["select", ...args]); return query; },
+      eq: (...args: unknown[]) => { calls.push(["eq", ...args]); return query; },
+      maybeSingle: async () => { calls.push(["maybeSingle"]); return readResult; },
+      upsert: async (...args: unknown[]) => { calls.push(["upsert", ...args]); return writeResult; },
+    };
+    const flowmateSupabase = {
+      from: (table: string) => { calls.push(["from", table]); return query; },
+    };
+    const preferences = loadPreferenceFunctions(flowmateSupabase);
+    if (!preferences) return;
+
+    expect(await preferences.load()).toBe(false);
+    expect(calls).toEqual([]);
+    expect(await preferences.load("user-a")).toBe(false);
+    expect(calls).toEqual([
+      ["from", "user_ui_preferences"],
+      ["select", "marketing_working_my_tasks"],
+      ["eq", "user_id", "user-a"],
+      ["maybeSingle"],
+    ]);
+
+    calls.length = 0;
+    readResult = { data: { marketing_working_my_tasks: true }, error: null };
+    expect(await preferences.load("user-b")).toBe(true);
+    calls.length = 0;
+    await preferences.save("user-b", 1 as unknown as boolean);
+    expect(calls).toEqual([
+      ["from", "user_ui_preferences"],
+      ["upsert", { user_id: "user-b", marketing_working_my_tasks: true }, { onConflict: "user_id" }],
+    ]);
+
+    const readError = new Error("read failed");
+    readResult = { data: null, error: readError };
+    await expect(preferences.load("user-c")).rejects.toBe(readError);
+    const writeError = new Error("write failed");
+    writeResult = { error: writeError };
+    await expect(preferences.save("user-c", false)).rejects.toBe(writeError);
+  });
+
+  it("My Tasks ignores a stale preference read success after a newer local toggle", async () => {
+    const read = deferred<boolean>();
+    const values: boolean[] = [];
+    const messages: string[] = [];
+    const controller = loadPreferenceController({
+      loadPreference: () => read.promise,
+      savePreference: async () => undefined,
+      onValue: (value: boolean) => values.push(value),
+      onMessage: (message: string) => messages.push(message),
+    });
+
+    const loading = controller.setAccount("user-a");
+    expect(values).toEqual([false]);
+    await controller.setLocalValue(true);
+    read.resolve(false);
+    await loading;
+
+    expect(values).toEqual([false, true]);
+    expect(messages).toEqual(["", ""]);
+  });
+
+  it("My Tasks ignores a stale preference read failure after a newer local toggle", async () => {
+    const read = deferred<boolean>();
+    const values: boolean[] = [];
+    const messages: string[] = [];
+    const controller = loadPreferenceController({
+      loadPreference: () => read.promise,
+      savePreference: async () => undefined,
+      onValue: (value: boolean) => values.push(value),
+      onMessage: (message: string) => messages.push(message),
+    });
+
+    const loading = controller.setAccount("user-a");
+    expect(values).toEqual([false]);
+    await controller.setLocalValue(true);
+    read.reject(new Error("stale read failed"));
+    await loading;
+
+    expect(values).toEqual([false, true]);
+    expect(messages).toEqual(["", ""]);
+  });
+
+  it("My Tasks shows exact current-account read and write warnings", async () => {
+    const loadWarning = "My Tasks preference could not be loaded. It is off for this account.";
+    const activeWriteWarning = "My Tasks is active, but the preference could not be saved.";
+    const inactiveWriteWarning = "My Tasks preference could not be saved.";
+    const read = deferred<boolean>();
+    const readValues: boolean[] = [];
+    const readMessages: string[] = [];
+    const readController = loadPreferenceController({
+      loadPreference: () => read.promise,
+      savePreference: async () => undefined,
+      onValue: (value: boolean) => readValues.push(value),
+      onMessage: (message: string) => readMessages.push(message),
+    });
+    const loading = readController.setAccount("user-a");
+    read.reject(new Error("current read failed"));
+    await loading;
+    expect(readValues).toEqual([false, false]);
+    expect(readMessages).toEqual(["", loadWarning]);
+
+    for (const { loadedValue, nextValue, warning } of [
+      { loadedValue: false, nextValue: true, warning: activeWriteWarning },
+      { loadedValue: true, nextValue: false, warning: inactiveWriteWarning },
+    ]) {
+      const write = deferred<void>();
+      const messages: string[] = [];
+      const controller = loadPreferenceController({
+        loadPreference: async () => loadedValue,
+        savePreference: () => write.promise,
+        onValue: () => undefined,
+        onMessage: (message: string) => messages.push(message),
+      });
+      await controller.setAccount("user-a");
+      const saving = controller.setLocalValue(nextValue);
+      await Promise.resolve();
+      write.reject(new Error("current write failed"));
+      await saving;
+      expect(messages).toEqual(["", "", warning]);
+    }
+  });
+
+  it("My Tasks ignores account A read and write failures after switching to account B", async () => {
+    const readA = deferred<boolean>();
+    const readB = deferred<boolean>();
+    const writeA = deferred<void>();
+    const values: boolean[] = [];
+    const messages: string[] = [];
+    const controller = loadPreferenceController({
+      loadPreference: (userId: string) => userId === "user-a" ? readA.promise : readB.promise,
+      savePreference: () => writeA.promise,
+      onValue: (value: boolean) => values.push(value),
+      onMessage: (message: string) => messages.push(message),
+    });
+
+    const loadingA = controller.setAccount("user-a");
+    const savingA = controller.setLocalValue(true);
+    const loadingB = controller.setAccount("user-b");
+    readA.reject(new Error("account A read failed"));
+    writeA.reject(new Error("account A write failed"));
+    readB.resolve(true);
+    await Promise.all([loadingA, savingA, loadingB]);
+
+    expect(values).toEqual([false, true, false, true]);
+    expect(messages).toEqual(["", "", ""]);
+    expect(messages).not.toContain("My Tasks preference could not be loaded. It is off for this account.");
+    expect(messages).not.toContain("My Tasks is active, but the preference could not be saved.");
+    expect(messages).not.toContain("My Tasks preference could not be saved.");
+  });
+
+  it("My Tasks serializes rapid writes so the last local action is stored last", async () => {
+    const firstWrite = deferred<void>();
+    const secondWrite = deferred<void>();
+    const writes: Array<{ userId: string; enabled: boolean }> = [];
+    const controller = loadPreferenceController({
+      loadPreference: async () => false,
+      savePreference: (userId: string, enabled: boolean) => {
+        writes.push({ userId, enabled });
+        return writes.length === 1 ? firstWrite.promise : secondWrite.promise;
+      },
+      onValue: () => undefined,
+      onMessage: () => undefined,
+    });
+
+    await controller.setAccount("user-a");
+    const saveOn = controller.setLocalValue(true);
+    const saveOff = controller.setLocalValue(false);
+    await Promise.resolve();
+    expect(writes).toEqual([{ userId: "user-a", enabled: true }]);
+    firstWrite.resolve();
+    await saveOn;
+    await Promise.resolve();
+    expect(writes).toEqual([
+      { userId: "user-a", enabled: true },
+      { userId: "user-a", enabled: false },
+    ]);
+    secondWrite.resolve();
+    await saveOff;
+  });
+
+  it("Launch Date invalid range reapplies last valid bounds and reason to current rows, account, My Tasks, and search", () => {
+    const resolveView = loadWorkingRowsView();
+    expect(resolveView([], {
+      currentUserId: "user-a",
+      myTasksOnly: true,
+      startDate: "",
+      endDate: "",
+      search: "",
+    }).emptyReason).toBe("No tasks are assigned to you in this month.");
+    expect(resolveView([{ id: "outside", publishDate: "2026-10-01", channels: [] }], {
+      currentUserId: "user-a",
+      myTasksOnly: false,
+      startDate: "2026-09-01",
+      endDate: "2026-09-30",
+      search: "",
+    }).emptyReason).toBe("No tasks match the selected Launch Date range.");
+    const valid = resolveView(workingRows, {
+      currentUserId: "user-a",
+      myTasksOnly: true,
+      startDate: "2026-09-01",
+      endDate: "2026-09-15",
+      search: "missing",
+    });
+    expect(valid.visibleRows).toEqual([]);
+    expect(valid.emptyReason).toBe("No rows match the selected filters.");
+
+    const currentMonthRows = [
+      { id: "current-match", picUserId: "user-b", publishDate: "2026-09-10", contentTitle: "Current launch", channels: [] },
+      { id: "old-account", picUserId: "user-a", publishDate: "2026-09-10", contentTitle: "Current launch", channels: [] },
+      { id: "outside-last-valid-date", picUserId: "user-b", publishDate: "2026-09-20", contentTitle: "Current launch", channels: [] },
+    ];
+    const invalid = resolveView(currentMonthRows, {
+      currentUserId: "user-b",
+      myTasksOnly: true,
+      startDate: "2026-09-30",
+      endDate: "2026-09-01",
+      search: "current",
+    }, valid.nextValidDateState);
+
+    expect(invalid.visibleRows.map((row) => row.id)).toEqual(["current-match"]);
+    expect(invalid.emptyReason).toBe("No rows match the selected filters.");
+    expect(invalid.nextValidDateState).toEqual(valid.nextValidDateState);
+  });
+
+  it("Current Working filters render the approved toolbar order, Clear scope, status text, and empty states", () => {
+    const toolbarStart = workingSource.indexOf('className: "marketing-working-filters"');
+    const toolbarEnd = workingSource.indexOf('className: "marketing-working-active-filters"', toolbarStart);
+    const toolbar = workingSource.slice(toolbarStart, toolbarEnd);
+    const orderedMarkers = [
+      '"aria-label": "Month"',
+      'className: `btn btn--secondary marketing-working-my-tasks',
+      'className: "field marketing-working-filter-field marketing-working-start-date"',
+      'className: "field marketing-working-filter-field marketing-working-end-date"',
+      '"data-testid": "working-search"',
+      '"data-testid": "working-filter-reset"',
+      '"data-testid": "working-export"',
+      '"data-testid": "working-row-count"',
+    ];
+    let previousIndex = -1;
+    for (const marker of orderedMarkers) {
+      const markerIndex = toolbar.indexOf(marker);
+      expect(markerIndex, marker).toBeGreaterThan(previousIndex);
+      previousIndex = markerIndex;
+    }
+
+    expect(toolbar).toContain('"aria-pressed": myTasksOnly');
+    expect(toolbar).toContain('myTasksOnly && React.createElement("span", null, "✓")');
+    expect(toolbar).toContain('type: "date"');
+    expect(toolbar).toContain('aria-describedby');
+    expect(toolbar).toContain('}, "Showing ", visibleRows.length, " rows")');
+    expect(workingSource).toContain("resolveMarketingPlanWorkingRowsView");
+    expect(workingSource).toContain("exportMarketingPlanRowsCsv(visibleRows, selectedMonth)");
+
+    const clearStart = workingSource.indexOf("function clearWorkingFilters");
+    const clearEnd = workingSource.indexOf("function handleWorkingRowTimeChange", clearStart);
+    const clearSource = workingSource.slice(clearStart, clearEnd);
+    expect(clearSource).toContain('setWorkingStartDate("")');
+    expect(clearSource).toContain('setWorkingEndDate("")');
+    expect(clearSource).toContain('setWorkingDateError("")');
+    expect(clearSource).toContain('setWorkingSearch("")');
+    expect(clearSource).not.toContain("setSelectedMonth");
+    expect(clearSource).not.toContain("setMyTasksOnly");
+  });
+
+  it("Current Working renders its row count as a polite live region", () => {
+    const tree = renderWorkingSheetTree();
+    const rowCount = findRenderedElement(tree, (element) => element.props["data-testid"] === "working-row-count");
+
+    expect(rowCount).toBeDefined();
+    expect(rowCount?.props["aria-live"]).toBe("polite");
+    expect(rowCount?.children).toEqual(["Showing ", 0, " rows"]);
+  });
+
+  it("keeps Month and replaces four Current Working dropdowns with My Tasks and Launch Date range", () => {
+    expect(workingSource).toContain('"aria-label": "Month"');
+    expect(workingSource).toContain("aria-pressed");
+    expect(workingSource).toContain("marketing-working-start-date");
+    expect(workingSource).toContain("marketing-working-end-date");
+    expect(workingSource).toContain("marketing-working-my-tasks");
+    const toolbarStart = workingSource.indexOf('"data-testid": "working-filters"');
+    const toolbarEnd = workingSource.indexOf('"data-testid": "working-search"');
+    expect(toolbarStart).toBeGreaterThanOrEqual(0);
+    expect(toolbarEnd).toBeGreaterThan(toolbarStart);
+    const currentWorkingToolbar = workingSource.slice(toolbarStart, toolbarEnd);
+    for (const obsoleteControl of ["working-channel", "working-status", "working-team", "working-owner"]) {
+      expect(currentWorkingToolbar).not.toContain(obsoleteControl);
+    }
+    expect(workingSource).toContain("getMarketingPlanTierClass(row.contentTier)");
+    expect(workingSource).toContain("getMarketingPlanWorkingStatusClass(rowStatusValue)");
+  });
+
+  it("matches My Tasks by PIC or Sub PIC user id and never by display name", () => {
+    expect(workingSource).toContain("row.picUserId === currentUser.id");
+    expect(workingSource).toContain("row.subPicUserId === currentUser.id");
+    expect(workingSource).toContain("marketing-working-my-tasks");
+    expect(workingSource).not.toContain("row.picName === currentUser.name");
+    expect(workingSource).not.toContain("row.subPicName === currentUser.name");
+  });
+
+  it("uses N/A plus every whole hour from 00:00 through 23:00", () => {
+    const expected = [
+      { value: "", label: "N/A" },
+      ...Array.from({ length: 24 }, (_, hour) => {
+        const value = `${String(hour).padStart(2, "0")}:00`;
+        return { value, label: value };
+      }),
+    ];
+    const marketingOptions = loadGeneratedOptions(appJsx, "MARKETING_PLAN_PUBLISH_TIME_OPTIONS");
+    const creativeOptions = loadGeneratedOptions(createScreenJsx, "FLOWMATE_PUBLISH_TIME_OPTIONS");
+
+    expect(marketingOptions).toEqual(expected);
+    expect(creativeOptions).toEqual(expected);
+    expect(marketingOptions).toHaveLength(25);
+    expect(new Set(marketingOptions.map((option) => option.value)).size).toBe(25);
+    expect(marketingOptions[1]).toEqual({ value: "00:00", label: "00:00" });
+    expect(marketingOptions.at(-1)).toEqual({ value: "23:00", label: "23:00" });
+  });
+
+  it("normalizes the complete nullable whole-hour Publish Time and preserves rejected legacy values", () => {
+    for (const [source, legacyFunctionName] of [
+      [appJsx, "getMarketingPlanLegacyPublishTimeOption"],
+      [createScreenJsx, "getFlowMateLegacyPublishTimeOption"],
+    ] as const) {
+      const normalize = loadWholeHourNormalizer(source);
+      expect(normalize(null)).toBe("");
+      expect(normalize("")).toBe("");
+      expect(normalize(" 14:00:00 ")).toBe("14:00");
+      expect(normalize("00:00")).toBe("00:00");
+      expect(normalize("23:00")).toBe("23:00");
+      for (const invalid of ["24:00", "14:30", "14:00:30", "14:00junk", "14:00:00junk", "9:00", "1400", "bad"]) {
+        expect(normalize(invalid), invalid).toBe("");
+      }
+      const legacySource = extractNamedFunction(source, legacyFunctionName);
+      const getLegacy = vm.runInNewContext(`(${legacySource})`, {
+        normalizeWholeHourTime: normalize,
+        formatMarketingPlanTime: (value: unknown) => value ? String(value).trim().slice(0, 5) : "N/A",
+      }) as (value: unknown) => string;
+      expect(getLegacy("14:00:00")).toBe("");
+      expect(getLegacy("14:00:30")).toBe("14:00:30");
+      expect(getLegacy("14:00junk")).toBe("14:00junk");
+    }
+  });
+
+  it("keeps nullable Publish Time defaults, validation, null sync, and legacy visibility", () => {
+    const marketingDefaultSource = extractNamedFunction(appJsx, "getDefaultMarketingPlanWorkingSheetForm");
+    const creativeDefaultSource = extractNamedFunction(createScreenJsx, "getDefaultCreativeDraft");
+    const saveSource = workingSource.slice(
+      workingSource.indexOf("async function handleSaveWorkingSheetRow"),
+      workingSource.indexOf("async function handleWorkingRowTimeChange"),
+    );
+    const creativeValidationSource = extractNamedFunction(createScreenJsx, "getFlowMateCreateValidationErrors");
+    const updateTimeSource = extractNamedFunction(appJsx, "updateMarketingPlanWorkingSheetTime");
+    const syncSource = extractNamedFunction(appJsx, "syncMarketingPlanLinkedFlowMateSchedule");
+    const marketingLegacySource = extractNamedFunction(appJsx, "getMarketingPlanLegacyPublishTimeOption");
+    const creativeLegacySource = extractNamedFunction(createScreenJsx, "getFlowMateLegacyPublishTimeOption");
+    const creativeFormSource = createScreenJsx.slice(
+      createScreenJsx.indexOf("function CreativeRequestForm"),
+      createScreenJsx.indexOf("function CreateResultScreen"),
+    );
+
+    expect(marketingDefaultSource).toContain('publishTime: ""');
+    expect(creativeDefaultSource).toContain('publishTime: ""');
+    expect(saveSource).not.toContain('["publishTime", "Time is required."]');
+    expect(saveSource).toContain('publishTime: ""');
+    expect(creativeValidationSource).not.toContain('requireTime("publishTime"');
+    expect(creativeValidationSource).toContain("normalizeWholeHourTime(row.publishTime)");
+    expect(creativeValidationSource).toContain("Publish Time must be N/A or a whole hour.");
+    expect(updateTimeSource).toContain("p_publish_time: normalizedTime || null");
+    expect(syncSource).toContain("p_publish_time: normalizedTime || null");
+    expect(marketingLegacySource).not.toBe("");
+    expect(creativeLegacySource).not.toBe("");
+    expect(workingSource).toContain("getMarketingPlanLegacyPublishTimeOption(row.publishTime)");
+    expect(workingSource).toContain("disabled: true");
+    expect(createScreenJsx).toContain("getFlowMateLegacyPublishTimeOption(value.publishTime)");
+    expect(creativeFormSource).toContain("disabled>{legacyPublishTime}</option>");
+    expect(createScreenJsx).not.toContain('Publish Time <span className="req">*</span>');
+  });
+
+  it("resets Creative Request Publish Time before normal success and fallback Create another paths", () => {
+    const resetSource = extractNamedFunction(createScreenJsx, "resetSubmittedDraft");
+    expect(resetSource).not.toBe("");
+    let creativeDraft: Record<string, unknown> = { publishTime: "21:00" };
+    const resetSubmittedDraft = vm.runInNewContext(`(${resetSource})`, {
+      mode: "creative",
+      setQuickDraft: () => undefined,
+      setCreativeDraft: (nextDraft: Record<string, unknown>) => { creativeDraft = nextDraft; },
+      normalizeFlowMateQuickDraft: (draft: Record<string, unknown>) => draft,
+      getDefaultQuickDraft: () => ({ title: "", publishTime: "" }),
+      withCreativeDraftTitle: (draft: Record<string, unknown>) => draft,
+      getDefaultCreativeDraft: () => ({ title: "", publishTime: "" }),
+    }) as () => void;
+
+    resetSubmittedDraft();
+    expect(creativeDraft.publishTime).toBe("");
+
+    const submitSource = createScreenJsx.slice(
+      createScreenJsx.indexOf("async function handleSubmit()"),
+      createScreenJsx.indexOf("if (submitted) return"),
+    );
+    const clearIndex = submitSource.indexOf("clearFlowMateCreateDraft(mode)");
+    const resetIndex = submitSource.indexOf("resetSubmittedDraft();", clearIndex);
+    expect(resetIndex).toBeGreaterThan(clearIndex);
+    expect(resetIndex).toBeLessThan(submitSource.indexOf("if (nextResult.warning)"));
+    expect(resetIndex).toBeLessThan(submitSource.indexOf("await openCreatedDetail(created, nextResult.id)"));
+  });
+
+  it("renders per-day Time not set sections after timed rows in Day, Week, and 4 Days Calendar modes", () => {
+    for (const viewMode of ["day", "week", "4_days"] as const) {
+      const tree = renderMarketingCalendarTree(viewMode);
+      const grid = findRenderedElement(tree, (element) => element.props.className === "marketing-calendar-time-grid");
+      expect(grid, viewMode).toBeDefined();
+      const gridText = getRenderedText(grid);
+      expect(gridText.indexOf("Timed row"), viewMode).toBeGreaterThanOrEqual(0);
+      expect(gridText.indexOf("DB timed row"), viewMode).toBeGreaterThan(gridText.indexOf("Timed row"));
+      expect(gridText.indexOf("Time not set"), viewMode).toBeGreaterThan(gridText.indexOf("DB timed row"));
+      expect(gridText.indexOf("Untimed row"), viewMode).toBeGreaterThan(gridText.indexOf("Time not set"));
+
+      const firstDayUntimed = findRenderedElements(grid, (element) => (
+        String(element.props.className || "").includes("marketing-calendar-time-grid__time-not-set")
+        && element.props["data-date"] === "2026-09-01"
+      ))[0];
+      expect(getRenderedText(firstDayUntimed), viewMode).toContain("Untimed row");
+      expect(getRenderedText(firstDayUntimed), viewMode).toContain("Legacy junk row");
+      expect(getRenderedText(firstDayUntimed), viewMode).toContain("14:00junk");
+      expect(getRenderedText(firstDayUntimed), viewMode).toContain("Legacy seconds row");
+      expect(getRenderedText(firstDayUntimed), viewMode).toContain("14:00:30");
+
+      const midnightSlot = findRenderedElements(grid, (element) => element.props.className === "marketing-calendar-time-grid__slot" && element.props.key === "2026-09-01-0")[0];
+      expect(getRenderedText(midnightSlot), viewMode).not.toContain("Untimed row");
+      const timedSlotsText = getRenderedText(findRenderedElements(grid, (element) => element.props.className === "marketing-calendar-time-grid__slot"));
+      expect(timedSlotsText, viewMode).toContain("DB timed row");
+      expect(timedSlotsText, viewMode).not.toContain("Legacy junk row");
+      expect(timedSlotsText, viewMode).not.toContain("Legacy seconds row");
+      expect(findRenderedElements(grid, (element) => String(element.props.className || "").includes("marketing-calendar-time-grid__time-not-set")).length, viewMode).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("renders Schedule timed rows before Time not set while preserving invalid legacy times", () => {
+    const tree = renderMarketingCalendarTree("schedule");
+    const schedule = findRenderedElement(tree, (element) => element.props.className === "marketing-calendar-schedule");
+    expect(schedule).toBeDefined();
+    const scheduleText = getRenderedText(schedule);
+    expect(scheduleText.indexOf("Timed row")).toBeGreaterThanOrEqual(0);
+    expect(scheduleText.indexOf("DB timed row")).toBeGreaterThan(scheduleText.indexOf("Timed row"));
+    expect(scheduleText.indexOf("Time not set")).toBeGreaterThan(scheduleText.indexOf("DB timed row"));
+
+    const timeNotSet = findRenderedElements(schedule, (element) => element.props.className === "marketing-calendar-schedule__time-not-set")[0];
+    const timeNotSetText = getRenderedText(timeNotSet);
+    expect(timeNotSetText).toContain("Untimed row");
+    expect(timeNotSetText).toContain("Legacy junk row");
+    expect(timeNotSetText).toContain("14:00junk");
+    expect(timeNotSetText).toContain("Legacy seconds row");
+    expect(timeNotSetText).toContain("14:00:30");
+  });
+
+  it("maps every Tier to a stable semantic class with readable light and dark styling", () => {
+    const mapperSource = extractNamedFunction(appJsx, "getMarketingPlanTierClass");
+    expect(mapperSource).not.toBe("");
+    const getTierClass = vm.runInNewContext(`(${mapperSource})`, {}) as (tier: unknown) => string;
+    expect([
+      getTierClass("S"), getTierClass(" a "), getTierClass("b"), getTierClass("C"), getTierClass("unknown"),
+    ]).toEqual([
+      "marketing-tier--s", "marketing-tier--a", "marketing-tier--b", "marketing-tier--c", "",
+    ]);
+
+    const foregrounds = { s: "#B42318", a: "#B54708", b: "#175CD3", c: "#475467" };
+    for (const [modifier, foreground] of Object.entries(foregrounds)) {
+      const lightBlock = extractCssBlock(`.marketing-tier--${modifier}`);
+      const darkBlock = extractCssBlock(`html[data-theme="dark"] .marketing-tier--${modifier}`);
+      expect(readCssHex(lightBlock, "color"), modifier).toBe(foreground);
+      expect(getContrastRatio(readCssHex(lightBlock, "color"), readCssHex(lightBlock, "background")), `${modifier} light`).toBeGreaterThanOrEqual(4.5);
+      expect(getContrastRatio(readCssHex(darkBlock, "color"), readCssHex(darkBlock, "background")), `${modifier} dark`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(workingSource).toContain("getMarketingPlanTierClass(row.contentTier)");
+  });
+
+  it("renders Tier and normalized Working Status semantics in real Current Working rows", () => {
+    const tree = renderWorkingSheetTree({
+      rows: [
+        {
+          contentItemId: "managed-row",
+          monthKey: "2026-09",
+          campaignName: "Managed campaign",
+          contentTitle: "Managed item",
+          contentTier: "S",
+          format: "Banner",
+          channels: ["facebook"],
+          publishDate: "2026-09-01",
+          publishTime: "11:00",
+          placementStatus: "planned",
+          picUserId: "user-a",
+          picName: "User A",
+          requiresBrief: false,
+        },
+        {
+          contentItemId: "locked-schedule-row",
+          monthKey: "2026-09",
+          campaignName: "Locked campaign",
+          contentTitle: "Scheduled item",
+          contentTier: "A",
+          format: "Video",
+          channels: ["youtube"],
+          publishDate: "2026-09-02",
+          publishTime: "",
+          placementStatus: "schedule",
+          picUserId: "user-b",
+          picName: "User B",
+          requiresBrief: false,
+        },
+      ],
+      currentUser: { id: "user-a", role: "member" },
+    });
+    const rows = findRenderedElements(tree, (element) => element.props["data-testid"] === "working-row");
+    expect(rows).toHaveLength(2);
+
+    const managedTier = findRenderedElement(rows[0], (element) => String(element.props.className || "").includes("marketing-tier"));
+    expect(getRenderedText(managedTier)).toBe("S");
+    expect(managedTier?.props.className).toBe("marketing-tier marketing-tier--s");
+
+    const lockedTier = findRenderedElement(rows[1], (element) => String(element.props.className || "").includes("marketing-tier"));
+    expect(getRenderedText(lockedTier)).toBe("A");
+    expect(lockedTier?.props.className).toBe("marketing-tier marketing-tier--a");
+
+    const statusSelects = rows.map((row) => findRenderedElement(
+      row,
+      (element) => String(element.props.className || "").includes("marketing-working-status"),
+    ));
+    expect(statusSelects[0]?.props).toMatchObject({
+      value: "planned",
+      disabled: false,
+      className: "select marketing-working-status marketing-status--planned",
+    });
+    expect(statusSelects[1]?.props).toMatchObject({
+      value: "scheduled",
+      disabled: true,
+      className: "select marketing-working-status marketing-status--schedule",
+    });
+    const scheduleOption = findRenderedElements(
+      statusSelects[1],
+      (element) => element.type === "option" && element.props.value === "scheduled",
+    )[0];
+    expect(getRenderedText(scheduleOption)).toBe("Schedule");
+  });
+
+  it("maps each Working Status colour independently from existing timeline badge semantics", () => {
+    const mapperSource = extractNamedFunction(appJsx, "getMarketingPlanWorkingStatusClass");
+    expect(mapperSource).not.toBe("");
+    const getWorkingStatusClass = vm.runInNewContext(`(${mapperSource})`, {}) as (status: unknown) => string;
+    expect([
+      getWorkingStatusClass("planned"), getWorkingStatusClass("assigned"), getWorkingStatusClass("review"),
+      getWorkingStatusClass("ready"), getWorkingStatusClass("ready_to_post"), getWorkingStatusClass("schedule"),
+      getWorkingStatusClass("scheduled"), getWorkingStatusClass("posted"), getWorkingStatusClass("unknown"),
+    ]).toEqual([
+      "marketing-status--planned", "marketing-status--assigned", "marketing-status--review",
+      "marketing-status--ready-to-post", "marketing-status--ready-to-post", "marketing-status--schedule",
+      "marketing-status--schedule", "marketing-status--posted", "marketing-status--planned",
+    ]);
+
+    const timelineMapperSource = extractNamedFunction(appJsx, "getMarketingPlanStatusClass");
+    const normalizeSource = extractNamedFunction(appJsx, "normalizeMarketingPlanWorkingStatus");
+    const normalizeStatus = vm.runInNewContext(`(${normalizeSource})`, {});
+    const getTimelineStatusClass = vm.runInNewContext(`(${timelineMapperSource})`, {
+      normalizeMarketingPlanWorkingStatus: normalizeStatus,
+    }) as (status: string) => string;
+    expect([
+      getTimelineStatusClass("planned"), getTimelineStatusClass("assigned"), getTimelineStatusClass("review"),
+      getTimelineStatusClass("ready_to_post"), getTimelineStatusClass("scheduled"), getTimelineStatusClass("posted"),
+    ]).toEqual([
+      "badge--neutral", "badge--assigned", "badge--review", "badge--assigned", "badge--assigned", "badge--delivered",
+    ]);
+
+    const foregrounds = {
+      planned: "#475467", assigned: "#175CD3", review: "#B54708",
+      "ready-to-post": "#0E7090", schedule: "#6941C6", posted: "#027A48",
+    };
+    for (const [modifier, foreground] of Object.entries(foregrounds)) {
+      const lightBlock = extractCssBlock(`.marketing-status--${modifier}`);
+      const darkBlock = extractCssBlock(`html[data-theme="dark"] .marketing-status--${modifier}`);
+      expect(readCssHex(lightBlock, "color"), modifier).toBe(foreground);
+      expect(getContrastRatio(readCssHex(lightBlock, "color"), readCssHex(lightBlock, "background")), `${modifier} light`).toBeGreaterThanOrEqual(4.5);
+      expect(getContrastRatio(readCssHex(darkBlock, "color"), readCssHex(darkBlock, "background")), `${modifier} dark`).toBeGreaterThanOrEqual(4.5);
+    }
+    expect(workingSource).toContain("getMarketingPlanWorkingStatusClass(rowStatusValue)");
+  });
+
+  it("Duplicate action authorizes only required-brief Admin, exact PIC, or exact Sub PIC IDs", () => {
+    const canDuplicate = loadDuplicatePermission();
+    if (!canDuplicate) return;
+    const requiredRow = {
+      requiresBrief: true,
+      picUserId: "pic-user",
+      subPicUserId: "sub-user",
+      picName: "Shared Name",
+      subPicName: "Shared Name",
+    };
+    const cases = [
+      { label: "Admin", user: { id: "other", role: "admin" }, allowed: true },
+      { label: "exact PIC", user: { id: "pic-user", role: "member" }, allowed: true },
+      { label: "exact Sub PIC", user: { id: "sub-user", role: "member" }, allowed: true },
+      { label: "same display name", user: { id: "other", role: "member", name: "Shared Name" }, allowed: false },
+      { label: "schedule operator only", user: { id: "other", role: "member", can_manage_marketing_schedule: true }, allowed: false },
+      { label: "missing user", user: null, allowed: false },
+    ];
+    for (const testCase of cases) {
+      expect(canDuplicate(requiredRow, testCase.user), testCase.label).toBe(testCase.allowed);
+    }
+    expect(canDuplicate({ ...requiredRow, requiresBrief: false }, { id: "pic-user", role: "member" })).toBe(false);
+    expect(canDuplicate(null, { id: "pic-user", role: "member" })).toBe(false);
+  });
+
+  it("Duplicate Brief draft preserves Launch Date, N/A or whole-hour Time, and a visible legacy Time", () => {
+    const buildDraft = loadDuplicateDraftBuilder();
+    if (!buildDraft) return;
+    expect(buildDraft({ publishDate: "2026-09-12", publishTime: null })).toEqual({
+      launchDate: "2026-09-12",
+      publishTime: "",
+    });
+    expect(buildDraft({ publishDate: "2026-09-13", publishTime: "14:00:00" })).toEqual({
+      launchDate: "2026-09-13",
+      publishTime: "14:00",
+    });
+    expect(buildDraft({ publishDate: "2026-09-14", publishTime: "14:00junk" })).toEqual({
+      launchDate: "2026-09-14",
+      publishTime: "14:00junk",
+    });
+  });
+
+  it("Duplicate Brief Create navigation requires synchronous acknowledgment from the real product-switch listener", () => {
+    const contract = loadCreativeBriefNavigationContract();
+    if (!contract) return;
+    expect(() => contract.openBrief({ contentItemId: "created-row" })).toThrow("Create Brief navigation was not handled.");
+    expect(contract.events.map((event) => event.type)).toEqual([
+      "flowmate:create-draft-updated",
+      "flowmate:switch-flowmate-product",
+    ]);
+    expect(contract.localStorageValues.get("flowmate:create:creativeDraft:v1")).toBe(JSON.stringify({ sourceId: "created-row" }));
+
+    contract.testWindow.addEventListener("flowmate:switch-flowmate-product", contract.listener);
+    expect(() => contract.openBrief({ contentItemId: "acknowledged-row" })).not.toThrow();
+    const acknowledgedSwitch = contract.events.at(-1);
+    expect(acknowledgedSwitch).toMatchObject({
+      type: "flowmate:switch-flowmate-product",
+      detail: { route: "create", handled: true },
+    });
+    expect(contract.productChanges).toEqual(["flowmate"]);
+    expect(contract.routeChanges).toEqual(["create"]);
+    expect(contract.testWindow.location.hash).toBe("create");
+    expect(contract.sessionStorageValues.get("flowmate:activeProduct")).toBe("flowmate");
+    expect(contract.events.filter((event) => event.type === "flowmate:create-draft-updated")).toHaveLength(2);
+  });
+
+  it("renders Duplicate action as a direct authorized Current Working control beside Edit", () => {
+    const rows = [
+      { contentItemId: "pic-row", monthKey: "2026-09", campaignName: "Campaign A", contentTitle: "PIC row", publishDate: "2026-09-10", publishTime: "11:00", contentTier: "A", channels: ["facebook"], placementStatus: "planned", picUserId: "user-a", requiresBrief: true },
+      { contentItemId: "other-row", monthKey: "2026-09", campaignName: "Campaign B", contentTitle: "Other row", publishDate: "2026-09-11", publishTime: "", contentTier: "B", channels: ["tiktok"], placementStatus: "planned", picUserId: "user-b", requiresBrief: true },
+      { contentItemId: "no-brief-row", monthKey: "2026-09", campaignName: "Campaign C", contentTitle: "No brief row", publishDate: "2026-09-12", publishTime: "", contentTier: "C", channels: ["facebook"], placementStatus: "planned", picUserId: "user-a", requiresBrief: false },
+    ];
+    const tree = renderWorkingSheetTree({ rows, currentUser: { id: "user-a", role: "member", can_manage_marketing_schedule: true } });
+    const renderedRows = findRenderedElements(tree, (element) => element.props["data-testid"] === "working-row");
+    expect(renderedRows).toHaveLength(3);
+    const actionGroups = renderedRows.map((row) => findRenderedElement(
+      row,
+      (element) => String(element.props.className || "").split(/\s+/).includes("marketing-working-actions"),
+    ));
+    const buttons = actionGroups.map((group) => findRenderedElements(group, (element) => element.type === "button"));
+    expect(buttons[0].map(getRenderedText)).toContain("Edit");
+    expect(buttons[0].map(getRenderedText)).toContain("Duplicate");
+    expect(buttons[0].find((button) => getRenderedText(button) === "Duplicate")?.props.className)
+      .toContain("marketing-working-duplicate");
+    expect(buttons[1].map(getRenderedText)).not.toContain("Duplicate");
+    expect(buttons[2].map(getRenderedText)).not.toContain("Duplicate");
+  });
+
+  it("Duplicate Brief modal renders accessible context, prefills legacy Time, and gates same-date creation", () => {
+    const sourceRow = {
+      contentItemId: "source-row",
+      monthKey: "2026-09",
+      campaignName: "Tournament campaign",
+      contentTitle: "Fixture post",
+      publishDate: "2026-09-18",
+      publishTime: "14:00junk",
+      contentTier: "A",
+      channels: ["facebook"],
+      placementStatus: "planned",
+      picUserId: "user-a",
+      requiresBrief: true,
+    };
+    const tree = renderWorkingSheetTree({
+      rows: [sourceRow],
+      duplicateSourceRow: sourceRow,
+      duplicateLaunchDate: "2026-09-18",
+      duplicatePublishTime: "14:00junk",
+      duplicateSameDateConfirmed: false,
+    });
+    const dialog = findRenderedElement(tree, (element) => element.props.role === "dialog");
+    expect(dialog?.props).toMatchObject({ role: "dialog", "aria-modal": "true", "aria-labelledby": "marketing-working-duplicate-title" });
+    expect(getRenderedText(dialog)).toContain("Duplicate Brief");
+    expect(getRenderedText(dialog)).toContain("Tournament campaign");
+    expect(getRenderedText(dialog)).toContain("Fixture post");
+    expect(getRenderedText(dialog)).toContain("A new Working Sheet row will be created without the previous Brief Link.");
+    const dateInput = findRenderedElement(dialog, (element) => element.props["data-testid"] === "marketing-working-duplicate-date");
+    expect(dateInput?.props).toMatchObject({ type: "date", value: "2026-09-18", autoFocus: true });
+    const timeSelect = findRenderedElement(dialog, (element) => element.props["data-testid"] === "marketing-working-duplicate-time");
+    expect(timeSelect?.props.value).toBe("14:00junk");
+    const legacyOption = findRenderedElement(timeSelect, (element) => element.type === "option" && element.props.value === "14:00junk");
+    expect(legacyOption?.props.disabled).toBe(true);
+    expect(getRenderedText(legacyOption)).toBe("14:00junk");
+    const timeOptions = findRenderedElements(timeSelect, (element) => element.type === "option");
+    expect(timeOptions.map((option) => option.props.value)).toEqual([
+      "14:00junk", "", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00",
+      "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00",
+      "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
+    ]);
+    const confirmation = findRenderedElement(dialog, (element) => element.props["data-testid"] === "marketing-working-duplicate-same-date");
+    expect(confirmation?.props).toMatchObject({ type: "checkbox", checked: false });
+    const createButton = findRenderedElement(dialog, (element) => element.type === "button" && getRenderedText(element) === "Create Duplicate");
+    expect(createButton?.props.disabled).toBe(true);
+
+    const confirmedTree = renderWorkingSheetTree({
+      rows: [sourceRow],
+      duplicateSourceRow: sourceRow,
+      duplicateLaunchDate: "2026-09-18",
+      duplicatePublishTime: "14:00",
+      duplicateSameDateConfirmed: true,
+    });
+    const confirmedDialog = findRenderedElement(confirmedTree, (element) => element.props.role === "dialog");
+    const confirmedCreate = findRenderedElement(confirmedDialog, (element) => element.type === "button" && getRenderedText(element) === "Create Duplicate");
+    expect(confirmedCreate?.props.disabled).toBe(false);
+  });
+
+  it("Duplicate Brief modal blocks close, backdrop, Escape, and repeated actions while in flight", () => {
+    const sourceRow = {
+      contentItemId: "source-row",
+      monthKey: "2026-09",
+      campaignName: "Campaign",
+      contentTitle: "Asset",
+      publishDate: "2026-09-18",
+      publishTime: "11:00",
+      contentTier: "A",
+      channels: ["facebook"],
+      placementStatus: "planned",
+      picUserId: "user-a",
+      requiresBrief: true,
+    };
+    const stateChanges: Array<{ index: number; value: unknown }> = [];
+    const tree = renderWorkingSheetTree({
+      rows: [sourceRow],
+      duplicateSourceRow: sourceRow,
+      duplicateLaunchDate: "2026-09-18",
+      duplicatePublishTime: "11:00",
+      duplicateSameDateConfirmed: true,
+      duplicateInFlightContentItemId: "source-row",
+      onStateChange: (index, value) => stateChanges.push({ index, value }),
+    });
+    const dialog = findRenderedElement(tree, (element) => element.props.role === "dialog");
+    const backdrop = findRenderedElement(tree, (element) => String(element.props.className || "").split(/\s+/).includes("marketing-working-duplicate-backdrop"));
+    const closeButton = findRenderedElement(dialog, (element) => element.props["aria-label"] === "Close Duplicate Brief dialog");
+    const cancelButton = findRenderedElement(dialog, (element) => element.type === "button" && getRenderedText(element) === "Cancel");
+    const createButton = findRenderedElement(dialog, (element) => element.type === "button" && getRenderedText(element) === "Duplicating...");
+    expect(closeButton?.props.disabled).toBe(true);
+    expect(cancelButton?.props.disabled).toBe(true);
+    expect(createButton?.props.disabled).toBe(true);
+    (backdrop?.props.onMouseDown as (() => void))();
+    (dialog?.props.onKeyDown as ((event: Record<string, unknown>) => void))({
+      key: "Escape",
+      preventDefault: () => undefined,
+      stopPropagation: () => undefined,
+    });
+    expect(stateChanges).toEqual([]);
+  });
+
+  it("Duplicate action guard blocks rapid submits, waits through refresh, and requires a new row action to retry", async () => {
+    const createGuard = loadDuplicateActionGuard();
+    if (!createGuard) return;
+    const guard = createGuard();
+    const refreshGate = deferred<void>();
+    let calls = 0;
+    expect(guard.activate("source-row")).toBe(true);
+    const first = guard.run("source-row", async () => {
+      calls += 1;
+      await refreshGate.promise;
+      return { status: "unknown" as const };
+    });
+    const rapidSecond = await guard.run("source-row", async () => {
+      calls += 1;
+      return { status: "unexpected" as const };
+    });
+    expect(rapidSecond).toEqual({ status: "ignored" });
+    expect(calls).toBe(1);
+    expect(guard.getState()).toEqual({ sourceId: "source-row", inFlight: true });
+    expect(guard.cancel()).toBe(false);
+    refreshGate.resolve();
+    expect(await first).toEqual({ status: "unknown" });
+    expect(guard.getState()).toEqual({ sourceId: "", inFlight: false });
+    expect(await guard.run("source-row", async () => ({ status: "unexpected" }))).toEqual({ status: "ignored" });
+    expect(guard.activate("source-row")).toBe(true);
+  });
+
+  it("Duplicate submit cleanup belongs only to the guard-acquired invocation from the same rendered closure", async () => {
+    const sourceRow = {
+      contentItemId: "source-row",
+      monthKey: "2026-09",
+      campaignName: "Campaign",
+      contentTitle: "Asset",
+      publishDate: "2026-09-18",
+      publishTime: "11:00",
+      contentTier: "A",
+      channels: ["facebook"],
+      placementStatus: "planned",
+      picUserId: "user-a",
+      requiresBrief: true,
+    };
+    const resultGate = deferred<Record<string, unknown>>();
+    const stateChanges: Array<{ index: number; value: unknown }> = [];
+    let duplicateCalls = 0;
+    const tree = renderWorkingSheetTree({
+      rows: [sourceRow],
+      duplicateSourceRow: sourceRow,
+      duplicateLaunchDate: "2026-09-19",
+      duplicatePublishTime: "11:00",
+      duplicateSameDateConfirmed: false,
+      duplicateGuardActivatedSourceId: "source-row",
+      runDuplicate: async () => {
+        duplicateCalls += 1;
+        return resultGate.promise;
+      },
+      onStateChange: (index, value) => stateChanges.push({ index, value }),
+    });
+    const form = findRenderedElement(tree, (element) => element.type === "form" && element.props.role === "dialog");
+    const submit = form?.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>;
+    const first = submit({ preventDefault: () => undefined });
+    const second = submit({ preventDefault: () => undefined });
+    await second;
+
+    expect(duplicateCalls).toBe(1);
+    expect(stateChanges.filter((change) => change.index === 22)).toEqual([{ index: 22, value: "source-row" }]);
+    expect(stateChanges.filter((change) => [18, 19, 20, 21].includes(change.index))).toEqual([]);
+
+    resultGate.resolve({ status: "opened", contentItemId: "created-row" });
+    await first;
+    expect(stateChanges.filter((change) => change.index === 22)).toEqual([
+      { index: 22, value: "source-row" },
+      { index: 22, value: "" },
+    ]);
+    expect(stateChanges.filter((change) => change.index === 18).at(-1)).toEqual({ index: 18, value: null });
+  });
+
+  it("Duplicate Brief behavior uses exact RPC args, returned ID, refreshed row, and empty integration links", async () => {
+    const runDuplicate = loadDuplicateRunner();
+    if (!runDuplicate) return;
+    const events: string[] = [];
+    const rpcCalls: Array<{ name: string; params: Record<string, unknown> }> = [];
+    const openedRows: Array<Record<string, unknown>> = [];
+    const sourceRow = { contentItemId: "source-id", briefLink: "https://old", flowmateWorkItemId: "old-work", campaignName: "Old campaign" };
+    const returnedRow = { contentItemId: "new-id", briefLink: "https://unexpected", flowmateWorkItemId: "unexpected-work", flowmateDisplayId: "CR-9999", campaignName: "Fresh campaign", publishDate: "2026-10-02", publishTime: "15:00" };
+    const result = await runDuplicate(sourceRow, "2026-10-02", "15:00", {
+      rpc: async (name, params) => {
+        events.push("rpc");
+        rpcCalls.push({ name, params });
+        return { data: { content_item_id: "new-id" }, error: null };
+      },
+      refreshRows: async () => {
+        events.push("refresh");
+        return [returnedRow];
+      },
+      openBrief: (row) => {
+        events.push("open");
+        openedRows.push(row);
+      },
+    });
+    expect(rpcCalls).toEqual([{
+      name: "marketing_plan_duplicate_working_row",
+      params: { p_source_content_item_id: "source-id", p_launch_date: "2026-10-02", p_publish_time: "15:00" },
+    }]);
+    expect(events).toEqual(["rpc", "refresh", "open"]);
+    expect(result).toEqual({ status: "opened", contentItemId: "new-id" });
+    expect(openedRows).toEqual([{
+      ...returnedRow,
+      briefLink: "",
+      flowmateWorkItemId: "",
+      flowmateDisplayId: "",
+    }]);
+    expect(openedRows[0]).not.toMatchObject({ campaignName: "Old campaign" });
+  });
+
+  it("Duplicate Brief unknown response refreshes before returning and never opens or reconstructs a row", async () => {
+    const runDuplicate = loadDuplicateRunner();
+    if (!runDuplicate) return;
+    const events: string[] = [];
+    const result = await runDuplicate({ contentItemId: "source-id", campaignName: "Stale source" }, "2026-10-03", "", {
+      rpc: async () => {
+        events.push("rpc-error");
+        return { data: null, error: { message: "connection lost" } };
+      },
+      refreshRows: async () => {
+        events.push("refresh");
+        return [{ contentItemId: "maybe-created" }];
+      },
+      openBrief: () => {
+        events.push("open");
+      },
+    });
+    expect(events).toEqual(["rpc-error", "refresh"]);
+    expect(result).toEqual({
+      status: "unknown",
+      message: "The duplicate result could not be confirmed. Check the refreshed Working Sheet before retrying.",
+    });
+  });
+
+  it("Duplicate Brief distinguishes a confirmed create with refresh failure and still refreshes unknown RPC outcomes", async () => {
+    const runDuplicate = loadDuplicateRunner();
+    if (!runDuplicate) return;
+    let refreshAttempts = 0;
+    const refreshRows = async () => {
+      refreshAttempts += 1;
+      throw new Error("timeline unavailable");
+    };
+    const confirmedCreate = await runDuplicate({ contentItemId: "source-id" }, "2026-10-05", "", {
+      rpc: async () => ({ data: { content_item_id: "created-row" }, error: null }),
+      refreshRows,
+      openBrief: () => {
+        throw new Error("must not open without a refreshed row");
+      },
+    });
+    expect(confirmedCreate).toEqual({
+      status: "created_refresh_failed",
+      contentItemId: "created-row",
+      message: "The duplicate row was created, but the Working Sheet could not refresh. Refresh the Working Sheet before using Create Brief.",
+    });
+
+    const unknownCreate = await runDuplicate({ contentItemId: "source-id" }, "2026-10-06", "", {
+      rpc: async () => {
+        throw new Error("network outcome unknown");
+      },
+      refreshRows,
+      openBrief: () => {
+        throw new Error("must not open");
+      },
+    });
+    expect(refreshAttempts).toBe(2);
+    expect(unknownCreate).toEqual({
+      status: "unknown",
+      message: "The duplicate result could not be confirmed. Check the refreshed Working Sheet before retrying.",
+    });
+  });
+
+  it("Duplicate submit asks its Working Sheet refresh dependency to propagate load failure truthfully", async () => {
+    const runDuplicate = loadDuplicateRunner();
+    if (!runDuplicate) return;
+    const sourceRow = {
+      contentItemId: "source-row",
+      monthKey: "2026-09",
+      campaignName: "Campaign",
+      contentTitle: "Asset",
+      publishDate: "2026-09-18",
+      publishTime: "11:00",
+      contentTier: "A",
+      channels: ["facebook"],
+      placementStatus: "planned",
+      picUserId: "user-a",
+      requiresBrief: true,
+    };
+    const loadOptions: Array<Record<string, unknown>> = [];
+    const stateChanges: Array<{ index: number; value: unknown }> = [];
+    const tree = renderWorkingSheetTree({
+      rows: [sourceRow],
+      duplicateSourceRow: sourceRow,
+      duplicateLaunchDate: "2026-09-19",
+      duplicatePublishTime: "11:00",
+      duplicateGuardActivatedSourceId: "source-row",
+      runDuplicate: runDuplicate as unknown as (...args: unknown[]) => Promise<Record<string, unknown>>,
+      rpc: async () => ({ data: { content_item_id: "created-row" }, error: null }),
+      loadTimelineRows: async (_field, _month, options) => {
+        loadOptions.push(options as Record<string, unknown>);
+        throw new Error("timeline unavailable");
+      },
+      suppressConsoleError: true,
+      onStateChange: (index, value) => stateChanges.push({ index, value }),
+    });
+    const form = findRenderedElement(tree, (element) => element.type === "form" && element.props.role === "dialog");
+    await (form?.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: () => undefined });
+
+    expect(loadOptions).toEqual([{ force: true, throwOnError: true }]);
+    expect(stateChanges.filter((change) => change.index === 11).at(-1)).toEqual({
+      index: 11,
+      value: "The duplicate row was created, but the Working Sheet could not refresh. Refresh the Working Sheet before using Create Brief.",
+    });
+  });
+
+  it("Duplicate Brief retains created rows when refreshed lookup or Create Brief navigation fails", async () => {
+    const runDuplicate = loadDuplicateRunner();
+    if (!runDuplicate) return;
+    let refreshCount = 0;
+    const notFound = await runDuplicate({ contentItemId: "source-id" }, "2027-01-02", "", {
+      rpc: async () => ({ data: { content_item_id: "outside-window" }, error: null }),
+      refreshRows: async () => {
+        refreshCount += 1;
+        return [];
+      },
+      openBrief: () => {
+        throw new Error("must not open");
+      },
+    });
+    expect(notFound).toEqual({
+      status: "created_not_found",
+      contentItemId: "outside-window",
+      message: "The duplicate row was created but is not in the current timeline window. Find it by Launch Date before using Create Brief.",
+    });
+
+    const openFailed = await runDuplicate({ contentItemId: "source-id" }, "2026-10-04", "", {
+      rpc: async () => ({ data: [{ content_item_id: "created-row" }], error: null }),
+      refreshRows: async () => {
+        refreshCount += 1;
+        return [{ contentItemId: "created-row", briefLink: "old", flowmateWorkItemId: "old" }];
+      },
+      openBrief: () => {
+        throw new Error("navigation unavailable");
+      },
+    });
+    expect(refreshCount).toBe(2);
+    expect(openFailed).toEqual({
+      status: "created_not_opened",
+      contentItemId: "created-row",
+      message: "The duplicate row was created. Use its Create Brief action from the refreshed Working Sheet.",
+    });
+  });
+
+  it("keeps Time column and Actions wide enough to avoid clipping", () => {
+    const tableBlock = extractCssBlock(".marketing-working-table");
+    const timeBlock = extractCssBlock(".marketing-working-table .col-time");
+    const actionsBlock = extractCssBlock(".marketing-working-table .col-actions");
+    const timeSelectBlock = extractCssBlock(".marketing-working-time-text");
+    const actionButtonBlock = extractCssBlock(".marketing-working-actions .btn");
+
+    expect(Number(tableBlock.match(/\bmin-width:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(1420);
+    expect(Number(timeBlock.match(/\bwidth:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(96);
+    expect(Number(timeBlock.match(/\bmin-width:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(96);
+    expect(Number(actionsBlock.match(/\bwidth:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(220);
+    expect(Number(actionsBlock.match(/\bmin-width:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(220);
+    expect(timeSelectBlock).toMatch(/\bbox-sizing:\s*border-box/);
+    expect(timeSelectBlock).toMatch(/\bwidth:\s*100%/);
+    expect(Number(timeSelectBlock.match(/\bmin-width:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(72);
+    expect(Number(timeSelectBlock.match(/\bpadding-right:\s*(\d+)px/)?.[1])).toBeGreaterThanOrEqual(24);
+    expect(timeSelectBlock).toMatch(/\bwhite-space:\s*nowrap/);
+    expect(timeSelectBlock).toMatch(/\bfont-variant-numeric:\s*tabular-nums/);
+    expect(actionButtonBlock).toMatch(/\bwhite-space:\s*nowrap/);
+    const tree = renderWorkingSheetTree();
+    const horizontalWrapper = findRenderedElement(
+      tree,
+      (element) => (element.props.style as Record<string, unknown> | undefined)?.overflowX === "auto",
+    );
+    const table = findRenderedElement(
+      horizontalWrapper,
+      (element) => String(element.props.className || "").split(/\s+/).includes("marketing-working-table"),
+    );
+    expect(horizontalWrapper).toBeDefined();
+    expect(table).toBeDefined();
+  });
+
 });
 
 // ============================================================================
@@ -686,14 +2386,15 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).toContain("Asset First Draft Due");
     expect(creativeFormSource).toContain("readOnly");
     expect(creativeFormSource).toContain("disabled");
-    expect(creativeFormSource).toContain("Generated as T-7 weekdays before Launch Date.");
+    expect(creativeFormSource).toContain("First Draft: T-5 Thai working days before Launch Date.");
+    expect(creativeFormSource).toContain("Final/Approved: T-1 Thai working day before Launch Date.");
     expect(creativeFormSource).not.toContain("Due date");
     expect(quickTaskFormSource).toContain("1st Review / Draft");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(assignmentSql).toContain("create or replace function public.flowmate_earliest_capacity_date(");
     expect(assignmentSql).toContain("v_earliest_feasible_due_date := public.flowmate_earliest_capacity_date(");
-    expect(assignmentSql).toContain("v_due_date := public.flowmate_subtract_working_days(v_launch_date, 7)");
-    expect(assignmentSql).toContain("v_final_approved_due_date := public.flowmate_subtract_working_days(v_launch_date, 5)");
+    expect(assignmentSql).toContain("v_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 5)");
+    expect(assignmentSql).toContain("v_final_approved_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 1)");
     expect(assignmentSql).toContain("v_review_buffer_working_days integer := 2");
     expect(assignmentSql).toContain("'code', 'review_buffer_risk'");
   });
@@ -822,7 +2523,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(appCss).toContain(".field");
   });
 
-  it("keeps incomplete create forms on the page with inline validation instead of showing Could not save", () => {
+  it("keeps optional Publish Time validation on-page with the generic highlighted-fields alert", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const createScreenSource = createScreenJsx.slice(createScreenJsx.indexOf("function CreateScreen"));
@@ -837,7 +2538,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(createScreenSource).toContain("const [validationErrors, setValidationErrors]");
     expect(createScreenSource).toContain("const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);");
     expect(createScreenSource).toContain("if (Object.keys(nextValidationErrors).length > 0)");
-    expect(createScreenSource).toContain("Please complete the highlighted required fields.");
+    expect(createScreenSource).toContain("Please correct the highlighted fields.");
     expect(handleSubmitSource.indexOf("setCreateAlert(")).toBeLessThan(handleSubmitSource.indexOf("window.createFlowMateQuickTask"));
     expect(handleSubmitSource.indexOf("setCreateAlert(")).toBeLessThan(handleSubmitSource.indexOf("window.createFlowMateCreativeRequest"));
     expect(quickTaskFormSource).toContain("errors = {}");
@@ -870,7 +2571,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(handleSubmitSource).toContain("const hasInvalidBriefLink = nextValidationErrors.briefLink === FLOWMATE_INVALID_BRIEF_LINK_MESSAGE;");
     expect(handleSubmitSource).toContain("title: \"Brief Link ไม่ถูกต้อง\"");
     expect(handleSubmitSource).toContain("note: FLOWMATE_INVALID_BRIEF_LINK_MESSAGE");
-    expect(handleSubmitSource).toContain("setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : \"Please complete the highlighted required fields.\")");
+    expect(handleSubmitSource).toContain("setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : \"Please correct the highlighted fields.\")");
     expect(validationBlock.indexOf("setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE")).toBeLessThan(validationBlock.indexOf("return;"));
   });
 
@@ -940,7 +2641,8 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).not.toContain("Publish Date");
     expect(creativeFormSource).toContain("Asset First Draft Due");
     expect(creativeFormSource).toContain("Launch date");
-    expect(creativeFormSource).toContain("Generated as T-7 weekdays before Launch Date.");
+    expect(creativeFormSource).toContain("First Draft: T-5 Thai working days before Launch Date.");
+    expect(creativeFormSource).toContain("Final/Approved: T-1 Thai working day before Launch Date.");
     expect(quickTaskJs).toContain("p_publish_date:    input.publishDate || null");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(quickTaskJs).toContain("p_launch_date:      input.launchDate || null");
@@ -1820,6 +3522,41 @@ describe("Marketing Plan backend SQL", () => {
     expect(sql).toContain("mcp.placement_status <> 'cancelled'");
   });
 
+  it("appends new timeline view columns without renaming existing production positions", () => {
+    const sql = marketingSql();
+    const timelineView = sql.slice(
+      sql.indexOf("create or replace view public.marketing_plan_timeline_v"),
+      sql.indexOf("create or replace view public.marketing_campaign_summary_v"),
+    );
+    const productionCompatibleOrder = [
+      "mci.brief_link",
+      "mci.source_start_date",
+      "mci.source_start_time",
+      "mci.flowmate_work_item_id",
+      "mci.status as content_status",
+      "mci.sort_order as content_sort_order",
+      "mcp.id as placement_id",
+      "mcp.channel",
+      "mcp.publish_date",
+      "mcp.publish_time",
+      "mcp.placement_status",
+      "mcp.posted_url",
+      "mcp.note as placement_note",
+      "wi.status as flowmate_status",
+      "wi.display_id as flowmate_display_id",
+      "mci.sub_pic_user_id",
+      "mci.sub_pic_name",
+      "mci.requires_brief",
+    ];
+
+    let previousIndex = -1;
+    for (const column of productionCompatibleOrder) {
+      const columnIndex = timelineView.indexOf(column);
+      expect(columnIndex, column).toBeGreaterThan(previousIndex);
+      previousIndex = columnIndex;
+    }
+  });
+
   it("allows one content item to have many placements and seeds a multi-channel different-date example", () => {
     const sql = marketingSql();
     const placementTable = sql.slice(
@@ -2572,9 +4309,11 @@ describe("Marketing Plan product split shell", () => {
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
     );
+    const rowRenderStart = workingSheetSource.indexOf("visibleRows.map(row => {");
+    const rowRenderEnd = workingSheetSource.indexOf("visibleRows.length === 0", rowRenderStart);
     const rowActionsSource = workingSheetSource.slice(
-      workingSheetSource.indexOf('className: "marketing-working-actions"'),
-      workingSheetSource.indexOf("visibleRows.length === 0"),
+      workingSheetSource.indexOf('className: "marketing-working-actions"', rowRenderStart),
+      rowRenderEnd,
     );
     const editModalSource = workingSheetSource.slice(
       workingSheetSource.indexOf("Edit Working Sheet row"),
@@ -2582,12 +4321,13 @@ describe("Marketing Plan product split shell", () => {
     );
 
     expect(appJsx).toContain("const MARKETING_PLAN_WORKING_STATUS_OPTIONS");
-    expect(appJsx).toContain('const MARKETING_PLAN_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"]');
+    expect(appJsx).toContain("const MARKETING_PLAN_PUBLISH_TIME_OPTIONS = [");
+    expect(appJsx).toContain('{ value: "", label: "N/A" }');
     for (const status of ["planned", "assigned", "review", "ready_to_post", "scheduled", "posted"]) {
       expect(appJsx).toContain(`value: "${status}"`);
     }
     expect(appJsx).toContain("function groupMarketingPlanWorkingSheetRows");
-    expect(workingSheetSource).toContain("groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel)");
+    expect(workingSheetSource).toContain('groupMarketingPlanWorkingSheetRows(rows, selectedMonth, "all")');
     expect(workingSheetSource).toContain("marketing-channel-tags");
     expect(workingSheetSource).toContain("marketing-working-table");
     expect(workingSheetSource).toContain("marketing-working-time-text");
@@ -2601,13 +4341,13 @@ describe("Marketing Plan product split shell", () => {
     expect(workingSheetSource).toContain('}, "PIC")');
     expect(workingSheetSource).toContain('className: "col-actions"');
     expect(workingSheetSource).toContain('}, "Actions")');
-    expect(workingSheetSource).toContain("MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(time =>");
+    expect(workingSheetSource).toContain("MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option =>");
     expect(workingSheetSource).toContain('React.createElement("option", {');
-    expect(workingSheetSource).toContain("key: time");
-    expect(workingSheetSource).toContain("value: time");
+    expect(workingSheetSource).toContain("key: option.value");
+    expect(workingSheetSource).toContain("value: option.value");
     expect(workingSheetSource).not.toContain("placeholder=\"HH:MM\"");
     expect(workingSheetSource).toContain("normalizeMarketingPlanPublishTimeOption");
-    expect(workingSheetSource).toContain("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
+    expect(workingSheetSource).toContain("Time must be N/A or a whole hour.");
     expect(workingSheetSource).not.toContain("type=\"time\"");
     expect(workingSheetSource).not.toContain("handleWorkingRowBriefLinkChange");
     expect(workingSheetSource).toContain("handleWorkingRowTimeChange");
@@ -2639,7 +4379,7 @@ describe("Marketing Plan product split shell", () => {
     expect(appJsx).toContain("async function syncMarketingPlanLinkedFlowMateSchedule");
     expect(appJsx).toContain('.rpc("marketing_plan_sync_flowmate_schedule"');
     expect(appJsx).toContain("if (!row || !row.contentItemId || !hasMarketingPlanLinkedCreativeRequest(row)) return false;");
-    expect(appJsx).toContain("await syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime)");
+    expect(appJsx).toContain("await syncMarketingPlanLinkedFlowMateSchedule(row, form, publishTime)");
     expect(appJsx).toContain("marketingPlanContentItemId");
     expect(appJsx).toContain("marketingPlanOriginalBriefLink");
     expect(appJsx).toContain("async function updateMarketingPlanWorkingSheetBriefLinkFromCreativeRequest");
@@ -2657,13 +4397,13 @@ describe("Marketing Plan product split shell", () => {
     expect(appJsx).toContain(".eq(\"id\", row.contentItemId)");
     expect(appJsx).toContain("marketing_plan_working_sheet_updated");
     expect(css).toContain(".marketing-working-table");
-    expect(css).toContain("min-width: 0");
+    expect(css).toContain("min-width: 1420px");
     expect(css).toContain(".marketing-working-table .col-date { width: 92px; }");
-    expect(css).toContain(".marketing-working-table .col-time { width: 72px; }");
+    expect(css).toContain(".marketing-working-table .col-time { width: 96px; min-width: 96px; }");
     expect(css).toContain(".marketing-working-table .col-link { width: 76px; }");
     expect(css).toContain(".marketing-working-table .col-pic { width: 58px; }");
     expect(css).toContain(".marketing-working-table .col-status { width: 108px; }");
-    expect(css).toContain(".marketing-working-table .col-actions { width: 124px; }");
+    expect(css).toContain(".marketing-working-table .col-actions { width: 220px; min-width: 220px; }");
     expect(css).toContain(".marketing-working-actions .btn");
     expect(css).toContain(".marketing-working-time-text");
     expect(css).toContain(".marketing-channel-tag");
@@ -2799,10 +4539,11 @@ describe("Marketing Plan product split shell", () => {
     expect(createScreenJsx).toContain("window.addEventListener(\"flowmate:create-draft-updated\", onExternalCreateDraftUpdated)");
     expect(createScreenJsx).toContain("setCreativeDraft(withTitle);");
     expect(creativeFormSource).toContain("Publish Time");
-    expect(createScreenJsx).toContain('const FLOWMATE_PUBLISH_TIME_OPTIONS = ["11:00", "14:00", "18:00", "21:00"];');
+    expect(createScreenJsx).toContain("const FLOWMATE_PUBLISH_TIME_OPTIONS = [");
+    expect(createScreenJsx).toContain('{ value: "", label: "N/A" }');
     expect(creativeFormSource).toContain('value={value.publishTime}');
     expect(creativeFormSource).toContain('onChange={e => update("publishTime", e.target.value)}');
-    expect(creativeFormSource).toContain("FLOWMATE_PUBLISH_TIME_OPTIONS.map(time =>");
+    expect(creativeFormSource).toContain("FLOWMATE_PUBLISH_TIME_OPTIONS.map(option =>");
     expect(creativeFormSource).not.toContain("inputMode=\"numeric\"");
     expect(creativeFormSource).not.toContain("type=\"time\"");
     expect(creativeFormSource).not.toContain("pattern=\"[0-9]{2}:[0-9]{2}\"");
@@ -2817,44 +4558,6 @@ describe("Marketing Plan product split shell", () => {
     expect(listDataJs).toContain("function flowmateDateTimeBangkokLabel");
     expect(listDataJs).toContain('timeZone: "Asia/Bangkok"');
     expect(listDataJs).toContain("createdLabel: flowmateDateTimeBangkokLabel(item.created_at)");
-  });
-
-  it("normalizes Marketing Plan HH:mm:ss database times before opening the Creative Request draft", () => {
-    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
-    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
-    const appTimeSource = [
-      appJsx.slice(
-        appJsx.indexOf("function normalizeMarketingPlanTimeInput"),
-        appJsx.indexOf("function formatMarketingPlanDate"),
-      ),
-      appJsx.slice(
-        appJsx.indexOf("function getMarketingPlanWorkingRowPublishTime"),
-        appJsx.indexOf("function createFlowMateDraftFromMarketingPlanRow"),
-      ),
-    ].join("\n");
-    const appSandbox = {} as {
-      normalizeMarketingPlanTimeInput: (value: unknown) => string;
-      getMarketingPlanWorkingRowPublishTime: (row: { publishTime?: string; placements?: Array<{ publishTime?: string }> }) => string;
-    };
-    vm.runInNewContext(`${appTimeSource}
-this.normalizeMarketingPlanTimeInput = normalizeMarketingPlanTimeInput;
-this.getMarketingPlanWorkingRowPublishTime = getMarketingPlanWorkingRowPublishTime;`, appSandbox);
-
-    const createTimeSource = createScreenJsx.slice(
-      createScreenJsx.indexOf("function normalizeFlowMatePublishTimeInput"),
-      createScreenJsx.indexOf("const FLOWMATE_CREATE_DRAFT_FIELDS"),
-    );
-    const createSandbox = {} as {
-      normalizeFlowMatePublishTimeInput: (value: unknown) => string;
-    };
-    vm.runInNewContext(`${createTimeSource}
-this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, createSandbox);
-
-    expect(appSandbox.normalizeMarketingPlanTimeInput("14:00:00")).toBe("14:00");
-    expect(appSandbox.getMarketingPlanWorkingRowPublishTime({ publishTime: "14:00:00" })).toBe("14:00");
-    expect(appSandbox.getMarketingPlanWorkingRowPublishTime({ placements: [{ publishTime: "15:30:00" }] })).toBe("15:30");
-    expect(appSandbox.getMarketingPlanWorkingRowPublishTime({})).toBe("11:00");
-    expect(createSandbox.normalizeFlowMatePublishTimeInput("14:00:00")).toBe("14:00");
   });
 
   it("uses Activity log on the detail sidebar and hides Publish Date there", () => {
@@ -2892,10 +4595,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
     );
-    const rowRenderSource = workingSheetSource.slice(
-      workingSheetSource.indexOf("visibleRows.map(row => {"),
-      workingSheetSource.indexOf("visibleRows.length === 0"),
-    );
+    const rowRenderSource = workingSheetSource;
 
     expect(rowRenderSource).toContain("const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);");
     expect(rowRenderSource).toContain("value: rowStatusValue");
@@ -2944,9 +4644,10 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
     );
+    const rowRenderStart = workingSheetSource.indexOf("visibleRows.map(row => {");
     const rowRenderSource = workingSheetSource.slice(
-      workingSheetSource.indexOf("visibleRows.map(row => {"),
-      workingSheetSource.indexOf("visibleRows.length === 0"),
+      rowRenderStart,
+      workingSheetSource.indexOf("visibleRows.length === 0", rowRenderStart),
     );
     const deleteSource = workingSheetSource.slice(
       workingSheetSource.indexOf("async function handleDeleteWorkingRow"),
@@ -2981,11 +4682,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
     );
 
-    expect(appJsx).toContain("function getMarketingPlanWorkingOwnerEntries(row)");
-    expect(appJsx).toContain("row && row.subPicUserId");
-    expect(appJsx).toContain("row && row.subPicName");
     expect(appJsx).toContain("row.subPicName, row.briefLink");
-    expect(workingSheetSource).toContain('"aria-label": "PIC or Sub PIC"');
     expect(workingSheetSource).toContain("row.subPicName || \"-\"");
     expect(workingSheetSource).toContain("row.subPicUserId === currentUser.id");
     expect(appJsx).toContain('className: "col-sub-pic"');
@@ -3066,10 +4763,7 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
       appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
       appJsx.indexOf("function MarketingPlanSupervisorScreen"),
     );
-    const rowRenderSource = workingSheetSource.slice(
-      workingSheetSource.indexOf("visibleRows.map(row => {"),
-      workingSheetSource.indexOf("visibleRows.length === 0"),
-    );
+    const rowRenderSource = workingSheetSource;
 
     expect(quickTaskJs).toContain("can_access_all_teams, can_manage_marketing_schedule");
     expect(quickTaskJs).toContain("can_manage_marketing_schedule: Boolean(profile.can_manage_marketing_schedule)");
@@ -3150,37 +4844,6 @@ this.normalizeFlowMatePublishTimeInput = normalizeFlowMatePublishTimeInput;`, cr
     expect(detailSource).toContain('window.addEventListener("flowmate:refresh-request", onExternalDetailRefresh)');
     expect(detailSource).toContain('window.removeEventListener("flowmate:refresh-request", onExternalDetailRefresh)');
     expect(detailSource).toContain("refreshDetailItem();");
-  });
-
-  it("keeps Marketing Plan CSV export for visible placement rows only", () => {
-    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
-    const workingSheetSource = appJsx.slice(
-      appJsx.indexOf("function MarketingPlanWorkingSheetScreen"),
-      appJsx.indexOf("function MarketingPlanPlaceholderScreen"),
-    );
-    const exportHelperSource = appJsx.slice(
-      appJsx.indexOf("function exportMarketingPlanRowsCsv"),
-      appJsx.indexOf("function groupMarketingPlanRowsByChannel"),
-    );
-
-    expect(appJsx).toContain("function exportMarketingPlanRowsCsv");
-    expect(exportHelperSource).toContain('"Month"');
-    expect(exportHelperSource).toContain('"Campaign"');
-    expect(exportHelperSource).toContain('"Team"');
-    expect(exportHelperSource).toContain('"Product / Event"');
-    expect(exportHelperSource).toContain('"Format"');
-    expect(exportHelperSource).toContain('"Tier"');
-    expect(exportHelperSource).toContain('"PIC"');
-    expect(exportHelperSource).toContain('"Channel"');
-    expect(exportHelperSource).toContain('"Publish Date"');
-    expect(exportHelperSource).toContain('"Publish Time"');
-    expect(exportHelperSource).toContain('"Placement Status"');
-    expect(exportHelperSource).toContain('"Note"');
-    expect(workingSheetSource).toContain("Export CSV");
-    expect(workingSheetSource).toContain("filterMarketingPlanRows(rows, selectedMonth, selectedChannel)");
-    expect(workingSheetSource).toContain("Run supabase/marketing_plan.sql");
-    expect(workingSheetSource).not.toContain("loadFlowMateListRows");
-    expect(workingSheetSource).not.toContain("dueDate");
   });
 
   it("adds admin-only Marketing Plan Supervisor navigation and direct-route guard", () => {
@@ -5357,6 +7020,7 @@ describe("Marketing Plan schedule-operator backend contract", () => {
   const operatorSqlPath = join(process.cwd(), "supabase", "marketing_plan_schedule_operator.sql");
   const operatorSql = existsSync(operatorSqlPath) ? readFileSync(operatorSqlPath, "utf8") : "";
   const canonicalMarketingPlanSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan.sql"), "utf8");
+  const workgridFeedbackSql = readFileSync(join(process.cwd(), "supabase", "marketing_plan_workgrid_feedback.sql"), "utf8");
 
   function getRpcBody(sql: string, functionName: string) {
     const start = sql.indexOf(`create or replace function public.${functionName}`);
@@ -5408,24 +7072,24 @@ describe("Marketing Plan schedule-operator backend contract", () => {
     expect(operatorSql).toContain("v_content.sub_pic_user_id = v_actor_id");
   });
 
-  it("keeps each installer and canonical RPC body narrowly authorized and scoped", () => {
-    for (const sql of [operatorSql, canonicalMarketingPlanSql]) {
+  it("keeps each schedule operator installer and canonical RPC body narrowly authorized and scoped", () => {
+    for (const sql of [operatorSql, canonicalMarketingPlanSql, workgridFeedbackSql]) {
       const timeRpc = getRpcBody(sql, "marketing_plan_update_working_row_time");
-      const statusRpc = getRpcBody(sql, "marketing_plan_update_working_row_status");
 
-      for (const rpcBody of [timeRpc, statusRpc]) {
-        expect(rpcBody).toContain("security definer\nset search_path = ''");
-        expect(rpcBody).toContain("v_actor_id := auth.uid()");
-        expect(rpcBody).toContain("and u.is_active = true");
-        expect(rpcBody).toContain("v_actor.role = 'admin'");
-        expect(rpcBody).toContain("v_content.pic_user_id = v_actor_id");
-        expect(rpcBody).toContain("v_content.sub_pic_user_id = v_actor_id");
-        expect(rpcBody).toContain("v_actor.can_manage_marketing_schedule = true");
-      }
-
-      expect(timeRpc).toContain("if p_publish_time is null or p_publish_time not in ('11:00', '14:00', '18:00', '21:00') then");
-      expect(timeRpc).toContain("Select a posting time: 11:00, 14:00, 18:00, or 21:00.");
+      expect(timeRpc).toContain("security definer\nset search_path = ''");
+      expect(timeRpc).toContain("v_actor_id := auth.uid()");
+      expect(timeRpc).toContain("and u.is_active = true");
+      expect(timeRpc).toContain("v_actor.role = 'admin'");
+      expect(timeRpc).toContain("v_content.pic_user_id = v_actor_id");
+      expect(timeRpc).toContain("v_content.sub_pic_user_id = v_actor_id");
+      expect(timeRpc).toContain("v_actor.can_manage_marketing_schedule = true");
+      expect(timeRpc).toContain("if not (");
+      expect(timeRpc).toContain("p_publish_time is null");
+      expect(timeRpc).toContain("extract(minute from p_publish_time) = 0");
+      expect(timeRpc).toContain("extract(second from p_publish_time) = 0");
+      expect(timeRpc).toContain("Publish Time must be N/A or a whole hour.");
       expect(timeRpc).toContain("using errcode = '22023'");
+      expect(timeRpc).not.toContain("p_publish_time not in ('11:00', '14:00', '18:00', '21:00')");
       expect(timeRpc).toContain("set source_start_time = p_publish_time");
       expect(timeRpc).toContain("set publish_time = p_publish_time");
       expect(timeRpc).toContain("where content_item_id = v_content.id");
@@ -5433,7 +7097,18 @@ describe("Marketing Plan schedule-operator backend contract", () => {
       expect(timeRpc).not.toContain("set placement_status =");
       expect(timeRpc).not.toContain("set status =");
       expect(timeRpc).not.toContain("set launch_date =");
+    }
 
+    for (const sql of [operatorSql, canonicalMarketingPlanSql]) {
+      const statusRpc = getRpcBody(sql, "marketing_plan_update_working_row_status");
+
+      expect(statusRpc).toContain("security definer\nset search_path = ''");
+      expect(statusRpc).toContain("v_actor_id := auth.uid()");
+      expect(statusRpc).toContain("and u.is_active = true");
+      expect(statusRpc).toContain("v_actor.role = 'admin'");
+      expect(statusRpc).toContain("v_content.pic_user_id = v_actor_id");
+      expect(statusRpc).toContain("v_content.sub_pic_user_id = v_actor_id");
+      expect(statusRpc).toContain("v_actor.can_manage_marketing_schedule = true");
       expect(statusRpc).toContain("if p_placement_status is null or p_placement_status not in ('planned', 'assigned', 'review', 'ready', 'ready_to_post', 'scheduled', 'posted', 'delayed', 'cancelled') then");
       expect(statusRpc).toContain("set placement_status = p_placement_status");
       expect(statusRpc).toContain("where content_item_id = v_content.id");
@@ -5443,6 +7118,7 @@ describe("Marketing Plan schedule-operator backend contract", () => {
       expect(statusRpc).not.toContain("set publish_time =");
       expect(statusRpc).not.toContain("set status =");
     }
+    expect(workgridFeedbackSql).not.toContain("create or replace function public.marketing_plan_update_working_row_status");
   });
 
   it("does not broaden table RLS for schedule operators", () => {
@@ -5454,5 +7130,744 @@ describe("Marketing Plan schedule-operator backend contract", () => {
 
     expect(operatorSql).not.toMatch(/create policy[\s\S]*can_manage_marketing_schedule/i);
     expect(marketingPlanRls).not.toContain("can_manage_marketing_schedule");
+  });
+
+  it("validates nullable whole-hour Publish Time before canonical linked schedule sync", () => {
+    for (const sql of [canonicalMarketingPlanSql, workgridFeedbackSql]) {
+      const syncRpc = getRpcBody(sql, "marketing_plan_sync_flowmate_schedule");
+
+      expect(syncRpc).toContain("p_publish_time is null");
+      expect(syncRpc).toContain("extract(minute from p_publish_time) = 0");
+      expect(syncRpc).toContain("extract(second from p_publish_time) = 0");
+      expect(syncRpc).toContain("publish_time = p_publish_time");
+      expect(syncRpc).not.toContain("publish_time = coalesce(p_publish_time");
+    }
+  });
+});
+
+// ============================================================================
+// Marketing Working Sheet — account-scoped My Tasks preference storage
+// ============================================================================
+describe("Marketing Working Sheet My Tasks preference storage", () => {
+  const preferenceSqlFiles = [
+    join(process.cwd(), "supabase", "marketing_plan.sql"),
+    join(process.cwd(), "supabase", "marketing_plan_workgrid_feedback.sql"),
+  ];
+  const preferencePolicyNames = {
+    select: "active authenticated accounts can select their My Tasks preference",
+    insert: "active authenticated accounts can insert their My Tasks preference",
+    update: "active authenticated accounts can update their My Tasks preference",
+  };
+
+  function getPreferenceSection(sql: string) {
+    const start = sql.indexOf("create table if not exists public.user_ui_preferences");
+    const end = sql.indexOf("-- End account-scoped My Tasks preference", start);
+    return start < 0 || end < 0 ? "" : sql.slice(start, end);
+  }
+
+  function getPolicy(sql: string, policyName: string) {
+    const start = sql.indexOf(`create policy "${policyName}"`);
+    const end = sql.indexOf(";", start);
+    return start < 0 || end < 0 ? "" : sql.slice(start, end + 1);
+  }
+
+  function getPreferenceTableGrantStatements(sql: string) {
+    const grantMarker = " on table public.user_ui_preferences to ";
+
+    return sql
+      .split(";")
+      .map((statement) => statement.replace(/\s+/g, " ").trim())
+      .filter((statement) => statement.toLowerCase().startsWith("grant "))
+      .flatMap((statement) => {
+        const normalizedStatement = statement.toLowerCase();
+        const grantMarkerIndex = normalizedStatement.indexOf(grantMarker);
+        if (grantMarkerIndex < 0) return [];
+
+        const privileges = statement
+          .slice("grant ".length, grantMarkerIndex)
+          .toLowerCase()
+          .split(",")
+          .map((privilege) => privilege.trim().replace(/\s+privileges$/, ""))
+          .filter(Boolean);
+        const grantees = statement
+          .slice(grantMarkerIndex + grantMarker.length)
+          .toLowerCase()
+          .split(",")
+          .map((grantee) => grantee.trim())
+          .filter(Boolean);
+
+        return [{ privileges, grantees }];
+      });
+  }
+
+  function getAuthenticatedTableGrantPrivileges(sql: string) {
+    return getPreferenceTableGrantStatements(sql)
+      .filter(({ grantees }) => grantees.includes("authenticated"))
+      .flatMap(({ privileges }) => privileges);
+  }
+
+  function expectAuthenticatedTableGrantsToBeLeastPrivilege(sql: string) {
+    expect(getAuthenticatedTableGrantPrivileges(sql)).toEqual(["select", "insert", "update"]);
+  }
+
+  it("rejects multi-grantee grants that broaden authenticated My Tasks preference access", () => {
+    const mutatedGrants = `
+      grant select on table public.user_ui_preferences to authenticated, another_role;
+      grant delete on table public.user_ui_preferences to another_role, authenticated;
+      grant all on table public.user_ui_preferences to another_role, authenticated;
+    `;
+    const authenticatedPrivileges = getAuthenticatedTableGrantPrivileges(mutatedGrants);
+
+    expect(authenticatedPrivileges).toEqual(["select", "delete", "all"]);
+    expect(() => expectAuthenticatedTableGrantsToBeLeastPrivilege(mutatedGrants)).toThrow();
+  });
+
+  it("stores My Tasks preference per active authenticated account with least-privilege RLS", () => {
+    const requiredAccountPredicate = `user_id = (select auth.uid())\n  and exists (\n    select 1\n    from public.users u\n    where u.id = (select auth.uid())\n      and u.is_active = true\n  )`;
+
+    for (const sqlPath of preferenceSqlFiles) {
+      const sql = existsSync(sqlPath) ? readFileSync(sqlPath, "utf8") : "";
+      const preferenceSection = getPreferenceSection(sql);
+
+      expect(preferenceSection).not.toBe("");
+      expect(preferenceSection).toContain("create table if not exists public.user_ui_preferences");
+      expect(preferenceSection).toContain("user_id uuid primary key references public.users(id) on delete cascade");
+      expect(preferenceSection).toContain("marketing_working_my_tasks boolean not null default false");
+      expect(preferenceSection).toContain("created_at timestamptz not null default now()");
+      expect(preferenceSection).toContain("updated_at timestamptz not null default now()");
+      expect(preferenceSection).toContain("drop trigger if exists user_ui_preferences_set_updated_at on public.user_ui_preferences");
+      expect(preferenceSection).toContain("create trigger user_ui_preferences_set_updated_at");
+      expect(preferenceSection).toContain("before update on public.user_ui_preferences");
+      expect(preferenceSection).toContain("for each row execute function public.set_updated_at()");
+      expect(preferenceSection).toContain("alter table public.user_ui_preferences enable row level security");
+      expect(preferenceSection).toContain("revoke all on table public.user_ui_preferences from public, anon, authenticated");
+      expectAuthenticatedTableGrantsToBeLeastPrivilege(preferenceSection);
+      expect(getPreferenceTableGrantStatements(preferenceSection).some(
+        ({ grantees }) => grantees.includes("public") || grantees.includes("anon"),
+      )).toBe(false);
+      expect(preferenceSection).not.toMatch(/for delete/i);
+      expect(preferenceSection).not.toMatch(/security\s+definer|auth\s*\.\s*role\s*\(\s*\)|auth\s*\.\s*jwt\s*\(\s*\)|raw_user_meta_data|user_metadata/i);
+      expect(preferenceSection).not.toMatch(
+        /auth\s*\.\s*jwt\s*\(\s*\)[\s\S]*?(?:raw_user_meta_data|user_metadata)/i,
+      );
+
+      const selectPolicy = getPolicy(preferenceSection, preferencePolicyNames.select);
+      const insertPolicy = getPolicy(preferenceSection, preferencePolicyNames.insert);
+      const updatePolicy = getPolicy(preferenceSection, preferencePolicyNames.update);
+
+      expect(preferenceSection).toContain(`drop policy if exists "${preferencePolicyNames.select}" on public.user_ui_preferences`);
+      expect(preferenceSection).toContain(`drop policy if exists "${preferencePolicyNames.insert}" on public.user_ui_preferences`);
+      expect(preferenceSection).toContain(`drop policy if exists "${preferencePolicyNames.update}" on public.user_ui_preferences`);
+      expect(selectPolicy).toContain("on public.user_ui_preferences for select\nto authenticated");
+      expect(selectPolicy).toContain(`using (\n  ${requiredAccountPredicate}\n)`);
+      expect(insertPolicy).toContain("on public.user_ui_preferences for insert\nto authenticated");
+      expect(insertPolicy).toContain(`with check (\n  ${requiredAccountPredicate}\n)`);
+      expect(updatePolicy).toContain("on public.user_ui_preferences for update\nto authenticated");
+      expect(updatePolicy).toContain(`using (\n  ${requiredAccountPredicate}\n)`);
+      expect(updatePolicy).toContain(`with check (\n  ${requiredAccountPredicate}\n)`);
+    }
+  });
+
+});
+
+// ============================================================================
+// Marketing Working Sheet — transactional Duplicate Brief backend
+// ============================================================================
+describe("duplicate working row RPC", () => {
+  const duplicateRpcSignature = "public.marketing_plan_duplicate_working_row(uuid, date, time)";
+  const duplicateRpcFiles = [
+    join(process.cwd(), "supabase", "marketing_plan.sql"),
+    join(process.cwd(), "supabase", "marketing_plan_workgrid_feedback.sql"),
+  ];
+
+  function scanPostgresSql(sql: string) {
+    const executableChars = Array.from({ length: sql.length }, () => " ");
+    const topLevelSemicolons: number[] = [];
+    const dollarQuotes: Array<{
+      delimiter: string;
+      start: number;
+      contentStart: number;
+      contentEnd: number;
+      end: number;
+    }> = [];
+
+    const preserveNewline = (index: number) => {
+      if (sql[index] === "\r" || sql[index] === "\n") {
+        executableChars[index] = sql[index];
+      }
+    };
+
+    const isIdentifierContinuation = (character: string | undefined) => (
+      Boolean(character) && /[$_\p{L}\p{M}\p{N}]/u.test(character || "")
+    );
+
+    const dollarTagAt = (index: number) => {
+      if (isIdentifierContinuation(sql[index - 1])) return "";
+      const match = sql.slice(index).match(/^\$(?:[_\p{L}][_\p{L}\p{M}\p{N}]*)?\$/u);
+      return match ? match[0] : "";
+    };
+
+    let index = 0;
+    while (index < sql.length) {
+      if (sql.startsWith("--", index)) {
+        while (index < sql.length && sql[index] !== "\r" && sql[index] !== "\n") {
+          index += 1;
+        }
+        continue;
+      }
+
+      if (sql.startsWith("/*", index)) {
+        let depth = 1;
+        index += 2;
+        while (index < sql.length && depth > 0) {
+          preserveNewline(index);
+          if (sql.startsWith("/*", index)) {
+            depth += 1;
+            index += 2;
+          } else if (sql.startsWith("*/", index)) {
+            depth -= 1;
+            index += 2;
+          } else {
+            index += 1;
+          }
+        }
+        continue;
+      }
+
+      if (sql[index] === "'") {
+        const hasEscapePrefix = (
+          (sql[index - 1] === "E" || sql[index - 1] === "e")
+          && !isIdentifierContinuation(sql[index - 2])
+        );
+        index += 1;
+        while (index < sql.length) {
+          preserveNewline(index);
+          if (hasEscapePrefix && sql[index] === "\\" && index + 1 < sql.length) {
+            preserveNewline(index + 1);
+            index += 2;
+          } else if (sql[index] === "'" && sql[index + 1] === "'") {
+            index += 2;
+          } else if (sql[index] === "'") {
+            index += 1;
+            break;
+          } else {
+            index += 1;
+          }
+        }
+        continue;
+      }
+
+      if (sql[index] === '"') {
+        index += 1;
+        while (index < sql.length) {
+          preserveNewline(index);
+          if (sql[index] === '"' && sql[index + 1] === '"') {
+            index += 2;
+          } else if (sql[index] === '"') {
+            index += 1;
+            break;
+          } else {
+            index += 1;
+          }
+        }
+        continue;
+      }
+
+      if (sql[index] === "$") {
+        const delimiter = dollarTagAt(index);
+        if (delimiter) {
+          const start = index;
+          const contentStart = start + delimiter.length;
+          const contentEnd = sql.indexOf(delimiter, contentStart);
+          const end = contentEnd < 0 ? sql.length : contentEnd + delimiter.length;
+          for (let cursor = start; cursor < end; cursor += 1) {
+            preserveNewline(cursor);
+          }
+          dollarQuotes.push({
+            delimiter,
+            start,
+            contentStart,
+            contentEnd: contentEnd < 0 ? sql.length : contentEnd,
+            end,
+          });
+          index = end;
+          continue;
+        }
+      }
+
+      executableChars[index] = sql[index];
+      if (sql[index] === ";") topLevelSemicolons.push(index);
+      index += 1;
+    }
+
+    return {
+      executableSql: executableChars.join(""),
+      topLevelSemicolons,
+      dollarQuotes,
+    };
+  }
+
+  function splitExecutablePostgresStatements(sql: string) {
+    const { executableSql, topLevelSemicolons } = scanPostgresSql(sql);
+    const statements: string[] = [];
+    let statementStart = 0;
+    for (const semicolonIndex of topLevelSemicolons) {
+      statements.push(executableSql.slice(statementStart, semicolonIndex));
+      statementStart = semicolonIndex + 1;
+    }
+    if (statementStart < executableSql.length) {
+      statements.push(executableSql.slice(statementStart));
+    }
+    return statements;
+  }
+
+  function extractDuplicateRpc(sql: string) {
+    const { executableSql, dollarQuotes } = scanPostgresSql(sql);
+    const marker = "create or replace function public.marketing_plan_duplicate_working_row(";
+    const executableLower = executableSql.toLowerCase();
+    const start = executableLower.indexOf(marker);
+    if (start < 0) return { definition: "", signature: "", body: "" };
+
+    const bodyQuote = dollarQuotes.find((candidate) => (
+      candidate.start > start
+      && /\bas\s*$/i.test(executableSql.slice(start, candidate.start))
+    ));
+    if (!bodyQuote || bodyQuote.contentEnd === sql.length) {
+      return { definition: "", signature: "", body: "" };
+    }
+
+    const signatureEnd = executableLower.indexOf(") returns jsonb", start);
+    const semicolonEnd = sql[bodyQuote.end] === ";" ? bodyQuote.end + 1 : bodyQuote.end;
+    const definition = sql.slice(start, semicolonEnd);
+    return {
+      definition,
+      signature: signatureEnd < 0 || signatureEnd > bodyQuote.start
+        ? ""
+        : sql.slice(start + marker.length, signatureEnd).replace(/\s+/g, " ").trim(),
+      body: sql.slice(bodyQuote.contentStart, bodyQuote.contentEnd),
+    };
+  }
+
+  function parseDuplicateRpcPrivilegeStatements(sql: string) {
+    const target = " on function public.marketing_plan_duplicate_working_row(uuid, date, time) ";
+    return splitExecutablePostgresStatements(sql)
+      .map((statement) => statement.replace(/\s+/g, " ").trim().toLowerCase())
+      .filter((statement) => statement.includes(target))
+      .map((statement) => {
+        const match = statement.match(
+          /^(grant|revoke)\s+(.+?)\s+on function public\.marketing_plan_duplicate_working_row\(uuid, date, time\)\s+(to|from)\s+(.+)$/,
+        );
+        if (!match) return { action: "invalid", privileges: [], grantees: [] };
+        return {
+          action: match[1],
+          privileges: match[2].split(",").map((value) => value.trim()),
+          grantees: match[4].split(",").map((value) => value.trim()),
+        };
+      });
+  }
+
+  function duplicateAuthorizationResult(
+    isAdmin: boolean | null,
+    isPic: boolean | null,
+    isSubPic: boolean | null,
+  ) {
+    return Boolean(isAdmin ?? false)
+      || Boolean(isPic ?? false)
+      || Boolean(isSubPic ?? false);
+  }
+
+  function duplicatePublishTimeIsAllowed(
+    value: { hour: number; minute: number; second: number } | null,
+  ) {
+    return value === null
+      || (
+        value.hour >= 0
+        && value.hour <= 23
+        && value.minute === 0
+        && value.second === 0
+      );
+  }
+
+  it("ignores commented-out duplicate RPC definitions", () => {
+    const commentedOutDefinition = [
+      "/*",
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid,",
+      "  p_launch_date date,",
+      "  p_publish_time time default null",
+      ") returns jsonb",
+      "language plpgsql",
+      "as $$",
+      "begin",
+      "  return '{}'::jsonb;",
+      "end;",
+      "$$;",
+      "*/",
+      "-- create or replace function public.marketing_plan_duplicate_working_row(",
+      "--   p_source_content_item_id uuid, p_launch_date date, p_publish_time time default null",
+      "-- ) returns jsonb as $$ begin return '{}'::jsonb; end; $$;",
+    ].join("\n");
+
+    expect(extractDuplicateRpc(commentedOutDefinition)).toEqual({
+      definition: "",
+      signature: "",
+      body: "",
+    });
+  });
+
+  it("ignores fake duplicate RPC definitions inside nested block comments", () => {
+    const nestedCommentDecoy = [
+      "/* outer review note",
+      "  /* nested review note */",
+      "  create or replace function public.marketing_plan_duplicate_working_row(",
+      "    p_source_content_item_id uuid,",
+      "    p_launch_date date,",
+      "    p_publish_time time default null",
+      "  ) returns jsonb",
+      "  language plpgsql",
+      "  as $$",
+      "  begin",
+      "    return '{\"decoy\":true}'::jsonb;",
+      "  end;",
+      "$$;",
+      "*/",
+    ].join("\n");
+
+    expect(extractDuplicateRpc(nestedCommentDecoy)).toEqual({
+      definition: "",
+      signature: "",
+      body: "",
+    });
+  });
+
+  it("ignores fake duplicate RPC definitions inside dollar-quoted text", () => {
+    const dollarQuotedDecoy = [
+      "do $decoy$",
+      "begin",
+      "  create or replace function public.marketing_plan_duplicate_working_row(",
+      "    p_source_content_item_id uuid,",
+      "    p_launch_date date,",
+      "    p_publish_time time default null",
+      "  ) returns jsonb",
+      "  language plpgsql",
+      "  as $$",
+      "  begin",
+      "    return '{\"decoy\":true}'::jsonb;",
+      "  end;",
+      "$$;",
+      "end;",
+      "$decoy$;",
+    ].join("\n");
+
+    expect(extractDuplicateRpc(dollarQuotedDecoy)).toEqual({
+      definition: "",
+      signature: "",
+      body: "",
+    });
+  });
+
+  it("ignores fake RPC markers inside escaped strings and quoted identifiers", () => {
+    const quotedDecoys = [
+      "select E'prefix \\' still one string",
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid, p_launch_date date, p_publish_time time default null",
+      ") returns jsonb language plpgsql as $$",
+      "begin return jsonb_build_object(); end;",
+      "$$;';",
+      'select "prefix "" still one identifier',
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid, p_launch_date date, p_publish_time time default null",
+      ") returns jsonb language plpgsql as $$",
+      "begin return jsonb_build_object(); end;",
+      '$$;";',
+    ].join("\n");
+
+    expect(extractDuplicateRpc(quotedDecoys)).toEqual({
+      definition: "",
+      signature: "",
+      body: "",
+    });
+  });
+
+  it("treats a trailing backslash in an ordinary string as literal before a real RPC", () => {
+    const realDefinition = [
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid,",
+      "  p_launch_date date,",
+      "  p_publish_time time default null",
+      ") returns jsonb",
+      "language plpgsql",
+      "as $function$",
+      "begin",
+      "  return '{}'::jsonb;",
+      "end;",
+      "$function$;",
+    ].join("\n");
+    const sql = [String.raw`select 'ordinary\';`, realDefinition].join("\n");
+
+    expect(extractDuplicateRpc(sql).definition).toBe(realDefinition);
+  });
+
+  it("does not start dollar quoting when a valid-looking tag is identifier-adjacent", () => {
+    const realDefinition = [
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid,",
+      "  p_launch_date date,",
+      "  p_publish_time time default null",
+      ") returns jsonb",
+      "language plpgsql",
+      "as $$",
+      "begin",
+      "  return '{}'::jsonb;",
+      "end;",
+      "$$;",
+    ].join("\n");
+    const sql = ["select identifier$tag$;", realDefinition].join("\n");
+
+    expect(extractDuplicateRpc(sql).definition).toBe(realDefinition);
+  });
+
+  it("keeps fake RPC markers masked inside valid E and e escape strings", () => {
+    const realDefinition = [
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid,",
+      "  p_launch_date date,",
+      "  p_publish_time time default null",
+      ") returns jsonb",
+      "language plpgsql",
+      "as $real$",
+      "begin",
+      "  return '{}'::jsonb;",
+      "end;",
+      "$real$;",
+    ].join("\n");
+    const sql = [
+      String.raw`select E'escaped \' create or replace function public.marketing_plan_duplicate_working_row(uuid, date, time)';`,
+      String.raw`select e'escaped \' create or replace function public.marketing_plan_duplicate_working_row(uuid, date, time)';`,
+      realDefinition,
+    ].join("\n");
+
+    expect(extractDuplicateRpc(sql).definition).toBe(realDefinition);
+  });
+
+  it("preserves comment-like text in quoted values and tagged function bodies", () => {
+    const realDefinition = [
+      "create or replace function public.marketing_plan_duplicate_working_row(",
+      "  p_source_content_item_id uuid,",
+      "  p_launch_date date,",
+      "  p_publish_time time default null",
+      ") returns jsonb",
+      "language plpgsql",
+      "as $function$",
+      "begin",
+      "  perform '-- text, not a line comment';",
+      "  perform 'it''s /* text, not a block comment */';",
+      "  perform \"-- quoted identifier\";",
+      "  return '{} '::jsonb;",
+      "end;",
+      "$function$;",
+    ].join("\n");
+
+    const extracted = extractDuplicateRpc(realDefinition);
+
+    expect(extracted.definition).toBe(realDefinition);
+    expect(extracted.body).toContain("perform '-- text, not a line comment';");
+    expect(extracted.body).toContain("perform 'it''s /* text, not a block comment */';");
+    expect(extracted.body).toContain('perform "-- quoted identifier";');
+  });
+
+  it("uses a null-safe authorization truth table for Admin, PIC, and Sub PIC", () => {
+    const cases = [
+      { label: "both owners null", admin: false, pic: null, subPic: null, allowed: false },
+      { label: "PIC nonmatch and Sub PIC null", admin: false, pic: false, subPic: null, allowed: false },
+      { label: "PIC null and Sub PIC nonmatch", admin: false, pic: null, subPic: false, allowed: false },
+      { label: "valid Admin", admin: true, pic: null, subPic: null, allowed: true },
+      { label: "valid PIC", admin: false, pic: true, subPic: null, allowed: true },
+      { label: "valid Sub PIC", admin: false, pic: null, subPic: true, allowed: true },
+    ];
+
+    for (const testCase of cases) {
+      expect(
+        duplicateAuthorizationResult(testCase.admin, testCase.pic, testCase.subPic),
+        testCase.label,
+      ).toBe(testCase.allowed);
+    }
+
+    for (const sqlPath of duplicateRpcFiles) {
+      const { body } = extractDuplicateRpc(readFileSync(sqlPath, "utf8"));
+      expect(body, sqlPath).toContain("coalesce(public.is_admin_app_user(v_actor_id), false)");
+      expect(body, sqlPath).toContain("coalesce(v_source.pic_user_id = v_actor_id, false)");
+      expect(body, sqlPath).toContain("coalesce(v_source.sub_pic_user_id = v_actor_id, false)");
+    }
+  });
+
+  it("accepts N/A and 00:00-23:00 but rejects PostgreSQL 24:00 and partial hours", () => {
+    const cases = [
+      { label: "N/A", value: null, allowed: true },
+      { label: "start of day", value: { hour: 0, minute: 0, second: 0 }, allowed: true },
+      { label: "end of day", value: { hour: 23, minute: 0, second: 0 }, allowed: true },
+      { label: "PostgreSQL end-of-day alias", value: { hour: 24, minute: 0, second: 0 }, allowed: false },
+      { label: "minute offset", value: { hour: 14, minute: 1, second: 0 }, allowed: false },
+      { label: "second offset", value: { hour: 14, minute: 0, second: 1 }, allowed: false },
+    ];
+
+    for (const testCase of cases) {
+      expect(duplicatePublishTimeIsAllowed(testCase.value), testCase.label).toBe(testCase.allowed);
+    }
+
+    for (const sqlPath of duplicateRpcFiles) {
+      const { body } = extractDuplicateRpc(readFileSync(sqlPath, "utf8"));
+      expect(body, sqlPath).toContain("p_publish_time is null");
+      expect(body, sqlPath).toContain("extract(hour from p_publish_time) between 0 and 23");
+      expect(body, sqlPath).toContain("extract(minute from p_publish_time) = 0");
+      expect(body, sqlPath).toContain("extract(second from p_publish_time) = 0");
+    }
+  });
+
+  it("parses only this function's grants and exposes execute only to authenticated", () => {
+    const parserFixture = `
+      grant execute on function public.some_adjacent_rpc(uuid, date, time) to anon;
+      revoke all on function ${duplicateRpcSignature} from public, anon, authenticated;
+      grant execute on function ${duplicateRpcSignature} to authenticated, another_role;
+      grant execute on function public.marketing_plan_duplicate_working_row(uuid, date) to public;
+    `;
+    expect(parseDuplicateRpcPrivilegeStatements(parserFixture)).toEqual([
+      { action: "revoke", privileges: ["all"], grantees: ["public", "anon", "authenticated"] },
+      { action: "grant", privileges: ["execute"], grantees: ["authenticated", "another_role"] },
+    ]);
+
+    for (const sqlPath of duplicateRpcFiles) {
+      const sql = readFileSync(sqlPath, "utf8");
+      expect(parseDuplicateRpcPrivilegeStatements(sql), sqlPath).toEqual([
+        { action: "revoke", privileges: ["all"], grantees: ["public", "anon", "authenticated"] },
+        { action: "grant", privileges: ["execute"], grantees: ["authenticated"] },
+      ]);
+    }
+  });
+
+  it("ignores privilege decoys and parses only executable top-level statements", () => {
+    const parserFixture = [
+      "/* ignored block statement;",
+      `revoke all on function ${duplicateRpcSignature} from public, anon, authenticated;`,
+      `grant execute on function ${duplicateRpcSignature} to anon;`,
+      "*/",
+      `-- ignored line statement; grant execute on function ${duplicateRpcSignature} to anon;`,
+      "select 'ignored quoted statement;",
+      `grant execute on function ${duplicateRpcSignature} to anon;`,
+      "';",
+      "do $decoy$",
+      "begin",
+      `  revoke all on function ${duplicateRpcSignature} from public;`,
+      `  grant execute on function ${duplicateRpcSignature} to anon;`,
+      "end;",
+      "$decoy$;",
+      `revoke all on function ${duplicateRpcSignature} from public, anon, authenticated;`,
+      `grant execute on function ${duplicateRpcSignature} to authenticated;`,
+      "grant execute on function public.marketing_plan_duplicate_working_row(uuid, date) to public;",
+    ].join("\n");
+
+    expect(parseDuplicateRpcPrivilegeStatements(parserFixture)).toEqual([
+      { action: "revoke", privileges: ["all"], grantees: ["public", "anon", "authenticated"] },
+      { action: "grant", privileges: ["execute"], grantees: ["authenticated"] },
+    ]);
+  });
+
+  it("defines the same locked and narrowly authorized clone transaction in both installers", () => {
+    const contracts = duplicateRpcFiles.map((sqlPath) => ({
+      sqlPath,
+      sql: readFileSync(sqlPath, "utf8"),
+    })).map(({ sqlPath, sql }) => ({ sqlPath, sql, ...extractDuplicateRpc(sql) }));
+
+    for (const contract of contracts) {
+      expect(contract.definition, contract.sqlPath).not.toBe("");
+      expect(contract.signature, contract.sqlPath).toBe(
+        "p_source_content_item_id uuid, p_launch_date date, p_publish_time time default null",
+      );
+      expect(contract.definition, contract.sqlPath).toContain(
+        "language plpgsql\nsecurity definer\nset search_path = public, pg_temp",
+      );
+
+      const sourceLockIndex = contract.body.indexOf("for update;");
+      const authorizationIndex = contract.body.indexOf("public.is_admin_app_user(v_actor_id)");
+      const contentInsertIndex = contract.body.indexOf("insert into public.marketing_content_items");
+      const placementInsertIndex = contract.body.indexOf("insert into public.marketing_channel_placements");
+      expect(sourceLockIndex, contract.sqlPath).toBeGreaterThanOrEqual(0);
+      expect(authorizationIndex, contract.sqlPath).toBeGreaterThan(sourceLockIndex);
+      expect(contentInsertIndex, contract.sqlPath).toBeGreaterThan(authorizationIndex);
+      expect(placementInsertIndex, contract.sqlPath).toBeGreaterThan(contentInsertIndex);
+
+      expect(contract.body, contract.sqlPath).toContain("v_actor_id := auth.uid()");
+      expect(contract.body, contract.sqlPath).toContain("from public.users u\n  where u.id = v_actor_id\n    and u.is_active = true");
+      expect(contract.body, contract.sqlPath).toContain("v_actor.display_name");
+      expect(contract.body, contract.sqlPath).toContain("v_source.pic_user_id = v_actor_id");
+      expect(contract.body, contract.sqlPath).toContain("v_source.sub_pic_user_id = v_actor_id");
+      expect(contract.body, contract.sqlPath).not.toContain("can_manage_marketing_schedule");
+      expect(contract.body, contract.sqlPath).toContain("if v_source.requires_brief is distinct from true then");
+      expect(contract.body, contract.sqlPath).toContain("if p_launch_date is null then");
+      expect(contract.body, contract.sqlPath).not.toContain("select count(*)");
+      expect(contract.body, contract.sqlPath).toContain("v_source_placement public.marketing_channel_placements%rowtype");
+      expect(contract.body, contract.sqlPath).toContain("for v_source_placement in");
+      expect(contract.body, contract.sqlPath).toContain(
+        "from public.marketing_channel_placements source\n    where source.content_item_id = v_source.id\n    order by source.id\n    for update",
+      );
+      expect(contract.body.match(/from public\.marketing_channel_placements source/g), contract.sqlPath)
+        .toHaveLength(1);
+      expect(contract.body, contract.sqlPath).toContain(
+        "v_source_placement_count := v_source_placement_count + 1",
+      );
+      expect(contract.body, contract.sqlPath).toContain("if v_source_placement_count < 1 then");
+      expect(contract.body.indexOf("if v_source_placement_count < 1 then"), contract.sqlPath)
+        .toBeGreaterThan(placementInsertIndex);
+      expect(contract.body.match(/insert into public\.marketing_content_items/g), contract.sqlPath).toHaveLength(1);
+      expect(contract.body.match(/insert into public\.marketing_channel_placements/g), contract.sqlPath).toHaveLength(1);
+      expect(contract.body, contract.sqlPath).not.toMatch(/\bexception\s+when\b/i);
+      expect(contract.body, contract.sqlPath).not.toMatch(/\b(begin\s+transaction|commit|rollback)\b/i);
+    }
+
+    expect(contracts[0].definition).toBe(contracts[1].definition);
+  });
+
+  it("copies approved fields, uses current user names, resets integrations, and creates fresh placements", () => {
+    for (const sqlPath of duplicateRpcFiles) {
+      const sql = readFileSync(sqlPath, "utf8");
+      const { body } = extractDuplicateRpc(sql);
+
+      expect(body, sqlPath).toContain("v_new_content_item_id := gen_random_uuid()");
+      expect(body, sqlPath).toContain(
+        "campaign_id, title, details, team, format, content_tier, pic_user_id, pic_name,",
+      );
+      expect(body, sqlPath).toContain(
+        "sub_pic_user_id, sub_pic_name, note, brief_link, requires_brief, source_start_date,",
+      );
+      expect(body, sqlPath).toContain(
+        "source_start_time, source_sheet_row, flowmate_work_item_id, status, sort_order",
+      );
+      expect(body, sqlPath).toContain("v_actor_id, v_actor.display_name");
+      expect(body, sqlPath).toContain("v_source.campaign_id, v_source.title, v_source.details, v_source.team");
+      expect(body, sqlPath).toContain("v_source.format, v_source.content_tier");
+      expect(body, sqlPath).toContain("v_source.note, null, v_source.requires_brief, null, null, null, null");
+      expect(body, sqlPath).toContain("'not_started', v_source.sort_order");
+
+      expect(body, sqlPath).toContain("where u.id = v_source.sub_pic_user_id\n      and u.is_active = true\n      and u.id <> v_actor_id");
+      expect(body, sqlPath).toContain("v_source_sub_pic.display_name");
+      expect(body, sqlPath).not.toContain("v_source.sub_pic_name");
+
+      expect(body, sqlPath).toContain(
+        "id, content_item_id, channel, publish_date, publish_time, placement_status, posted_url, note",
+      );
+      expect(body, sqlPath).toContain("gen_random_uuid(), v_new_content_item_id, v_source_placement.channel, p_launch_date,");
+      expect(body, sqlPath).toContain("p_publish_time, 'planned', null, v_source_placement.note");
+      expect(body, sqlPath).toContain("where source.content_item_id = v_source.id");
+      expect(body, sqlPath).toContain("'content_item_id', v_new_content_item_id");
+      expect(body, sqlPath).toContain("'launch_date', p_launch_date");
+      expect(body, sqlPath).toContain("'publish_time', p_publish_time");
+
+      expect(sql, sqlPath).toContain("-- Manual rollback-safe verification checklist (do not run against production):");
+      expect(sql, sqlPath).toContain("-- Unauthorized actor: function raises before either insert, leaving zero new rows.");
+      expect(sql, sqlPath).toContain("-- Placement insert failure: the uncaught error rolls back the preceding content insert.");
+      expect(sql, sqlPath).toContain("-- Successful clone: content and placement IDs are distinct and Brief/FlowMate/source links are null.");
+      expect(sql, sqlPath).toContain("-- Channel check: the new row has exactly the source channels and preserves each placement note.");
+      expect(sql, sqlPath).toContain("-- Same-date duplication is accepted; no date-based dedupe state is created.");
+    }
   });
 });

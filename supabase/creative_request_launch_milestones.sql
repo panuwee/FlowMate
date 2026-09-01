@@ -2,9 +2,9 @@
 -- Canonical self-run migration + verification bundle.
 --
 -- Scope:
---   * Asset First Draft Due = Launch Date minus 7 Monday-Friday working days.
---   * Asset Final/Approved Due = Launch Date minus 5 Monday-Friday working days.
---   * Thai public holidays that fall on weekdays remain working days by design.
+--   * Asset First Draft Due = Launch Date minus 5 Thai working days.
+--   * Asset Final/Approved Due = Launch Date minus 1 Thai working day.
+--   * Active nationwide BOT holidays and substitute holidays are excluded.
 --   * Capacity pressure may raise urgent/risk signals but never rebases milestones.
 --
 -- Provenance (canonical source definitions):
@@ -125,6 +125,78 @@ begin
 end;
 $$;
 
+-- Creative Request-only holiday helpers. Run
+-- creative_request_thai_business_days.sql first to install reviewed coverage.
+create or replace function public.flowmate_is_th_business_day(
+  p_date date
+) returns boolean
+language sql
+stable
+strict
+set search_path = ''
+as $business_day$
+  select
+    extract(isodow from p_date) between 1 and 5
+    and not exists (
+      select 1
+      from public.flowmate_th_holidays h
+      where h.holiday_date = p_date
+        and h.is_active
+    );
+$business_day$;
+
+create or replace function public.flowmate_subtract_th_business_days(
+  p_date date,
+  p_days integer
+) returns date
+language plpgsql
+stable
+set search_path = ''
+as $subtract_days$
+declare
+  v_cursor date := p_date;
+  v_remaining integer := p_days;
+  v_year integer;
+  v_last_checked_year integer;
+begin
+  if p_date is null then
+    raise exception 'Thai business-day date is required';
+  end if;
+  if p_days is null then
+    raise exception 'Thai business-day count is required';
+  end if;
+  if p_days < 0 then
+    raise exception 'Thai business-day count cannot be negative';
+  end if;
+
+  v_year := extract(year from v_cursor)::integer;
+  perform 1 from public.flowmate_th_calendar_years y
+  where y.calendar_year = v_year and y.is_complete;
+  if not found then
+    raise exception 'Thai business-day calendar is incomplete for year %', v_year;
+  end if;
+  v_last_checked_year := v_year;
+
+  while v_remaining > 0 loop
+    v_cursor := v_cursor - 1;
+    v_year := extract(year from v_cursor)::integer;
+    if v_year <> v_last_checked_year then
+      perform 1 from public.flowmate_th_calendar_years y
+      where y.calendar_year = v_year and y.is_complete;
+      if not found then
+        raise exception 'Thai business-day calendar is incomplete for year %', v_year;
+      end if;
+      v_last_checked_year := v_year;
+    end if;
+    if public.flowmate_is_th_business_day(v_cursor) then
+      v_remaining := v_remaining - 1;
+    end if;
+  end loop;
+
+  return v_cursor;
+end;
+$subtract_days$;
+
 -- Canonical Creative Request creation RPC. Existing rows are not backfilled;
 -- every newly created request derives both milestones from Launch Date.
 create or replace function public.create_creative_request(
@@ -236,8 +308,8 @@ begin
 
   -- Creative Request milestones are fixed from Launch Date. Capacity pressure
   -- raises urgent/risk signals but never rebases either generated milestone.
-  v_due_date := public.flowmate_subtract_working_days(v_launch_date, 7);
-  v_final_approved_due_date := public.flowmate_subtract_working_days(v_launch_date, 5);
+  v_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 5);
+  v_final_approved_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 1);
   v_earliest_feasible_due_date := public.flowmate_earliest_capacity_date(
     v_production_start,
     v_production_start_half,
@@ -324,8 +396,8 @@ begin
 end;
 $$;
 
--- Canonical assignment surfaces. Both emit the fixed T-7 warning only for
--- Creative Requests; Quick Task due-date behavior is unchanged.
+-- Canonical assignment surfaces. Both enforce the fixed T-5/T-1 Thai
+-- business-day milestones only for Creative Requests; Quick Task behavior is unchanged.
 create or replace function public.flowmate_run_assignment(
   p_work_item_id uuid,
   p_trigger public.assignment_trigger
@@ -781,13 +853,22 @@ begin
       ) end),
     (8, case when v_work.work_type = 'creative_request'
                   and v_work.launch_date is not null
-                  and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7) then
+                  and v_work.due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 5) then
       jsonb_build_object(
         'code', 'review_buffer_risk',
         'severity', 'warning',
-        'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
+        'message', 'Asset First Draft Due exceeds Launch Date minus 5 Thai working days.'
       ) end),
-    (9, case when v_needs_split then
+    (9, case when v_work.work_type = 'creative_request'
+                  and v_work.launch_date is not null
+                  and v_work.final_approved_due_date is not null
+                  and v_work.final_approved_due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 1) then
+      jsonb_build_object(
+        'code', 'final_approved_buffer_risk',
+        'severity', 'warning',
+        'message', 'Asset Final/Approved Due exceeds Launch Date minus 1 Thai working day.'
+      ) end),
+    (10, case when v_needs_split then
       jsonb_build_object(
         'code', 'needs_split',
         'severity', 'warning',
@@ -1146,12 +1227,20 @@ begin
         ) end),
       (8, case when v_work.work_type = 'creative_request'
                     and v_work.launch_date is not null
-                    and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7)
+                    and v_work.due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 5)
         then jsonb_build_object(
           'code', 'review_buffer_risk', 'severity', 'warning',
-          'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
+          'message', 'Asset First Draft Due exceeds Launch Date minus 5 Thai working days.'
         ) end),
-      (9, case when v_needs_split then jsonb_build_object(
+      (9, case when v_work.work_type = 'creative_request'
+                    and v_work.launch_date is not null
+                    and v_work.final_approved_due_date is not null
+                    and v_work.final_approved_due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 1)
+        then jsonb_build_object(
+          'code', 'final_approved_buffer_risk', 'severity', 'warning',
+          'message', 'Asset Final/Approved Due exceeds Launch Date minus 1 Thai working day.'
+        ) end),
+      (10, case when v_needs_split then jsonb_build_object(
         'code', 'needs_split', 'severity', 'warning',
         'message', 'This request still needs to be split for execution tracking.'
       ) end)
@@ -1517,24 +1606,24 @@ begin
     raise exception 'Verification failed: work_items.final_approved_due_date must be nullable date';
   end if;
 
-  if public.flowmate_subtract_working_days(date '2026-08-17', 7) <> date '2026-08-06'
-     or public.flowmate_subtract_working_days(date '2026-08-17', 5) <> date '2026-08-10' then
-    raise exception 'Verification failed: Monday Launch Date did not map to T-7/T-5 milestones';
+  if public.flowmate_subtract_th_business_days(date '2026-04-16', 5) <> date '2026-04-03'
+     or public.flowmate_subtract_th_business_days(date '2026-04-16', 1) <> date '2026-04-10' then
+    raise exception 'Verification failed: Launch Date did not map to T-5/T-1 Thai business-day milestones';
   end if;
 
   v_definition := pg_get_functiondef(
-    'public.flowmate_subtract_working_days(date,integer)'::regprocedure
+    'public.flowmate_subtract_th_business_days(date,integer)'::regprocedure
   );
-  if position('extract(isodow from v_cursor) between 1 and 5' in v_definition) = 0
-     or position('public_holidays' in v_definition) > 0 then
-    raise exception 'Verification failed: working-day helper contract differs';
+  if position('public.flowmate_is_th_business_day(v_cursor)' in v_definition) = 0
+     or position('public.flowmate_th_calendar_years' in v_definition) = 0 then
+    raise exception 'Verification failed: Thai business-day helper contract differs';
   end if;
 
   v_definition := pg_get_functiondef(
     'public.create_creative_request(uuid,text,text,text,public.asset_type,text,text[],text,text,text,text,public.priority_level,text,date,date,integer,date,time,public.asset_type,text,integer)'::regprocedure
   );
-  if position('public.flowmate_subtract_working_days(v_launch_date, 7)' in v_definition) = 0
-     or position('public.flowmate_subtract_working_days(v_launch_date, 5)' in v_definition) = 0
+  if position('public.flowmate_subtract_th_business_days(v_launch_date, 5)' in v_definition) = 0
+     or position('public.flowmate_subtract_th_business_days(v_launch_date, 1)' in v_definition) = 0
      or position('due_date, final_approved_due_date, launch_date' in v_definition) = 0
      or position('v_due_date, v_final_approved_due_date, v_launch_date' in v_definition) = 0 then
     raise exception 'Verification failed: create_creative_request milestone contract differs';
@@ -1544,16 +1633,18 @@ begin
     'public.flowmate_run_assignment(uuid,public.assignment_trigger)'::regprocedure
   );
   if position('v_work.work_type = ''creative_request''' in v_definition) = 0
-     or position('public.flowmate_subtract_working_days(v_work.launch_date, 7)' in v_definition) = 0 then
-    raise exception 'Verification failed: automatic assignment T-7 guard differs';
+     or position('public.flowmate_subtract_th_business_days(v_work.launch_date, 5)' in v_definition) = 0
+     or position('public.flowmate_subtract_th_business_days(v_work.launch_date, 1)' in v_definition) = 0 then
+    raise exception 'Verification failed: automatic assignment T-5/T-1 Thai working-day guards differ';
   end if;
 
   v_definition := pg_get_functiondef(
     'public.flowmate_change_creative_assignee(text,uuid,text)'::regprocedure
   );
   if position('v_work.work_type = ''creative_request''' in v_definition) = 0
-     or position('public.flowmate_subtract_working_days(v_work.launch_date, 7)' in v_definition) = 0 then
-    raise exception 'Verification failed: manual assignment T-7 guard differs';
+     or position('public.flowmate_subtract_th_business_days(v_work.launch_date, 5)' in v_definition) = 0
+     or position('public.flowmate_subtract_th_business_days(v_work.launch_date, 1)' in v_definition) = 0 then
+    raise exception 'Verification failed: manual assignment T-5/T-1 Thai working-day guards differ';
   end if;
 
   select count(distinct table_name)
@@ -1580,12 +1671,12 @@ commit;
 
 -- Read-only evidence rows after successful commit.
 select
-  public.flowmate_subtract_working_days(date '2026-08-17', 7) as monday_launch_t_minus_7,
-  public.flowmate_subtract_working_days(date '2026-08-17', 5) as monday_launch_t_minus_5,
+  public.flowmate_subtract_th_business_days(date '2026-04-16', 5) as launch_t_minus_5,
+  public.flowmate_subtract_th_business_days(date '2026-04-16', 1) as launch_t_minus_1,
   (
-    public.flowmate_subtract_working_days(date '2026-08-17', 7) = date '2026-08-06'
-    and public.flowmate_subtract_working_days(date '2026-08-17', 5) = date '2026-08-10'
-  ) as milestone_math_ok;
+    public.flowmate_subtract_th_business_days(date '2026-04-16', 5) = date '2026-04-03'
+    and public.flowmate_subtract_th_business_days(date '2026-04-16', 1) = date '2026-04-10'
+  ) as thai_milestone_math_ok;
 
 select
   table_name,

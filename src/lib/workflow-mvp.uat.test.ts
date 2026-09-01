@@ -39,7 +39,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(source).not.toMatch(/visibleRows\.slice\(0,\s*12\)/);
     expect(source).toContain('data-testid": "working-row-count"');
     expect(source).toContain("visibleRows.map(row =>");
-    expect(source).toContain('visibleRows.length === 1 ? " request" : " requests"');
+    expect(source).toContain('"Showing ", visibleRows.length, " rows"');
   });
 
   it("loads Marketing Plan rows by a cached three-month window without dropping month navigation", () => {
@@ -65,7 +65,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(workingSheet).toContain("useEffectApp(() => {");
     expect(workingSheet).toContain("}, [selectedMonth]);");
     expect(workingSheet).toContain("useMemoApp(() => groupMarketingPlanWorkingSheetRows");
-    expect(workingSheet).toContain("useMemoApp(() => filterMarketingPlanWorkingRows");
+    expect(workingSheet).toContain("useMemoApp(() => resolveMarketingPlanWorkingRowsView");
   });
 
   it("Phase 2 backfills direct FlowMate links and removes regex joins from reporting views", () => {
@@ -158,20 +158,28 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(styles).toContain("--surface-page: var(--garena-bg)");
   });
 
-  it("R4 combines status, team, owner, search, and clear controls", () => {
+  it("R4 combines account-scoped My Tasks, Launch Date range, search, and clear controls", () => {
     const source = app();
     for (const testId of [
       "working-month-filter",
-      "working-channel-filter",
-      "working-status-filter",
-      "working-team-filter",
-      "working-owner-filter",
+      "marketing-working-my-tasks",
+      "working-start-date",
+      "working-end-date",
       "working-search",
       "working-filter-reset",
     ]) {
       expect(source).toContain(`"data-testid": "${testId}"`);
     }
-    expect(source).toContain("filterMarketingPlanWorkingRows(groupedWorkingRows");
+    for (const removedTestId of [
+      "working-channel-filter",
+      "working-status-filter",
+      "working-team-filter",
+      "working-owner-filter",
+    ]) {
+      expect(source).not.toContain(`"data-testid": "${removedTestId}"`);
+    }
+    expect(source).toContain("resolveMarketingPlanWorkingRowsView(groupedWorkingRows");
+    expect(source).toContain('"aria-pressed": myTasksOnly');
   });
 
   it("R5 enforces four team workspaces in UI queries and database RLS", () => {

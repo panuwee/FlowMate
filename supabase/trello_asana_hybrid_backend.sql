@@ -633,13 +633,22 @@ begin
       ) end),
     (8, case when v_work.work_type = 'creative_request'
                   and v_work.launch_date is not null
-                  and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7) then
+                  and v_work.due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 5) then
       jsonb_build_object(
         'code', 'review_buffer_risk',
         'severity', 'warning',
-        'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
+        'message', 'Asset First Draft Due exceeds Launch Date minus 5 Thai working days.'
       ) end),
-    (9, case when v_needs_split then
+    (9, case when v_work.work_type = 'creative_request'
+                  and v_work.launch_date is not null
+                  and v_work.final_approved_due_date is not null
+                  and v_work.final_approved_due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 1) then
+      jsonb_build_object(
+        'code', 'final_approved_buffer_risk',
+        'severity', 'warning',
+        'message', 'Asset Final/Approved Due exceeds Launch Date minus 1 Thai working day.'
+      ) end),
+    (10, case when v_needs_split then
       jsonb_build_object(
         'code', 'needs_split',
         'severity', 'warning',
@@ -1023,12 +1032,20 @@ begin
         ) end),
       (8, case when v_work.work_type = 'creative_request'
                     and v_work.launch_date is not null
-                    and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7)
+                    and v_work.due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 5)
         then jsonb_build_object(
           'code', 'review_buffer_risk', 'severity', 'warning',
-          'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
+          'message', 'Asset First Draft Due exceeds Launch Date minus 5 Thai working days.'
         ) end),
-      (9, case when v_needs_split then jsonb_build_object(
+      (9, case when v_work.work_type = 'creative_request'
+                    and v_work.launch_date is not null
+                    and v_work.final_approved_due_date is not null
+                    and v_work.final_approved_due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 1)
+        then jsonb_build_object(
+          'code', 'final_approved_buffer_risk', 'severity', 'warning',
+          'message', 'Asset Final/Approved Due exceeds Launch Date minus 1 Thai working day.'
+        ) end),
+      (10, case when v_needs_split then jsonb_build_object(
         'code', 'needs_split', 'severity', 'warning',
         'message', 'This request still needs to be split for execution tracking.'
       ) end)

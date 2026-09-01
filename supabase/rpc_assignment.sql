@@ -617,6 +617,82 @@ begin
 end;
 $$;
 
+-- Holiday-aware helpers are intentionally separate from the generic weekday
+-- helpers above because other work types retain their existing capacity rules.
+-- Install creative_request_thai_business_days.sql before this canonical RPC
+-- bundle so the reviewed calendar tables exist.
+create or replace function public.flowmate_is_th_business_day(
+  p_date date
+) returns boolean
+language sql
+stable
+strict
+set search_path = ''
+as $business_day$
+  select
+    extract(isodow from p_date) between 1 and 5
+    and not exists (
+      select 1
+      from public.flowmate_th_holidays h
+      where h.holiday_date = p_date
+        and h.is_active
+    );
+$business_day$;
+
+create or replace function public.flowmate_subtract_th_business_days(
+  p_date date,
+  p_days integer
+) returns date
+language plpgsql
+stable
+set search_path = ''
+as $subtract_days$
+declare
+  v_cursor date := p_date;
+  v_remaining integer := p_days;
+  v_year integer;
+  v_last_checked_year integer;
+begin
+  if p_date is null then
+    raise exception 'Thai business-day date is required';
+  end if;
+  if p_days is null then
+    raise exception 'Thai business-day count is required';
+  end if;
+  if p_days < 0 then
+    raise exception 'Thai business-day count cannot be negative';
+  end if;
+
+  v_year := extract(year from v_cursor)::integer;
+  perform 1
+  from public.flowmate_th_calendar_years y
+  where y.calendar_year = v_year and y.is_complete;
+  if not found then
+    raise exception 'Thai business-day calendar is incomplete for year %', v_year;
+  end if;
+  v_last_checked_year := v_year;
+
+  while v_remaining > 0 loop
+    v_cursor := v_cursor - 1;
+    v_year := extract(year from v_cursor)::integer;
+    if v_year <> v_last_checked_year then
+      perform 1
+      from public.flowmate_th_calendar_years y
+      where y.calendar_year = v_year and y.is_complete;
+      if not found then
+        raise exception 'Thai business-day calendar is incomplete for year %', v_year;
+      end if;
+      v_last_checked_year := v_year;
+    end if;
+    if public.flowmate_is_th_business_day(v_cursor) then
+      v_remaining := v_remaining - 1;
+    end if;
+  end loop;
+
+  return v_cursor;
+end;
+$subtract_days$;
+
 -- ---------------------------------------------------------------------------
 -- Brief completeness check (rules §4). Returns a text reason when incomplete,
 -- or NULL when complete.
@@ -1619,8 +1695,8 @@ begin
 
   -- Creative Request milestones are fixed from Launch Date. Capacity pressure
   -- raises urgent/risk signals but never rebases either generated milestone.
-  v_due_date := public.flowmate_subtract_working_days(v_launch_date, 7);
-  v_final_approved_due_date := public.flowmate_subtract_working_days(v_launch_date, 5);
+  v_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 5);
+  v_final_approved_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 1);
   v_earliest_feasible_due_date := public.flowmate_earliest_capacity_date(
     v_production_start,
     v_production_start_half,
@@ -2438,13 +2514,22 @@ begin
       ) end),
     (8, case when v_work.work_type = 'creative_request'
                   and v_work.launch_date is not null
-                  and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7) then
+                  and v_work.due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 5) then
       jsonb_build_object(
         'code', 'review_buffer_risk',
         'severity', 'warning',
-        'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
+        'message', 'Asset First Draft Due exceeds Launch Date minus 5 Thai working days.'
       ) end),
-    (9, case when v_needs_split then
+    (9, case when v_work.work_type = 'creative_request'
+                  and v_work.launch_date is not null
+                  and v_work.final_approved_due_date is not null
+                  and v_work.final_approved_due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 1) then
+      jsonb_build_object(
+        'code', 'final_approved_buffer_risk',
+        'severity', 'warning',
+        'message', 'Asset Final/Approved Due exceeds Launch Date minus 1 Thai working day.'
+      ) end),
+    (10, case when v_needs_split then
       jsonb_build_object(
         'code', 'needs_split',
         'severity', 'warning',
@@ -2828,12 +2913,20 @@ begin
         ) end),
       (8, case when v_work.work_type = 'creative_request'
                     and v_work.launch_date is not null
-                    and v_work.due_date > public.flowmate_subtract_working_days(v_work.launch_date, 7)
+                    and v_work.due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 5)
         then jsonb_build_object(
           'code', 'review_buffer_risk', 'severity', 'warning',
-          'message', 'Asset First Draft Due violates the fixed T-7 deadline before Launch.'
+          'message', 'Asset First Draft Due exceeds Launch Date minus 5 Thai working days.'
         ) end),
-      (9, case when v_needs_split then jsonb_build_object(
+      (9, case when v_work.work_type = 'creative_request'
+                    and v_work.launch_date is not null
+                    and v_work.final_approved_due_date is not null
+                    and v_work.final_approved_due_date > public.flowmate_subtract_th_business_days(v_work.launch_date, 1)
+        then jsonb_build_object(
+          'code', 'final_approved_buffer_risk', 'severity', 'warning',
+          'message', 'Asset Final/Approved Due exceeds Launch Date minus 1 Thai working day.'
+        ) end),
+      (10, case when v_needs_split then jsonb_build_object(
         'code', 'needs_split', 'severity', 'warning',
         'message', 'This request still needs to be split for execution tracking.'
       ) end)

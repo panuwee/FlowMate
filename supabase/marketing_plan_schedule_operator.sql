@@ -44,8 +44,15 @@ begin
     raise exception 'An active FlowMate user is required' using errcode = '42501';
   end if;
 
-  if p_publish_time is null or p_publish_time not in ('11:00', '14:00', '18:00', '21:00') then
-    raise exception 'Select a posting time: 11:00, 14:00, 18:00, or 21:00.' using errcode = '22023';
+  if not (
+    p_publish_time is null
+    or (
+      extract(minute from p_publish_time) = 0
+      and extract(second from p_publish_time) = 0
+    )
+  ) then
+    raise exception 'Publish Time must be N/A or a whole hour.'
+      using errcode = '22023';
   end if;
 
   select * into v_content
@@ -65,11 +72,6 @@ begin
   ) then
     raise exception 'Only an Admin, PIC, Sub PIC, or schedule operator can update Working Sheet time'
       using errcode = '42501';
-  end if;
-
-  if p_publish_time is null or p_publish_time not in ('11:00', '14:00', '18:00', '21:00') then
-    raise exception 'Select a posting time: 11:00, 14:00, 18:00, or 21:00.'
-      using errcode = '22023';
   end if;
 
   update public.marketing_content_items

@@ -34,6 +34,79 @@ revoke all on function public.marketing_normalize_channel(text) from public, ano
 grant execute on function public.marketing_normalize_channel(text) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Account-scoped My Tasks preference
+-- ---------------------------------------------------------------------------
+create table if not exists public.user_ui_preferences (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  marketing_working_my_tasks boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists user_ui_preferences_set_updated_at on public.user_ui_preferences;
+create trigger user_ui_preferences_set_updated_at
+before update on public.user_ui_preferences
+for each row execute function public.set_updated_at();
+
+alter table public.user_ui_preferences enable row level security;
+
+drop policy if exists "active authenticated accounts can select their My Tasks preference" on public.user_ui_preferences;
+create policy "active authenticated accounts can select their My Tasks preference"
+on public.user_ui_preferences for select
+to authenticated
+using (
+  user_id = (select auth.uid())
+  and exists (
+    select 1
+    from public.users u
+    where u.id = (select auth.uid())
+      and u.is_active = true
+  )
+);
+
+drop policy if exists "active authenticated accounts can insert their My Tasks preference" on public.user_ui_preferences;
+create policy "active authenticated accounts can insert their My Tasks preference"
+on public.user_ui_preferences for insert
+to authenticated
+with check (
+  user_id = (select auth.uid())
+  and exists (
+    select 1
+    from public.users u
+    where u.id = (select auth.uid())
+      and u.is_active = true
+  )
+);
+
+drop policy if exists "active authenticated accounts can update their My Tasks preference" on public.user_ui_preferences;
+create policy "active authenticated accounts can update their My Tasks preference"
+on public.user_ui_preferences for update
+to authenticated
+using (
+  user_id = (select auth.uid())
+  and exists (
+    select 1
+    from public.users u
+    where u.id = (select auth.uid())
+      and u.is_active = true
+  )
+)
+with check (
+  user_id = (select auth.uid())
+  and exists (
+    select 1
+    from public.users u
+    where u.id = (select auth.uid())
+      and u.is_active = true
+  )
+);
+
+revoke all on table public.user_ui_preferences from public, anon, authenticated;
+grant select, insert, update on table public.user_ui_preferences to authenticated;
+
+-- End account-scoped My Tasks preference
+
+-- ---------------------------------------------------------------------------
 -- Tables
 -- ---------------------------------------------------------------------------
 create table if not exists public.marketing_plans (
@@ -389,7 +462,6 @@ select
   mci.pic_name,
   mci.note as content_note,
   mci.brief_link,
-  mci.requires_brief,
   mci.source_start_date,
   mci.source_start_time,
   mci.flowmate_work_item_id,
@@ -405,7 +477,8 @@ select
   wi.status as flowmate_status,
   wi.display_id as flowmate_display_id,
   mci.sub_pic_user_id,
-  mci.sub_pic_name
+  mci.sub_pic_name,
+  mci.requires_brief
 from public.marketing_plans mp
 join public.marketing_campaigns mc on mc.plan_id = mp.id
 join public.marketing_content_items mci on mci.campaign_id = mc.id
@@ -478,6 +551,17 @@ begin
   if v_actor_id is null then
     raise exception 'Authentication is required'
       using errcode = '42501';
+  end if;
+
+  if not (
+    p_publish_time is null
+    or (
+      extract(minute from p_publish_time) = 0
+      and extract(second from p_publish_time) = 0
+    )
+  ) then
+    raise exception 'Publish Time must be N/A or a whole hour.'
+      using errcode = '22023';
   end if;
 
   select *
@@ -576,8 +660,15 @@ begin
     raise exception 'An active FlowMate user is required' using errcode = '42501';
   end if;
 
-  if p_publish_time is null or p_publish_time not in ('11:00', '14:00', '18:00', '21:00') then
-    raise exception 'Select a posting time: 11:00, 14:00, 18:00, or 21:00.' using errcode = '22023';
+  if not (
+    p_publish_time is null
+    or (
+      extract(minute from p_publish_time) = 0
+      and extract(second from p_publish_time) = 0
+    )
+  ) then
+    raise exception 'Publish Time must be N/A or a whole hour.'
+      using errcode = '22023';
   end if;
 
   select * into v_content
@@ -597,11 +688,6 @@ begin
   ) then
     raise exception 'Only an Admin, PIC, Sub PIC, or schedule operator can update Working Sheet time'
       using errcode = '42501';
-  end if;
-
-  if p_publish_time is null or p_publish_time not in ('11:00', '14:00', '18:00', '21:00') then
-    raise exception 'Select a posting time: 11:00, 14:00, 18:00, or 21:00.'
-      using errcode = '22023';
   end if;
 
   update public.marketing_content_items
@@ -697,6 +783,142 @@ $$;
 
 revoke all on function public.marketing_plan_update_working_row_status(uuid, text) from public, anon, authenticated;
 grant execute on function public.marketing_plan_update_working_row_status(uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Transactional Working Sheet duplication
+-- ---------------------------------------------------------------------------
+create or replace function public.marketing_plan_duplicate_working_row(
+  p_source_content_item_id uuid,
+  p_launch_date date,
+  p_publish_time time default null
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_actor_id uuid;
+  v_actor public.users%rowtype;
+  v_source public.marketing_content_items%rowtype;
+  v_source_sub_pic public.users%rowtype;
+  v_source_placement public.marketing_channel_placements%rowtype;
+  v_new_content_item_id uuid;
+  v_source_placement_count integer := 0;
+begin
+  v_actor_id := auth.uid();
+
+  if v_actor_id is null then
+    raise exception 'Authentication is required' using errcode = '42501';
+  end if;
+
+  select * into v_actor
+  from public.users u
+  where u.id = v_actor_id
+    and u.is_active = true;
+
+  if v_actor.id is null then
+    raise exception 'An active FlowMate user is required' using errcode = '42501';
+  end if;
+
+  if p_launch_date is null then
+    raise exception 'Launch Date is required' using errcode = '22023';
+  end if;
+
+  if not (
+    p_publish_time is null
+    or (
+      extract(hour from p_publish_time) between 0 and 23
+      and extract(minute from p_publish_time) = 0
+      and extract(second from p_publish_time) = 0
+    )
+  ) then
+    raise exception 'Publish Time must be N/A or a whole hour.'
+      using errcode = '22023';
+  end if;
+
+  select * into v_source
+  from public.marketing_content_items mci
+  where mci.id = p_source_content_item_id
+  for update;
+
+  if v_source.id is null then
+    raise exception 'Marketing Plan content item not found';
+  end if;
+
+  if not (
+    coalesce(public.is_admin_app_user(v_actor_id), false)
+    or coalesce(v_source.pic_user_id = v_actor_id, false)
+    or coalesce(v_source.sub_pic_user_id = v_actor_id, false)
+  ) then
+    raise exception 'Only an Admin, PIC, or Sub PIC can duplicate this Working Sheet row'
+      using errcode = '42501';
+  end if;
+
+  if v_source.requires_brief is distinct from true then
+    raise exception 'Only rows that require a Brief can be duplicated'
+      using errcode = '22023';
+  end if;
+
+  select * into v_source_sub_pic
+  from public.users u
+  where u.id = v_source.sub_pic_user_id
+      and u.is_active = true
+      and u.id <> v_actor_id;
+
+  v_new_content_item_id := gen_random_uuid();
+
+  insert into public.marketing_content_items (
+    id, campaign_id, title, details, team, format, content_tier, pic_user_id, pic_name,
+    sub_pic_user_id, sub_pic_name, note, brief_link, requires_brief, source_start_date,
+    source_start_time, source_sheet_row, flowmate_work_item_id, status, sort_order
+  ) values (
+    v_new_content_item_id,
+    v_source.campaign_id, v_source.title, v_source.details, v_source.team,
+    v_source.format, v_source.content_tier,
+    v_actor_id, v_actor.display_name,
+    v_source_sub_pic.id, v_source_sub_pic.display_name,
+    v_source.note, null, v_source.requires_brief, null, null, null, null,
+    'not_started', v_source.sort_order
+  );
+
+  for v_source_placement in
+    select source.*
+    from public.marketing_channel_placements source
+    where source.content_item_id = v_source.id
+    order by source.id
+    for update
+  loop
+    insert into public.marketing_channel_placements (
+      id, content_item_id, channel, publish_date, publish_time, placement_status, posted_url, note
+    ) values (
+      gen_random_uuid(), v_new_content_item_id, v_source_placement.channel, p_launch_date,
+      p_publish_time, 'planned', null, v_source_placement.note
+    );
+    v_source_placement_count := v_source_placement_count + 1;
+  end loop;
+
+  if v_source_placement_count < 1 then
+    raise exception 'A Working Sheet row needs at least one placement before it can be duplicated'
+      using errcode = '22023';
+  end if;
+
+  return jsonb_build_object(
+    'content_item_id', v_new_content_item_id,
+    'launch_date', p_launch_date,
+    'publish_time', p_publish_time
+  );
+end;
+$$;
+
+revoke all on function public.marketing_plan_duplicate_working_row(uuid, date, time) from public, anon, authenticated;
+grant execute on function public.marketing_plan_duplicate_working_row(uuid, date, time) to authenticated;
+
+-- Manual rollback-safe verification checklist (do not run against production):
+-- Unauthorized actor: function raises before either insert, leaving zero new rows.
+-- Placement insert failure: the uncaught error rolls back the preceding content insert.
+-- Successful clone: content and placement IDs are distinct and Brief/FlowMate/source links are null.
+-- Channel check: the new row has exactly the source channels and preserves each placement note.
+-- Same-date duplication is accepted; no date-based dedupe state is created.
 
 -- ---------------------------------------------------------------------------
 -- Sample seed helper

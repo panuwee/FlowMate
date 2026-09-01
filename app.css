@@ -691,7 +691,7 @@ section[aria-labelledby="detail-assignment-attention"] {
 
 .marketing-working-table {
   width: 100%;
-  min-width: 0;
+  min-width: 1420px;
   table-layout: fixed;
   border-collapse: collapse;
 }
@@ -719,12 +719,12 @@ section[aria-labelledby="detail-assignment-attention"] {
 .marketing-working-table .col-type { width: 96px; }
 .marketing-working-table .col-channel { width: 104px; }
 .marketing-working-table .col-date { width: 92px; }
-.marketing-working-table .col-time { width: 72px; }
+.marketing-working-table .col-time { width: 96px; min-width: 96px; }
 .marketing-working-table .col-link { width: 76px; }
 .marketing-working-table .col-pic { width: 58px; }
 .marketing-working-table .col-sub-pic { width: 76px; }
 .marketing-working-table .col-status { width: 108px; }
-.marketing-working-table .col-actions { width: 124px; }
+.marketing-working-table .col-actions { width: 220px; min-width: 220px; }
 
 .marketing-member-picker { position: relative; }
 .marketing-member-picker__options {
@@ -772,8 +772,45 @@ section[aria-labelledby="detail-assignment-attention"] {
 .marketing-working-time-text {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 72px;
   min-height: 30px;
+  padding-right: 24px;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+.marketing-tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  font-weight: 800;
+  line-height: 1.2;
+}
+.marketing-tier--s {
+  border-color: #FECDCA;
+  background: #FEF3F2;
+  color: #B42318;
+}
+.marketing-tier--a {
+  border-color: #FEDF89;
+  background: #FFFAEB;
+  color: #B54708;
+}
+.marketing-tier--b {
+  border-color: #B2DDFF;
+  background: #EFF8FF;
+  color: #175CD3;
+}
+.marketing-tier--c {
+  border-color: #D0D5DD;
+  background: #F2F4F7;
+  color: #475467;
 }
 .marketing-working-status {
   width: 112px;
@@ -792,6 +829,7 @@ section[aria-labelledby="detail-assignment-attention"] {
 .marketing-working-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
   justify-content: flex-start;
 }
@@ -802,6 +840,29 @@ section[aria-labelledby="detail-assignment-attention"] {
 }
 .marketing-working-edit-modal {
   width: min(720px, 100%);
+}
+.marketing-working-duplicate-modal {
+  width: min(620px, 100%);
+}
+.marketing-working-duplicate-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--garena-badge-bg);
+}
+.marketing-working-duplicate-confirm {
+  width: 100%;
+  margin-top: 12px;
+}
+
+@media (max-width: 640px) {
+  .marketing-working-duplicate-context {
+    grid-template-columns: 1fr;
+  }
 }
 
 .marketing-sub-pic-search {
@@ -1241,6 +1302,42 @@ section[aria-labelledby="detail-assignment-attention"] {
 }
 .textarea { resize: vertical; min-height: 80px; font-family: var(--garena-font-en); }
 .input--readonly { background: var(--garena-badge-bg); color: var(--garena-grey); }
+
+.marketing-status--planned {
+  border-color: #D0D5DD;
+  background: #F2F4F7;
+  color: #475467;
+}
+.marketing-status--assigned {
+  border-color: #B2DDFF;
+  background: #EFF8FF;
+  color: #175CD3;
+}
+.marketing-status--review {
+  border-color: #FEDF89;
+  background: #FFFAEB;
+  color: #B54708;
+}
+.marketing-status--ready-to-post {
+  border-color: #A5F0FC;
+  background: #ECFDFF;
+  color: #0E7090;
+}
+.marketing-status--schedule {
+  border-color: #D9D6FE;
+  background: #F4F3FF;
+  color: #6941C6;
+}
+.marketing-status--posted {
+  border-color: #ABEFC6;
+  background: #ECFDF3;
+  color: #027A48;
+}
+.marketing-working-status:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+  filter: saturate(.72);
+}
 
 .form-grid {
   display: grid;
@@ -3322,10 +3419,29 @@ form[aria-label="Change creative assignee"] .select {
 }
 .marketing-working-filters {
   display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr)) minmax(190px, 1.5fr) auto auto auto;
+  grid-template-columns: minmax(120px, 1fr) auto repeat(2, minmax(145px, 1fr)) minmax(190px, 1.5fr) auto auto auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 10px;
+}
+.marketing-working-my-tasks {
+  min-height: 36px;
+}
+.marketing-working-my-tasks.is-active {
+  border-color: var(--garena-red);
+  background: var(--garena-red);
+}
+.marketing-working-filter-field {
+  gap: 3px;
+  margin: 0;
+}
+.marketing-working-filter-field .field__label {
+  font-size: 10px;
+}
+.marketing-working-date-error {
+  margin: -2px 0 10px;
+  color: var(--garena-red);
+  font-size: 12px;
 }
 .marketing-working-filters__search {
   min-width: 190px;
@@ -3498,6 +3614,56 @@ html[data-theme="dark"] .badge--delivered {
 html[data-theme="dark"] .campaign-function-tag {
   background: var(--campaign-function-bg-dark);
   color: var(--campaign-function-fg-dark);
+}
+html[data-theme="dark"] .marketing-tier--s {
+  border-color: #F97066;
+  background: #4A1D1A;
+  color: #FECDCA;
+}
+html[data-theme="dark"] .marketing-tier--a {
+  border-color: #F79009;
+  background: #4E2B0E;
+  color: #FEDF89;
+}
+html[data-theme="dark"] .marketing-tier--b {
+  border-color: #53B1FD;
+  background: #102A56;
+  color: #B2DDFF;
+}
+html[data-theme="dark"] .marketing-tier--c {
+  border-color: #667085;
+  background: #344054;
+  color: #EAECF0;
+}
+html[data-theme="dark"] .marketing-status--planned {
+  border-color: #667085;
+  background: #344054;
+  color: #EAECF0;
+}
+html[data-theme="dark"] .marketing-status--assigned {
+  border-color: #53B1FD;
+  background: #102A56;
+  color: #B2DDFF;
+}
+html[data-theme="dark"] .marketing-status--review {
+  border-color: #F79009;
+  background: #4E2B0E;
+  color: #FEDF89;
+}
+html[data-theme="dark"] .marketing-status--ready-to-post {
+  border-color: #2ED3B7;
+  background: #164C63;
+  color: #A5F0FC;
+}
+html[data-theme="dark"] .marketing-status--schedule {
+  border-color: #9B8AFB;
+  background: #352A66;
+  color: #D9D6FE;
+}
+html[data-theme="dark"] .marketing-status--posted {
+  border-color: #32D583;
+  background: #0B4730;
+  color: #ABEFC6;
 }
 html[data-theme="dark"] .tbl tbody tr:hover,
 html[data-theme="dark"] .table tbody tr:hover {
