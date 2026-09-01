@@ -95,7 +95,7 @@ describe("FlowMate Board integration contracts", () => {
         expect(versions[0], "app.css must use the automated release token").toMatch(/^[0-9]{8}-[a-f0-9]{6}$/);
       }
       if (assetName === "app.js") {
-        expect(versions[0], "app.js must use the automated release token").toMatch(/^[0-9]{8}-[0-9]{2}$/);
+        expect(versions[0], "app.js must use the automated release token").toMatch(/^[0-9]{8}-[a-f0-9]{6}$/);
       } else if (assetName === "supabase-list-data.js") {
         expect(versions[0], "supabase-list-data.js must use the current release token").toBe("20260817-01");
       } else if (currentReleaseAssets.has(assetName)) {

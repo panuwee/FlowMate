@@ -29,8 +29,7 @@ function getStagedFingerprint() {
     cwd: ROOT,
     encoding: "utf8",
   });
-  const digest = crypto.createHash("sha256").update(diff || "release-only").digest();
-  return (digest.readUIntBE(0, 6) % 1_000_000).toString().padStart(6, "0");
+  return crypto.createHash("sha256").update(diff || "release-only").digest("hex").slice(0, 6);
 }
 
 function escapeRegExp(value) {

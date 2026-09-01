@@ -2359,7 +2359,7 @@ describe("OT Request static module integration", () => {
         return match?.[1];
       });
       expect(new Set(stamps).size).toBe(1);
-      expect(html).toMatch(/app\.js\?v=[0-9]{8}-[0-9]{2}/);
+      expect(html).toMatch(/app\.js\?v=[0-9]{8}-[a-f0-9]{6}/);
     }
   });
 

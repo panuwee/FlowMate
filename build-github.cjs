@@ -20,6 +20,7 @@ const babel = require("@babel/core");
 const targetArg = process.argv[2] || ".";
 const dir = path.resolve(__dirname, targetArg);
 const FILES = ["data.jsx", "screens-a.jsx", "screens-b.jsx", "screens-c.jsx", "screens-ot.jsx", "app.jsx"];
+const normalizeEol = value => value.replace(/\r\n/g, "\n");
 
 let ok = 0;
 const changed = [];
@@ -43,7 +44,7 @@ for (const file of FILES) {
   // Only write when the output actually changed, so the file's modified date
   // (and what you need to re-upload) reflects real content changes.
   const prev = fs.existsSync(outPath) ? fs.readFileSync(outPath, "utf8") : null;
-  if (prev === next) {
+  if (prev !== null && normalizeEol(prev) === normalizeEol(next)) {
     console.log("unchanged", path.basename(outPath));
   } else {
     fs.writeFileSync(outPath, next, "utf8");
