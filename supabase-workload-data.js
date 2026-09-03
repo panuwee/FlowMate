@@ -16,6 +16,66 @@ function flowmateWorkloadTodayKey(value = new Date()) {
   return flowmateWorkloadBangkokDateKey(value);
 }
 
+async function loadFlowMateTeamSettingsMembers() {
+  if (!window.flowmateSupabase) {
+    throw new Error("Supabase client is not ready.");
+  }
+
+  const todayKey = flowmateWorkloadTodayKey();
+  const [membersResult, leaveResult] = await Promise.all([
+    window.flowmateSupabase
+      .from("team_members")
+      .select("id,user_id,member_code,display_name,initials,color,discipline,discipline_short,skills,backup_skills,capacity_per_day,capacity_override_per_day,wip_limit,availability"),
+    window.flowmateSupabase
+      .from("leave_requests")
+      .select("team_member_id,start_date,end_date,start_half,end_half,cancelled_at")
+      .is("cancelled_at", null)
+      .lte("start_date", todayKey)
+      .gte("end_date", todayKey),
+  ]);
+
+  const firstError = membersResult.error || leaveResult.error;
+  if (firstError) throw firstError;
+
+  const leaveCapacityByMemberId = new Map();
+  (leaveResult.data || []).forEach((leave) => {
+    const isStartToday = leave.start_date === todayKey;
+    const isEndToday = leave.end_date === todayKey;
+    const dayStartHalf = isStartToday ? (leave.start_half || "am") : "am";
+    const dayEndHalf = isEndToday ? (leave.end_half || "pm") : "pm";
+    const leaveFraction = dayStartHalf === dayEndHalf ? 0.5 : 1;
+    leaveCapacityByMemberId.set(
+      leave.team_member_id,
+      Math.min(1, (leaveCapacityByMemberId.get(leave.team_member_id) || 0) + leaveFraction),
+    );
+  });
+
+  return (membersResult.data || [])
+    .filter((member) => isVisibleMemberCode(member.member_code))
+    .map((member) => {
+      const leaveFractionToday = leaveCapacityByMemberId.get(member.id) || 0;
+      return {
+        id: member.id,
+        userId: member.user_id || null,
+        name: member.display_name,
+        initials: member.initials || member.member_code,
+        color: member.color || "#2E546D",
+        discipline: member.discipline || member.discipline_short,
+        skills: [
+          ...((member.skills || []).map((skill) => String(skill))),
+          ...((member.backup_skills || []).map((skill) => `${String(skill)}-backup`)),
+        ],
+        capacityPerDay: Number(member.capacity_per_day || 0),
+        capacityOverride: member.capacity_override_per_day,
+        wipLimit: Number(member.wip_limit || 0),
+        availability: leaveFractionToday >= 1
+          ? "leave"
+          : (leaveFractionToday > 0 ? "partial" : member.availability),
+        leaveFractionToday,
+      };
+    });
+}
+
 async function loadFlowMateWorkloadRows() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -114,3 +174,4 @@ async function loadFlowMateWorkloadRows() {
 }
 
 window.loadFlowMateWorkloadRows = loadFlowMateWorkloadRows;
+window.loadFlowMateTeamSettingsMembers = loadFlowMateTeamSettingsMembers;

@@ -40,6 +40,25 @@ function loadPureScreenBuilders(names: string[]) {
 }
 
 describe("normal UI hides operational Effort", () => {
+  it("keeps every member_workload_v installer compatible with the frontend count contract", () => {
+    const requiredFragments = [
+      "as assigned_count",
+      "as in_progress_count",
+      "as review_count",
+      "as blocked_count",
+    ];
+
+    for (const sqlPath of ["supabase/schema.sql", "supabase/rpc_assignment.sql"]) {
+      const sql = repo(sqlPath);
+      const viewStart = sql.indexOf("create or replace view public.member_workload_v");
+      const viewEnd = sql.indexOf("revoke all privileges on public.member_workload_v", viewStart);
+      const view = sql.slice(viewStart, viewEnd);
+      expect(viewStart, sqlPath).toBeGreaterThanOrEqual(0);
+      expect(viewEnd, sqlPath).toBeGreaterThan(viewStart);
+      for (const fragment of requiredFragments) expect(view, sqlPath).toContain(fragment);
+    }
+  });
+
   it("removes Effort and legacy capacity flags from working surfaces and CSV", () => {
     for (const file of ["screens-a.jsx", "screens-b.jsx", "screens-c.jsx"]) {
       const source = repo(file);

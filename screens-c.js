@@ -3727,17 +3727,17 @@ function SettingsScreen() {
     message: "Loading Supabase members..."
   });
   async function loadMembers() {
-    if (!window.loadFlowMateWorkloadRows) {
+    if (!window.loadFlowMateTeamSettingsMembers) {
       setMembers(window.MEMBERS || []);
       setLoadState({
         status: "error",
-        message: "Live data unavailable: Supabase workload loader is not ready."
+        message: "Live data unavailable: Supabase Team Settings loader is not ready."
       });
       return;
     }
     try {
-      const liveRows = await window.loadFlowMateWorkloadRows();
-      setMembers(liveRows.map(row => row.m));
+      const liveMembers = await window.loadFlowMateTeamSettingsMembers();
+      setMembers(liveMembers);
       setLoadState({
         status: "live",
         message: "Live Supabase data"
@@ -3754,19 +3754,19 @@ function SettingsScreen() {
   useEffectC(() => {
     let alive = true;
     async function loadMembersIfAlive() {
-      if (!window.loadFlowMateWorkloadRows) {
+      if (!window.loadFlowMateTeamSettingsMembers) {
         if (!alive) return;
         setMembers(window.MEMBERS || []);
         setLoadState({
           status: "error",
-          message: "Live data unavailable: Supabase workload loader is not ready."
+          message: "Live data unavailable: Supabase Team Settings loader is not ready."
         });
         return;
       }
       try {
-        const liveRows = await window.loadFlowMateWorkloadRows();
+        const liveMembers = await window.loadFlowMateTeamSettingsMembers();
         if (!alive) return;
-        setMembers(liveRows.map(row => row.m));
+        setMembers(liveMembers);
         setLoadState({
           status: "live",
           message: "Live Supabase data"

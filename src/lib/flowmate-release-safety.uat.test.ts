@@ -9,6 +9,18 @@ const transactionStatements = (sql: string, statement: "begin" | "commit") =>
   sql.match(new RegExp(`^${statement};$`, "gim")) || [];
 
 describe("FlowMate production release safety", () => {
+  it("cache-busts every changed Team Settings and Supervisor browser asset", () => {
+    const releaseStamp = repo("scripts", "release-stamp.cjs");
+    const versionedAssets = releaseStamp.slice(
+      releaseStamp.indexOf("const VERSIONED_ASSETS"),
+      releaseStamp.indexOf("const EXCLUDED_FROM_FINGERPRINT"),
+    );
+
+    for (const asset of ["screens-c.js", "supabase-workload-data.js", "app.js"]) {
+      expect(versionedAssets, asset).toContain(`"${asset}"`);
+    }
+  });
+
   it("documents the post-backfill installer path without authorizing another Apply", () => {
     const readme = repo("supabase", "README.md");
     const start = readme.indexOf("Post-backfill canonical backend installation");

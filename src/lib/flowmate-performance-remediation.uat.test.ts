@@ -400,4 +400,56 @@ describe("FlowMate performance remediation", () => {
     expect(searchEffect).toContain("if (!isGlobalSearchOpen || !normalizedGlobalSearch)");
     expect(searchEffect).not.toContain('window.addEventListener("flowmate:refresh-request", refreshGlobalSearchRows)');
   });
+
+  it("loads Team Settings members without depending on the Workload report view", async () => {
+    const tableCalls: string[] = [];
+    const from = vi.fn((table: string) => {
+      tableCalls.push(table);
+      if (table === "team_members") {
+        return makeQuery([{
+          id: "member-1",
+          user_id: "user-1",
+          member_code: "pond",
+          display_name: "Pond",
+          initials: "PO",
+          color: "#123456",
+          discipline: "GD/VE",
+          discipline_short: "GD",
+          skills: ["banner"],
+          backup_skills: ["video"],
+          capacity_per_day: 8,
+          capacity_override_per_day: null,
+          wip_limit: 3,
+          availability: "available",
+        }]).query;
+      }
+      if (table === "leave_requests") return makeQuery([]).query;
+      return makeQuery([], null, { message: `Unexpected table: ${table}` }).query;
+    });
+    const windowObject = loadBrowserScript("supabase-workload-data.js", {
+      flowmateSupabase: { from },
+    });
+
+    const members = await windowObject.loadFlowMateTeamSettingsMembers();
+
+    expect(tableCalls).toEqual(["team_members", "leave_requests"]);
+    expect(tableCalls).not.toContain("member_workload_v");
+    expect(members).toEqual([expect.objectContaining({
+      id: "member-1",
+      name: "Pond",
+      availability: "available",
+      skills: ["banner", "video-backup"],
+    })]);
+  });
+
+  it("keeps Team Settings independent from the hidden Workload screen", () => {
+    const screens = readRepo("screens-c.jsx");
+    const settings = screens.slice(
+      screens.indexOf("function SettingsScreen"),
+      screens.indexOf("function TaskAssignScheduleScreen"),
+    );
+
+    expect(settings).toContain("window.loadFlowMateTeamSettingsMembers");
+    expect(settings).not.toContain("window.loadFlowMateWorkloadRows");
+  });
 });

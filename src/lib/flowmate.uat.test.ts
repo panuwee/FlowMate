@@ -4953,10 +4953,11 @@ describe("Marketing Plan product split shell", () => {
     expect(supervisorSource).toContain("Avg Working Days Before Launch Date / Deadline");
     expect(supervisorSource).toContain("Risk");
     expect(supervisorSource).toContain("Critical");
-    for (const tab of ["Production Insights", "Monthly Overview", "PIC Overview", "Campaign Risk", "Channel Risk"]) {
+    for (const tab of ["Monthly Overview", "PIC Performance", "Campaign Risk", "Channel Risk", "Production Insights"]) {
       expect(supervisorSource).toContain(tab);
     }
-    expect(supervisorSource).toContain('const [activeTab, setActiveTab] = useStateApp("production");');
+    expect(supervisorSource.indexOf('label: "Monthly Overview"')).toBeLessThan(supervisorSource.indexOf('label: "Production Insights"'));
+    expect(supervisorSource).toContain('const [activeTab, setActiveTab] = useStateApp("monthly");');
     expect(supervisorSource).toContain("productionInsights.status");
     expect(supervisorSource).toContain("productionStartDate");
     expect(supervisorSource).toContain("productionEndDate");
@@ -4969,7 +4970,9 @@ describe("Marketing Plan product split shell", () => {
     for (const productionStatusLabel of ["In Progress", "Assigned awaiting acceptance", "Review", "Blocked", "Delivered"]) {
       expect(supervisorSource).toContain(productionStatusLabel);
     }
-    expect(supervisorSource).not.toContain("PIC Performance");
+    expect(supervisorSource).not.toContain("PIC Overview");
+    expect(supervisorSource).toContain('message: "Loading supervisor report..."');
+    expect(supervisorSource).toContain('setExportMessage(`Exported ${exportedCount} supervisor rows.`)');
     expect(supervisorSource).toContain("getMarketingPlanSupervisorMonthOptions(monthlyRows)");
     expect(supervisorSource).toContain("filterMarketingPlanSupervisorRows(monthlyRows, filters)");
     expect(supervisorSource).toContain("loadSupervisorRows(isAlive);");
@@ -7216,6 +7219,25 @@ describe("Marketing Plan schedule-operator backend contract", () => {
       expect(syncRpc).toMatch(/publish_time = (?:v_effective_publish_time|p_publish_time)/);
       expect(syncRpc).not.toContain("publish_time = coalesce(p_publish_time");
     }
+  });
+});
+
+describe("Workload reporting access", () => {
+  it("hides the legacy Workload route while preserving its internal reporting dependencies", () => {
+    const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
+    const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
+    const workloadLoader = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
+    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
+    const titleMapSource = appJsx.slice(appJsx.indexOf("const TITLE_MAP = {"), appJsx.indexOf("const MEMBER_ROUTE_KEYS"));
+    const routeSource = appJsx.slice(appJsx.indexOf("const allowedRoute ="), appJsx.indexOf("function ProductSwitch"));
+
+    expect(navSource).not.toContain('key: "workload"');
+    expect(titleMapSource).not.toContain('"workload": "Workload"');
+    expect(routeSource).not.toContain('route === "workload"');
+    expect(routeSource).not.toContain("React.createElement(WorkloadScreen");
+    expect(screensC).toContain("function WorkloadScreen");
+    expect(screensC).toContain("Object.assign(window, { WorkloadScreen");
+    expect(workloadLoader).toContain("loadFlowMateWorkloadRows");
   });
 });
 

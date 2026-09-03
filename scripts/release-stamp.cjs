@@ -11,7 +11,15 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..");
 const ENTRY_PAGES = ["index.html", "home/index.html", "product-book/index.html"];
-const VERSIONED_ASSETS = ["app.css", "ot-request-domain.js", "supabase-ot-request.js", "screens-ot.js", "app.js"];
+const VERSIONED_ASSETS = [
+  "app.css",
+  "ot-request-domain.js",
+  "supabase-ot-request.js",
+  "supabase-workload-data.js",
+  "screens-c.js",
+  "screens-ot.js",
+  "app.js",
+];
 const EXCLUDED_FROM_FINGERPRINT = ENTRY_PAGES.map(file => `:(exclude)${file}`);
 
 function getBangkokDateStamp() {

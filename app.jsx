@@ -120,10 +120,6 @@ const NAV = [{
 }, {
   group: "Supervisor",
   items: [{
-    key: "workload",
-    label: "Workload",
-    icon: "users"
-  }, {
     key: "kpi",
     label: "KPI",
     icon: "chart"
@@ -182,7 +178,6 @@ const TITLE_MAP = {
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
-  "workload": "Workload",
   "kpi": "KPI",
   "settings": "Team settings",
   "admin-whitelist": "Whitelist"
@@ -1127,8 +1122,6 @@ function App() {
   }), allowedRoute && route === "planning-campaign" && React.createElement(PlanningCampaignViewScreen, {
     onOpen: open
   }), allowedRoute && route === "planning-calendar" && React.createElement(PlanningContentCalendarScreen, {
-    onOpen: open
-  }), allowedRoute && route === "workload" && React.createElement(WorkloadScreen, {
     onOpen: open
   }), allowedRoute && route === "kpi" && React.createElement(KpiScreen, null), allowedRoute && route === "settings" && React.createElement(SettingsScreen, null), allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
     onNav: nav
@@ -7144,7 +7137,7 @@ function MarketingPlanSupervisorScreen({
   const [selectedProductionAssetSubtype, setSelectedProductionAssetSubtype] = useStateApp("");
   const [selectedProductionPriority, setSelectedProductionPriority] = useStateApp("");
   const [selectedProductionStatus, setSelectedProductionStatus] = useStateApp("");
-  const [activeTab, setActiveTab] = useStateApp("production");
+  const [activeTab, setActiveTab] = useStateApp("monthly");
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading supervisor report..."
@@ -7370,20 +7363,20 @@ function MarketingPlanSupervisorScreen({
     }, productionInsights.status === "error" ? "Production Insights could not load." : "No Production Insights data for this filter.")))))));
   }
   const tabOptions = [{
-    key: "production",
-    label: "Production Insights"
-  }, {
     key: "monthly",
     label: "Monthly Overview"
   }, {
     key: "pic",
-    label: "PIC Overview"
+    label: "PIC Performance"
   }, {
     key: "campaign",
     label: "Campaign Risk"
   }, {
     key: "channel",
     label: "Channel Risk"
+  }, {
+    key: "production",
+    label: "Production Insights"
   }];
   return React.createElement("div", null, React.createElement("div", {
     className: "page-head"
