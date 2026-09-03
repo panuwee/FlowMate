@@ -202,11 +202,6 @@ create table if not exists public.work_items (
     or status not in ('assigned', 'in_progress', 'review', 'blocked', 'delivered')
     or final_owner_member_id is not null
   ),
-  constraint work_items_effort_for_creative_after_brief check (
-    work_type <> 'creative_request'
-    or status in ('new', 'need_brief')
-    or effort_point is not null
-  ),
   constraint work_items_wip_counted_status check (
     wip_counted = false or status = 'in_progress'
   ),
@@ -278,7 +273,7 @@ create table if not exists public.assignment_runs (
   final_owner_member_id uuid references public.team_members(id),
   result public.assignment_result not null,
   reason text not null,
-  effort_point integer not null check (effort_point >= 1 and effort_point <= 999),
+  effort_point integer check (effort_point is null or (effort_point >= 1 and effort_point <= 999)),
   raw_range_min integer check (raw_range_min is null or raw_range_min >= 1),
   raw_range_max integer check (raw_range_max is null or raw_range_max >= raw_range_min),
   was_capped boolean not null default false,
@@ -453,6 +448,22 @@ select
   ), 0) as assigned_effort,
   count(wi.id) filter (
     where wi.work_type = 'creative_request'
+      and wi.status = 'assigned'
+  ) as assigned_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'in_progress'
+  ) as in_progress_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'review'
+  ) as review_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'blocked'
+  ) as blocked_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
       and wi.status = 'in_progress'
       and wi.wip_counted = true
   ) as current_wip,
@@ -465,8 +476,6 @@ select
       and wi.due_date >= current_date
       and wi.due_date <= current_date + interval '2 days'
   ) as due_soon_count,
-  count(wi.id) filter (where wi.status = 'blocked') as blocked_count,
-  count(wi.id) filter (where wi.status = 'review') as review_count,
   count(wi.id) filter (where wi.work_type = 'quick_task' and wi.status not in ('delivered', 'cancelled')) as quick_task_count
 from public.team_members tm
 left join public.work_items wi on wi.final_owner_member_id = tm.id

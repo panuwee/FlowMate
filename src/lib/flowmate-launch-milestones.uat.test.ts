@@ -3,6 +3,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repo = (...parts: string[]) => readFileSync(resolve(process.cwd(), ...parts), "utf8").replace(/\r\n/g, "\n");
+const optionalRepo = (...parts: string[]) => {
+  try {
+    return repo(...parts);
+  } catch {
+    return "";
+  }
+};
 const functionBody = (source: string, signature: string) => {
   const start = source.indexOf(signature);
   const end = source.indexOf("$$;", start);
@@ -125,8 +132,8 @@ it("stores both Creative Request milestones and generates them from Thai busines
   expect(businessDayHelper).toContain("flowmate_th_calendar_years");
   expect(businessDayHelper).toContain("flowmate_is_th_business_day");
   expect(businessDayHelper).toContain("flowmate_subtract_th_business_days");
-  expect(creativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*5\)/);
-  expect(creativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*1\)/);
+  expect(creativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*4\)/);
+  expect(creativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*2\)/);
 });
 
 it("defines Thai business days with the holiday and calendar-year helpers", () => {
@@ -140,7 +147,7 @@ it("defines Thai business days with the holiday and calendar-year helpers", () =
   expect(businessDayHelper).toContain("flowmate_subtract_th_business_days");
 });
 
-it("maps Launch Date to the approved T-5 and T-1 Creative Request milestones", () => {
+it("maps Launch Date to the approved T-4 and T-2 Creative Request milestones", () => {
   const assignment = repo("supabase", "rpc_assignment.sql");
   const createCreativeRequest = functionBody(
     assignment,
@@ -148,8 +155,8 @@ it("maps Launch Date to the approved T-5 and T-1 Creative Request milestones", (
   );
 
   expect(createCreativeRequest).toContain("flowmate_subtract_th_business_days");
-  expect(createCreativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*5\)/);
-  expect(createCreativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*1\)/);
+  expect(createCreativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*4\)/);
+  expect(createCreativeRequest).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*2\)/);
   expect(createCreativeRequest).toMatch(
     /due_date, final_approved_due_date, launch_date,[\s\S]*?v_due_date, v_final_approved_due_date, v_launch_date/
   );
@@ -184,8 +191,8 @@ it("mirrors Thai business-day milestones across assignment SQL, hybrid SQL, and 
   ] as const) {
     for (const signature of signatures) {
       const region = functionRegion(sql, signature);
-      expect(region, `${fileName}: ${signature}`).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*5\)/);
-      expect(region, `${fileName}: ${signature}`).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*1\)/);
+      expect(region, `${fileName}: ${signature}`).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*4\)/);
+      expect(region, `${fileName}: ${signature}`).toMatch(/flowmate_subtract_th_business_days\([^)]*,\s*2\)/);
     }
   }
 
@@ -194,8 +201,10 @@ it("mirrors Thai business-day milestones across assignment SQL, hybrid SQL, and 
   expect(quickTaskCreate).not.toContain("final_approved_due_date");
   expect(quickTaskCreate).not.toContain("flowmate_subtract_th_business_days");
 
-  expect(screenA).toMatch(/Asset First Draft Due[\s\S]{0,300}T-5/);
-  expect(screenA).toMatch(/Asset Final\/Approved Due[\s\S]{0,300}T-1/);
+  expect(screenA).toContain("Asset First Draft Due");
+  expect(screenA).toContain("First Draft: T-4 Thai working days before Launch Date / Deadline.");
+  expect(screenA).toContain("Asset Final/Approved Due");
+  expect(screenA).toContain("Final/Approved: T-2 Thai working days before Launch Date / Deadline.");
   expect(screenA).toContain("FLOWMATE_TH_HOLIDAY_DATES");
   expect(screenA).toContain("FLOWMATE_TH_COMPLETE_CALENDAR_YEARS");
   expect(screenA).toContain("Thai holiday calendar for ${launchCalendarYear} is not available.");
@@ -206,7 +215,7 @@ it("mirrors Thai business-day milestones across assignment SQL, hybrid SQL, and 
   expect(screenA).toContain('"2026-04-15"');
 });
 
-it("verifies T-5 and T-1 independently for automatic and manual assignment", () => {
+it("verifies T-4 and T-2 independently for automatic and manual assignment", () => {
   const migration = repo("supabase", "creative_request_launch_milestones.sql");
   const automaticVerification = migration.slice(
     migration.indexOf("'public.flowmate_run_assignment(uuid,public.assignment_trigger)'::regprocedure"),
@@ -217,8 +226,8 @@ it("verifies T-5 and T-1 independently for automatic and manual assignment", () 
     migration.indexOf("select count(distinct table_name)"),
   );
   for (const verification of [automaticVerification, manualVerification]) {
-    expect(verification).toContain("flowmate_subtract_th_business_days(v_work.launch_date, 5)");
-    expect(verification).toContain("flowmate_subtract_th_business_days(v_work.launch_date, 1)");
+    expect(verification).toContain("flowmate_subtract_th_business_days(v_work.launch_date, 4)");
+    expect(verification).toContain("flowmate_subtract_th_business_days(v_work.launch_date, 2)");
   }
   expect(migration).not.toContain("monday_launch_t_minus_7");
   expect(migration).not.toContain("monday_launch_t_minus_5");
@@ -265,7 +274,7 @@ it("keeps Creative Request launch milestones aligned across Calendar compact car
   expect(calendar).not.toContain('!compact && item.type === "creative" && item.finalApprovedDueLabel');
   expect(gantt).toContain('Asset First Draft Due: ${calendarDateLabelC(task.dueKey)}');
   expect(gantt).toContain('Asset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}');
-  expect(gantt).toContain('Launch: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}');
+  expect(gantt).toContain('Launch Date / Deadline: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}');
 });
 
 it("keeps Team Schedule legend markers from reusing absolute task-bar marker styles", () => {
@@ -280,4 +289,36 @@ it("keeps Team Schedule legend markers from reusing absolute task-bar marker sty
   expect(legend).not.toContain('<i className="team-schedule__draft-marker"></i>');
   expect(css).toContain(".team-schedule__legend-draft-marker");
   expect(css).toContain(".team-schedule__draft-marker { position: absolute;");
+});
+
+it("backfills only Creative Requests whose two milestones exactly match the legacy T-7 and T-5 formula", () => {
+  const sql = optionalRepo("supabase", "creative_request_milestone_backfill_t5_t1.sql");
+  const candidate = sql.slice(sql.indexOf("with candidate as ("), sql.indexOf("select\n  count(*)"));
+
+  expect(sql).toMatch(/work_type\s*=\s*'creative_request'/i);
+  expect(sql).toMatch(/due_date\s+is\s+not\s+null/i);
+  expect(sql).toMatch(/final_approved_due_date\s+is\s+not\s+null/i);
+  expect(sql).toMatch(/due_date\s*=\s*public\.flowmate_subtract_working_days\([^,]+,\s*7\)/i);
+  expect(sql).toMatch(/final_approved_due_date\s*=\s*public\.flowmate_subtract_working_days\([^,]+,\s*5\)/i);
+  expect(candidate).not.toMatch(/wi\.status\s*(?:=|in\b)/i);
+  expect(candidate).not.toMatch(/wi\.archived_at\s+is/i);
+});
+
+it("backs up old and new milestone values before applying T-5 and T-1 Thai business-day dates", () => {
+  const sql = optionalRepo("supabase", "creative_request_milestone_backfill_t5_t1.sql");
+
+  expect(sql).toContain("private.flowmate_creative_milestone_backfill_20260901");
+  expect(sql).toMatch(/new_due_date[\s\S]*flowmate_subtract_th_business_days\([^,]+,\s*5\)/i);
+  expect(sql).toMatch(/new_final_approved_due_date[\s\S]*flowmate_subtract_th_business_days\([^,]+,\s*1\)/i);
+  expect(sql).toMatch(/wi\.due_date\s*=\s*b\.old_due_date/i);
+  expect(sql).toMatch(/wi\.final_approved_due_date\s*=\s*b\.old_final_approved_due_date/i);
+});
+
+it("guards rollback so it never overwrites milestone values changed after the backfill", () => {
+  const sql = optionalRepo("supabase", "creative_request_milestone_backfill_t5_t1.sql");
+  const rollback = sql.slice(sql.indexOf("ROLLBACK SCRIPT"));
+
+  expect(rollback).toMatch(/wi\.due_date\s*=\s*b\.new_due_date/i);
+  expect(rollback).toMatch(/wi\.final_approved_due_date\s*=\s*b\.new_final_approved_due_date/i);
+  expect(rollback).toContain("Changed after backfill; rollback skipped");
 });

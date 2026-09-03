@@ -2792,6 +2792,26 @@ function getMarketingPlanExclusiveChannels(currentChannels, channelKey) {
   const nextChannels = withoutNoTag.includes(channelKey) ? withoutNoTag.filter(channel => channel !== channelKey) : [...withoutNoTag, channelKey];
   return nextChannels.length ? nextChannels : [channelKey];
 }
+function isMarketingPlanNoTagSelection(channels) {
+  return Array.isArray(channels)
+    && channels.length === 1
+    && channels[0] === "no_tag";
+}
+function getMarketingPlanInlineTimeUi(row, canManageSchedule, updatingRowId) {
+  const isNoTag = isMarketingPlanNoTagSelection(row && row.channels);
+  const legacyPublishTime = isNoTag ? "" : getMarketingPlanLegacyPublishTimeOption(row && row.publishTime);
+  return {
+    isNoTag,
+    value: isNoTag ? "" : normalizeMarketingPlanPublishTimeOption(row && row.publishTime) || legacyPublishTime,
+    legacyPublishTime,
+    disabled: isNoTag || !canManageSchedule || updatingRowId === (row && row.contentItemId),
+    title: isNoTag
+      ? "Not required for No Tag"
+      : canManageSchedule
+        ? ""
+        : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status."
+  };
+}
 function isMarketingPlanPublishableChannel(channel) {
   return Boolean(channel) && channel !== "no_tag";
 }
@@ -2830,7 +2850,8 @@ function getMarketingPlanWorkingRowPublishTime(row) {
 function createFlowMateDraftFromMarketingPlanRow(row) {
   const currentUserDefaults = getMarketingPlanCurrentUserDefaults();
   const launchDate = row.publishDate || flowMateTodayDateKey();
-  const channels = Array.isArray(row.channels) && row.channels.length ? row.channels.map(channel => getMarketingPlanChannelLabel(channel)).join(", ") : row.channel ? getMarketingPlanChannelLabel(row.channel) : "Instagram";
+  const selectedChannels = Array.isArray(row.channels) && row.channels.length ? row.channels : row.channel ? [row.channel] : ["instagram"];
+  const channels = selectedChannels.map(channel => getMarketingPlanChannelLabel(channel)).join(", ");
   const productEvent = row.contentTitle || "";
   const requesterTeam = currentUserDefaults.team || "Operations";
   const campaignName = row.campaignName || "";
@@ -2859,7 +2880,7 @@ function createFlowMateDraftFromMarketingPlanRow(row) {
     urgentReason: "",
     dueDate: launchDate,
     launchDate,
-    publishTime: getMarketingPlanWorkingRowPublishTime(row),
+    publishTime: isMarketingPlanNoTagSelection(selectedChannels) ? "" : getMarketingPlanWorkingRowPublishTime(row),
     marketingPlanContentItemId: row.contentItemId || "",
     marketingPlanOriginalBriefLink: row.briefLink || "",
     marketingPlanProductEvent: productEvent,
@@ -2945,6 +2966,8 @@ async function runMarketingWorkingRowDuplicate(sourceRow, launchDate, publishTim
   const rpc = dependencies.rpc || ((name, params) => window.flowmateSupabase.rpc(name, params));
   const refreshRows = dependencies.refreshRows || (() => Promise.resolve([]));
   const openBrief = dependencies.openBrief || openFlowMateCreativeBriefFromMarketingRow;
+  const sourceChannels = Array.isArray(sourceRow && sourceRow.channels) && sourceRow.channels.length ? sourceRow.channels : sourceRow && sourceRow.channel ? [sourceRow.channel] : [];
+  const effectivePublishTime = isMarketingPlanNoTagSelection(sourceChannels) ? null : publishTime || null;
   const unknownResult = {
     status: "unknown",
     message: "The duplicate result could not be confirmed. Check the refreshed Working Sheet before retrying."
@@ -2970,7 +2993,7 @@ async function runMarketingWorkingRowDuplicate(sourceRow, launchDate, publishTim
     rpcResult = await rpc("marketing_plan_duplicate_working_row", {
       p_source_content_item_id: sourceRow && sourceRow.contentItemId,
       p_launch_date: launchDate,
-      p_publish_time: publishTime || null
+      p_publish_time: effectivePublishTime
     });
   } catch (error) {
     console.error("[Marketing Plan] Duplicate RPC outcome is unknown:", error);
@@ -2997,7 +3020,7 @@ async function runMarketingWorkingRowDuplicate(sourceRow, launchDate, publishTim
     return {
       status: "created_not_found",
       contentItemId,
-      message: "The duplicate row was created but is not in the current timeline window. Find it by Launch Date before using Create Brief."
+      message: "The duplicate row was created but is not in the current timeline window. Find it by Launch Date / Deadline before using Create Brief."
     };
   }
   const safeCreatedRow = {
@@ -3107,7 +3130,7 @@ function resolveMarketingPlanWorkingRowsView(rows, filters = {}, lastValidDateSt
   const currentUserId = String(filters.currentUserId || "");
   const myTasksOnly = filters.myTasksOnly === true;
   const hasAssignedRowsForCurrentUser = !myTasksOnly || Boolean(currentUserId && (rows || []).some(row => row.picUserId === currentUserId || row.subPicUserId === currentUserId));
-  const nextEmptyReason = myTasksOnly && !hasAssignedRowsForCurrentUser ? "No tasks are assigned to you in this month." : (appliedStartDate || appliedEndDate) && rowsBeforeSearch.length === 0 ? "No tasks match the selected Launch Date range." : "No rows match the selected filters.";
+  const nextEmptyReason = myTasksOnly && !hasAssignedRowsForCurrentUser ? "No tasks are assigned to you in this month." : (appliedStartDate || appliedEndDate) && rowsBeforeSearch.length === 0 ? "No tasks match the selected Launch Date / Deadline range." : "No rows match the selected filters.";
   return {
     visibleRows,
     emptyReason: hasInvalidDateRange ? lastValidDateState.emptyReason || nextEmptyReason : nextEmptyReason,
@@ -3698,6 +3721,7 @@ async function createMarketingPlanWorkingSheetRow(form) {
   const monthKey = marketingPlanMonthKeyFromDate(form.launchDate);
   const title = String(form.productEvent || "").trim() || marketingPlanTitleFromDetails(form.details, form.assetType);
   const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : ["other"];
+  const effectivePublishTime = isMarketingPlanNoTagSelection(selectedChannels) ? null : form.publishTime || null;
   const planId = await findOrCreateMarketingPlan(monthKey);
   const campaignId = await findOrCreateMarketingCampaign(planId, form.campaignName, getMarketingPlanCurrentUserDefaults().team || null);
   const contentPayload = {
@@ -3714,7 +3738,7 @@ async function createMarketingPlanWorkingSheetRow(form) {
     brief_link: String(form.briefLink || "").trim() || null,
     requires_brief: form.requiresBrief !== false,
     source_start_date: form.launchDate || null,
-    source_start_time: form.publishTime || null,
+    source_start_time: effectivePublishTime,
     note: String(form.note || "").trim() || null
   };
   const contentResult = await window.flowmateSupabase.from("marketing_content_items").insert(contentPayload).select("id").single();
@@ -3724,7 +3748,7 @@ async function createMarketingPlanWorkingSheetRow(form) {
     content_item_id: contentItemId,
     channel,
     publish_date: form.launchDate || null,
-    publish_time: form.publishTime || null,
+    publish_time: effectivePublishTime,
     placement_status: "planned"
   }));
   const placementResult = await window.flowmateSupabase.from("marketing_channel_placements").insert(insertRows);
@@ -3827,6 +3851,7 @@ async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selected
   const existingPlacements = Array.isArray(row.placements) ? row.placements : [];
   const existingByChannel = new Map(existingPlacements.map(placement => [placement.channel, placement]));
   const selectedSet = new Set(selectedChannels);
+  const effectivePublishTime = isMarketingPlanNoTagSelection(selectedChannels) ? null : normalizedTime;
   const deleteIds = existingPlacements.filter(placement => placement.placementId && !selectedSet.has(placement.channel)).map(placement => placement.placementId);
   if (deleteIds.length > 0) {
     const deleted = await window.flowmateSupabase.from("marketing_channel_placements").delete().in("id", deleteIds);
@@ -3836,7 +3861,7 @@ async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selected
   if (updateIds.length > 0) {
     const updated = await window.flowmateSupabase.from("marketing_channel_placements").update({
       publish_date: form.publishDate || null,
-      publish_time: normalizedTime
+      publish_time: effectivePublishTime
     }).in("id", updateIds);
     if (updated.error) throw updated.error;
   }
@@ -3844,7 +3869,7 @@ async function syncMarketingPlanWorkingSheetPlacementsDirect(row, form, selected
     content_item_id: row.contentItemId,
     channel,
     publish_date: form.publishDate || null,
-    publish_time: normalizedTime,
+    publish_time: effectivePublishTime,
     placement_status: normalizeMarketingPlanWorkingStatus(row.placementStatus)
   }));
   if (insertRows.length > 0) {
@@ -3858,10 +3883,12 @@ async function syncMarketingPlanLinkedFlowMateSchedule(row, form, normalizedTime
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
+  const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : [];
+  const effectivePublishTime = isMarketingPlanNoTagSelection(selectedChannels) ? null : normalizedTime || null;
   const result = await window.flowmateSupabase.rpc("marketing_plan_sync_flowmate_schedule", {
     p_content_item_id: row.contentItemId,
     p_launch_date: form.publishDate || null,
-    p_publish_time: normalizedTime || null
+    p_publish_time: effectivePublishTime
   });
   if (result.error) throw result.error;
   return true;
@@ -3873,10 +3900,11 @@ async function updateMarketingPlanWorkingSheetRow(row, form) {
   if (!row || !row.contentItemId) throw new Error("Content item is missing.");
   const selectedChannels = Array.isArray(form.channels) && form.channels.length ? form.channels : [];
   if (selectedChannels.length === 0) throw new Error("Select at least one Channel Tag.");
-  const rawTime = String(form.publishTime || "").trim();
-  const normalizedTime = normalizeWholeHourTime(rawTime);
+  const nextIsNoTag = isMarketingPlanNoTagSelection(selectedChannels);
+  const rawTime = nextIsNoTag ? "" : String(form.publishTime || "").trim();
+  const normalizedTime = nextIsNoTag ? "" : normalizeWholeHourTime(rawTime);
   if (rawTime && !normalizedTime) throw new Error("Time must be N/A or a whole hour.");
-  const publishTime = normalizedTime || null;
+  const publishTime = nextIsNoTag ? null : normalizedTime || null;
   const contentPayload = {
     title: String(form.contentTitle || "").trim(),
     details: String(form.details || form.contentTitle || "").trim(),
@@ -3923,7 +3951,7 @@ async function deleteMarketingPlanWorkingSheetRow(row) {
   return true;
 }
 function exportMarketingPlanRowsCsv(visibleRows, selectedMonth) {
-  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channels", "Launch Date", "Publish Time", "Marketing Status", "Note"];
+  const headerLabels = ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channels", "Launch Date / Deadline", "Publish Time", "Marketing Status", "Note"];
   const dataRows = (visibleRows || []).map(row => [getMarketingPlanMonthLabel(row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "")), row.campaignName || "", getMarketingPlanWorkingRowTeam(row), row.contentTitle || "", row.format || "", row.contentTier || "", row.picName || "", row.subPicName || "", (row.channels || []).map(getMarketingPlanChannelLabel).join(" | "), row.publishDate || "", formatMarketingPlanTime(row.publishTime), getMarketingPlanStatusLabel(getMarketingPlanWorkingSheetStatus(row)), row.placementNote || ""]);
   const filename = `marketing-plan-${selectedMonth || "no-month"}-current-working.csv`;
   if (window.flowmateDownloadCsv) {
@@ -4077,17 +4105,251 @@ function normalizeMarketingPlanSupervisorSummaryRow(row, type) {
     missingBriefLinkCount: Number(row.missing_brief_link_count || 0)
   };
 }
-async function loadMarketingPlanSupervisorRows(user) {
+const FLOWMATE_PRODUCTION_MIN_SAMPLE_COUNT = 20;
+function flowMateProductionPercentile(values, percentile) {
+  const sorted = values.map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const index = (sorted.length - 1) * percentile;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
+}
+function normalizeFlowMateProductionSampleRow(row) {
+  const deliveredDate = row.delivered_date || (row.delivered_at ? String(row.delivered_at).slice(0, 10) : "");
+  return {
+    workItemId: row.work_item_id || "",
+    displayId: row.display_id || "",
+    team: row.team || "Unspecified",
+    assetType: row.asset_type || "",
+    assetSubtype: row.asset_subtype || "Unspecified",
+    priority: row.priority || "",
+    status: row.status || "delivered",
+    effortPoint: row.effort_point == null ? null : Number(row.effort_point),
+    deliveredAt: row.delivered_at || "",
+    deliveredDate,
+    monthKey: deliveredDate ? String(deliveredDate).slice(0, 7) : "",
+    activeProductionHours: row.active_production_hours == null ? null : Number(row.active_production_hours)
+  };
+}
+function normalizeFlowMateProductionOperationRow(row) {
+  return {
+    team: row.team || "Unspecified",
+    assetSubtype: row.asset_subtype || "Unspecified",
+    priority: row.priority || "",
+    status: row.status || "",
+    taskCount: Number(row.task_count || 0),
+    overdueCount: Number(row.overdue_count || 0),
+    dueSoonCount: Number(row.due_soon_count || 0),
+    ownerOnLeaveCount: Number(row.owner_on_leave_count || 0),
+    ownerPartialCount: Number(row.owner_partial_count || 0)
+  };
+}
+function normalizeFlowMateLegacyCapacityWarningRow(row) {
+  const monthStart = row.month_start || "";
+  return {
+    monthStart,
+    monthKey: monthStart ? String(monthStart).slice(0, 7) : "",
+    team: row.team || "Unspecified",
+    warningCode: row.warning_code || "",
+    warningCount: Number(row.warning_count || 0)
+  };
+}
+function summarizeFlowMateProductionSamples(rows) {
+  const hours = (rows || []).map(row => row.activeProductionHours).filter(Number.isFinite);
+  return {
+    sampleCount: hours.length,
+    p50: hours.length >= FLOWMATE_PRODUCTION_MIN_SAMPLE_COUNT ? flowMateProductionPercentile(hours, 0.5) : null,
+    p85: hours.length >= FLOWMATE_PRODUCTION_MIN_SAMPLE_COUNT ? flowMateProductionPercentile(hours, 0.85) : null,
+    reliability: hours.length >= FLOWMATE_PRODUCTION_MIN_SAMPLE_COUNT ? "Ready" : "Insufficient history",
+    historicalEffort: (() => {
+      const efforts = (rows || []).map(row => row.effortPoint).filter(Number.isFinite);
+      return efforts.length ? efforts.reduce((sum, value) => sum + value, 0) / efforts.length : null;
+    })()
+  };
+}
+function filterFlowMateProductionSamples(rows, filters) {
+  const activeFilters = filters || {};
+  return (rows || []).filter(row => {
+    if (activeFilters.month && row.monthKey !== activeFilters.month) return false;
+    if (activeFilters.team && row.team !== activeFilters.team) return false;
+    if (activeFilters.assetSubtype && row.assetSubtype !== activeFilters.assetSubtype) return false;
+    if (activeFilters.priority && row.priority !== activeFilters.priority) return false;
+    if (activeFilters.status && row.status !== activeFilters.status) return false;
+    return true;
+  });
+}
+function filterFlowMateProductionOperations(rows, filters) {
+  const activeFilters = filters || {};
+  return (rows || []).filter(row => {
+    if (activeFilters.team && row.team !== activeFilters.team) return false;
+    if (activeFilters.assetSubtype && row.assetSubtype !== activeFilters.assetSubtype) return false;
+    if (activeFilters.priority && row.priority !== activeFilters.priority) return false;
+    if (activeFilters.status && row.status !== activeFilters.status) return false;
+    return true;
+  });
+}
+function getFlowMateProductionStatusOptions(samples, operations) {
+  const statusOrder = ["in_progress", "assigned", "review", "blocked", "delivered"];
+  const statuses = new Set([...(operations || []), ...(samples || [])].map(row => row.status).filter(Boolean));
+  return statusOrder.filter(status => statuses.has(status)).map(status => ({
+    value: status,
+    label: getMarketingPlanStatusLabel(status)
+  }));
+}
+function summarizeFlowMateProductionOperations(rows, filters) {
+  const counts = {
+    inProgress: 0,
+    assignedAwaitingAcceptance: 0,
+    review: 0,
+    blocked: 0,
+    delivered: 0,
+    leave: 0,
+    partial: 0,
+    overdue: 0,
+    dueSoon: 0
+  };
+  filterFlowMateProductionOperations(rows, filters).forEach(row => {
+    if (row.status === "in_progress") counts.inProgress += row.taskCount;
+    if (row.status === "assigned") counts.assignedAwaitingAcceptance += row.taskCount;
+    if (row.status === "review") counts.review += row.taskCount;
+    if (row.status === "blocked") counts.blocked += row.taskCount;
+    if (row.status === "delivered") counts.delivered += row.taskCount;
+    counts.leave += row.ownerOnLeaveCount;
+    counts.partial += row.ownerPartialCount;
+    counts.overdue += row.overdueCount;
+    counts.dueSoon += row.dueSoonCount;
+  });
+  return counts;
+}
+function summarizeFlowMateLegacyWarnings(rows, filters) {
+  const activeFilters = filters || {};
+  return (rows || []).filter(row => {
+    if (activeFilters.month && row.monthKey !== activeFilters.month) return false;
+    if (activeFilters.team && row.team !== activeFilters.team) return false;
+    return true;
+  }).reduce((summary, row) => {
+    if (row.warningCode === "over_capacity") summary.overCapacity += row.warningCount;
+    if (row.warningCode === "deadline_capacity_gap") summary.deadlineGap += row.warningCount;
+    return summary;
+  }, {
+    overCapacity: 0,
+    deadlineGap: 0
+  });
+}
+function summarizeFlowMateProductionMonthTrend(rows, filters) {
+  const cohortFilters = {
+    ...(filters || {}),
+    month: ""
+  };
+  const rowsByMonth = new Map();
+  filterFlowMateProductionSamples(rows, cohortFilters).forEach(row => {
+    if (!row.monthKey) return;
+    if (!rowsByMonth.has(row.monthKey)) rowsByMonth.set(row.monthKey, []);
+    rowsByMonth.get(row.monthKey).push(row);
+  });
+  let previousP85 = null;
+  return Array.from(rowsByMonth.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([monthKey, monthRows]) => {
+    const summary = summarizeFlowMateProductionSamples(monthRows);
+    const p50 = summary.p50 == null ? null : Number(summary.p50.toFixed(2));
+    const p85 = summary.p85 == null ? null : Number(summary.p85.toFixed(2));
+    const p85Variance = p85 == null || previousP85 == null ? null : Number((p85 - previousP85).toFixed(2));
+    if (p85 != null) previousP85 = p85;
+    return {
+      monthKey,
+      sampleCount: summary.sampleCount,
+      p50,
+      p85,
+      p85Variance,
+      reliability: summary.reliability
+    };
+  });
+}
+function exportFlowMateProductionInsightsCsv(samples, operations, warnings, filters) {
+  const activeFilters = filters || {};
+  const visibleSamples = filterFlowMateProductionSamples(samples, activeFilters);
+  const cohortMap = new Map();
+  visibleSamples.forEach(row => {
+    const key = [row.monthKey, row.team, row.assetType, row.assetSubtype, row.priority, row.status].join("|");
+    if (!cohortMap.has(key)) cohortMap.set(key, []);
+    cohortMap.get(key).push(row);
+  });
+  const headerLabels = ["Period", "Team", "Skill", "Asset subtype", "Priority", "Status", "Sample count", "Reliability", "P50 active hours", "P85 active hours", "Historical effort", "In Progress", "Assigned awaiting acceptance", "Review", "Blocked", "Delivered", "Leave context", "Legacy over capacity count", "Legacy deadline gap count"];
+  const dataRows = Array.from(cohortMap.values()).map(cohortRows => {
+    const first = cohortRows[0] || {};
+    const cohortFilters = {
+      ...activeFilters,
+      month: first.monthKey,
+      team: first.team,
+      assetSubtype: first.assetSubtype,
+      priority: first.priority
+    };
+    const summary = summarizeFlowMateProductionSamples(cohortRows);
+    const ops = summarizeFlowMateProductionOperations(operations, cohortFilters);
+    const legacy = summarizeFlowMateLegacyWarnings(warnings, cohortFilters);
+    return [getMarketingPlanMonthLabel(first.monthKey || activeFilters.month || ""), first.team || "", first.assetType || "", first.assetSubtype || "", first.priority || "", first.status || "", String(summary.sampleCount), summary.reliability, formatMarketingPlanSupervisorNumber(summary.p50), formatMarketingPlanSupervisorNumber(summary.p85), formatMarketingPlanSupervisorNumber(summary.historicalEffort), String(ops.inProgress), String(ops.assignedAwaitingAcceptance), String(ops.review), String(ops.blocked), String(ops.delivered || summary.sampleCount), `${ops.leave} leave / ${ops.partial} partial`, String(legacy.overCapacity), String(legacy.deadlineGap)];
+  });
+  const filenamePeriod = activeFilters.month ? getMarketingPlanMonthLabel(activeFilters.month).toLowerCase().replace(/\s+/g, "-") : "all-periods";
+  const filename = `flowmate-production-insights-${filenamePeriod}.csv`;
+  if (window.flowmateDownloadCsv) {
+    window.flowmateDownloadCsv(filename, headerLabels, dataRows);
+    return dataRows.length;
+  }
+  const csv = [headerLabels, ...dataRows].map(row => row.map(value => `"${String(value == null ? "" : value).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], {
+    type: "text/csv;charset=utf-8"
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  return dataRows.length;
+}
+async function loadMarketingPlanSupervisorRows(user, options = {}) {
   if (!user || user.role !== "admin") return {
     monthlyRows: [],
     picRows: [],
     campaignRows: [],
-    channelRows: []
+    channelRows: [],
+    productionInsights: {
+      status: "empty",
+      message: "Admin access required.",
+      samples: [],
+      operations: [],
+      warnings: []
+    }
   };
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready. Please refresh after the app loads.");
   }
-  const [monthlyResult, picResult, campaignResult, channelResult] = await Promise.all([window.flowmateSupabase.from("marketing_plan_supervisor_monthly_v").select("*").order("month_key", {
+  let productionSamplesQuery = window.flowmateSupabase.from("flowmate_production_samples_v").select("*").order("delivered_date", {
+    ascending: true
+  }).order("team", {
+    ascending: true
+  }).order("asset_subtype", {
+    ascending: true
+  });
+  if (options.productionStartDate) {
+    productionSamplesQuery = productionSamplesQuery.gte("delivered_date", options.productionStartDate);
+  }
+  if (options.productionEndDate) {
+    productionSamplesQuery = productionSamplesQuery.lte("delivered_date", options.productionEndDate);
+  }
+  const productionOperationsQuery = window.flowmateSupabase.from("flowmate_production_operations_v").select("*").order("team", {
+    ascending: true
+  }).order("asset_subtype", {
+    ascending: true
+  });
+  const productionWarningsQuery = window.flowmateSupabase.from("flowmate_legacy_capacity_warning_v").select("*").order("month_start", {
+    ascending: true
+  }).order("team", {
+    ascending: true
+  });
+  const [monthlyResult, picResult, campaignResult, channelResult, productionSamplesResult, productionOperationsResult, productionWarningsResult] = await Promise.all([window.flowmateSupabase.from("marketing_plan_supervisor_monthly_v").select("*").order("month_key", {
     ascending: true
   }).order("launch_date", {
     ascending: true
@@ -4105,15 +4367,53 @@ async function loadMarketingPlanSupervisorRows(user) {
     ascending: true
   }).order("channel", {
     ascending: true
-  })]);
+  }), (async () => {
+    try {
+      return await productionSamplesQuery;
+    } catch (error) {
+      return {
+        data: [],
+        error
+      };
+    }
+  })(), (async () => {
+    try {
+      return await productionOperationsQuery;
+    } catch (error) {
+      return {
+        data: [],
+        error
+      };
+    }
+  })(), (async () => {
+    try {
+      return await productionWarningsQuery;
+    } catch (error) {
+      return {
+        data: [],
+        error
+      };
+    }
+  })()]);
   for (const result of [monthlyResult, picResult, campaignResult, channelResult]) {
     if (result.error) throw result.error;
   }
+  const productionError = [productionSamplesResult, productionOperationsResult, productionWarningsResult].find(result => result && result.error)?.error;
+  const productionRows = {
+    samples: productionError ? [] : (productionSamplesResult.data || []).map(normalizeFlowMateProductionSampleRow),
+    operations: productionError ? [] : (productionOperationsResult.data || []).map(normalizeFlowMateProductionOperationRow),
+    warnings: productionError ? [] : (productionWarningsResult.data || []).map(normalizeFlowMateLegacyCapacityWarningRow)
+  };
   return {
     monthlyRows: (monthlyResult.data || []).map(normalizeMarketingPlanSupervisorRow),
     picRows: (picResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "pic")),
     campaignRows: (campaignResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "campaign")),
-    channelRows: (channelResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "channel"))
+    channelRows: (channelResult.data || []).map(row => normalizeMarketingPlanSupervisorSummaryRow(row, "channel")),
+    productionInsights: {
+      status: productionError ? "error" : productionRows.samples.length || productionRows.operations.length || productionRows.warnings.length ? "live" : "empty",
+      message: productionError ? productionError.message || "Production Insights could not load." : "Production Insights loaded.",
+      ...productionRows
+    }
   };
 }
 function getMarketingPlanSupervisorMonthOptions(monthlyRows) {
@@ -4212,7 +4512,7 @@ function getMarketingPlanSupervisorRiskClass(bucket) {
 }
 function exportMarketingPlanSupervisorCsv(rows, filters) {
   const visibleRows = filterMarketingPlanSupervisorRows(rows, filters);
-  const headerLabels = ["Month", "Campaign", "Product / Event", "Channel", "Launch Date", "Time", "PIC", "Effective Status", "Stored Status", "Assigned At", "Working Days Before Launch", "Risk Bucket", "Brief Link"];
+  const headerLabels = ["Month", "Campaign", "Product / Event", "Channel", "Launch Date / Deadline", "Time", "PIC", "Effective Status", "Stored Status", "Assigned At", "Working Days Before Launch Date / Deadline", "Risk Bucket", "Brief Link"];
   const dataRows = visibleRows.map(row => [getMarketingPlanMonthLabel(row.monthKey), row.campaignName, row.productEvent, getMarketingPlanChannelLabel(row.channel), row.launchDate, formatMarketingPlanTime(row.publishTime), row.picName, getMarketingPlanStatusLabel(row.effectiveStatus), getMarketingPlanStatusLabel(row.storedStatus), formatMarketingPlanSupervisorExportDateTime(row.firstAssignedAt), row.workingDaysBeforeLaunch == null ? "" : row.workingDaysBeforeLaunch, row.riskBucket, row.briefLink]);
   const filenameMonth = filters && filters.month ? getMarketingPlanMonthLabel(filters.month).toLowerCase().replace(/\s+/g, "-") : "all-months";
   const filename = `marketing-plan-supervisor-${filenameMonth}.csv`;
@@ -5753,9 +6053,12 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function toggleSheetChannel(channelKey) {
     setSheetForm(current => {
+      const nextChannels = getMarketingPlanExclusiveChannels(current.channels, channelKey);
+      const nextIsNoTag = isMarketingPlanNoTagSelection(nextChannels);
       return {
         ...current,
-        channels: getMarketingPlanExclusiveChannels(current.channels, channelKey)
+        channels: nextChannels,
+        publishTime: nextIsNoTag ? "" : current.publishTime
       };
     });
   }
@@ -5769,11 +6072,12 @@ function MarketingPlanWorkingSheetScreen() {
       return;
     }
     const selectedChannels = Array.isArray(row.channels) && row.channels.length ? row.channels : row.channel ? [row.channel] : ["facebook"];
+    const nextIsNoTag = isMarketingPlanNoTagSelection(selectedChannels);
     setEditingWorkingRow(row);
     setEditForm({
       contentTitle: row.contentTitle || "",
       publishDate: row.publishDate || flowMateTodayDateKey(),
-      publishTime: normalizeMarketingPlanPublishTimeOption(row.publishTime) || getMarketingPlanLegacyPublishTimeOption(row.publishTime),
+      publishTime: nextIsNoTag ? "" : normalizeMarketingPlanPublishTimeOption(row.publishTime) || getMarketingPlanLegacyPublishTimeOption(row.publishTime),
       assetType: row.format || "Banner",
       contentTier: row.contentTier || "B",
       subPicUserId: row.subPicUserId || "",
@@ -5792,9 +6096,12 @@ function MarketingPlanWorkingSheetScreen() {
   }
   function toggleEditChannel(channelKey) {
     setEditForm(current => {
+      const nextChannels = getMarketingPlanExclusiveChannels(current && current.channels, channelKey);
+      const nextIsNoTag = isMarketingPlanNoTagSelection(nextChannels);
       return {
         ...(current || {}),
-        channels: getMarketingPlanExclusiveChannels(current && current.channels, channelKey)
+        channels: nextChannels,
+        publishTime: nextIsNoTag ? "" : current.publishTime
       };
     });
   }
@@ -5812,7 +6119,7 @@ function MarketingPlanWorkingSheetScreen() {
       return;
     }
     if (!editForm.publishDate) {
-      setExportMessage("Launch Date is required.");
+      setExportMessage("Launch Date / Deadline is required.");
       return;
     }
     if (!editForm.channels || editForm.channels.length === 0) {
@@ -5888,7 +6195,7 @@ function MarketingPlanWorkingSheetScreen() {
   }
   async function handleSaveWorkingSheetRow(event) {
     event.preventDefault();
-    const required = [["campaignName", "Campaign is required."], ["productEvent", "Product / Event is required."], ["launchDate", "Launch Date is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
+    const required = [["campaignName", "Campaign is required."], ["productEvent", "Product / Event is required."], ["launchDate", "Launch Date / Deadline is required."], ["assetType", "Asset Type is required."], ["details", "Details are required."], ["contentTier", "Content Tier is required."]];
     const missing = required.find(([key]) => !String(sheetForm[key] || "").trim());
     if (missing) {
       setSaveState({
@@ -5904,8 +6211,9 @@ function MarketingPlanWorkingSheetScreen() {
       });
       return;
     }
-    const rawTime = String(sheetForm.publishTime || "").trim();
-    const normalizedTime = normalizeMarketingPlanPublishTimeOption(sheetForm.publishTime);
+    const sheetIsNoTag = isMarketingPlanNoTagSelection(sheetForm.channels);
+    const rawTime = sheetIsNoTag ? "" : String(sheetForm.publishTime || "").trim();
+    const normalizedTime = sheetIsNoTag ? "" : normalizeMarketingPlanPublishTimeOption(sheetForm.publishTime);
     if (rawTime && !normalizedTime) {
       setSaveState({
         status: "error",
@@ -5927,7 +6235,7 @@ function MarketingPlanWorkingSheetScreen() {
     try {
       const result = await createMarketingPlanWorkingSheetRow({
         ...sheetForm,
-        publishTime: normalizedTime
+        publishTime: sheetIsNoTag ? null : normalizedTime
       });
       setSaveState({
         status: "saved",
@@ -5990,9 +6298,10 @@ function MarketingPlanWorkingSheetScreen() {
     if (!canDuplicateMarketingWorkingRow(row, currentUser)) return;
     if (!duplicateActionGuardRef.current.activate(row.contentItemId)) return;
     const draft = getMarketingWorkingDuplicateDraft(row);
+    const nextIsNoTag = isMarketingPlanNoTagSelection(Array.isArray(row && row.channels) && row.channels.length ? row.channels : row && row.channel ? [row.channel] : []);
     setDuplicateSourceRow(row);
     setDuplicateLaunchDate(draft.launchDate);
-    setDuplicatePublishTime(draft.publishTime);
+    setDuplicatePublishTime(nextIsNoTag ? "" : draft.publishTime);
     setDuplicateSameDateConfirmed(false);
     setExportMessage("");
   }
@@ -6009,10 +6318,12 @@ function MarketingPlanWorkingSheetScreen() {
     const sourceRow = duplicateSourceRow;
     const sourceId = String(sourceRow && sourceRow.contentItemId || "");
     if (!sourceId || duplicateInFlightContentItemId) return;
-    const rawTime = String(duplicatePublishTime || "").trim();
-    const normalizedTime = normalizeMarketingPlanPublishTimeOption(rawTime);
+    const duplicateChannels = Array.isArray(sourceRow && sourceRow.channels) && sourceRow.channels.length ? sourceRow.channels : sourceRow && sourceRow.channel ? [sourceRow.channel] : [];
+    const nextIsNoTag = isMarketingPlanNoTagSelection(duplicateChannels);
+    const rawTime = nextIsNoTag ? "" : String(duplicatePublishTime || "").trim();
+    const normalizedTime = nextIsNoTag ? "" : normalizeMarketingPlanPublishTimeOption(rawTime);
     if (!duplicateLaunchDate) {
-      setExportMessage("Launch Date is required.");
+      setExportMessage("Launch Date / Deadline is required.");
       return;
     }
     if (rawTime && !normalizedTime) {
@@ -6027,7 +6338,7 @@ function MarketingPlanWorkingSheetScreen() {
         ownsDuplicateUi = true;
         setDuplicateInFlightContentItemId(sourceId);
         setExportMessage("");
-        return runMarketingWorkingRowDuplicate(sourceRow, duplicateLaunchDate, normalizedTime, {
+        return runMarketingWorkingRowDuplicate(sourceRow, duplicateLaunchDate, nextIsNoTag ? null : normalizedTime, {
           rpc: (name, params) => window.flowmateSupabase.rpc(name, params),
           refreshRows: () => loadWorkingSheetRows({
             alive: true
@@ -6050,6 +6361,10 @@ function MarketingPlanWorkingSheetScreen() {
   async function handleWorkingRowTimeChange(row, nextTime) {
     if (!canManageMarketingPlanSchedule(row)) {
       setExportMessage("Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.");
+      return;
+    }
+    if (isMarketingPlanNoTagSelection(row && row.channels)) {
+      setExportMessage("Time is not required for No Tag.");
       return;
     }
     const rawTime = String(nextTime || "").trim();
@@ -6123,9 +6438,12 @@ function MarketingPlanWorkingSheetScreen() {
     }
   }
   const editLegacyPublishTime = getMarketingPlanLegacyPublishTimeOption(editForm && editForm.publishTime);
+  const sheetIsNoTag = isMarketingPlanNoTagSelection(sheetForm.channels);
+  const editIsNoTag = editForm ? isMarketingPlanNoTagSelection(editForm.channels) : false;
+  const duplicateIsNoTag = isMarketingPlanNoTagSelection(duplicateSourceRow && duplicateSourceRow.channels);
   const duplicateLegacyPublishTime = getMarketingPlanLegacyPublishTimeOption(duplicatePublishTime);
-  const duplicateRawPublishTime = String(duplicatePublishTime || "").trim();
-  const duplicatePublishTimeIsValid = !duplicateRawPublishTime || Boolean(normalizeMarketingPlanPublishTimeOption(duplicateRawPublishTime));
+  const duplicateRawPublishTime = duplicateIsNoTag ? "" : String(duplicatePublishTime || "").trim();
+  const duplicatePublishTimeIsValid = duplicateIsNoTag || !duplicateRawPublishTime || Boolean(normalizeMarketingPlanPublishTimeOption(duplicateRawPublishTime));
   const duplicateUsesSameDate = Boolean(duplicateSourceRow && duplicateLaunchDate === duplicateSourceRow.publishDate);
   const duplicateIsInFlight = Boolean(duplicateSourceRow && duplicateInFlightContentItemId === duplicateSourceRow.contentItemId);
   const duplicateCanSubmit = Boolean(duplicateSourceRow && duplicateLaunchDate && duplicatePublishTimeIsValid && (!duplicateUsesSameDate || duplicateSameDateConfirmed) && !duplicateIsInFlight);
@@ -6196,7 +6514,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Launch Date *"), React.createElement("input", {
+  }, "Launch Date / Deadline *"), React.createElement("input", {
     className: "input",
     type: "date",
     value: sheetForm.launchDate,
@@ -6210,11 +6528,18 @@ function MarketingPlanWorkingSheetScreen() {
   }, "Time"), React.createElement("select", {
     className: "select",
     value: sheetForm.publishTime,
-    onChange: event => updateSheetForm("publishTime", event.target.value)
+    onChange: event => updateSheetForm("publishTime", event.target.value),
+    disabled: isMarketingPlanNoTagSelection(sheetForm.channels)
   }, MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
     key: option.value,
     value: option.value
-  }, option.label)))), React.createElement("label", {
+  }, option.label))), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginTop: 6
+    }
+  }, sheetIsNoTag ? "Not required for No Tag" : "")), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
@@ -6433,7 +6758,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "col-channel"
   }, "Channel"), React.createElement("th", {
     className: "col-date"
-  }, "Launch Date"), React.createElement("th", {
+  }, "Launch Date / Deadline"), React.createElement("th", {
     className: "col-time"
   }, "Time"), React.createElement("th", {
     className: "col-link"
@@ -6451,7 +6776,7 @@ function MarketingPlanWorkingSheetScreen() {
     const rowNeedsBriefLinkRepair = row.requiresBrief && rowHasLinkedCreativeRequest && !String(row.briefLink || "").trim();
     const canManageRow = canManageMarketingPlanWorkingRow(row);
     const canManageSchedule = canManageMarketingPlanSchedule(row);
-    const legacyPublishTime = getMarketingPlanLegacyPublishTimeOption(row.publishTime);
+    const inlineTimeUi = getMarketingPlanInlineTimeUi(row, canManageSchedule, updatingRowId);
     return React.createElement("tr", {
       key: row.contentItemId || `${row.campaignName}-${row.contentTitle}-${row.publishDate}`,
       "data-testid": "working-row",
@@ -6466,17 +6791,25 @@ function MarketingPlanWorkingSheetScreen() {
       title: getMarketingPlanChannelLabel(channel)
     }, getMarketingPlanChannelAbbrev(channel))))), React.createElement("td", null, formatMarketingPlanDate(row.publishDate)), React.createElement("td", null, React.createElement("select", {
       className: "select mono marketing-working-time-text",
-      value: normalizeMarketingPlanPublishTimeOption(row.publishTime) || legacyPublishTime,
-      disabled: !canManageSchedule || updatingRowId === row.contentItemId,
-      title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status.",
-      onChange: event => handleWorkingRowTimeChange(row, event.target.value)
-    }, legacyPublishTime && React.createElement("option", {
-      value: legacyPublishTime,
+      value: inlineTimeUi.value,
+      disabled: inlineTimeUi.disabled,
+      title: inlineTimeUi.title,
+      onChange: event => {
+        if (!inlineTimeUi.isNoTag) handleWorkingRowTimeChange(row, event.target.value);
+      }
+    }, inlineTimeUi.legacyPublishTime && React.createElement("option", {
+      value: inlineTimeUi.legacyPublishTime,
       disabled: true
-    }, legacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
+    }, inlineTimeUi.legacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
       key: option.value,
       value: option.value
-    }, option.label)))), React.createElement("td", null, row.briefLink ? React.createElement("a", {
+    }, option.label))), inlineTimeUi.isNoTag ? React.createElement("div", {
+      className: "muted",
+      style: {
+        fontSize: 11,
+        marginTop: 4
+      }
+    }, "Not required for No Tag") : null), React.createElement("td", null, row.briefLink ? React.createElement("a", {
       className: "marketing-working-link",
       href: row.briefLink,
       target: "_blank",
@@ -6572,7 +6905,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Launch Date *"), React.createElement("input", {
+  }, "Launch Date / Deadline *"), React.createElement("input", {
     className: "input",
     type: "date",
     value: duplicateLaunchDate,
@@ -6588,18 +6921,24 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field__label"
   }, "Publish Time"), React.createElement("select", {
     className: "select",
-    value: duplicatePublishTime,
-    disabled: duplicateIsInFlight,
+    value: duplicateIsNoTag ? "" : duplicatePublishTime,
+    disabled: duplicateIsInFlight || duplicateIsNoTag,
     onChange: event => setDuplicatePublishTime(event.target.value),
     "aria-invalid": !duplicatePublishTimeIsValid,
     "data-testid": "marketing-working-duplicate-time"
-  }, duplicateLegacyPublishTime && React.createElement("option", {
+  }, duplicateLegacyPublishTime && !duplicateIsNoTag && React.createElement("option", {
     value: duplicateLegacyPublishTime,
     disabled: true
   }, duplicateLegacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
     key: option.value,
     value: option.value
-  }, option.label))))), !duplicatePublishTimeIsValid && React.createElement("div", {
+  }, option.label))), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginTop: 6
+    }
+  }, duplicateIsNoTag ? "Not required for No Tag" : ""))), !duplicatePublishTimeIsValid && React.createElement("div", {
     className: "reason-box reason-box--need",
     role: "alert"
   }, "Select N/A or a whole-hour Publish Time before duplicating."), duplicateUsesSameDate && React.createElement("label", {
@@ -6610,7 +6949,7 @@ function MarketingPlanWorkingSheetScreen() {
     disabled: duplicateIsInFlight,
     onChange: event => setDuplicateSameDateConfirmed(event.target.checked),
     "data-testid": "marketing-working-duplicate-same-date"
-  }), React.createElement("span", null, "I confirm this duplicate should use the same Launch Date.")), React.createElement("div", {
+  }), React.createElement("span", null, "I confirm this duplicate should use the same Launch Date / Deadline.")), React.createElement("div", {
     className: "modal__actions"
   }, React.createElement("button", {
     type: "button",
@@ -6661,7 +7000,7 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
-  }, "Launch Date *"), React.createElement("input", {
+  }, "Launch Date / Deadline *"), React.createElement("input", {
     className: "input",
     type: "date",
     value: editForm.publishDate,
@@ -6674,15 +7013,22 @@ function MarketingPlanWorkingSheetScreen() {
     className: "field__label"
   }, "Time"), React.createElement("select", {
     className: "select",
-    value: editForm.publishTime,
-    onChange: event => updateEditForm("publishTime", event.target.value)
-  }, editLegacyPublishTime && React.createElement("option", {
+    value: editIsNoTag ? "" : editForm.publishTime,
+    onChange: event => updateEditForm("publishTime", event.target.value),
+    disabled: isMarketingPlanNoTagSelection(editForm.channels)
+  }, editLegacyPublishTime && !editIsNoTag && React.createElement("option", {
     value: editLegacyPublishTime,
     disabled: true
   }, editLegacyPublishTime), MARKETING_PLAN_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
     key: option.value,
     value: option.value
-  }, option.label)))), React.createElement("label", {
+  }, option.label))), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginTop: 6
+    }
+  }, editIsNoTag ? "Not required for No Tag" : "")), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
@@ -6780,11 +7126,25 @@ function MarketingPlanSupervisorScreen({
   const [picRows, setPicRows] = useStateApp([]);
   const [campaignRows, setCampaignRows] = useStateApp([]);
   const [channelRows, setChannelRows] = useStateApp([]);
+  const [productionInsights, setProductionInsights] = useStateApp({
+    status: "loading",
+    message: "Loading Production Insights...",
+    samples: [],
+    operations: [],
+    warnings: []
+  });
   const [selectedMonth, setSelectedMonth] = useStateApp("");
   const [selectedCampaign, setSelectedCampaign] = useStateApp("");
   const [selectedChannel, setSelectedChannel] = useStateApp("");
   const [selectedPic, setSelectedPic] = useStateApp("");
-  const [activeTab, setActiveTab] = useStateApp("monthly");
+  const [productionStartDate, setProductionStartDate] = useStateApp("");
+  const [productionEndDate, setProductionEndDate] = useStateApp("");
+  const [selectedProductionMonth, setSelectedProductionMonth] = useStateApp("");
+  const [selectedProductionTeam, setSelectedProductionTeam] = useStateApp("");
+  const [selectedProductionAssetSubtype, setSelectedProductionAssetSubtype] = useStateApp("");
+  const [selectedProductionPriority, setSelectedProductionPriority] = useStateApp("");
+  const [selectedProductionStatus, setSelectedProductionStatus] = useStateApp("");
+  const [activeTab, setActiveTab] = useStateApp("production");
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading supervisor report..."
@@ -6797,18 +7157,33 @@ function MarketingPlanSupervisorScreen({
       message: "Loading supervisor report..."
     });
     try {
-      const report = await loadMarketingPlanSupervisorRows(user);
+      const report = await loadMarketingPlanSupervisorRows(user, {
+        productionStartDate,
+        productionEndDate
+      });
       if (!isAlive()) return;
       const nextMonthlyRows = report.monthlyRows || [];
       const monthOptions = getMarketingPlanSupervisorMonthOptions(nextMonthlyRows);
+      const nextProductionInsights = report.productionInsights || {
+        status: "empty",
+        message: "No Production Insights data.",
+        samples: [],
+        operations: [],
+        warnings: []
+      };
       setMonthlyRows(nextMonthlyRows);
       setPicRows(report.picRows || []);
       setCampaignRows(report.campaignRows || []);
       setChannelRows(report.channelRows || []);
+      setProductionInsights(nextProductionInsights);
       setSelectedMonth(current => current && monthOptions.includes(current) ? current : getDefaultMarketingPlanSupervisorMonth(monthOptions));
+      setSelectedProductionMonth(current => {
+        const productionMonths = Array.from(new Set((nextProductionInsights.samples || []).map(row => row.monthKey).filter(Boolean))).sort();
+        return current && productionMonths.includes(current) ? current : productionMonths[productionMonths.length - 1] || "";
+      });
       setLoadState({
-        status: nextMonthlyRows.length ? "live" : "empty",
-        message: nextMonthlyRows.length ? "Live supervisor report" : "No supervisor data for this filter."
+        status: nextMonthlyRows.length || nextProductionInsights.samples.length || nextProductionInsights.operations.length || nextProductionInsights.warnings.length ? "live" : "empty",
+        message: nextMonthlyRows.length || nextProductionInsights.samples.length || nextProductionInsights.operations.length || nextProductionInsights.warnings.length ? "Live supervisor report" : "No supervisor data for this filter."
       });
     } catch (error) {
       if (!isAlive()) return;
@@ -6826,7 +7201,7 @@ function MarketingPlanSupervisorScreen({
     return () => {
       alive = false;
     };
-  }, [user && user.role]);
+  }, [user && user.role, productionStartDate, productionEndDate]);
   const monthOptions = getMarketingPlanSupervisorMonthOptions(monthlyRows);
   const filters = {
     month: selectedMonth,
@@ -6839,6 +7214,28 @@ function MarketingPlanSupervisorScreen({
   const filteredCampaignRows = filterMarketingPlanSupervisorSummaryRows(campaignRows, filters);
   const filteredChannelRows = filterMarketingPlanSupervisorSummaryRows(channelRows, filters);
   const summary = getMarketingPlanSupervisorSummary(filteredMonthlyRows);
+  const productionFilters = {
+    month: selectedProductionMonth,
+    team: selectedProductionTeam,
+    assetSubtype: selectedProductionAssetSubtype,
+    priority: selectedProductionPriority,
+    status: selectedProductionStatus
+  };
+  const filteredProductionSamples = filterFlowMateProductionSamples(productionInsights.samples || [], productionFilters);
+  const productionSampleSummary = summarizeFlowMateProductionSamples(filteredProductionSamples);
+  const productionOperationSummary = summarizeFlowMateProductionOperations(productionInsights.operations || [], productionFilters);
+  const productionWarningSummary = summarizeFlowMateLegacyWarnings(productionInsights.warnings || [], productionFilters);
+  const productionMonthTrend = summarizeFlowMateProductionMonthTrend(productionInsights.samples || [], {
+    team: selectedProductionTeam,
+    assetSubtype: selectedProductionAssetSubtype,
+    priority: selectedProductionPriority,
+    status: selectedProductionStatus
+  });
+  const productionMonthOptions = Array.from(new Set((productionInsights.samples || []).map(row => row.monthKey).filter(Boolean))).sort();
+  const productionTeamOptions = getMarketingPlanSupervisorFilterOptions(productionInsights.samples || [], "team", "team");
+  const productionAssetSubtypeOptions = getMarketingPlanSupervisorFilterOptions(productionInsights.samples || [], "assetSubtype", "assetSubtype");
+  const productionPriorityOptions = getMarketingPlanSupervisorFilterOptions(productionInsights.samples || [], "priority", "priority");
+  const productionStatusOptions = getFlowMateProductionStatusOptions(productionInsights.samples || [], productionInsights.operations || []);
   const campaignOptions = getMarketingPlanSupervisorFilterOptions(filterMarketingPlanSupervisorRows(monthlyRows, {
     month: selectedMonth,
     channel: selectedChannel,
@@ -6866,6 +7263,11 @@ function MarketingPlanSupervisorScreen({
     if (type === "pic") setSelectedPic(value);
   }
   function handleExportSupervisorCsv() {
+    if (activeTab === "production") {
+      const exportedCount = exportFlowMateProductionInsightsCsv(productionInsights.samples || [], productionInsights.operations || [], productionInsights.warnings || [], productionFilters);
+      setExportMessage(`Exported ${exportedCount} Production Insights rows.`);
+      return;
+    }
     const exportedCount = exportMarketingPlanSupervisorCsv(monthlyRows, filters);
     setExportMessage(`Exported ${exportedCount} supervisor rows.`);
   }
@@ -6894,6 +7296,29 @@ function MarketingPlanSupervisorScreen({
       }
     }, value)));
   }
+  function renderProductionMonthTrend() {
+    return React.createElement("div", {
+      className: "card",
+      style: {
+        marginBottom: 16
+      }
+    }, React.createElement("div", {
+      className: "card__head"
+    }, React.createElement("span", {
+      className: "card__title"
+    }, "Month trend")), React.createElement("div", {
+      className: "card__body",
+      style: {
+        overflowX: "auto"
+      }
+    }, React.createElement("table", {
+      className: "marketing-working-table"
+    }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Period"), React.createElement("th", null, "Sample count"), React.createElement("th", null, "P50 active hours"), React.createElement("th", null, "P85 active hours"), React.createElement("th", null, "Variance"), React.createElement("th", null, "Reliability"))), React.createElement("tbody", null, productionMonthTrend.map(row => React.createElement("tr", {
+      key: row.monthKey
+    }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.sampleCount), React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.p50)), React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.p85)), React.createElement("td", null, row.p85Variance == null ? "-" : formatMarketingPlanSupervisorNumber(row.p85Variance)), React.createElement("td", null, row.reliability))), productionMonthTrend.length === 0 && React.createElement("tr", null, React.createElement("td", {
+      colSpan: "6"
+    }, "No month trend data for this cohort."))))));
+  }
   function renderSummaryTable(rows, type) {
     return React.createElement("div", {
       className: "card"
@@ -6904,18 +7329,55 @@ function MarketingPlanSupervisorScreen({
       }
     }, React.createElement("table", {
       className: "marketing-working-table"
-    }, React.createElement("thead", null, React.createElement("tr", null, type === "pic" && React.createElement("th", null, "PIC"), type === "campaign" && React.createElement("th", null, "Campaign"), type === "campaign" && React.createElement("th", null, "Team"), type === "channel" && React.createElement("th", null, "Channel"), React.createElement("th", null, "Total Event"), React.createElement("th", null, "Assigned"), React.createElement("th", null, "Unassigned"), React.createElement("th", null, "Avg Working Days Before Launch"), type === "pic" && React.createElement("th", null, "Median Working Days Before Launch"), React.createElement("th", null, "Healthy"), React.createElement("th", null, "Watch"), React.createElement("th", null, "Risk"), React.createElement("th", null, "Critical"), React.createElement("th", null, "Missing Brief Link"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
+    }, React.createElement("thead", null, React.createElement("tr", null, type === "pic" && React.createElement("th", null, "PIC"), type === "campaign" && React.createElement("th", null, "Campaign"), type === "campaign" && React.createElement("th", null, "Team"), type === "channel" && React.createElement("th", null, "Channel"), React.createElement("th", null, "Total Event"), React.createElement("th", null, "Assigned"), React.createElement("th", null, "Unassigned"), React.createElement("th", null, "Avg Working Days Before Launch Date / Deadline"), type === "pic" && React.createElement("th", null, "Median Working Days Before Launch Date / Deadline"), React.createElement("th", null, "Healthy"), React.createElement("th", null, "Watch"), React.createElement("th", null, "Risk"), React.createElement("th", null, "Critical"), React.createElement("th", null, "Missing Brief Link"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
       key: `${type}-${row.monthKey}-${row.picUserId || row.campaignId || row.channel}`
     }, type === "pic" && React.createElement("td", null, row.picName), type === "campaign" && React.createElement("td", null, row.campaignName), type === "campaign" && React.createElement("td", null, row.campaignTeam || "-"), type === "channel" && React.createElement("td", null, getMarketingPlanChannelLabel(row.channel)), React.createElement("td", null, row.totalRows), React.createElement("td", null, row.assignedRows), React.createElement("td", null, row.unassignedRows), React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.avgWorkingDaysBeforeLaunch)), type === "pic" && React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.medianWorkingDaysBeforeLaunch)), React.createElement("td", null, row.healthyCount), React.createElement("td", null, row.watchCount), React.createElement("td", null, row.riskCount), React.createElement("td", null, row.criticalCount), React.createElement("td", null, row.missingBriefLinkCount))), rows.length === 0 && React.createElement("tr", null, React.createElement("td", {
       colSpan: type === "campaign" ? 13 : 12
     }, "No supervisor data for this filter."))))));
   }
+  function renderProductionInsightsTable() {
+    return React.createElement("div", null, productionInsights.status === "error" && React.createElement("div", {
+      className: "reason-box reason-box--need",
+      style: {
+        marginBottom: 16
+      }
+    }, React.createElement("div", {
+      className: "strong"
+    }, "Production Insights are stale."), React.createElement("div", {
+      style: {
+        marginTop: 4
+      }
+    }, productionInsights.message)), React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        gap: 12,
+        marginBottom: 16
+      }
+    }, renderSummaryMetric("Sample count", productionSampleSummary.sampleCount), renderSummaryMetric("Reliability", productionSampleSummary.reliability), renderSummaryMetric("P50 active production hours", formatMarketingPlanSupervisorNumber(productionSampleSummary.p50)), renderSummaryMetric("P85 active production hours", formatMarketingPlanSupervisorNumber(productionSampleSummary.p85)), renderSummaryMetric("Historical Effort", formatMarketingPlanSupervisorNumber(productionSampleSummary.historicalEffort)), renderSummaryMetric("In Progress", productionOperationSummary.inProgress), renderSummaryMetric("Assigned awaiting acceptance", productionOperationSummary.assignedAwaitingAcceptance), renderSummaryMetric("Review", productionOperationSummary.review), renderSummaryMetric("Blocked", productionOperationSummary.blocked), renderSummaryMetric("Delivered", productionOperationSummary.delivered || productionSampleSummary.sampleCount), renderSummaryMetric("Leave context", `${productionOperationSummary.leave} leave / ${productionOperationSummary.partial} partial`), renderSummaryMetric("Legacy warnings", productionWarningSummary.overCapacity + productionWarningSummary.deadlineGap)), renderProductionMonthTrend(), React.createElement("div", {
+      className: "card"
+    }, React.createElement("div", {
+      className: "card__body",
+      style: {
+        overflowX: "auto"
+      }
+    }, React.createElement("table", {
+      className: "marketing-working-table"
+    }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Period"), React.createElement("th", null, "Team"), React.createElement("th", null, "Skill"), React.createElement("th", null, "Asset subtype"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Status"), React.createElement("th", null, "Active production hours"), React.createElement("th", null, "Historical Effort"), React.createElement("th", null, "Delivered"))), React.createElement("tbody", null, filteredProductionSamples.map(row => React.createElement("tr", {
+      key: row.workItemId || row.displayId
+    }, React.createElement("td", null, getMarketingPlanMonthLabel(row.monthKey)), React.createElement("td", null, row.team), React.createElement("td", null, row.assetType || "-"), React.createElement("td", null, row.assetSubtype), React.createElement("td", null, row.priority || "-"), React.createElement("td", null, getMarketingPlanStatusLabel(row.status)), React.createElement("td", null, formatMarketingPlanSupervisorNumber(row.activeProductionHours)), React.createElement("td", null, row.effortPoint == null ? "-" : row.effortPoint), React.createElement("td", null, formatMarketingPlanDate(row.deliveredDate)))), filteredProductionSamples.length === 0 && React.createElement("tr", null, React.createElement("td", {
+      colSpan: "9"
+    }, productionInsights.status === "error" ? "Production Insights could not load." : "No Production Insights data for this filter.")))))));
+  }
   const tabOptions = [{
+    key: "production",
+    label: "Production Insights"
+  }, {
     key: "monthly",
     label: "Monthly Overview"
   }, {
     key: "pic",
-    label: "PIC Performance"
+    label: "PIC Overview"
   }, {
     key: "campaign",
     label: "Campaign Risk"
@@ -6996,10 +7458,93 @@ function MarketingPlanSupervisorScreen({
     type: "button",
     className: "btn btn--primary",
     onClick: handleExportSupervisorCsv,
-    disabled: filteredMonthlyRows.length === 0
+    disabled: activeTab === "production" ? filteredProductionSamples.length === 0 : filteredMonthlyRows.length === 0
   }, React.createElement(Icon, {
     name: "download"
-  }), " Export CSV")), exportMessage && React.createElement("div", {
+  }), " Export CSV")), activeTab === "production" && React.createElement("div", {
+    className: "row",
+    style: {
+      gap: 8,
+      flexWrap: "wrap",
+      marginTop: 10
+    }
+  }, React.createElement("input", {
+    type: "date",
+    className: "input",
+    style: {
+      width: 150
+    },
+    value: productionStartDate,
+    onChange: event => setProductionStartDate(event.target.value)
+  }), React.createElement("input", {
+    type: "date",
+    className: "input",
+    style: {
+      width: 150
+    },
+    value: productionEndDate,
+    onChange: event => setProductionEndDate(event.target.value)
+  }), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 150
+    },
+    value: selectedProductionMonth,
+    onChange: event => setSelectedProductionMonth(event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All periods"), productionMonthOptions.map(monthKey => React.createElement("option", {
+    key: monthKey,
+    value: monthKey
+  }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 150
+    },
+    value: selectedProductionTeam,
+    onChange: event => setSelectedProductionTeam(event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All teams"), productionTeamOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 170
+    },
+    value: selectedProductionAssetSubtype,
+    onChange: event => setSelectedProductionAssetSubtype(event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All skills"), productionAssetSubtypeOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 140
+    },
+    value: selectedProductionPriority,
+    onChange: event => setSelectedProductionPriority(event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All priority"), productionPriorityOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label))), React.createElement("select", {
+    className: "input",
+    style: {
+      width: 140
+    },
+    value: selectedProductionStatus,
+    onChange: event => setSelectedProductionStatus(event.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "All status"), productionStatusOptions.map(option => React.createElement("option", {
+    key: option.value,
+    value: option.value
+  }, option.label)))), exportMessage && React.createElement("div", {
     className: "muted",
     style: {
       marginTop: 8
@@ -7023,7 +7568,7 @@ function MarketingPlanSupervisorScreen({
       gap: 12,
       marginBottom: 16
     }
-  }, renderSummaryMetric("Total Event", summary.totalRows), renderSummaryMetric("Assigned", summary.assignedRows), renderSummaryMetric("Unassigned", summary.unassignedRows), renderSummaryMetric("Avg Working Days Before Launch", formatMarketingPlanSupervisorNumber(summary.avgWorkingDaysBeforeLaunch)), renderSummaryMetric("Risk", summary.riskRows), renderSummaryMetric("Critical", summary.criticalRows)), React.createElement("div", {
+  }, renderSummaryMetric("Total Event", summary.totalRows), renderSummaryMetric("Assigned", summary.assignedRows), renderSummaryMetric("Unassigned", summary.unassignedRows), renderSummaryMetric("Avg Working Days Before Launch Date / Deadline", formatMarketingPlanSupervisorNumber(summary.avgWorkingDaysBeforeLaunch)), renderSummaryMetric("Risk", summary.riskRows), renderSummaryMetric("Critical", summary.criticalRows)), React.createElement("div", {
     className: "row",
     style: {
       gap: 8,
@@ -7045,7 +7590,7 @@ function MarketingPlanSupervisorScreen({
     className: "badge badge--review"
   }, "Risk"), React.createElement("span", {
     className: "badge badge--overdue"
-  }, "Critical")), activeTab === "monthly" && React.createElement("div", {
+  }, "Critical")), activeTab === "production" && renderProductionInsightsTable(), activeTab === "monthly" && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__body",
@@ -7054,7 +7599,7 @@ function MarketingPlanSupervisorScreen({
     }
   }, React.createElement("table", {
     className: "marketing-working-table"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Campaign"), React.createElement("th", null, "Product / Event"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Launch Date"), React.createElement("th", null, "Time"), React.createElement("th", null, "PIC"), React.createElement("th", null, "Effective Status"), React.createElement("th", null, "Assigned At"), React.createElement("th", null, "Working Days Before Launch"), React.createElement("th", null, "Risk Bucket"), React.createElement("th", null, "Brief Link"))), React.createElement("tbody", null, filteredMonthlyRows.map(row => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Campaign"), React.createElement("th", null, "Product / Event"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Launch Date / Deadline"), React.createElement("th", null, "Time"), React.createElement("th", null, "PIC"), React.createElement("th", null, "Effective Status"), React.createElement("th", null, "Assigned At"), React.createElement("th", null, "Working Days Before Launch Date / Deadline"), React.createElement("th", null, "Risk Bucket"), React.createElement("th", null, "Brief Link"))), React.createElement("tbody", null, filteredMonthlyRows.map(row => React.createElement("tr", {
     key: `${row.contentItemId}-${row.placementId || row.channel}`
   }, React.createElement("td", null, row.campaignName), React.createElement("td", null, row.productEvent), React.createElement("td", null, getMarketingPlanChannelLabel(row.channel)), React.createElement("td", null, formatMarketingPlanDate(row.launchDate)), React.createElement("td", null, formatMarketingPlanTime(row.publishTime) || "-"), React.createElement("td", null, row.picName), React.createElement("td", null, React.createElement("span", {
     className: `badge ${getMarketingPlanStatusClass(row.effectiveStatus)}`

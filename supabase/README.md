@@ -51,6 +51,11 @@ Local Vitest checks validate source and application contracts only. Before UAT o
 | `marketing_plan.sql` | Marketing Plan tables, RLS, channel normalization helper, timeline/summary views, and June 2026 sample seed helper |
 | `marketing_plan_status_update.sql` | One-time Marketing Plan patch for existing databases: allows Working Sheet status edits such as Assigned, Review, Ready to Post, and Schedule |
 | `marketing_plan_supervisor.sql` | Admin-only Marketing Plan Supervisor assignment timestamping, event log, working-day helper, monthly risk view, and summary views |
+| `flowmate_production_insights.sql` | Admin-only Supervisor Production Insights views for historical active production time, current operations context, and retired capacity-warning history |
+| `flowmate_production_insights_verify.sql` | Rollback-only Production Insights verifier for anon denial, non-admin empty reads, active-hour metrics, and retired warning fixtures |
+| `creative_request_date_led_preview.sql` | Read-only Creative Request T-5/T-1 to T-4/T-2 active-data preview with No Tag, skip, retained-history, and Thai calendar counts |
+| `creative_request_date_led_apply.sql` | Separately approved recoverable active Creative Request date-led backfill with guarded current-value checks |
+| `creative_request_date_led_verify.sql` | Post-apply invariant verifier plus a commented rollback block that requires separate rollback approval |
 | `marketing_plan_performance_phase2.sql` | Idempotent direct-link backfill, indexed Timeline/Supervisor joins, and three-month schedule indexes |
 | `marketing_plan_performance_phase2_verify.sql` | Read-only Phase 2 mismatch, security-invoker, index, row-count, and EXPLAIN verification |
 | `workflow_mvp_catalogs.sql` | Workflow Management MVP creative channel/format catalogs plus campaign function colours and archive/restore lifecycle |
@@ -100,14 +105,16 @@ Do not put the Supabase `service_role` key in frontend code or commit it to git.
    12. `supabase/marketing_plan.sql`
    13. `supabase/marketing_plan_status_update.sql`
    14. `supabase/marketing_plan_supervisor.sql`
-   15. `supabase/marketing_plan_performance_phase2.sql`
-   16. `supabase/marketing_plan_performance_phase2_verify.sql` (read-only)
-   17. `supabase/workflow_mvp_catalogs.sql`
-   18. `supabase/workflow_team_workspaces.sql`
-   19. `supabase/workflow_gdve_creative_visibility.sql`
-   20. `supabase/marketing_plan_sub_pic_restore.sql`
-   21. `supabase/workflow_esport_channel_multi_format.sql`
-   22. `supabase/workflow_management_mvp_verify.sql`
+   15. `supabase/flowmate_production_insights.sql`
+   16. `supabase/flowmate_production_insights_verify.sql` (rollback-only verifier; run last for this report slice)
+   17. `supabase/marketing_plan_performance_phase2.sql`
+   18. `supabase/marketing_plan_performance_phase2_verify.sql` (read-only)
+   19. `supabase/workflow_mvp_catalogs.sql`
+   20. `supabase/workflow_team_workspaces.sql`
+   21. `supabase/workflow_gdve_creative_visibility.sql`
+   22. `supabase/marketing_plan_sub_pic_restore.sql`
+   23. `supabase/workflow_esport_channel_multi_format.sql`
+   24. `supabase/workflow_management_mvp_verify.sql`
 
 ## Trello + Asana Hybrid Release Order (3 Aug 2026)
 
@@ -266,6 +273,60 @@ Working Sheet and exports, while the frontend excludes it from Campaign
 Timeline, FB eSport Timeline, Channel Plan, and Calendar. Do not re-run
 `rpc_assignment.sql` for this update.
 
+For the Creative Request date-led active-data backfill dated 2 Sep 2026, keep
+preview and apply as separate approval gates. Do not re-run
+`supabase/creative_request_milestone_backfill_t5_t1.sql`; it belongs to the
+earlier T-7/T-5 to T-5/T-1 migration.
+
+Preview approval:
+
+1. Run only `supabase/creative_request_date_led_preview.sql`.
+2. Record the `calendar_gate`, publishing candidate, No Tag candidate, active
+   skip, Delivered/Cancelled retained-history checksum, Effort, legacy
+   `over_capacity`, legacy `deadline_capacity_gap`, and Thai calendar counts.
+3. If `preview_gate` is `BLOCKED_CALENDAR_INCOMPLETE`, stop and complete the
+   Thai calendar data before any apply approval.
+
+Post-backfill canonical backend installation (separate approval):
+
+The date-led active-data Apply was completed on 3 Sep 2026 and its guarded
+backup, applied-row, retained-history, and mismatch checks passed. Do not rerun
+`supabase/creative_request_date_led_apply.sql`; a second execution could include
+new legacy rows that were not part of the reviewed 53-row snapshot.
+
+Before any mutation, run a mandatory read-only prerequisite preflight against
+the exact linked project and stop unless all checks pass:
+
+- `work_status.unassigned`, `assignment_result.unassigned`, and
+  `event_type.capacity_changed` exist from the committed Trello/Asana prepare
+  step.
+- `flowmate_capacity_allocations.capacity_point` has the prepared positive-only
+  constraint.
+- Marketing Plan, workflow catalogs, FB eSport channel/format support, Thai
+  calendar coverage, assignment helpers, and required reporting dependencies
+  exist.
+- The date-led backup still reports 53 backup rows, 53 applied rows, zero
+  concurrent skips, and zero rollback-marked rows.
+
+After that preflight, run only these installers in order and stop immediately
+if any file reports an error:
+
+1. `supabase/workflow_no_tag_channel.sql`
+2. `supabase/rpc_assignment.sql`
+3. `supabase/creative_request_launch_milestones.sql`
+4. `supabase/trello_asana_hybrid_backend.sql`
+5. `supabase/marketing_plan.sql`
+6. `supabase/flowmate_production_insights.sql`
+7. `supabase/flowmate_production_insights_verify.sql`
+
+Finally, run the exact `supabase/creative_request_date_led_verify.sql` main
+verification plus the read-only post-backfill audit. Confirm zero legacy T-5,
+publishing, No Tag, stale-publishing, concurrent-skip, and rollback mismatches;
+also confirm retained Delivered/Cancelled, Effort, and legacy-warning checksums
+are unchanged. Stop on any mismatch, incomplete calendar, permission error, or
+failed Production Insights security/fixture check. The commented rollback block
+remains outside this order and still requires separate rollback approval.
+
 For the Pond manual-skill assignment hotfix on an existing database, run only:
 
 1. `supabase/rpc_assignment.sql`
@@ -398,6 +459,9 @@ select * from public.marketing_campaign_summary_v order by month_key, campaign_s
 select * from public.marketing_plan_timeline_v order by publish_date, publish_time nulls last;
 select * from public.marketing_plan_supervisor_monthly_v order by launch_date, publish_time nulls last;
 select * from public.marketing_plan_supervisor_pic_v order by month_key, critical_count desc, risk_count desc;
+select * from public.flowmate_production_samples_v order by delivered_date desc, display_id;
+select * from public.flowmate_production_operations_v order by team, asset_subtype, priority, status;
+select * from public.flowmate_legacy_capacity_warning_v order by month_start desc, team, warning_code;
 ```
 
 To load the optional June 2026 Marketing Plan sample after `marketing_plan.sql`, run this manually from Supabase SQL Editor:

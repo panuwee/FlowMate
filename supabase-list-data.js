@@ -290,6 +290,10 @@ async function loadFlowMateLatestAssignmentRuns(workItemIds = []) {
 }
 
 function parseFlowMateAssignmentWarnings(capacitySnapshot) {
+  const FLOWMATE_HIDDEN_OPERATIONAL_WARNING_CODES = new Set([
+    "over_capacity",
+    "deadline_capacity_gap",
+  ]);
   let snapshot = capacitySnapshot;
   if (typeof snapshot === "string") {
     try {
@@ -301,7 +305,7 @@ function parseFlowMateAssignmentWarnings(capacitySnapshot) {
   const rawWarnings = Array.isArray(snapshot)
     ? snapshot
     : (snapshot && Array.isArray(snapshot.warnings) ? snapshot.warnings : []);
-  return rawWarnings.flatMap((warning) => {
+  const normalizedWarnings = rawWarnings.flatMap((warning) => {
     if (typeof warning === "string") {
       const code = warning.trim().toLowerCase();
       return code ? [{ code, severity: "warning", message: code.replace(/_/g, " ") }] : [];
@@ -315,6 +319,9 @@ function parseFlowMateAssignmentWarnings(capacitySnapshot) {
       message: String(warning.message || code.replace(/_/g, " ")).trim(),
     }];
   });
+  return normalizedWarnings.filter(
+    (warning) => !FLOWMATE_HIDDEN_OPERATIONAL_WARNING_CODES.has(warning.code),
+  );
 }
 
 async function loadFlowMateAiTagRowsForList(workItemIds = []) {

@@ -45,6 +45,10 @@ security definer
 set search_path = public, pg_temp
 as $function$
 begin
+  if new.channel = 'no_tag' then
+    new.publish_time := null;
+  end if;
+
   if new.channel = 'no_tag' and exists (
     select 1
     from public.marketing_channel_placements sibling
@@ -75,7 +79,7 @@ drop trigger if exists marketing_channel_placements_validate_channel_exclusivity
 on public.marketing_channel_placements;
 
 create trigger marketing_channel_placements_validate_channel_exclusivity
-before insert or update of content_item_id, channel
+before insert or update of content_item_id, channel, publish_time
 on public.marketing_channel_placements
 for each row execute function public.marketing_validate_channel_exclusivity_row();
 

@@ -4,6 +4,8 @@
 -- Marketing Plan is separate from FlowMate execution. Scheduling lives on
 -- marketing_channel_placements, not on FlowMate work_items.
 
+begin;
+
 create extension if not exists pgcrypto;
 
 -- ---------------------------------------------------------------------------
@@ -247,6 +249,10 @@ security definer
 set search_path = public, pg_temp
 as $$
 begin
+  if new.channel = 'no_tag' then
+    new.publish_time := null;
+  end if;
+
   if new.channel = 'no_tag' and exists (
     select 1
     from public.marketing_channel_placements sibling
@@ -300,7 +306,7 @@ for each row execute function public.marketing_normalize_channel_row();
 
 drop trigger if exists marketing_channel_placements_validate_channel_exclusivity on public.marketing_channel_placements;
 create trigger marketing_channel_placements_validate_channel_exclusivity
-before insert or update of content_item_id, channel on public.marketing_channel_placements
+before insert or update of content_item_id, channel, publish_time on public.marketing_channel_placements
 for each row execute function public.marketing_validate_channel_exclusivity_row();
 
 drop trigger if exists marketing_channel_placements_set_updated_at on public.marketing_channel_placements;
@@ -545,6 +551,8 @@ declare
   v_content public.marketing_content_items%rowtype;
   v_flowmate_display_id text;
   v_resolved_work_item_id uuid;
+  v_has_no_tag boolean := false;
+  v_effective_publish_time time;
 begin
   v_actor_id := auth.uid();
 
@@ -592,6 +600,19 @@ begin
     return jsonb_build_object('synced', false, 'reason', 'no linked FlowMate work item');
   end if;
 
+  select exists (
+    select 1
+    from public.marketing_channel_placements mcp
+    where mcp.content_item_id = v_content.id
+      and mcp.channel = 'no_tag'
+  )
+  into v_has_no_tag;
+
+  v_effective_publish_time := case
+    when v_has_no_tag then null
+    else p_publish_time
+  end;
+
   if not (
     public.is_admin_app_user(v_actor_id)
     or v_content.pic_user_id = v_actor_id
@@ -609,8 +630,20 @@ begin
 
   update public.work_items
      set launch_date = coalesce(p_launch_date, launch_date),
+         due_date = case
+           when work_type = 'creative_request' and p_launch_date is not null then
+             public.flowmate_subtract_th_business_days(p_launch_date, 4)
+           else due_date
+         end,
+         final_approved_due_date = case
+           when work_type = 'creative_request' and v_has_no_tag then
+             null
+           when work_type = 'creative_request' and p_launch_date is not null then
+             public.flowmate_subtract_th_business_days(p_launch_date, 2)
+           else final_approved_due_date
+         end,
          publish_date = coalesce(p_launch_date, publish_date),
-         publish_time = p_publish_time,
+         publish_time = v_effective_publish_time,
          updated_at = now()
    where id = v_resolved_work_item_id;
 
@@ -619,7 +652,7 @@ begin
     'content_item_id', v_content.id,
     'work_item_id', v_resolved_work_item_id,
     'launch_date', p_launch_date,
-    'publish_time', p_publish_time
+    'publish_time', v_effective_publish_time
   );
 end;
 $$;
@@ -644,6 +677,8 @@ declare
   v_content public.marketing_content_items%rowtype;
   v_placement_count integer := 0;
   v_work_item_count integer := 0;
+  v_has_no_tag boolean := false;
+  v_effective_publish_time time;
 begin
   v_actor_id := auth.uid();
 
@@ -680,6 +715,19 @@ begin
     raise exception 'Marketing Plan content item not found';
   end if;
 
+  select exists (
+    select 1
+    from public.marketing_channel_placements mcp
+    where mcp.content_item_id = v_content.id
+      and mcp.channel = 'no_tag'
+  )
+  into v_has_no_tag;
+
+  v_effective_publish_time := case
+    when v_has_no_tag then null
+    else p_publish_time
+  end;
+
   if not (
     v_actor.role = 'admin'
     or v_content.pic_user_id = v_actor_id
@@ -691,22 +739,25 @@ begin
   end if;
 
   update public.marketing_content_items
-  set source_start_time = p_publish_time
+  set source_start_time = v_effective_publish_time
   where id = v_content.id;
 
   update public.marketing_channel_placements
-  set publish_time = p_publish_time
+  set publish_time = case
+    when channel = 'no_tag' then null
+    else v_effective_publish_time
+  end
   where content_item_id = v_content.id;
   get diagnostics v_placement_count = row_count;
 
   update public.work_items
-  set publish_time = p_publish_time
+  set publish_time = v_effective_publish_time
   where id = v_content.flowmate_work_item_id;
   get diagnostics v_work_item_count = row_count;
 
   return jsonb_build_object(
     'content_item_id', v_content.id,
-    'publish_time', p_publish_time,
+    'publish_time', v_effective_publish_time,
     'placement_count', v_placement_count,
     'linked_work_item_updated', v_work_item_count = 1
   );
@@ -804,6 +855,7 @@ declare
   v_source_placement public.marketing_channel_placements%rowtype;
   v_new_content_item_id uuid;
   v_source_placement_count integer := 0;
+  v_effective_publish_time time := p_publish_time;
 begin
   v_actor_id := auth.uid();
 
@@ -888,11 +940,19 @@ begin
     order by source.id
     for update
   loop
+    if v_source_placement.channel = 'no_tag' then
+      v_effective_publish_time := null;
+    end if;
+
     insert into public.marketing_channel_placements (
       id, content_item_id, channel, publish_date, publish_time, placement_status, posted_url, note
     ) values (
       gen_random_uuid(), v_new_content_item_id, v_source_placement.channel, p_launch_date,
-      p_publish_time, 'planned', null, v_source_placement.note
+      case
+        when v_source_placement.channel = 'no_tag' then null
+        else p_publish_time
+      end,
+      'planned', null, v_source_placement.note
     );
     v_source_placement_count := v_source_placement_count + 1;
   end loop;
@@ -905,7 +965,7 @@ begin
   return jsonb_build_object(
     'content_item_id', v_new_content_item_id,
     'launch_date', p_launch_date,
-    'publish_time', p_publish_time
+    'publish_time', v_effective_publish_time
   );
 end;
 $$;
@@ -1029,3 +1089,5 @@ end;
 $$;
 
 revoke all on function public.marketing_plan_june_2026_sample() from public, anon, authenticated;
+
+commit;

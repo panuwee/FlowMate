@@ -104,18 +104,20 @@ function StatusBadge({ status }) {
 }
 
 const FLOWMATE_WARNING_LABEL = {
-  over_capacity: "Over capacity",
   wip_exceeded: "WIP exceeded",
   skill_mismatch: "Skill mismatch",
   backup_skill: "Backup skill",
   member_partial: "Partial availability",
   member_on_leave: "Member on leave",
-  deadline_capacity_gap: "Deadline capacity gap",
   review_buffer_risk: "Review buffer risk",
   review_delay: "Review delay",
   blocked: "Blocked",
   needs_split: "Needs split",
 };
+const FLOWMATE_HIDDEN_OPERATIONAL_WARNING_CODES = new Set([
+  "over_capacity",
+  "deadline_capacity_gap",
+]);
 
 function AssignmentWarningBadges({ work, limit = 3 }) {
   const warnings = window.getFlowMateAssignmentWarnings
@@ -124,8 +126,14 @@ function AssignmentWarningBadges({ work, limit = 3 }) {
   const categoryCodes = window.getFlowMateAttentionCategoryCodes
     ? window.getFlowMateAttentionCategoryCodes(work)
     : [];
-  const warningByCode = new Map(warnings.map((warning) => [warning.code, warning]));
-  const codes = categoryCodes.filter((code) => code !== "unassigned");
+  const warningByCode = new Map(
+    warnings
+      .filter((warning) => !FLOWMATE_HIDDEN_OPERATIONAL_WARNING_CODES.has(warning.code))
+      .map((warning) => [warning.code, warning]),
+  );
+  const codes = categoryCodes.filter(
+    (code) => code !== "unassigned" && !FLOWMATE_HIDDEN_OPERATIONAL_WARNING_CODES.has(code),
+  );
   const visibleCodes = codes.slice(0, limit);
   if (!visibleCodes.length) return null;
   return (

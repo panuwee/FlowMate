@@ -10,7 +10,17 @@ const quickTask = read("supabase/rpc_quick_task.sql");
 const collaboration = read("supabase/collaboration_admin.sql");
 const readme = read("supabase/README.md");
 const approvedBackend = read("supabase/trello_asana_hybrid_backend.sql");
+const approvedLaunch = read("supabase/creative_request_launch_milestones.sql");
 const teamSchedule = read("supabase/team_schedule_weekly_capacity.sql");
+
+function withoutTransactionEnvelope(sql: string): string {
+  return sql
+    .split("\n")
+    .filter((line) => !/^(?:begin|commit);$/i.test(line.trim()))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 function finalFunction(sql: string, name: string): string {
   const createMarker = `create or replace function public.${name}(`;
@@ -31,13 +41,36 @@ function functionHeader(sql: string, name: string): string {
 }
 
 describe("Trello + Asana hybrid canonical SQL", () => {
-  it("keeps the approved backend delta as the exact final canonical override", () => {
+  it("keeps the approved mirror on live state-count routing", () => {
+    const engine = finalFunction(assignment, "flowmate_run_assignment");
+
+    expect(engine).toContain("'routing_model', 'state_count_v1'");
+    expect(engine).toContain("candidate_state_version");
+    expect(engine).toContain("count(*) filter (where active_wi.status = 'in_progress')");
+    expect(engine).toContain("count(*) filter (where active_wi.status = 'assigned')");
+    expect(engine).toMatch(/public\.flowmate_is_th_business_day\([^)]*\)/);
+    expect(engine).not.toContain("'over_capacity'");
+    expect(engine).not.toContain("'deadline_capacity_gap'");
+  });
+
+  it("keeps the approved backend delta as the exact final canonical override inside the file transaction", () => {
     const marker = "-- FlowMate Trello + Asana hybrid: existing-database backend delta.";
     const canonicalTail = assignment.slice(assignment.lastIndexOf(marker)).trim();
 
     expect(assignment).toContain("FINAL CANONICAL OVERRIDE - Trello + Asana hybrid assignment contract");
-    expect(canonicalTail).toBe(approvedBackend.trim());
+    expect(withoutTransactionEnvelope(canonicalTail)).toBe(
+      withoutTransactionEnvelope(approvedBackend),
+    );
     expect(assignment).not.toMatch(/^\s*\\i\s+/m);
+  });
+
+  it("keeps the creative launch mirror identical to the approved automatic and manual blocks", () => {
+    expect(finalFunction(approvedLaunch, "flowmate_run_assignment")).toBe(
+      finalFunction(approvedBackend, "flowmate_run_assignment"),
+    );
+    expect(finalFunction(approvedLaunch, "flowmate_change_creative_assignee")).toBe(
+      finalFunction(approvedBackend, "flowmate_change_creative_assignee"),
+    );
   });
 
   it("uses a final assignment engine that never writes Queued and returns only the locked outcomes", () => {

@@ -231,17 +231,17 @@ function MyWorkScreen({
   const overdueIds = new Set(overdue.map(w => w.id));
   const blocked = mine.filter(w => w.status === "blocked" && !overdueIds.has(w.id));
   const blockedIds = new Set(blocked.map(w => w.id));
-  const capacityRisk = mine.filter(w => {
+  const scheduleRisk = mine.filter(w => {
     if (overdueIds.has(w.id) || blockedIds.has(w.id)) return false;
     const codes = new Set((window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : []).map(warning => warning.code));
-    return codes.has("over_capacity") || codes.has("deadline_capacity_gap") || codes.has("review_buffer_risk");
+    return codes.has("review_buffer_risk");
   });
-  const capacityRiskIds = new Set(capacityRisk.map(w => w.id));
-  const dueToday = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && w.dueDelta === 0);
+  const scheduleRiskIds = new Set(scheduleRisk.map(w => w.id));
+  const dueToday = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !scheduleRiskIds.has(w.id) && w.dueDelta === 0);
   const dueTodayIds = new Set(dueToday.map(w => w.id));
-  const dueSoon = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && !dueTodayIds.has(w.id) && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2);
+  const dueSoon = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !scheduleRiskIds.has(w.id) && !dueTodayIds.has(w.id) && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2);
   const dueSoonIds = new Set(dueSoon.map(w => w.id));
-  const riskGroupIds = new Set([...overdueIds, ...blockedIds, ...capacityRiskIds, ...dueTodayIds, ...dueSoonIds]);
+  const riskGroupIds = new Set([...overdueIds, ...blockedIds, ...scheduleRiskIds, ...dueTodayIds, ...dueSoonIds]);
   const inProgress = mine.filter(w => w.status === "in_progress" && !riskGroupIds.has(w.id));
   const assigned = mine.filter(w => w.status === "assigned" && !riskGroupIds.has(w.id));
   const review = mine.filter(w => w.status === "review" && !riskGroupIds.has(w.id));
@@ -295,9 +295,9 @@ function MyWorkScreen({
     className: "stat stat--info"
   }, React.createElement("div", {
     className: "stat__num"
-  }, capacityRisk.length), React.createElement("div", {
+  }, scheduleRisk.length), React.createElement("div", {
     className: "stat__lbl"
-  }, "Capacity / deadline risk")), React.createElement("div", {
+  }, "Schedule risk")), React.createElement("div", {
     className: "stat"
   }, React.createElement("div", {
     className: "stat__num"
@@ -354,8 +354,8 @@ function MyWorkScreen({
     onCreativeTransition: handleCreativeTransition,
     transitionPending: transitionPending
   }), React.createElement(MyWorkGroup, {
-    title: "Capacity / deadline risk",
-    items: capacityRisk,
+    title: "Schedule risk",
+    items: scheduleRisk,
     onOpen: onOpen,
     onQuickDone: handleQuickDone,
     onCreativeTransition: handleCreativeTransition,
@@ -438,7 +438,7 @@ function MyWorkGroup({
     className: "tbl"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
     className: "col-id"
-  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Checklist"), React.createElement("th", null, "Due"), React.createElement("th", {
+  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Checklist"), React.createElement("th", null, "Due"), React.createElement("th", {
     className: "col-right"
   }, "Action"))), React.createElement("tbody", null, items.map(w => React.createElement("tr", {
     key: w.id,
@@ -460,8 +460,6 @@ function MyWorkGroup({
     status: w.status
   })), React.createElement("td", null, React.createElement(PriorityBadge, {
     level: w.priority
-  })), React.createElement("td", null, React.createElement(Effort, {
-    value: w.effort
   })), React.createElement("td", null, React.createElement(Progress, w.checklist || {
     done: 0,
     total: 0
@@ -884,6 +882,10 @@ function normalizeFlowMateCreativeChannels(value) {
   }).filter(Boolean);
   return Array.from(new Set(normalizedLabels));
 }
+function isFlowMateNoTagDraft(draft) {
+  const channels = normalizeFlowMateCreativeChannels(draft && draft.platforms);
+  return channels.length === 1 && channels[0] === "No Tag";
+}
 function formatFlowMateCreativeChannels(value) {
   return normalizeFlowMateCreativeChannels(value).join(", ");
 }
@@ -935,8 +937,8 @@ const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
 const FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET = 4;
 const FLOWMATE_MIDDAY_CUTOFF_HOUR = 12;
 const FLOWMATE_PRODUCTION_CUTOFF_HOUR = 15;
-const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 5;
-const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 1;
+const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 4;
+const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 2;
 const FLOWMATE_TH_COMPLETE_CALENDAR_YEARS = new Set([2025, 2026, 2027]);
 const FLOWMATE_TH_HOLIDAY_DATES = new Set(["2025-01-01", "2025-02-12", "2025-04-07", "2025-04-14", "2025-04-15", "2025-05-01", "2025-05-05", "2025-05-12", "2025-06-02", "2025-06-03", "2025-07-10", "2025-07-28", "2025-08-11", "2025-08-12", "2025-10-13", "2025-10-23", "2025-12-05", "2025-12-10", "2025-12-31", "2026-01-01", "2026-01-02", "2026-03-03", "2026-04-06", "2026-04-13", "2026-04-14", "2026-04-15", "2026-05-01", "2026-05-04", "2026-06-01", "2026-06-03", "2026-07-28", "2026-07-29", "2026-08-12", "2026-10-13", "2026-10-23", "2026-12-07", "2026-12-10", "2026-12-31", "2027-01-01", "2027-02-22", "2027-04-06", "2027-04-13", "2027-04-14", "2027-04-15", "2027-05-03", "2027-05-04", "2027-05-20", "2027-06-03", "2027-07-19", "2027-07-28", "2027-08-12", "2027-10-13", "2027-10-25", "2027-12-06", "2027-12-10", "2027-12-31"]);
 const FLOWMATE_CREATIVE_UNIT_EFFORT = {
@@ -1099,12 +1101,6 @@ function getFlowMateCreativeTimePressure(draft) {
     requiresUrgent: effort > normalCapacity || dueDate > reviewTargetDate
   };
 }
-function getFlowMateAutoUrgentReason(timePressure) {
-  if (timePressure.isReviewBufferAtRisk && !timePressure.isInsufficient) {
-    return `Auto urgent: the earliest feasible Asset First Draft is ${timePressure.dueDate}, after the fixed Asset First Draft Due date before Launch ${timePressure.launchDate}.`;
-  }
-  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before Asset First Draft Due.`;
-}
 function normalizeFlowMateQuickDraft(draft) {
   const nextDraft = {
     ...getDefaultQuickDraft(),
@@ -1124,6 +1120,8 @@ function normalizeFlowMateCreativeDraft(draft) {
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const creativeType2 = String(nextDraft.assetSubtype2 || "").trim() ? getFlowMateCreativeTypeOption(nextDraft.assetSubtype2) : null;
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
+  const normalizedChannels = normalizeFlowMateCreativeChannels(nextDraft.platforms);
+  const nextIsNoTag = normalizedChannels.length === 1 && normalizedChannels[0] === "No Tag";
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   const assetCount2Number = Number(nextDraft.assetCount2);
@@ -1137,13 +1135,14 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetType2: creativeType2 ? creativeType2.assetType : "",
     assetSubtype2: creativeType2 ? creativeType2.key : "",
     assetCount2,
-    publishTime: normalizeWholeHourTime(nextDraft.publishTime) || getFlowMateLegacyPublishTimeOption(nextDraft.publishTime),
+    platforms: normalizedChannels.join(", "),
+    publishTime: nextIsNoTag ? "" : normalizeWholeHourTime(nextDraft.publishTime) || getFlowMateLegacyPublishTimeOption(nextDraft.publishTime),
     launchDate
   };
   return {
     ...normalizedDraft,
     dueDate: getFlowMateAutoCreativeDraftDate(normalizedDraft),
-    finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(launchDate)
+    finalApprovedDueDate: nextIsNoTag ? "" : getFlowMateFinalApprovedDateForLaunchDate(launchDate)
   };
 }
 function normalizeWholeHourTime(value) {
@@ -1266,9 +1265,9 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     requireField("requesterTeam", "Requester team is required.");
     requireField("projectName", "Project / campaign is required.");
     requireField("dueDate", "1st Review / Draft is required.");
-    requireField("launchDate", "Launch date is required.");
+    requireField("launchDate", "Launch Date / Deadline is required.");
     requireNotPast("dueDate", "1st Review / Draft cannot be before today.");
-    requireNotPast("launchDate", "Launch date cannot be before today.");
+    requireNotPast("launchDate", "Launch Date / Deadline cannot be before today.");
     return errors;
   }
   requireField("campaignName", "Campaign is required.");
@@ -1291,7 +1290,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireHttpUrl("briefLink", FLOWMATE_INVALID_BRIEF_LINK_MESSAGE);
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
-  requireField("launchDate", "Launch date is required.");
+  requireField("launchDate", "Launch Date / Deadline is required.");
   const launchCalendarYear = Number(String(row.launchDate || "").slice(0, 4));
   if (Number.isInteger(launchCalendarYear) && !FLOWMATE_TH_COMPLETE_CALENDAR_YEARS.has(launchCalendarYear)) {
     errors.launchDate = `Thai holiday calendar for ${launchCalendarYear} is not available. Ask an administrator to review that year before creating this request.`;
@@ -1299,7 +1298,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   if (String(row.publishTime || "").trim() && !normalizeWholeHourTime(row.publishTime)) {
     errors.publishTime = "Publish Time must be N/A or a whole hour.";
   }
-  requireNotPast("launchDate", "Launch date cannot be before today.");
+  requireNotPast("launchDate", "Launch Date / Deadline cannot be before today.");
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
   }
@@ -1474,7 +1473,7 @@ function CreateScreen({
   async function handleSubmit() {
     if (isSubmitting) return;
     const activeDraft = mode === "quick" ? quickDraft : creativeDraft;
-    let submissionDraft = activeDraft;
+    const submissionDraft = activeDraft;
     const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);
     if (Object.keys(nextValidationErrors).length > 0) {
       const hasInvalidBriefLink = nextValidationErrors.briefLink === FLOWMATE_INVALID_BRIEF_LINK_MESSAGE;
@@ -1489,28 +1488,6 @@ function CreateScreen({
       setValidationErrors(nextValidationErrors);
       setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please correct the highlighted fields.");
       return;
-    }
-    const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
-    if (timePressure && timePressure.requiresUrgent && submissionDraft.priority !== "urgent") {
-      const autoUrgentReason = getFlowMateAutoUrgentReason(timePressure);
-      const confirmed = window.flowmatePrompt ? await window.flowmatePrompt({
-        title: "เวลาไม่เพียงพอ",
-        hideInput: true,
-        note: timePressure.isInsufficient ? `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before Asset First Draft Due. Priority will be set to Urgent.` : `The earliest feasible Asset First Draft is ${timePressure.dueDate}, after the fixed Asset First Draft Due date. Priority will be set to Urgent.`,
-        confirmText: "Set Urgent and submit"
-      }) : "";
-      if (confirmed === null) {
-        setCreateAlert("Submit cancelled. Please adjust Launch date, Asset Count, or Priority.");
-        return;
-      }
-      const urgentDraft = {
-        ...submissionDraft,
-        priority: "urgent",
-        urgentReason: submissionDraft.urgentReason || autoUrgentReason
-      };
-      submissionDraft = urgentDraft;
-      setCreativeDraft(urgentDraft);
-      saveFlowMateCreateDraft("creative", urgentDraft);
     }
     setValidationErrors({});
     setCreateAlert("");
@@ -1660,7 +1637,7 @@ function CreateScreen({
     className: "choice-card__sub"
   }, "Small internal task, follow-up, or reminder. Stays in your team's quick-task list."), React.createElement("ul", {
     className: "choice-card__list"
-  }, React.createElement("li", null, "No effort calculation, no auto-assignment"), React.createElement("li", null, "Self-assign or pick a teammate"), React.createElement("li", null, "Counted separately from creative capacity"))), !isTaskAssignProduct && React.createElement("button", {
+  }, React.createElement("li", null, "No brief or routing review required"), React.createElement("li", null, "Self-assign or pick a teammate"), React.createElement("li", null, "Tracked separately from creative requests"))), !isTaskAssignProduct && React.createElement("button", {
     className: `choice-card ${mode === "creative" ? "is-active" : ""}`,
     onClick: () => switchCreateMode("creative")
   }, React.createElement("div", {
@@ -1671,7 +1648,7 @@ function CreateScreen({
     className: "choice-card__sub"
   }, "Structured request for production creative - banner, video, motion, esport pack."), React.createElement("ul", {
     className: "choice-card__list"
-  }, React.createElement("li", null, "Brief validation, auto effort point, auto routing"), React.createElement("li", null, "Owner is decided by the engine - no preferred owner")))), React.createElement("div", {
+  }, React.createElement("li", null, "Brief validation and structured request details"), React.createElement("li", null, "Owner is confirmed after routing review")))), React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
@@ -1763,14 +1740,14 @@ function QuickTaskForm({
     value: value.title,
     readOnly: true,
     placeholder: "[3 Jul 2026][Function][Project Name]",
-    title: "Auto-filled from Launch Date, Requester Team / Function, and Project / campaign."
+    title: "Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign."
   }), React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12,
       marginTop: 6
     }
-  }, "Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.")), React.createElement("div", {
+  }, "Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign.")), React.createElement("div", {
     className: "field field--full"
   }, React.createElement("label", {
     className: "field__label"
@@ -1865,7 +1842,7 @@ function QuickTaskForm({
     className: `field ${errors.launchDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "Launch date ", React.createElement("span", {
+  }, "Launch Date / Deadline ", React.createElement("span", {
     className: "req"
   }, "*")), React.createElement("input", {
     className: "input",
@@ -1903,6 +1880,7 @@ function CreativeRequestForm({
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
   const [formatPrompt, setFormatPrompt] = useState("");
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
+  const isNoTag = isFlowMateNoTagDraft(value);
   const formatOptions = getFlowMateCreativeFormatOptions(selectedChannels);
   const selectedFormatKeys = getFlowMateSelectedCreativeFormatKeys(value);
   const invalidSelectedFormatKeys = selectedFormatKeys.filter(formatKey => !formatOptions.includes(formatKey));
@@ -1929,7 +1907,7 @@ function CreativeRequestForm({
     const applyCreativeMilestones = nextValue => ({
       ...nextValue,
       dueDate: getFlowMateAutoCreativeDraftDate(nextValue),
-      finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(nextValue.launchDate)
+      finalApprovedDueDate: isFlowMateNoTagDraft(nextValue) ? "" : getFlowMateFinalApprovedDateForLaunchDate(nextValue.launchDate)
     });
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
@@ -1977,9 +1955,12 @@ function CreativeRequestForm({
     const currentChannels = normalizeFlowMateCreativeChannels(value.platforms);
     const nextChannels = channelLabel === "No Tag" ? ["No Tag"] : currentChannels.filter(channel => channel !== "No Tag").includes(channelLabel) ? currentChannels.filter(channel => channel !== "No Tag" && channel !== channelLabel) : [...currentChannels.filter(channel => channel !== "No Tag"), channelLabel];
     const normalizedNextChannels = nextChannels.length ? nextChannels : [channelLabel];
+    const nextIsNoTag = normalizedNextChannels.length === 1 && normalizedNextChannels[0] === "No Tag";
     const nextValue = {
       ...value,
-      platforms: normalizedNextChannels.join(", ")
+      platforms: normalizedNextChannels.join(", "),
+      publishTime: nextIsNoTag ? "" : value.publishTime,
+      finalApprovedDueDate: nextIsNoTag ? "" : getFlowMateFinalApprovedDateForLaunchDate(value.launchDate)
     };
     const nextFormatKeys = getFlowMateCreativeFormatOptions(normalizedNextChannels);
     nextValue.sizeFormats = nextFormatKeys;
@@ -2010,14 +1991,14 @@ function CreativeRequestForm({
     value: value.title,
     readOnly: true,
     placeholder: "[3 Jul 2026][Function][Campaign][Product / Event]",
-    title: "Auto-filled from Launch Date, your account team, Campaign, and Product / Event."
+    title: "Auto-filled from Launch Date / Deadline, your account team, Campaign, and Product / Event."
   }), React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12,
       marginTop: 6
     }
-  }, "Auto-filled from Launch Date, your account team, Campaign, and Product / Event.")), React.createElement("div", {
+  }, "Auto-filled from Launch Date / Deadline, your account team, Campaign, and Product / Event.")), React.createElement("div", {
     className: `field ${errors.campaignName ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
@@ -2248,7 +2229,7 @@ function CreativeRequestForm({
       fontSize: 12,
       marginTop: 6
     }
-  }, "First Draft: T-5 Thai working days before Launch Date."), errors.dueDate && React.createElement("div", {
+  }, "First Draft: T-4 Thai working days before Launch Date / Deadline."), errors.dueDate && React.createElement("div", {
     className: "field__error"
   }, errors.dueDate)), React.createElement("div", {
     className: "field"
@@ -2257,9 +2238,9 @@ function CreativeRequestForm({
   }, "Asset Final/Approved Due"), React.createElement("input", {
     className: "input",
     type: "date",
-    value: value.finalApprovedDueDate || getFlowMateFinalApprovedDateForLaunchDate(value.launchDate),
+    value: isNoTag ? "" : value.finalApprovedDueDate || getFlowMateFinalApprovedDateForLaunchDate(value.launchDate),
     readOnly: true,
-    disabled: true,
+    disabled: isNoTag,
     min: todayDate
   }), React.createElement("div", {
     className: "muted",
@@ -2267,11 +2248,11 @@ function CreativeRequestForm({
       fontSize: 12,
       marginTop: 6
     }
-  }, "Final/Approved: T-1 Thai working day before Launch Date.")), React.createElement("div", {
+  }, isNoTag ? "Not required for No Tag" : "Final/Approved: T-2 Thai working days before Launch Date / Deadline.")), React.createElement("div", {
     className: `field ${errors.launchDate ? "field--error" : ""}`
   }, React.createElement("label", {
     className: "field__label"
-  }, "Launch date ", React.createElement("span", {
+  }, "Launch Date / Deadline ", React.createElement("span", {
     className: "req"
   }, "*")), React.createElement("input", {
     className: "input",
@@ -2287,21 +2268,28 @@ function CreativeRequestForm({
     className: "field__label"
   }, "Publish Time"), React.createElement("select", {
     className: "select",
-    value: value.publishTime,
-    onChange: e => update("publishTime", e.target.value)
-  }, legacyPublishTime && React.createElement("option", {
+    value: isNoTag ? "" : value.publishTime,
+    onChange: e => update("publishTime", e.target.value),
+    disabled: isNoTag
+  }, legacyPublishTime && !isNoTag && React.createElement("option", {
     value: legacyPublishTime,
     disabled: true
   }, legacyPublishTime), FLOWMATE_PUBLISH_TIME_OPTIONS.map(option => React.createElement("option", {
     key: option.value,
     value: option.value
-  }, option.label))), errors.publishTime && React.createElement("div", {
+  }, option.label))), React.createElement("div", {
+    className: "muted",
+    style: {
+      fontSize: 12,
+      marginTop: 6
+    }
+  }, isNoTag ? "Not required for No Tag" : ""), errors.publishTime && React.createElement("div", {
     className: "field__error"
   }, errors.publishTime)), React.createElement("div", {
     className: "field field--full"
   }, React.createElement("div", {
     className: "reason-box"
-  }, React.createElement("strong", null, "Note - fields not collected:"), " preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules."))));
+  }, React.createElement("strong", null, "Note - fields not collected:"), " preferred owner, manual effort, complexity. Assignment details are set after submission in the workflow."))));
 }
 function CreateResultScreen({
   result,
@@ -2350,17 +2338,14 @@ function CreateResultScreen({
     style: {
       fontSize: 12
     }
-  }, m ? `${m.discipline} - capacity ${m.capacityPerDay} pt/day` : "Owner selected by the assignment engine")), React.createElement("div", {
+  }, m?.discipline || "Assigned by FlowMate")), React.createElement("div", {
     className: "spacer"
-  }), React.createElement(Effort, {
-    value: result.effort,
-    lg: true
-  }), React.createElement("span", {
+  })), React.createElement("div", {
     className: "muted",
     style: {
       fontSize: 12
     }
-  }, "effort points")), result.reason && React.createElement("div", {
+  }, "Owner selected from Skill, active work, Assigned queue, and leave."), result.reason && React.createElement("div", {
     className: "reason-box"
   }, result.reason), React.createElement(AssignmentWarningBadges, {
     work: resultWarningWork,
@@ -2372,21 +2357,7 @@ function CreateResultScreen({
     }
   }, React.createElement("div", {
     className: "muted"
-  }, "Task created but needs manual assignment."), result.effort != null && React.createElement("div", {
-    className: "row",
-    style: {
-      gap: 6,
-      alignItems: "center"
-    }
-  }, React.createElement(Effort, {
-    value: result.effort,
-    lg: true
-  }), React.createElement("span", {
-    className: "muted",
-    style: {
-      fontSize: 12
-    }
-  }, "effort points")), result.reason && React.createElement("div", {
+  }, "Task created but needs manual assignment."), result.reason && React.createElement("div", {
     className: "reason-box reason-box--queued"
   }, result.reason), React.createElement("button", {
     type: "button",
@@ -3456,7 +3427,7 @@ function DetailScreen({
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"
-  }, "Launch date"), React.createElement("div", {
+  }, "Launch Date / Deadline"), React.createElement("div", {
     className: "meta-row__val"
   }, w.launchFullLabel || w.launchLabel || "-")), React.createElement("div", {
     className: "meta-row"
@@ -3740,21 +3711,6 @@ function DetailScreen({
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"
-  }, "Effort"), React.createElement("div", {
-    className: "meta-row__val"
-  }, React.createElement(Effort, {
-    value: w.effort,
-    lg: true
-  }), " ", React.createElement("span", {
-    className: "muted",
-    style: {
-      fontSize: 11,
-      marginLeft: 6
-    }
-  }, "~", w.effort, "h"))), React.createElement("div", {
-    className: "meta-row"
-  }, React.createElement("div", {
-    className: "meta-row__lbl"
   }, "Review round"), React.createElement("div", {
     className: "meta-row__val"
   }, w.reviewRound - 0, " ", React.createElement("span", {
@@ -3896,7 +3852,7 @@ function DetailScreen({
     className: "meta-row"
   }, React.createElement("div", {
     className: "meta-row__lbl"
-  }, "Launch date"), React.createElement("div", {
+  }, "Launch Date / Deadline"), React.createElement("div", {
     className: "meta-row__val"
   }, w.launchFullLabel || w.launchLabel || "-")), React.createElement("div", {
     className: "meta-row"

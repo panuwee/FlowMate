@@ -95,6 +95,221 @@ function flowMateWorkloadMonthOptionsC(rows) {
     label: flowMateMonthLabelC(key)
   }));
 }
+function flowMateDateKeyC(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  const key = `${match[1]}-${match[2]}-${match[3]}`;
+  const date = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) return "";
+  return key;
+}
+function flowMateBangkokDateKeyC(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(value);
+  const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+function flowMateDueDateSignalC(row, todayKey) {
+  const status = String(row?.status || "").toLowerCase();
+  if (["delivered", "done", "cancelled", "queued"].includes(status)) {
+    return {
+      dueSoon: false,
+      overdue: false
+    };
+  }
+  const dueKey = flowMateDateKeyC(row?.dueDate);
+  const normalizedTodayKey = flowMateDateKeyC(todayKey);
+  if (!dueKey || !normalizedTodayKey) return {
+    dueSoon: false,
+    overdue: false
+  };
+  const dayDelta = Math.round((Date.parse(`${dueKey}T00:00:00Z`) - Date.parse(`${normalizedTodayKey}T00:00:00Z`)) / 86400000);
+  return {
+    dueSoon: dayDelta >= 0 && dayDelta <= 2,
+    overdue: dayDelta < 0
+  };
+}
+function flowMateWorkloadStatusCountsC(items) {
+  return (items || []).reduce((counts, item) => {
+    const status = String(item?.status || "").toLowerCase();
+    if (status === "done") counts.delivered += 1;else if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+    return counts;
+  }, {
+    assigned: 0,
+    in_progress: 0,
+    review: 0,
+    blocked: 0,
+    delivered: 0
+  });
+}
+function buildFlowMateWorkloadMemberSummaryC(row, monthItems, monthRequestedItems, todayKey) {
+  const member = row?.m || {};
+  const items = monthItems || [];
+  const activeCreativeItems = items.filter(item => item?.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status)).map(item => {
+    const {
+      effort,
+      effortPoint,
+      effort_point,
+      assignedEffort,
+      effectiveCap,
+      capacityWindow,
+      available,
+      window,
+      wip,
+      ...operationalItem
+    } = item || {};
+    return operationalItem;
+  });
+  const dateSignals = items.map(item => flowMateDueDateSignalC(item, todayKey));
+  return {
+    m: {
+      id: member.id,
+      name: member.name,
+      discipline: member.discipline,
+      skills: member.skills || [],
+      availability: member.availability || "available",
+      leaveFractionToday: Number(member.leaveFractionToday || 0)
+    },
+    statusCounts: flowMateWorkloadStatusCountsC(items),
+    due_soon: dateSignals.filter(signal => signal.dueSoon).length,
+    overdue: dateSignals.filter(signal => signal.overdue).length,
+    blocked: items.filter(item => item?.status === "blocked").length,
+    review: items.filter(item => item?.status === "review").length,
+    quick: items.filter(item => item?.type === "quick" && !["delivered", "done", "cancelled"].includes(item.status)).length,
+    urgentAssigned: items.filter(item => item?.priority === "urgent").length,
+    urgentRequested: (monthRequestedItems || []).filter(item => item?.priority === "urgent").length,
+    items: activeCreativeItems
+  };
+}
+function buildFlowMateKpiTeamSummaryC(rows, todayKey) {
+  const totals = {
+    active: 0,
+    assigned: 0,
+    inProgress: 0,
+    review: 0,
+    blocked: 0,
+    dueSoon: 0,
+    overdue: 0,
+    delivered: 0,
+    cancelled: 0,
+    unassigned: 0
+  };
+  const teamMap = new Map();
+  (rows || []).forEach(row => {
+    const status = String(row?.status || "").toLowerCase();
+    const team = row?.requesterTeam || "No team";
+    const current = teamMap.get(team) || {
+      team,
+      total: 0,
+      assigned: 0,
+      inProgress: 0,
+      review: 0,
+      blocked: 0,
+      dueSoon: 0,
+      overdue: 0,
+      delivered: 0,
+      cancelled: 0,
+      unassigned: 0
+    };
+    current.total += 1;
+    const isDelivered = status === "delivered" || status === "done";
+    const isCancelled = status === "cancelled";
+    const isActive = !["delivered", "done", "cancelled", "queued"].includes(status);
+    const isUnassigned = status === "unassigned" || row?.assignmentResult === "unassigned";
+    if (isActive) totals.active += 1;
+    if (status === "assigned") {
+      totals.assigned += 1;
+      current.assigned += 1;
+    }
+    if (status === "in_progress") {
+      totals.inProgress += 1;
+      current.inProgress += 1;
+    }
+    if (status === "review") {
+      totals.review += 1;
+      current.review += 1;
+    }
+    if (status === "blocked") {
+      totals.blocked += 1;
+      current.blocked += 1;
+    }
+    if (isDelivered) {
+      totals.delivered += 1;
+      current.delivered += 1;
+    }
+    if (isCancelled) {
+      totals.cancelled += 1;
+      current.cancelled += 1;
+    }
+    if (isUnassigned) {
+      totals.unassigned += 1;
+      current.unassigned += 1;
+    }
+    const signal = flowMateDueDateSignalC(row, todayKey);
+    if (signal.dueSoon) {
+      totals.dueSoon += 1;
+      current.dueSoon += 1;
+    }
+    if (signal.overdue) {
+      totals.overdue += 1;
+      current.overdue += 1;
+    }
+    teamMap.set(team, current);
+  });
+  return {
+    totals,
+    teams: Array.from(teamMap.values()).sort((a, b) => a.team.localeCompare(b.team))
+  };
+}
+function buildFlowMateKpiExportC(summary, monthLabel) {
+  const totals = summary?.totals || {};
+  const teams = summary?.teams || [];
+  const summaryRows = [["Metric", "Value"], ["Export month", monthLabel], ["Active work", totals.active || 0], ["Assigned awaiting acceptance", totals.assigned || 0], ["In Progress", totals.inProgress || 0], ["Review", totals.review || 0], ["Blocked", totals.blocked || 0], ["Due soon", totals.dueSoon || 0], ["Overdue", totals.overdue || 0], ["Delivered", totals.delivered || 0], ["Cancelled", totals.cancelled || 0], ["Unassigned", totals.unassigned || 0]];
+  const teamStatusRows = [["Requester team", "All tasks", "Assigned awaiting acceptance", "In Progress", "Review", "Blocked", "Due soon", "Overdue", "Delivered", "Cancelled", "Unassigned"], ...teams.map(row => [row.team, row.total, row.assigned, row.inProgress, row.review, row.blocked, row.dueSoon, row.overdue, row.delivered, row.cancelled, row.unassigned])];
+  return {
+    summaryRows,
+    teamStatusRows,
+    csvColumns: [{
+      label: "Requester team",
+      value: "team"
+    }, {
+      label: "All tasks",
+      value: "total"
+    }, {
+      label: "Assigned awaiting acceptance",
+      value: "assigned"
+    }, {
+      label: "In Progress",
+      value: "inProgress"
+    }, {
+      label: "Review",
+      value: "review"
+    }, {
+      label: "Blocked",
+      value: "blocked"
+    }, {
+      label: "Due soon",
+      value: "dueSoon"
+    }, {
+      label: "Overdue",
+      value: "overdue"
+    }, {
+      label: "Delivered",
+      value: "delivered"
+    }, {
+      label: "Cancelled",
+      value: "cancelled"
+    }, {
+      label: "Unassigned",
+      value: "unassigned"
+    }],
+    csvRows: teams
+  };
+}
 const FLOWMATE_PLANNING_CHANNELS_C = ["Facebook", "Instagram", "TikTok", "YouTube", "Website", "In-game", "LINE", "Other"];
 function normalizeFlowMatePlanningChannelC(value) {
   const raw = String(value || "").trim();
@@ -338,15 +553,11 @@ function WorkloadScreen({
   onOpen
 }) {
   const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
-  const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
+  const FLOWMATE_ACTIVE_WORK_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
     const requestedItems = WORK.filter(w => w.requesterUserId && w.requesterUserId === (m.userId || m.id));
-    const openCreative = mine.filter(w => w.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(w.status));
-    const wip = mine.filter(w => w.status === "in_progress" && w.type === "creative").length;
-    const assignedEffort = openCreative.reduce((s, w) => s + (w.effort || 0), 0);
-    const effectiveCap = m.availability === "partial" ? m.capacityOverride || 0 : m.availability === "leave" ? 0 : m.capacityPerDay;
-    const capacityWindow = effectiveCap * 5;
+    const activeCreative = mine.filter(w => w.type === "creative" && FLOWMATE_ACTIVE_WORK_STATUS_KEYS.includes(w.status));
     return {
       m,
       statusCounts: window.getFlowMateWorkloadStatusCounts ? window.getFlowMateWorkloadStatusCounts(mine) : {
@@ -356,17 +567,12 @@ function WorkloadScreen({
         blocked: 0,
         delivered: 0
       },
-      assignedEffort,
-      effectiveCap,
-      window: capacityWindow,
-      available: Math.max(0, capacityWindow - assignedEffort),
-      wip,
       due_soon: mine.filter(w => w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 2 && ["assigned", "in_progress", "review"].includes(w.status)).length,
       overdue: mine.filter(w => w.overdue).length,
       blocked: mine.filter(w => w.status === "blocked").length,
       review: mine.filter(w => w.status === "review").length,
       quick: mine.filter(w => w.type === "quick" && !["delivered", "cancelled"].includes(w.status)).length,
-      items: openCreative,
+      items: activeCreative,
       allItems: mine,
       requestedItems
     };
@@ -424,8 +630,7 @@ function WorkloadScreen({
     m: {
       ...r.m,
       skills: r.m.skills || [],
-      availability: r.m.availability || "available",
-      wipLimit: r.m.wipLimit || 0
+      availability: r.m.availability || "available"
     },
     statusCounts: r.statusCounts || {
       assigned: 0,
@@ -444,6 +649,7 @@ function WorkloadScreen({
     label: flowMateMonthLabelC(workloadMonth)
   }];
   const selectedWorkloadMonth = effectiveWorkloadMonthOptions.some(option => option.key === workloadMonth) ? workloadMonth : effectiveWorkloadMonthOptions[0].key;
+  const workloadTodayKey = flowMateBangkokDateKeyC();
   const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth);
   const selectedMonthWorkloadItems = flowMateFilterRowsByMonthC(workloadItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]).filter(item => item.status !== "queued");
   const fallbackWorkloadUnassignedRows = selectedMonthWorkloadItems.filter(item => item.status === "unassigned" || item.assignmentResult === "unassigned");
@@ -452,27 +658,7 @@ function WorkloadScreen({
   const monthRows = safeRows.map(r => {
     const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthRequestedItems = flowMateFilterRowsByMonthC(r.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-    const monthOpenCreative = monthItems.filter(item => item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status));
-    const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
-    const capacityWindow = r.effectiveCap * selectedMonthWorkingDays;
-    const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
-    const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
-    return {
-      ...r,
-      statusCounts: window.getFlowMateWorkloadStatusCounts ? window.getFlowMateWorkloadStatusCounts(monthItems) : r.statusCounts,
-      assignedEffort,
-      window: capacityWindow,
-      available: Math.max(0, capacityWindow - assignedEffort),
-      due_soon: monthItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned", "in_progress", "review"].includes(item.status)).length,
-      overdue: monthItems.filter(item => item.overdue || item.dueDelta != null && item.dueDelta < 0).length,
-      blocked: monthItems.filter(item => item.status === "blocked").length,
-      review: monthItems.filter(item => item.status === "review").length,
-      quick: monthItems.filter(item => item.type === "quick" && !["delivered", "cancelled"].includes(item.status)).length,
-      urgentAssigned,
-      urgentRequested,
-      items: monthOpenCreative,
-      requestedItems: monthRequestedItems
-    };
+    return buildFlowMateWorkloadMemberSummaryC(r, monthItems, monthRequestedItems, workloadTodayKey);
   });
   const tabRows = monthRows.filter(r => {
     const isGdVe = window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(r.m) : false;
@@ -499,15 +685,12 @@ function WorkloadScreen({
     urgentRequested: 0
   });
   const totals = {
-    capacity: visibleRows.reduce((s, r) => s + r.window, 0),
-    assigned: visibleRows.reduce((s, r) => s + r.assignedEffort, 0),
     unassigned: workloadUnassignedRows.length,
     attention: workloadAttentionRows.length,
     overdue: visibleRows.reduce((s, r) => s + r.overdue, 0),
     urgentAssigned: visibleRows.reduce((s, r) => s + (r.urgentAssigned || 0), 0),
     urgentRequested: visibleRows.reduce((s, r) => s + (r.urgentRequested || 0), 0)
   };
-  totals.available = totals.capacity - totals.assigned;
   const [expanded, setExpanded] = useStateC(new Set());
   function toggle(id) {
     const next = new Set(expanded);
@@ -515,29 +698,10 @@ function WorkloadScreen({
     setExpanded(next);
   }
   function exportWorkloadRows() {
-    const exportRows = visibleRows.map(row => {
-      const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-      const monthRequestedItems = flowMateFilterRowsByMonthC(row.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-      const monthOpenCreative = monthItems.filter(item => item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status));
-      const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
-      const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
-      const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
-      return {
-        ...row,
-        exportMonthLabel: flowMateMonthLabelC(selectedWorkloadMonth),
-        statusCounts: window.getFlowMateWorkloadStatusCounts ? window.getFlowMateWorkloadStatusCounts(monthItems) : row.statusCounts,
-        assignedEffort,
-        available: Math.max(0, row.window - assignedEffort),
-        wip: monthItems.filter(item => item.status === "in_progress" && item.type === "creative").length,
-        due_soon: monthItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned", "in_progress", "review"].includes(item.status)).length,
-        overdue: monthItems.filter(item => item.overdue || item.dueDelta != null && item.dueDelta < 0).length,
-        blocked: monthItems.filter(item => item.status === "blocked").length,
-        review: monthItems.filter(item => item.status === "review").length,
-        quick: monthItems.filter(item => item.type === "quick" && !["delivered", "cancelled"].includes(item.status)).length,
-        urgentAssigned,
-        urgentRequested
-      };
-    });
+    const exportRows = visibleRows.map(row => ({
+      ...row,
+      exportMonthLabel: flowMateMonthLabelC(selectedWorkloadMonth)
+    }));
     exportFlowMateCsvC(`flowmate-workload-${selectedWorkloadMonth}-${new Date().toISOString().slice(0, 10)}.csv`, [{
       label: "Export month",
       value: "exportMonthLabel"
@@ -548,22 +712,13 @@ function WorkloadScreen({
       label: "Team",
       value: row => row.m.discipline
     }, {
-      label: "Capacity",
-      value: "window"
+      label: "Availability",
+      value: row => row.m.availability
     }, {
-      label: "Assigned effort",
-      value: "assignedEffort"
-    }, {
-      label: "Available",
-      value: "available"
-    }, {
-      label: "WIP",
-      value: "wip"
-    }, {
-      label: "Assigned",
+      label: "Assigned awaiting acceptance",
       value: row => row.statusCounts.assigned || 0
     }, {
-      label: "In progress",
+      label: "In Progress",
       value: row => row.statusCounts.in_progress || 0
     }, {
       label: "Review",
@@ -572,8 +727,14 @@ function WorkloadScreen({
       label: "Blocked",
       value: row => row.statusCounts.blocked || 0
     }, {
-      label: "Delivered",
-      value: row => row.statusCounts.delivered || 0
+      label: "Due soon",
+      value: "due_soon"
+    }, {
+      label: "Overdue",
+      value: "overdue"
+    }, {
+      label: "Quick tasks",
+      value: "quick"
     }, {
       label: "Urgent assigned",
       value: "urgentAssigned"
@@ -590,7 +751,7 @@ function WorkloadScreen({
     className: "page__title"
   }, "Workload"), React.createElement("div", {
     className: "page__sub"
-  }, "Per-member effort for ", flowMateMonthLabelC(selectedWorkloadMonth), " (", selectedMonthWorkingDays, " working days) - ", loadState.message)), React.createElement("div", {
+  }, "Per-member active work and date signals for ", flowMateMonthLabelC(selectedWorkloadMonth), " (", selectedMonthWorkingDays, " working days) - ", loadState.message)), React.createElement("div", {
     className: "page__actions"
   }, React.createElement("select", {
     className: "select",
@@ -641,13 +802,13 @@ function WorkloadScreen({
     className: "stat__num mono"
   }, statusTotals.assigned), React.createElement("div", {
     className: "stat__lbl"
-  }, "Assigned")), React.createElement("div", {
+  }, "Assigned awaiting acceptance")), React.createElement("div", {
     className: "stat stat--info"
   }, React.createElement("div", {
     className: "stat__num mono"
   }, statusTotals.in_progress), React.createElement("div", {
     className: "stat__lbl"
-  }, "In progress")), React.createElement("div", {
+  }, "In Progress")), React.createElement("div", {
     className: "stat"
   }, React.createElement("div", {
     className: "stat__num mono"
@@ -660,12 +821,18 @@ function WorkloadScreen({
   }, statusTotals.blocked), React.createElement("div", {
     className: "stat__lbl"
   }, "Blocked")), React.createElement("div", {
-    className: "stat stat--ok"
+    className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, statusTotals.delivered), React.createElement("div", {
+  }, visibleRows.reduce((s, r) => s + r.due_soon, 0)), React.createElement("div", {
     className: "stat__lbl"
-  }, "Delivered")), React.createElement("div", {
+  }, "Due soon")), React.createElement("div", {
+    className: "stat stat--accent"
+  }, React.createElement("div", {
+    className: "stat__num mono"
+  }, visibleRows.reduce((s, r) => s + r.overdue, 0)), React.createElement("div", {
+    className: "stat__lbl"
+  }, "Overdue")), React.createElement("div", {
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num mono"
@@ -693,7 +860,7 @@ function WorkloadScreen({
     className: "card card__body--flush"
   }, React.createElement("table", {
     className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), React.createElement("th", null, "Assigned"), React.createElement("th", null, "In Progress"), React.createElement("th", null, "Review"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "Delivered"), React.createElement("th", null, "Urgent assigned"), React.createElement("th", null, "Urgent requested"))), React.createElement("tbody", null, visibleRows.map(r => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), React.createElement("th", null, "Assigned awaiting acceptance"), React.createElement("th", null, "In Progress"), React.createElement("th", null, "Review"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "Due soon"), React.createElement("th", null, "Overdue"), React.createElement("th", null, "Urgent assigned"), React.createElement("th", null, "Urgent requested"))), React.createElement("tbody", null, visibleRows.map(r => React.createElement("tr", {
     key: r.m.id
   }, React.createElement("td", {
     className: "col-name"
@@ -720,7 +887,9 @@ function WorkloadScreen({
     className: "mono"
   }, r.statusCounts.blocked), React.createElement("td", {
     className: "mono"
-  }, r.statusCounts.delivered), React.createElement("td", {
+  }, r.due_soon), React.createElement("td", {
+    className: "mono"
+  }, r.overdue), React.createElement("td", {
     className: "mono"
   }, r.urgentAssigned), React.createElement("td", {
     className: "mono"
@@ -736,23 +905,23 @@ function WorkloadScreen({
     className: "stat"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, totals.capacity), React.createElement("div", {
+  }, visibleRows.reduce((s, r) => s + (r.statusCounts.assigned || 0), 0)), React.createElement("div", {
     className: "stat__lbl"
-  }, "Total capacity (pt)"), React.createElement("div", {
+  }, "Assigned awaiting acceptance"), React.createElement("div", {
     className: "stat__delta"
   }, "across ", visibleRows.length, " members - ", selectedMonthWorkingDays, " working days")), React.createElement("div", {
     className: "stat stat--info"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, totals.assigned), React.createElement("div", {
+  }, visibleRows.reduce((s, r) => s + (r.statusCounts.in_progress || 0), 0)), React.createElement("div", {
     className: "stat__lbl"
-  }, "Assigned effort")), React.createElement("div", {
+  }, "In Progress")), React.createElement("div", {
     className: "stat stat--ok"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, totals.available), React.createElement("div", {
+  }, visibleRows.reduce((s, r) => s + (r.statusCounts.review || 0), 0)), React.createElement("div", {
     className: "stat__lbl"
-  }, "Available")), React.createElement("div", {
+  }, "Review")), React.createElement("div", {
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num mono"
@@ -790,15 +959,7 @@ function WorkloadScreen({
     style: {
       width: 28
     }
-  }), React.createElement("th", null, "Member"), React.createElement("th", null, "Skills"), React.createElement("th", null, "Availability"), React.createElement("th", null, "Cap / day"), React.createElement("th", null, "Assigned effort"), React.createElement("th", {
-    style: {
-      width: 200
-    }
-  }, "Load (", selectedMonthWorkingDays, "wd)"), React.createElement("th", null, "WIP"), React.createElement("th", null, "Due soon"), React.createElement("th", null, "Overdue"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "Review"), React.createElement("th", null, "Quick"), React.createElement("th", null, "Urgent"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, visibleRows.map(r => {
-    const pct = r.window > 0 ? Math.min(100, r.assignedEffort / r.window * 100) : 0;
-    const over = r.assignedEffort > r.window;
-    const wipFull = r.wip >= r.m.wipLimit;
-    const partialNoOverride = r.m.availability === "partial" && !r.m.capacityOverride;
+  }), React.createElement("th", null, "Member"), React.createElement("th", null, "Skills"), React.createElement("th", null, "Availability"), React.createElement("th", null, "Assigned awaiting acceptance"), React.createElement("th", null, "In Progress"), React.createElement("th", null, "Due soon"), React.createElement("th", null, "Overdue"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "Review"), React.createElement("th", null, "Quick"), React.createElement("th", null, "Urgent"))), React.createElement("tbody", null, visibleRows.map(r => {
     const isOpen = expanded.has(r.m.id);
     return React.createElement(React.Fragment, {
       key: r.m.id
@@ -845,30 +1006,11 @@ function WorkloadScreen({
       className: `avail avail--${r.m.availability}`
     }, React.createElement("span", {
       className: "avail__dot"
-    }), r.m.availability === "available" && "Available", r.m.availability === "partial" && (r.m.capacityOverride ? `Partial - ${r.m.capacityOverride}/d` : "Partial - no override"), r.m.availability === "leave" && "On leave")), React.createElement("td", {
+    }), r.m.availability === "available" && "Available", r.m.availability === "partial" && "Partial leave", r.m.availability === "leave" && "On leave")), React.createElement("td", {
       className: "mono"
-    }, r.effectiveCap), React.createElement("td", {
+    }, r.statusCounts.assigned || 0), React.createElement("td", {
       className: "mono"
-    }, React.createElement("span", {
-      className: over ? "cell-bad" : ""
-    }, r.assignedEffort), " ", React.createElement("span", {
-      className: "muted"
-    }, "/ ", r.window)), React.createElement("td", null, React.createElement("div", {
-      className: "meter"
-    }, React.createElement("div", {
-      className: `meter__fill ${over ? "meter__fill--over" : pct > 80 ? "meter__fill--warn" : ""}`,
-      style: {
-        width: `${pct}%`
-      }
-    })), React.createElement("div", {
-      className: "mono muted",
-      style: {
-        fontSize: 11,
-        marginTop: 4
-      }
-    }, r.available, " pt available")), React.createElement("td", null, React.createElement("span", {
-      className: wipFull ? "cell-bad" : ""
-    }, r.wip, "/", r.m.wipLimit)), React.createElement("td", null, React.createElement("span", {
+    }, r.statusCounts.in_progress || 0), React.createElement("td", null, React.createElement("span", {
       className: r.due_soon > 0 ? "cell-warn" : "cell-grey"
     }, r.due_soon)), React.createElement("td", null, React.createElement("span", {
       className: r.overdue > 0 ? "cell-bad" : "cell-grey"
@@ -880,42 +1022,12 @@ function WorkloadScreen({
       className: "cell-grey"
     }, r.quick), React.createElement("td", null, React.createElement("span", {
       className: r.urgentAssigned > 0 ? "cell-warn" : "cell-grey"
-    }, r.urgentAssigned)), React.createElement("td", null, React.createElement("span", {
-      className: "row",
-      style: {
-        gap: 4,
-        flexWrap: "wrap"
-      }
-    }, over && React.createElement("span", {
-      className: "tag",
-      style: {
-        background: "var(--garena-red-light-2)",
-        color: "var(--garena-red)"
-      }
-    }, "Over cap"), wipFull && React.createElement("span", {
-      className: "tag",
-      style: {
-        background: "#FDEFE0",
-        color: "#8A4A12"
-      }
-    }, "WIP full"), partialNoOverride && React.createElement("span", {
-      className: "tag",
-      style: {
-        background: "#FDEFE0",
-        color: "#8A4A12"
-      }
-    }, "No override"), r.overdue > 0 && React.createElement("span", {
-      className: "tag",
-      style: {
-        background: "var(--garena-red-light-2)",
-        color: "var(--garena-red)"
-      }
-    }, "Overdue")))), isOpen && React.createElement("tr", {
+    }, r.urgentAssigned))), isOpen && React.createElement("tr", {
       style: {
         background: "#FCFCFC"
       }
     }, React.createElement("td", null), React.createElement("td", {
-      colSpan: "14",
+      colSpan: "12",
       style: {
         padding: "12px 14px"
       }
@@ -955,15 +1067,13 @@ function WorkloadScreen({
       status: w.status
     })), React.createElement("td", null, React.createElement(PriorityBadge, {
       level: w.priority
-    })), React.createElement("td", null, React.createElement(Effort, {
-      value: w.effort
     })), React.createElement("td", null, React.createElement(DueBadge, {
       delta: w.dueDelta,
       label: w.dueLabel,
       status: w.status
     })))))))));
   }), visibleRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "15",
+    colSpan: "12",
     className: "muted"
   }, "No GD/VE workload rows loaded.")))))), React.createElement(Source, null, loadState.status === "live" ? "Supabase member_workload_v" : "No local fallback data", " - ", flowMateMonthLabelC(selectedWorkloadMonth), " - ", TODAY));
 }
@@ -1174,7 +1284,7 @@ function PlanningChannelViewScreen({
     style: {
       marginTop: 12
     }
-  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - publish date with launch date fallback"));
+  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - publish date with Launch Date / Deadline fallback"));
 }
 function PlanningCampaignViewScreen({
   onOpen
@@ -1502,7 +1612,7 @@ function PlanningContentCalendarScreen({
     className: "page__title"
   }, "Content Calendar"), React.createElement("div", {
     className: "page__sub"
-  }, "Planning calendar by publish date, with launch date fallback - ", loadState.message)), React.createElement("div", {
+  }, "Planning calendar by publish date, with Launch Date / Deadline fallback - ", loadState.message)), React.createElement("div", {
     className: "page__actions"
   }, React.createElement("button", {
     className: "btn btn--secondary",
@@ -1592,7 +1702,7 @@ function PlanningContentCalendarScreen({
     style: {
       marginTop: 12
     }
-  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - publish date first, launch date fallback; Team Calendar still uses 1st Draft/due date"));
+  }, "No active Creative Requests match the selected filters."), React.createElement(Source, null, loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows", " - publish date first, Launch Date / Deadline fallback; Team Calendar still uses 1st Draft/due date"));
 }
 function flowMateKpiAiTagsC(row) {
   return Array.isArray(row && row.aiTags) ? row.aiTags : [];
@@ -1685,35 +1795,10 @@ function flowMateKpiGdVeAiSheets(rows) {
   });
   return Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([ownerName, memberRows]) => ({
     name: `AI - ${ownerName}`,
-    rows: [["Task ID", "Task name", "Status", "Assignee", "Requester", "Requester team", "Type", "Priority", "Effort", "1st Draft / Due", "Launch", "AI Tag", "Campaign / project", "Platform", "Size / format", "Brief link"], ...memberRows.slice().sort((a, b) => String(a.id || "").localeCompare(String(b.id || ""))).map(row => [row.id || "", row.title || "", row.status || "", ownerName, row.requester || "", row.requesterTeam || "", row.type || "", row.priority || "", row.effort || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || "", row.briefLink || ""])]
+    rows: [["Task ID", "Task name", "Status", "Assignee", "Requester", "Requester team", "Type", "Priority", "1st Draft / Due", "Launch Date / Deadline", "AI Tag", "Campaign / project", "Platform", "Size / format", "Brief link"], ...memberRows.slice().sort((a, b) => String(a.id || "").localeCompare(String(b.id || ""))).map(row => [row.id || "", row.title || "", row.status || "", ownerName, row.requester || "", row.requesterTeam || "", row.type || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || "", row.briefLink || ""])]
   }));
 }
 function KpiScreen() {
-  function Bar({
-    value,
-    max,
-    color = "var(--garena-deep-blue)"
-  }) {
-    const pct = max ? value / max * 100 : 0;
-    return React.createElement("span", {
-      style: {
-        display: "inline-block",
-        width: 100,
-        height: 8,
-        background: "var(--garena-light-grey)",
-        borderRadius: 4,
-        position: "relative",
-        overflow: "hidden",
-        verticalAlign: "middle"
-      }
-    }, React.createElement("span", {
-      style: {
-        position: "absolute",
-        inset: `0 ${100 - pct}% 0 0`,
-        background: color
-      }
-    }));
-  }
   const [rows, setRows] = useStateC([]);
   const [kpiExportMonth, setKpiExportMonth] = useStateC(flowMateDefaultExportMonthC());
   const [loadState, setLoadState] = useStateC({
@@ -1765,142 +1850,24 @@ function KpiScreen() {
   const effectiveKpiMonthOptions = flowMateMonthOptionsC();
   const selectedKpiExportMonth = kpiExportMonth;
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
-  const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
-  const cancelledRows = kpiRows.filter(w => w.status === "cancelled");
-  const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled", "queued"].includes(w.status));
-  const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
-  const blockedRows = activeRows.filter(w => w.status === "blocked");
-  const fallbackUnassignedRows = activeRows.filter(w => w.status === "unassigned" || w.assignmentResult === "unassigned");
-  const attentionRows = window.getFlowMateAttentionRows ? window.getFlowMateAttentionRows(activeRows) : fallbackUnassignedRows;
-  const unassignedRows = window.getFlowMateAttentionCategoryCodes ? attentionRows.filter(row => window.getFlowMateAttentionCategoryCodes(row).includes("unassigned")) : fallbackUnassignedRows;
-  const quickClosedRows = deliveredRows.filter(w => w.type === "quick");
-  const ownerMap = new Map();
-  deliveredRows.forEach(w => {
-    const id = w.assignee || "unassigned";
-    const owner = MEMBERS_BY_ID[id];
-    const current = ownerMap.get(id) || {
-      id,
-      name: owner?.name || w.assigneeOtherName || "Unassigned",
-      delivered: 0,
-      items: 0,
-      blocked: 0,
-      aiTagged: 0,
-      aiTaggedItems: [],
-      completionDaysTotal: 0,
-      completionDaysCount: 0,
-      completionItems: []
-    };
-    const completionDays = flowMateKpiCompletionDaysC(w);
-    current.delivered += w.effort || 0;
-    current.items += 1;
-    if (completionDays != null) {
-      current.completionDaysTotal += completionDays;
-      current.completionDaysCount += 1;
-      current.completionItems.push(w);
-    }
-    ownerMap.set(id, current);
-  });
-  blockedRows.forEach(w => {
-    const id = w.assignee || "unassigned";
-    const owner = MEMBERS_BY_ID[id];
-    const current = ownerMap.get(id) || {
-      id,
-      name: owner?.name || w.assigneeOtherName || "Unassigned",
-      delivered: 0,
-      items: 0,
-      blocked: 0,
-      aiTagged: 0,
-      aiTaggedItems: [],
-      completionDaysTotal: 0,
-      completionDaysCount: 0,
-      completionItems: []
-    };
-    current.blocked += 1;
-    ownerMap.set(id, current);
-  });
-  kpiRows.forEach(w => {
-    if (!flowMateKpiAiTagsC(w).length) return;
-    const id = w.assignee || "unassigned";
-    const owner = MEMBERS_BY_ID[id];
-    const current = ownerMap.get(id) || {
-      id,
-      name: owner?.name || w.assigneeOtherName || "Unassigned",
-      delivered: 0,
-      items: 0,
-      blocked: 0,
-      aiTagged: 0,
-      aiTaggedItems: [],
-      completionDaysTotal: 0,
-      completionDaysCount: 0,
-      completionItems: []
-    };
-    current.aiTagged += 1;
-    current.aiTaggedItems.push(w);
-    ownerMap.set(id, current);
-  });
-  const ownerRows = Array.from(ownerMap.values()).map(row => ({
-    ...row,
-    avgCompletionDays: row.completionDaysCount ? row.completionDaysTotal / row.completionDaysCount : null
-  })).sort((a, b) => b.delivered - a.delivered || a.name.localeCompare(b.name));
-  const maxOwnerDelivered = Math.max(1, ...ownerRows.map(row => row.delivered));
-  const completionDetailRows = deliveredRows.map(row => ({
-    ...row,
-    assignedAt: flowMateKpiAssignedAtC(row),
-    deliveredAt: flowMateKpiDeliveredAtC(row),
-    completionDays: flowMateKpiCompletionDaysC(row)
-  })).filter(row => row.completionDays != null);
-  const teamMap = new Map();
-  kpiRows.forEach(w => {
-    const team = w.requesterTeam || "No team";
-    teamMap.set(team, (teamMap.get(team) || 0) + 1);
-  });
-  const teamRows = Array.from(teamMap.entries()).map(([team, count]) => ({
-    team,
-    count,
-    share: kpiRows.length ? Math.round(count / kpiRows.length * 100) : 0
-  })).sort((a, b) => b.count - a.count || a.team.localeCompare(b.team));
-  const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
+  const kpiSummary = buildFlowMateKpiTeamSummaryC(kpiRows, flowMateBangkokDateKeyC());
+  const kpiTotals = kpiSummary.totals;
+  const teamRows = kpiSummary.teams;
   function exportKpiRows() {
     const filename = `flowmate-kpi-${selectedKpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    const allWorkRows = [["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"], ...kpiRows.map(row => [flowMateMonthLabelC(selectedKpiExportMonth), row.id || "", row.title || "", row.type || "", row.status || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.effort || "", row.priority || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)), flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)), flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)), flowMateKpiAiTagTextC(row), row.campaign || "", row.platform || "", row.size || ""])];
-    const perMemberRows = [["Member", "Delivered effort", "Delivered items", "Avg days to delivered", "Blocked", "AI Tagged", "AI tagged task IDs"], ...ownerRows.map(row => [row.name, row.delivered, row.items, flowMateKpiFormatDaysC(row.avgCompletionDays), row.blocked, row.aiTagged, (row.aiTaggedItems || []).map(item => item.id).join(", ")])];
-    const requesterTeamRows = [["Requester team", "Requests", "Share"], ...teamRows.map(row => [row.team, row.count, `${row.share}%`])];
-    const summaryRows = [["Metric", "Value"], ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)], ["Delivered effort", deliveredEffort], ["Delivered items", deliveredRows.length], ["Active work", activeRows.length], ["Blocked", blockedRows.length], ["Unassigned", unassignedRows.length], ["Attention / at risk", attentionRows.length], ["Cancelled", cancelledRows.length], ["Quick tasks closed", quickClosedRows.length], ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length], ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)]];
-    const completionRows = [["Task ID", "Task name", "Assignee", "Status", "Assigned At", "Delivered At", "Completion days", "Effort", "Campaign / project", "Type", "Priority"], ...completionDetailRows.map(row => [row.id || "", row.title || "", flowMateKpiOwnerNameC(row), row.status || "", flowMateKpiFormatDateTimeC(row.assignedAt), flowMateKpiFormatDateTimeC(row.deliveredAt), flowMateKpiFormatDaysC(row.completionDays), row.effort || "", row.campaign || "", row.type || "", row.priority || ""])];
-    const cancelledDetailRows = [["Task ID", "Task name", "Type", "Assignee", "Requester", "Requester team", "Campaign / project", "Priority", "Effort", "1st Draft / Due", "Launch", "Cancelled At", "Cancel reason"], ...cancelledRows.map(row => [row.id || "", row.title || "", row.type || "", flowMateKpiOwnerNameC(row), row.requester || "", row.requesterTeam || "", row.campaign || "", row.priority || "", row.effort || "", row.dueFullLabel || row.dueDate || "", row.launchFullLabel || row.launchDate || "", flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)), flowMateKpiCancelReasonC(row)])];
+    const exportData = buildFlowMateKpiExportC(kpiSummary, flowMateMonthLabelC(selectedKpiExportMonth));
     const sheets = [{
       name: "Summary",
-      rows: summaryRows
+      rows: exportData.summaryRows
     }, {
-      name: "All work",
-      rows: allWorkRows
-    }, {
-      name: "Per member",
-      rows: perMemberRows
-    }, {
-      name: "Completion detail",
-      rows: completionRows
-    }, {
-      name: "Cancelled detail",
-      rows: cancelledDetailRows
-    }, {
-      name: "Requester team",
-      rows: requesterTeamRows
-    }, ...flowMateKpiGdVeAiSheets(kpiRows)];
+      name: "Team status",
+      rows: exportData.teamStatusRows
+    }];
     if (window.flowmateDownloadWorkbook) {
       window.flowmateDownloadWorkbook(filename, sheets);
       return;
     }
-    exportFlowMateCsvC(filename.replace(/\.xlsx$/, ".csv"), [{
-      label: "ID",
-      value: "id"
-    }, {
-      label: "Title",
-      value: "title"
-    }, {
-      label: "AI Tag",
-      value: row => flowMateKpiAiTagTextC(row)
-    }], kpiRows);
+    exportFlowMateCsvC(filename.replace(/\.xlsx$/, ".csv"), exportData.csvColumns, exportData.csvRows);
   }
   return React.createElement("div", {
     className: "page"
@@ -1938,49 +1905,35 @@ function KpiScreen() {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
-  }, "Delivered effort"), React.createElement("div", {
-    className: "kpi__num mono"
-  }, deliveredEffort, React.createElement("span", {
-    style: {
-      fontSize: 14,
-      color: "var(--garena-grey)",
-      marginLeft: 4,
-      fontWeight: 400
-    }
-  }, "pt")), React.createElement("div", {
-    className: "kpi__delta"
-  }, deliveredRows.length, " delivered items")), React.createElement("div", {
-    className: "kpi"
-  }, React.createElement("div", {
-    className: "kpi__lbl"
-  }, "Throughput"), React.createElement("div", {
-    className: "kpi__num mono"
-  }, deliveredRows.length, React.createElement("span", {
-    style: {
-      fontSize: 14,
-      color: "var(--garena-grey)",
-      marginLeft: 4,
-      fontWeight: 400
-    }
-  }, "delivered")), React.createElement("div", {
-    className: "kpi__delta"
-  }, "Creative + quick tasks")), React.createElement("div", {
-    className: "kpi"
-  }, React.createElement("div", {
-    className: "kpi__lbl"
   }, "Active work"), React.createElement("div", {
     className: "kpi__num mono"
-  }, activeRows.length), React.createElement("div", {
+  }, kpiTotals.active), React.createElement("div", {
     className: "kpi__delta"
-  }, "Excludes delivered and cancelled")), React.createElement("div", {
+  }, "Current tasks in ", flowMateMonthLabelC(selectedKpiExportMonth))), React.createElement("div", {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
-  }, "Avg review rounds"), React.createElement("div", {
+  }, "Delivered"), React.createElement("div", {
     className: "kpi__num mono"
-  }, kpiRows.length ? (kpiRows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / kpiRows.length).toFixed(1) : "0.0"), React.createElement("div", {
+  }, kpiTotals.delivered), React.createElement("div", {
     className: "kpi__delta"
-  }, "Across ", flowMateMonthLabelC(selectedKpiExportMonth), " rows"))), React.createElement("div", {
+  }, "Completed tasks")), React.createElement("div", {
+    className: "kpi"
+  }, React.createElement("div", {
+    className: "kpi__lbl"
+  }, "Due soon"), React.createElement("div", {
+    className: "kpi__num mono"
+  }, kpiTotals.dueSoon), React.createElement("div", {
+    className: "kpi__delta"
+  }, "Due within two days")), React.createElement("div", {
+    className: "kpi"
+  }, React.createElement("div", {
+    className: "kpi__lbl"
+  }, "Overdue"), React.createElement("div", {
+    className: "kpi__num mono"
+  }, kpiTotals.overdue), React.createElement("div", {
+    className: "kpi__delta"
+  }, "Past the current deadline"))), React.createElement("div", {
     className: "kpi-grid",
     style: {
       gridTemplateColumns: "repeat(4, 1fr)"
@@ -1989,121 +1942,56 @@ function KpiScreen() {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
+  }, "Assigned awaiting acceptance"), React.createElement("div", {
+    className: "kpi__num mono"
+  }, kpiTotals.assigned), React.createElement("div", {
+    className: "kpi__delta"
+  }, "Assigned but not accepted")), React.createElement("div", {
+    className: "kpi"
+  }, React.createElement("div", {
+    className: "kpi__lbl"
+  }, "In Progress"), React.createElement("div", {
+    className: "kpi__num mono"
+  }, kpiTotals.inProgress), React.createElement("div", {
+    className: "kpi__delta"
+  }, "Work being produced")), React.createElement("div", {
+    className: "kpi"
+  }, React.createElement("div", {
+    className: "kpi__lbl"
+  }, "Review"), React.createElement("div", {
+    className: "kpi__num mono"
+  }, kpiTotals.review), React.createElement("div", {
+    className: "kpi__delta"
+  }, "Waiting for review")), React.createElement("div", {
+    className: "kpi"
+  }, React.createElement("div", {
+    className: "kpi__lbl"
   }, "Blocked"), React.createElement("div", {
     className: "kpi__num mono"
-  }, blockedRows.length), React.createElement("div", {
+  }, kpiTotals.blocked), React.createElement("div", {
     className: "kpi__delta"
-  }, "Active blocked work")), React.createElement("div", {
+  }, "Active blocked work"))), React.createElement("div", {
+    className: "kpi-grid",
+    style: {
+      gridTemplateColumns: "repeat(2, 1fr)"
+    }
+  }, React.createElement("div", {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
   }, "Unassigned"), React.createElement("div", {
     className: "kpi__num mono"
-  }, unassignedRows.length), React.createElement("div", {
+  }, kpiTotals.unassigned), React.createElement("div", {
     className: "kpi__delta"
   }, "Current work without an owner")), React.createElement("div", {
     className: "kpi"
   }, React.createElement("div", {
     className: "kpi__lbl"
-  }, "Attention / at risk"), React.createElement("div", {
-    className: "kpi__num mono"
-  }, attentionRows.length), React.createElement("div", {
-    className: "kpi__delta"
-  }, "Deduplicated current attention items")), React.createElement("div", {
-    className: "kpi"
-  }, React.createElement("div", {
-    className: "kpi__lbl"
   }, "Cancelled"), React.createElement("div", {
     className: "kpi__num mono"
-  }, cancelledRows.length), React.createElement("div", {
+  }, kpiTotals.cancelled), React.createElement("div", {
     className: "kpi__delta"
   }, "Cancelled work in selected month"))), React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "1.4fr 1fr",
-      gap: 16
-    }
-  }, React.createElement("div", {
-    className: "card"
-  }, React.createElement("div", {
-    className: "card__head"
-  }, React.createElement("span", {
-    className: "card__title"
-  }, "Per member"), React.createElement("span", {
-    className: "card__sub"
-  }, "delivered effort - delivered items - average delivery days")), React.createElement("div", {
-    className: "card__body",
-    style: {
-      padding: 0
-    }
-  }, React.createElement("table", {
-    className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), React.createElement("th", null, "Delivered effort"), React.createElement("th", null, "Distribution"), React.createElement("th", null, "Delivered items"), React.createElement("th", null, "Avg days to delivered"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "AI Tagged"))), React.createElement("tbody", null, ownerRows.map(r => React.createElement("tr", {
-    key: r.id
-  }, React.createElement("td", {
-    className: "col-name strong"
-  }, React.createElement("span", {
-    className: "row",
-    style: {
-      gap: 6
-    }
-  }, React.createElement(Avatar, {
-    memberId: r.id
-  }), " ", r.name)), React.createElement("td", {
-    className: "mono"
-  }, r.delivered, " pt"), React.createElement("td", null, React.createElement(Bar, {
-    value: r.delivered,
-    max: maxOwnerDelivered
-  })), React.createElement("td", {
-    className: "mono"
-  }, r.items), React.createElement("td", {
-    className: "mono"
-  }, flowMateKpiFormatDaysC(r.avgCompletionDays)), React.createElement("td", {
-    className: "mono"
-  }, r.blocked), React.createElement("td", {
-    className: "mono"
-  }, r.aiTagged))), ownerRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "7",
-    className: "muted"
-  }, "No delivered, blocked, or AI-tagged rows loaded.")))))), React.createElement("div", {
-    className: "card"
-  }, React.createElement("div", {
-    className: "card__head"
-  }, React.createElement("span", {
-    className: "card__title"
-  }, "By requester team"), React.createElement("span", {
-    className: "card__sub"
-  }, flowMateMonthLabelC(selectedKpiExportMonth), " rows")), React.createElement("div", {
-    className: "card__body",
-    style: {
-      padding: 0
-    }
-  }, React.createElement("table", {
-    className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Team"), React.createElement("th", null, "Requests"), React.createElement("th", null, "Share"))), React.createElement("tbody", null, teamRows.map(t => React.createElement("tr", {
-    key: t.team
-  }, React.createElement("td", {
-    className: "strong"
-  }, t.team), React.createElement("td", {
-    className: "mono"
-  }, t.count), React.createElement("td", null, React.createElement("div", {
-    className: "row",
-    style: {
-      gap: 8
-    }
-  }, React.createElement(Bar, {
-    value: t.share,
-    max: maxTeamShare,
-    color: "var(--garena-orange)"
-  }), React.createElement("span", {
-    className: "mono muted",
-    style: {
-      fontSize: 11
-    }
-  }, t.share, "%"))))), teamRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "3",
-    className: "muted"
-  }, "No live rows loaded."))))))), React.createElement("div", {
     className: "card",
     style: {
       marginTop: 16
@@ -2112,9 +2000,9 @@ function KpiScreen() {
     className: "card__head"
   }, React.createElement("span", {
     className: "card__title"
-  }, "Cancelled report"), React.createElement("span", {
+  }, "Team task status"), React.createElement("span", {
     className: "card__sub"
-  }, "cancelled task audit for ", flowMateMonthLabelC(selectedKpiExportMonth))), React.createElement("div", {
+  }, "state and date counts for ", flowMateMonthLabelC(selectedKpiExportMonth))), React.createElement("div", {
     className: "card__body",
     style: {
       padding: 0,
@@ -2122,23 +2010,34 @@ function KpiScreen() {
     }
   }, React.createElement("table", {
     className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Task ID"), React.createElement("th", null, "Task name"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "Requester"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Cancelled At"), React.createElement("th", null, "Cancel reason"))), React.createElement("tbody", null, cancelledRows.map(row => React.createElement("tr", {
-    key: row.id
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Requester team"), React.createElement("th", null, "All tasks"), React.createElement("th", null, "Assigned awaiting acceptance"), React.createElement("th", null, "In Progress"), React.createElement("th", null, "Review"), React.createElement("th", null, "Blocked"), React.createElement("th", null, "Due soon"), React.createElement("th", null, "Overdue"), React.createElement("th", null, "Delivered"), React.createElement("th", null, "Cancelled"), React.createElement("th", null, "Unassigned"))), React.createElement("tbody", null, teamRows.map(row => React.createElement("tr", {
+    key: row.team
   }, React.createElement("td", {
-    className: "mono strong"
-  }, row.id), React.createElement("td", null, row.title), React.createElement("td", null, flowMateKpiOwnerNameC(row)), React.createElement("td", null, row.requester || "-"), React.createElement("td", null, row.campaign || "-"), React.createElement("td", {
+    className: "strong"
+  }, row.team), React.createElement("td", {
     className: "mono"
-  }, flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)) || "-"), React.createElement("td", null, flowMateKpiCancelReasonC(row) || "-"))), cancelledRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
-    colSpan: "7",
+  }, row.total), React.createElement("td", {
+    className: "mono"
+  }, row.assigned), React.createElement("td", {
+    className: "mono"
+  }, row.inProgress), React.createElement("td", {
+    className: "mono"
+  }, row.review), React.createElement("td", {
+    className: "mono"
+  }, row.blocked), React.createElement("td", {
+    className: "mono"
+  }, row.dueSoon), React.createElement("td", {
+    className: "mono"
+  }, row.overdue), React.createElement("td", {
+    className: "mono"
+  }, row.delivered), React.createElement("td", {
+    className: "mono"
+  }, row.cancelled), React.createElement("td", {
+    className: "mono"
+  }, row.unassigned))), teamRows.length === 0 && React.createElement("tr", null, React.createElement("td", {
+    colSpan: "11",
     className: "muted"
-  }, "No cancelled rows in this month.")))))), React.createElement("div", {
-    style: {
-      marginTop: 16
-    },
-    className: "reason-box"
-  }, "Productivity index is calculated as ", React.createElement("span", {
-    className: "mono"
-  }, "delivered_effort x on_time_factor x rework_factor"), " and is intentionally ", React.createElement("strong", null, "not displayed as a personal ranking"), " in MVP - see PRD section 12."), React.createElement(Source, null, loadState.status === "live" ? "Supabase work_items table" : "No local fallback data", " - ", flowMateMonthLabelC(selectedKpiExportMonth), " - ", TODAY));
+  }, "No team task rows in this month.")))))), React.createElement(Source, null, loadState.status === "live" ? "Supabase work_items table" : "No local fallback data", " - ", flowMateMonthLabelC(selectedKpiExportMonth), " - ", TODAY));
 }
 function calendarUtcKeyC(date) {
   const y = date.getUTCFullYear();
@@ -2264,26 +2163,19 @@ function ganttSubtractWorkingDaysC(dateKey, workingDays) {
   }
   return calendarUtcKeyC(cursor);
 }
-function ganttSuggestedStartKeyC(row, allocationStartKey) {
+function ganttTaskStartKeyC(row) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return "";
   const actualStartKey = ganttDateKeyFromRowC(row, ["startedAt", "started_at"]);
   if (actualStartKey) return actualStartKey;
-  const persistedSuggestedStartKey = ganttDateKeyFromRowC(row, ["suggestedStartDate", "suggested_start_date"]);
-  if (persistedSuggestedStartKey) return persistedSuggestedStartKey;
-  if (allocationStartKey) return allocationStartKey;
-  const member = MEMBERS_BY_ID[row?.assignee];
-  const capacityPerDay = Math.max(1, Number(member?.capacityPerDay || 8));
-  const effort = Math.max(1, Number(row?.effort || 1));
-  const workingDays = Math.max(1, Math.ceil(effort / capacityPerDay));
-  return ganttSubtractWorkingDaysC(dueKey, workingDays - 1);
+  return dueKey;
 }
-function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
+function ganttTaskModelC(row, monthKey, ganttWindow) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return null;
   const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
   const finalApprovedKey = ganttDateKeyFromRowC(row, ["finalApprovedDueDate", "final_approved_due_date"]);
-  const rawStartKey = ganttSuggestedStartKeyC(row, allocationStartKey) || dueKey;
+  const rawStartKey = ganttTaskStartKeyC(row) || dueKey;
   const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
   const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
   if (rawEndKey < timeline.startKey || rawStartKey > timeline.endKey) return null;
@@ -2308,7 +2200,7 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
     launchOffset,
     finalApprovedOffset,
     spansToLaunch: Boolean(launchKey && launchKey > dueKey),
-    isSuggestedStart: !ganttDateKeyFromRowC(row, ["startedAt", "started_at"]),
+    isActualStart: Boolean(ganttDateKeyFromRowC(row, ["startedAt", "started_at"])),
     priorityClass: row.priority === "urgent" ? "is-urgent" : row.priority === "high" ? "is-high" : row.priority === "low" ? "is-low" : "is-normal",
     statusClass: row.status ? `is-status-${row.status}` : "is-status-unknown",
     displayLabel: row.type === "creative" ? "1st Draft" : "Due"
@@ -2442,78 +2334,6 @@ function teamScheduleMonthOptionsC(rows, currentMonthKey) {
   }
   return options.sort((a, b) => b.key.localeCompare(a.key));
 }
-function teamScheduleWeekStartC(dateKey) {
-  const date = calendarParseKeyC(dateKey);
-  const day = date.getUTCDay();
-  return calendarAddDaysC(dateKey, day === 0 ? -6 : 1 - day);
-}
-function teamScheduleWeeksC(ganttWindow) {
-  const weeks = [];
-  let weekStart = teamScheduleWeekStartC(ganttWindow.startKey);
-  while (weekStart <= ganttWindow.endKey) {
-    const weekEnd = calendarAddDaysC(weekStart, 6);
-    const visibleStart = weekStart < ganttWindow.startKey ? ganttWindow.startKey : weekStart;
-    const visibleEnd = weekEnd > ganttWindow.endKey ? ganttWindow.endKey : weekEnd;
-    weeks.push({
-      key: weekStart,
-      startKey: weekStart,
-      endKey: weekEnd,
-      visibleStart,
-      visibleEnd,
-      label: `${calendarParseKeyC(visibleStart).getUTCDate()}-${calendarParseKeyC(visibleEnd).getUTCDate()} ${ganttWindow.dayCells.find(cell => cell.dateKey === visibleEnd)?.monthLabel || ""}`
-    });
-    weekStart = calendarAddDaysC(weekStart, 7);
-  }
-  return weeks;
-}
-function teamScheduleLeaveUnitsC(leaves, assigneeId, dateKey) {
-  return (leaves || []).reduce((sum, leave) => {
-    if (leave.item?.assignee !== assigneeId || leave.leaveKey !== dateKey) return sum;
-    const units = Number(leave.item?.leaveUnits || 0);
-    return Math.min(1, sum + (units > 0 ? units : 1));
-  }, 0);
-}
-function teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows) {
-  const memberId = member?.id || "unassigned";
-  const dailyCapacity = member?.availability === "leave" ? 0 : member?.availability === "partial" ? Number(member?.capacityOverridePerDay || 0) : Number(member?.capacityPerDay || 8);
-  let available = 0;
-  let cursor = week.visibleStart;
-  while (cursor <= week.visibleEnd) {
-    const date = calendarParseKeyC(cursor);
-    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6 && !holidayKeys.has(cursor)) {
-      available += dailyCapacity * Math.max(0, 1 - teamScheduleLeaveUnitsC(leaves, memberId, cursor));
-    }
-    cursor = calendarAddDaysC(cursor, 1);
-  }
-  const sourceByWorkId = new Map((sourceRows || []).map(row => [row.workItemId, row]));
-  const entryMap = new Map();
-  (capacityRows || []).forEach(allocation => {
-    const dateKey = String(allocation?.bucketDate || "").slice(0, 10);
-    if (allocation?.assignee !== memberId || dateKey < week.visibleStart || dateKey > week.visibleEnd) return;
-    const item = sourceByWorkId.get(allocation.workItemId);
-    if (!item || !TEAM_SCHEDULE_CAPACITY_STATUSES_C.includes(item.status)) return;
-    const current = entryMap.get(item.id) || {
-      item,
-      point: 0
-    };
-    current.point = Number((current.point + Math.max(0, Number(allocation.capacityPoint || 0))).toFixed(2));
-    entryMap.set(item.id, current);
-  });
-  const entries = Array.from(entryMap.values()).sort((a, b) => b.point - a.point || a.item.id.localeCompare(b.item.id));
-  const used = Number(entries.reduce((sum, entry) => sum + entry.point, 0).toFixed(2));
-  const roundedAvailable = Number(available.toFixed(2));
-  const percent = roundedAvailable > 0 ? Math.round(used / roundedAvailable * 100) : used > 0 ? 999 : 0;
-  const stateClass = used > roundedAvailable ? "is-over" : percent >= 85 ? "is-near" : used > 0 ? "is-healthy" : "is-available";
-  return {
-    memberId,
-    week,
-    used,
-    available: roundedAvailable,
-    percent,
-    entries,
-    stateClass
-  };
-}
 function LegacyTeamGanttScreen({
   onOpen
 }) {
@@ -2527,7 +2347,7 @@ function LegacyTeamGanttScreen({
     status: "loading",
     message: "Loading capacity..."
   });
-  const [showCapacity, setShowCapacity] = useStateC(true);
+  const [showCapacity] = useStateC(false);
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
   useEffectC(() => {
     let alive = true;
@@ -2683,15 +2503,9 @@ function LegacyTeamGanttScreen({
     className: "page__title"
   }, "Team Gantt Chart"), React.createElement("div", {
     className: "page__sub"
-  }, "Work timeline and production capacity grouped by team and assignee - ", loadState.message, " - ", capacityLoadState.message)), React.createElement("div", {
+  }, "Work timeline grouped by team and assignee - ", loadState.message)), React.createElement("div", {
     className: "page__actions"
-  }, React.createElement("button", {
-    type: "button",
-    className: `btn btn--sm gantt__capacity-toggle ${showCapacity ? "is-active" : ""}`,
-    onClick: () => setShowCapacity(value => !value),
-    "aria-pressed": showCapacity,
-    "data-testid": "flowmate-gantt-capacity-toggle"
-  }, showCapacity ? "Hide workload" : "Show workload"), React.createElement("select", {
+  }, React.createElement("select", {
     className: "select",
     value: selectedGanttMonth,
     onChange: event => setMonthKey(event.target.value),
@@ -2717,22 +2531,16 @@ function LegacyTeamGanttScreen({
     className: "gantt__legend-dot gantt__legend-dot--urgent"
   }), "Urgent"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
-  }), "Launch"), React.createElement("span", null, React.createElement("i", {
+  }), "Launch Date / Deadline"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-leave"
   }), "Leave / partial leave"), React.createElement("span", null, React.createElement("i", {
-    className: "gantt__legend-capacity gantt__legend-capacity--available"
-  }), "Available"), React.createElement("span", null, React.createElement("i", {
-    className: "gantt__legend-capacity gantt__legend-capacity--used"
-  }), "Daily workload"), React.createElement("span", null, React.createElement("i", {
-    className: "gantt__legend-capacity gantt__legend-capacity--over"
-  }), "Over capacity (advisory)"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-line"
   }), "Today")), React.createElement("span", {
     className: "muted",
     style: {
       fontSize: 12
     }
-  }, "Daily workload is planned automatically. Over-capacity warnings are advisory; adjust priority or reassign when needed.")), React.createElement("div", {
+  }, "Use status, leave, and due dates to decide follow-up.")), React.createElement("div", {
     className: "stat-strip",
     style: {
       gridTemplateColumns: "repeat(4, 1fr)"
@@ -2759,9 +2567,9 @@ function LegacyTeamGanttScreen({
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, ganttCapacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0)), React.createElement("div", {
+  }, ganttTasks.filter(task => task.item.dueDelta != null && task.item.dueDelta >= 0 && task.item.dueDelta <= 2).length), React.createElement("div", {
     className: "stat__lbl"
-  }, "Planned pt"))), React.createElement("div", {
+  }, "Due soon"))), React.createElement("div", {
     className: "gantt",
     "data-testid": "flowmate-team-gantt-chart"
   }, React.createElement("div", {
@@ -2807,7 +2615,7 @@ function LegacyTeamGanttScreen({
     className: "gantt__team-title"
   }, React.createElement("span", null, team.teamName), React.createElement("span", {
     className: "tag"
-  }, team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0), " tasks - ", team.assignees.reduce((sum, assignee) => sum + assignee.capacityBuckets.reduce((bucketSum, bucket) => bucketSum + bucket.halves.am.point + bucket.halves.pm.point, 0), 0), " pt")), team.assignees.map(assignee => {
+  }, team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0), " tasks")), team.assignees.map(assignee => {
     const capacityByDate = new Map(assignee.capacityBuckets.map(bucket => [bucket.bucketDate, bucket]));
     const allocatedPoint = assignee.capacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0);
     return React.createElement("div", {
@@ -2822,7 +2630,7 @@ function LegacyTeamGanttScreen({
       className: "gantt__owner-name"
     }, assignee.assigneeName), React.createElement("span", {
       className: "muted"
-    }, assignee.member ? assignee.member.discipline : "Unassigned", showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt planned` : ""))), React.createElement("div", {
+    }, assignee.member ? assignee.member.discipline : "Unassigned"))), React.createElement("div", {
       className: "gantt__tracks",
       style: {
         "--gantt-days": ganttWindow.totalDays,
@@ -2917,7 +2725,7 @@ function LegacyTeamGanttScreen({
       className: "gantt__bar-date"
     }, task.displayLabel), task.launchKey && React.createElement("span", {
       className: "gantt__launch-marker",
-      title: `Launch: ${calendarDateLabelC(task.launchKey)}`,
+      title: `Launch Date / Deadline: ${calendarDateLabelC(task.launchKey)}`,
       "data-testid": "flowmate-gantt-launch-marker"
     }))))));
   }))), teamGroups.length === 0 && React.createElement("div", {
@@ -2927,7 +2735,7 @@ function LegacyTeamGanttScreen({
     style: {
       marginTop: 16
     }
-  }, "Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity."), React.createElement(Source, null, loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data", " - ", capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable", " - Team Gantt Chart - ", flowMateMonthLabelC(selectedGanttMonth), " plus next month"));
+  }, "Gantt rule: the task bar runs from 1st Draft to Launch Date / Deadline. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not appear in the active production timeline."), React.createElement(Source, null, loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data", " - Team Gantt Chart - ", flowMateMonthLabelC(selectedGanttMonth), " plus next month"));
 }
 function TeamGanttScreen({
   onOpen,
@@ -2936,26 +2744,14 @@ function TeamGanttScreen({
   const isTaskAssignProduct = product === "task-assign";
   const [sourceRows, setSourceRows] = useStateC([]);
   const [members, setMembers] = useStateC([]);
-  const [capacityRows, setCapacityRows] = useStateC([]);
-  const [holidays, setHolidays] = useStateC([]);
   const [loadState, setLoadState] = useStateC({
     status: "loading",
     message: "Loading Team Schedule..."
   });
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
-  const [viewMode, setViewMode] = useStateC(() => {
-    if (isTaskAssignProduct) return "timeline";
-    try {
-      return sessionStorage.getItem("flowmate:team-schedule:view") || "timeline";
-    } catch (error) {
-      return "timeline";
-    }
-  });
   const [assigneeFilter, setAssigneeFilter] = useStateC("all");
   const [statusFilter, setStatusFilter] = useStateC("all");
   const [skillFilter, setSkillFilter] = useStateC("all");
-  const [overOnly, setOverOnly] = useStateC(false);
-  const [selectedWorkload, setSelectedWorkload] = useStateC(null);
   useEffectC(() => {
     let alive = true;
     async function loadSchedule() {
@@ -2994,47 +2790,8 @@ function TeamGanttScreen({
   }, [isTaskAssignProduct]);
   const monthOptions = teamScheduleMonthOptionsC(sourceRows, monthKey);
   const ganttWindow = ganttTimelineWindowC(monthKey);
-  useEffectC(() => {
-    let alive = true;
-    async function loadCapacityAndHolidays() {
-      try {
-        if (isTaskAssignProduct) {
-          if (alive) {
-            setCapacityRows([]);
-            setHolidays([]);
-          }
-          return;
-        }
-        const [allocationRows, holidayRows] = await Promise.all([window.loadFlowMateCapacityAllocationRows ? window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey) : Promise.resolve([]), window.loadFlowMateNonWorkingDays ? window.loadFlowMateNonWorkingDays(ganttWindow.startKey, ganttWindow.endKey) : Promise.resolve([])]);
-        if (!alive) return;
-        setCapacityRows(allocationRows || []);
-        setHolidays(holidayRows || []);
-      } catch (error) {
-        if (!alive) return;
-        console.error("[FlowMate Team Schedule] capacity load failed:", error);
-        setCapacityRows([]);
-        setHolidays([]);
-      }
-    }
-    loadCapacityAndHolidays();
-    return () => {
-      alive = false;
-    };
-  }, [monthKey, isTaskAssignProduct]);
-  useEffectC(() => {
-    try {
-      sessionStorage.setItem("flowmate:team-schedule:view", viewMode);
-    } catch (error) {}
-  }, [viewMode]);
-  const todayKey = calendarUtcKeyC(new Date());
+  const todayKey = flowMateBangkokDateKeyC();
   const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000) : null;
-  const allocationStartByWorkId = new Map();
-  capacityRows.forEach(allocation => {
-    const dateKey = String(allocation?.bucketDate || "").slice(0, 10);
-    if (!dateKey || !allocation?.workItemId) return;
-    const previous = allocationStartByWorkId.get(allocation.workItemId);
-    if (!previous || dateKey < previous) allocationStartByWorkId.set(allocation.workItemId, dateKey);
-  });
   const skillOptions = Array.from(new Set(sourceRows.filter(row => row && row.type !== "leave").map(row => row.subtype || row.assetType).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const filteredRows = sourceRows.filter(row => {
     if (!row || row.type === "leave" || !TEAM_SCHEDULE_CAPACITY_STATUSES_C.includes(row.status)) return false;
@@ -3043,10 +2800,8 @@ function TeamGanttScreen({
     if (skillFilter !== "all" && (row.subtype || row.assetType) !== skillFilter) return false;
     return true;
   });
-  const tasks = filteredRows.map(row => ganttTaskModelC(row, monthKey, ganttWindow, allocationStartByWorkId.get(row.workItemId))).filter(Boolean).sort((a, b) => a.startOffset - b.startOffset || a.dueKey.localeCompare(b.dueKey));
+  const tasks = filteredRows.map(row => ganttTaskModelC(row, monthKey, ganttWindow)).filter(Boolean).sort((a, b) => a.startOffset - b.startOffset || a.dueKey.localeCompare(b.dueKey));
   const leaves = sourceRows.filter(row => row?.type === "leave").map(row => ganttLeaveModelC(row, monthKey, ganttWindow)).filter(Boolean);
-  const holidayKeys = new Set(holidays.filter(row => row.active !== false).map(row => String(row.date || row.day || "").slice(0, 10)));
-  const weeks = teamScheduleWeeksC(ganttWindow);
   const memberMap = new Map();
   (members || []).forEach(member => memberMap.set(member.id, member));
   tasks.forEach(task => {
@@ -3054,17 +2809,10 @@ function TeamGanttScreen({
     if (!memberMap.has(id)) memberMap.set(id, MEMBERS_BY_ID[id] || {
       id,
       name: task.item.assigneeOtherName || "Unassigned",
-      discipline: "GD/VE",
-      capacityPerDay: 8
+      discipline: "GD/VE"
     });
   });
   const visibleMembers = Array.from(memberMap.values()).filter(member => assigneeFilter === "all" || member.id === assigneeFilter).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  const cellsByMember = new Map(visibleMembers.map(member => [member.id, weeks.map(week => teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows))]));
-  const visibleMembersAfterOverFilter = !isTaskAssignProduct && overOnly ? visibleMembers.filter(member => (cellsByMember.get(member.id) || []).some(cell => cell.stateClass === "is-over")) : visibleMembers;
-  const overCapacityWeeks = new Set();
-  cellsByMember.forEach(cells => cells.forEach(cell => {
-    if (cell.stateClass === "is-over") overCapacityWeeks.add(cell.week.key);
-  }));
   const dueSoonCount = filteredRows.filter(row => {
     const dueKey = ganttDateKeyFromRowC(row, ["dueDate"]);
     return dueKey && dueKey >= todayKey && dueKey <= calendarAddDaysC(todayKey, 7);
@@ -3077,7 +2825,6 @@ function TeamGanttScreen({
     setAssigneeFilter("all");
     setStatusFilter("all");
     setSkillFilter("all");
-    setOverOnly(false);
   }
   return React.createElement("div", {
     className: "page team-schedule",
@@ -3089,7 +2836,7 @@ function TeamGanttScreen({
     className: "page__title"
   }, "Team Schedule"), React.createElement("div", {
     className: "page__sub"
-  }, isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch date" : "Production timing and weekly capacity for GD/VE", " - ", loadState.message)), React.createElement("select", {
+  }, isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline" : "Production timeline, owner, and milestone status for GD/VE", " - ", loadState.message)), React.createElement("select", {
     className: "select",
     value: monthKey,
     onChange: event => setMonthKey(event.target.value),
@@ -3107,18 +2854,10 @@ function TeamGanttScreen({
   }, React.createElement("button", {
     type: "button",
     role: "tab",
-    "aria-selected": viewMode === "timeline",
-    className: viewMode === "timeline" ? "is-active" : "",
-    onClick: () => setViewMode("timeline"),
+    "aria-selected": "true",
+    className: "is-active",
     "data-testid": "flowmate-team-schedule-timeline-tab"
-  }, "Timeline"), !isTaskAssignProduct && React.createElement("button", {
-    type: "button",
-    role: "tab",
-    "aria-selected": viewMode === "workload",
-    className: viewMode === "workload" ? "is-active" : "",
-    onClick: () => setViewMode("workload"),
-    "data-testid": "flowmate-team-schedule-workload-tab"
-  }, "Workload")), React.createElement("div", {
+  }, "Timeline")), React.createElement("div", {
     className: "team-schedule__filters"
   }, React.createElement("select", {
     className: "select",
@@ -3155,13 +2894,7 @@ function TeamGanttScreen({
   }, "All skills"), skillOptions.map(skill => React.createElement("option", {
     key: skill,
     value: skill
-  }, skill))), !isTaskAssignProduct && React.createElement("label", {
-    className: "team-schedule__over-filter"
-  }, React.createElement("input", {
-    type: "checkbox",
-    checked: overOnly,
-    onChange: event => setOverOnly(event.target.checked)
-  }), " Over capacity only"), React.createElement("button", {
+  }, skill))), React.createElement("button", {
     type: "button",
     className: "btn btn--sm",
     onClick: resetFilters
@@ -3177,21 +2910,21 @@ function TeamGanttScreen({
     className: "stat stat--info"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, visibleMembersAfterOverFilter.length), React.createElement("div", {
+  }, visibleMembers.length), React.createElement("div", {
     className: "stat__lbl"
   }, "Assignees")), React.createElement("div", {
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num mono"
-  }, isTaskAssignProduct ? tasks.filter(task => task.launchKey && task.launchKey < todayKey).length : overCapacityWeeks.size), React.createElement("div", {
+  }, tasks.filter(task => task.item.overdue || task.item.dueDelta != null && task.item.dueDelta < 0).length), React.createElement("div", {
     className: "stat__lbl"
-  }, isTaskAssignProduct ? "Past launch" : "Over-capacity weeks")), React.createElement("div", {
+  }, "Overdue")), React.createElement("div", {
     className: "stat stat--ok"
   }, React.createElement("div", {
     className: "stat__num mono"
   }, dueSoonCount), React.createElement("div", {
     className: "stat__lbl"
-  }, "Due in 7 days"))), viewMode === "timeline" ? React.createElement(React.Fragment, null, React.createElement("div", {
+  }, "Due in 7 days"))), React.createElement(React.Fragment, null, React.createElement("div", {
     className: "team-schedule__legend",
     "aria-label": "Timeline legend"
   }, React.createElement("span", null, React.createElement("i", {
@@ -3208,7 +2941,7 @@ function TeamGanttScreen({
     className: "team-schedule__legend-final-approved-marker"
   }), "Final/Approved"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
-  }), "Launch"), React.createElement("span", null, React.createElement("i", {
+  }), "Launch Date / Deadline"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-line"
   }), "Today"), React.createElement("span", null, "⚑ Urgent")), React.createElement("div", {
     className: "gantt team-schedule__timeline",
@@ -3247,7 +2980,7 @@ function TeamGanttScreen({
   }, cell.day), React.createElement("span", null, cell.label)))), todayOffset !== null && React.createElement("div", {
     className: "gantt__today-line gantt__today-line--header",
     "aria-hidden": "true"
-  }))), visibleMembersAfterOverFilter.map(member => {
+  }))), visibleMembers.map(member => {
     const memberTasks = tasks.filter(task => task.item.assignee === member.id);
     const memberLeaves = mergeGanttLeaveSegmentsC(leaves.filter(leave => leave.item.assignee === member.id));
     return React.createElement("div", {
@@ -3290,7 +3023,7 @@ function TeamGanttScreen({
         gridColumn: `${task.startOffset + 1} / span ${task.spanDays}`
       },
       onClick: () => openScheduleItem(task.item),
-      title: `${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\nAsset First Draft Due: ${calendarDateLabelC(task.dueKey)}\nAsset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}\nLaunch: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}`,
+      title: `${task.item.id} ${task.item.title}\n${task.isActualStart ? "Actual start" : "Date-led start (Asset First Draft Due)"}: ${calendarDateLabelC(ganttTaskStartKeyC(task.item))}\nAsset First Draft Due: ${calendarDateLabelC(task.dueKey)}\nAsset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}\nLaunch Date / Deadline: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}`,
       "data-testid": "flowmate-gantt-task-bar"
     }, React.createElement("span", {
       className: "team-schedule__production",
@@ -3328,67 +3061,13 @@ function TeamGanttScreen({
       title: `Final/Approved: ${calendarDateLabelC(task.finalApprovedKey)}`
     }), task.launchOffset !== null && React.createElement("span", {
       className: "gantt__launch-marker",
-      title: "Launch"
+      title: "Launch Date / Deadline"
     }))))));
-  }), visibleMembersAfterOverFilter.length === 0 && React.createElement("div", {
+  }), visibleMembers.length === 0 && React.createElement("div", {
     className: "gantt__empty"
-  }, "No assignees match the active filters."))) : React.createElement("div", {
-    className: "team-schedule__workload-wrap"
-  }, React.createElement("div", {
-    className: "team-schedule__workload",
-    style: {
-      "--schedule-weeks": weeks.length
-    },
-    "data-testid": "flowmate-team-schedule-workload"
-  }, React.createElement("div", {
-    className: "team-schedule__workload-head"
-  }, React.createElement("span", null, "Assignee"), weeks.map(week => React.createElement("span", {
-    key: week.key
-  }, "Week ", week.label))), visibleMembersAfterOverFilter.map(member => React.createElement("div", {
-    key: member.id,
-    className: "team-schedule__workload-row"
-  }, React.createElement("div", {
-    className: "team-schedule__workload-owner"
-  }, React.createElement(Avatar, {
-    memberId: member.id
-  }), React.createElement("span", null, React.createElement("b", null, member.name), React.createElement("small", null, Number(member.capacityPerDay || 8), " pt/day"))), (cellsByMember.get(member.id) || []).map(cell => React.createElement("button", {
-    key: cell.week.key,
-    type: "button",
-    className: `team-schedule__capacity-cell ${cell.stateClass}`,
-    onClick: () => setSelectedWorkload({
-      ...cell,
-      member
-    }),
-    "aria-label": `${member.name}, week ${cell.week.label}: ${cell.used} of ${cell.available} points`,
-    "data-testid": "flowmate-team-schedule-capacity-cell"
-  }, React.createElement("strong", null, cell.used, " / ", cell.available, " pt"), React.createElement("span", null, cell.percent > 999 ? "Over" : `${cell.percent}%`)))))), React.createElement("aside", {
-    className: `team-schedule__inspector ${selectedWorkload ? "is-open" : ""}`,
-    "aria-live": "polite",
-    "data-testid": "flowmate-team-schedule-workload-inspector"
-  }, selectedWorkload ? React.createElement(React.Fragment, null, React.createElement("div", {
-    className: "team-schedule__inspector-head"
-  }, React.createElement("div", null, React.createElement("b", null, selectedWorkload.member.name), React.createElement("span", null, "Week ", selectedWorkload.week.label)), React.createElement("button", {
-    type: "button",
-    className: "icon-btn",
-    onClick: () => setSelectedWorkload(null),
-    "aria-label": "Close workload details"
-  }, "×")), React.createElement("div", {
-    className: "team-schedule__inspector-total"
-  }, React.createElement("strong", null, selectedWorkload.used, " / ", selectedWorkload.available, " pt"), React.createElement("span", null, selectedWorkload.percent, "% allocated")), React.createElement("div", {
-    className: "team-schedule__inspector-list"
-  }, selectedWorkload.entries.map(entry => React.createElement("button", {
-    type: "button",
-    key: entry.item.id,
-    onClick: () => openScheduleItem(entry.item)
-  }, React.createElement("span", null, React.createElement("b", {
-    className: "mono"
-  }, entry.item.id), entry.item.title), React.createElement("strong", null, entry.point, " pt"))), selectedWorkload.entries.length === 0 && React.createElement("p", {
-    className: "muted"
-  }, "No allocated tasks in this week."))) : React.createElement("p", {
-    className: "muted"
-  }, "Select a week to see every contributing task and point allocation."))), React.createElement("div", {
+  }, "No assignees match the active filters."))), React.createElement("div", {
     className: "reason-box team-schedule__rule"
-  }, isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch. GD/VE capacity and leave calculations do not apply." : "Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes."), React.createElement(Source, null, isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days`));
+  }, isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch Date / Deadline. Leave calculations do not apply." : "Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled. This view is read-only; open a task to make changes."), React.createElement(Source, null, isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + leave_requests + flowmate_non_working_days`));
 }
 function CalendarScreen({
   onOpen
@@ -3696,7 +3375,7 @@ function CalendarScreen({
       style: {
         fontSize: 11
       }
-    }, "Launch date: ", item.launchFullLabel || item.launchLabel)));
+    }, "Launch Date / Deadline: ", item.launchFullLabel || item.launchLabel)));
   }
   return React.createElement("div", {
     className: "page"
@@ -3914,7 +3593,7 @@ function CalendarScreen({
     }
   }, React.createElement("table", {
     className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Due / First Draft"), React.createElement("th", null, "Final / Approved"), React.createElement("th", null, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Launch date"))), React.createElement("tbody", null, agendaRows.map(item => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Due / First Draft"), React.createElement("th", null, "Final / Approved"), React.createElement("th", null, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Launch Date / Deadline"))), React.createElement("tbody", null, agendaRows.map(item => React.createElement("tr", {
     key: item.id,
     className: item.overdue ? "is-overdue" : "",
     onClick: () => openCalendarItem(item)
@@ -4450,7 +4129,7 @@ function TaskAssignScheduleScreen({
     className: "page__title"
   }, "Team Schedule"), React.createElement("div", {
     className: "page__sub"
-  }, "Quick Task delivery timeline: 1st Review / Draft to Launch date - ", loadState.message))), React.createElement("div", {
+  }, "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline - ", loadState.message))), React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__body",
@@ -4460,7 +4139,7 @@ function TaskAssignScheduleScreen({
     }
   }, React.createElement("table", {
     className: "tbl"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "ID"), React.createElement("th", null, "Task"), React.createElement("th", null, "Function"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "1st Review / Draft"), React.createElement("th", null, "Launch date"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "ID"), React.createElement("th", null, "Task"), React.createElement("th", null, "Function"), React.createElement("th", null, "Assignee"), React.createElement("th", null, "1st Review / Draft"), React.createElement("th", null, "Launch Date / Deadline"), React.createElement("th", null, "Status"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
     key: row.id,
     onClick: () => onOpen(row.id),
     style: {
@@ -4519,8 +4198,8 @@ function TaskAssignAttentionScreen({
   });
   function reasonFor(row) {
     if (row.status === "blocked") return "Blocked";
-    if (!row.dueDate || !row.launchDate) return "Missing 1st Review / Draft or Launch date";
-    if (row.launchDate < today) return "Launch date is overdue";
+    if (!row.dueDate || !row.launchDate) return "Missing 1st Review / Draft or Launch Date / Deadline";
+    if (row.launchDate < today) return "Launch Date / Deadline is overdue";
     return "1st Review / Draft is overdue";
   }
   return React.createElement("div", {

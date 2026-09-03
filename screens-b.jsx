@@ -196,7 +196,7 @@ Object.assign(window, {
 });
 
 function exportRowsCsv(rows) {
-  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "Due / First Draft", "Final / Approved", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
+  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date / Deadline", "Due / First Draft", "Final / Approved", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Priority"];
   const csvRows = rows.map((w) => [
     w.id,
     w.title,
@@ -214,7 +214,6 @@ function exportRowsCsv(rows) {
     w.requester || "",
     w.requesterTeam || "",
     ASSET_LABEL[w.assetType] || w.assetType || "",
-    w.effort || "",
     w.priority || "",
   ]);
   window.flowmateDownloadCsv(`flowmate-list-${new Date().toISOString().slice(0, 10)}.csv`, columns, csvRows);
@@ -439,7 +438,6 @@ function ListScreen({ onOpen, searchQuery = "" }) {
               <th>Owner</th>
               <th>Requester / Team</th>
               <th>Asset</th>
-              <th>Effort</th>
               <th>Priority</th>
               <th>Due / First Draft</th>
               <th>Final / Approved</th>
@@ -466,7 +464,6 @@ function ListScreen({ onOpen, searchQuery = "" }) {
                 </td>
                 <td><div style={{ fontSize: 12 }}>{w.requester || "-"}</div><div className="muted" style={{ fontSize: 11 }}>{w.requesterTeam}</div></td>
                 <td><span className="muted" style={{ fontSize: 12 }}>{ASSET_LABEL[w.assetType] || "-"}</span></td>
-                <td><Effort value={w.effort} /></td>
                 <td><PriorityBadge level={w.priority} /></td>
                 <td><div className="muted" style={{ fontSize: 11 }}>{w.type === "creative" ? "First Draft" : "Due"}</div><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
                 <td><span className="mono muted" style={{ fontSize: 12 }}>{w.type === "creative" ? (w.finalApprovedDueLabel || "-") : "-"}</span></td>
@@ -1157,7 +1154,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
                         <div className="board-card__top"><span className="kcard__id mono">{row.id}</span><PriorityBadge level={row.priority} /></div>
                         <div className="kcard__title">{row.title}</div>
                         <AssignmentWarningBadges work={row} limit={2} />
-                        <div className="kcard__row"><Avatar memberId={row.assignee} /><span className="board-card__owner">{row.ownerName || "Unassigned"}</span><Effort value={row.effort} /><Progress {...(row.checklist || { done: 0, total: 0 })} /></div>
+                        <div className="kcard__row"><Avatar memberId={row.assignee} /><span className="board-card__owner">{row.ownerName || "Unassigned"}</span><Progress {...(row.checklist || { done: 0, total: 0 })} /></div>
                         <div className="kcard__row"><DueBadge delta={row.dueDelta} label={row.dueLabel} status={row.status} /></div>
                         {row.blockReason && <div className="kcard__row kcard__row--meta board-card__blocked"><Icon name="alert" size={11} /> Blocked: {row.blockReason}</div>}
                         <div className="board-card__actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
@@ -1217,14 +1214,12 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
    ============================================================ */
 const FLOWMATE_ATTENTION_CATEGORIES_B = [
   { code: "unassigned", label: "Unassigned", hint: "Choose an active GD/VE owner from the work item detail." },
-  { code: "over_capacity", label: "Over capacity", hint: "Owner workload exceeds their normal daily capacity; review priority or reassign the task." },
   { code: "wip_exceeded", label: "WIP exceeded", hint: "Owner has more active production work than their WIP limit." },
   { code: "skill_mismatch", label: "Skill mismatch", hint: "Assigned owner does not have the requested primary skill." },
   { code: "backup_skill", label: "Backup skill", hint: "Assignment used a configured backup skill." },
   { code: "member_partial", label: "Partial availability", hint: "Assigned owner has partial availability." },
   { code: "member_on_leave", label: "Member on leave", hint: "Assigned owner has leave during the production window." },
-  { code: "deadline_capacity_gap", label: "Deadline capacity gap", hint: "Available capacity does not fully cover work before 1st Draft." },
-  { code: "review_buffer_risk", label: "Review buffer risk", hint: "The review window before Launch is compressed." },
+  { code: "review_buffer_risk", label: "Review buffer risk", hint: "The review window before Launch Date / Deadline is compressed." },
   { code: "review_delay", label: "Review delay", hint: "Requester review is past the at-risk date." },
   { code: "blocked", label: "Blocked", hint: "Resolve the recorded blocker before production can continue." },
   { code: "needs_split", label: "Needs split", hint: "Split the combined deliverables while retaining the assigned owner." },
@@ -1294,7 +1289,7 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
       <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
         <div className="stat stat--accent"><div className="stat__num">{attentionRows.length}</div><div className="stat__lbl">Unique tasks</div><div className="stat__delta">counted once</div></div>
         <div className="stat stat--warn"><div className="stat__num">{(attentionGroups.unassigned || []).length}</div><div className="stat__lbl">Unassigned</div></div>
-        <div className="stat stat--warn"><div className="stat__num">{(attentionGroups.over_capacity || []).length + (attentionGroups.deadline_capacity_gap || []).length}</div><div className="stat__lbl">Capacity risk</div></div>
+        <div className="stat stat--warn"><div className="stat__num">{(attentionGroups.review_buffer_risk || []).length + (attentionGroups.needs_split || []).length}</div><div className="stat__lbl">Planning signals</div></div>
         <div className="stat stat--accent"><div className="stat__num">{(attentionGroups.blocked || []).length + (attentionGroups.review_delay || []).length}</div><div className="stat__lbl">Delivery risk signals</div></div>
       </div>
 

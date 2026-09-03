@@ -51,46 +51,36 @@ describe("Trello + Asana hybrid backend SQL delta", () => {
     expect(engine).toContain("linked_user.is_active = true");
     expect(engine).toContain("tm.active = true");
     expect(engine).toContain("public.flowmate_is_gdve_member_code(tm.member_code)");
-    expect(engine).toContain("from public.leave_requests active_leave");
-    expect(engine).toContain("active_leave.cancelled_at is null");
-    expect(engine).toContain("metrics.leave_bucket_count > 0");
-    expect(engine).toContain("metrics.full_leave_bucket_count = metrics.window_bucket_count");
-    expect(engine).toContain("v_full_leave_bucket_count > 0");
+    expect(engine).toContain("public.flowmate_leave_fraction_for_bucket(");
+    expect(engine).toContain("1 - public.flowmate_leave_fraction_for_bucket(");
+    expect(engine).toContain("count(*) filter (where leave_fraction > 0)::integer as leave_bucket_count");
+    expect(engine).toContain("count(*) filter (where leave_fraction >= 1)::integer as full_leave_bucket_count");
+    expect(engine).toContain("where c.availability_fraction > 0");
     expect(engine).toContain("v_leave_bucket_count > 0 and v_full_leave_bucket_count = 0");
 
-    const rankingClause = block(engine, "from candidates c", "limit 1;");
-    const order = [
-      "c.context_rank",
-      "c.skill_rank",
-      "c.availability_rank",
-      "c.projected_ratio",
-      "c.allocated_points",
-      "c.wip_now",
-      "c.overdue_count",
-      "lower(c.member_code)",
-    ];
-    for (let index = 1; index < order.length; index += 1) {
-      expect(rankingClause.indexOf(order[index])).toBeGreaterThan(
-        rankingClause.indexOf(order[index - 1]),
-      );
-    }
+    const rankingClause = block(engine, "row_number() over (", ") as winner_rank");
+    expect(rankingClause).toMatch(/order by\s+c\.skill_rank asc,\s+c\.adjusted_load asc,\s+c\.in_progress_count asc,\s+c\.assigned_count asc,\s+c\.overdue_count asc,\s+c\.last_auto_assigned_at asc,\s+c\.context_rank asc,\s+lower\(c\.member_code\) asc\s*$/);
   });
 
-  it("emits every supported warning code in result, event, and audit snapshot", () => {
+  it("emits current automatic warnings and excludes retired capacity warnings", () => {
+    const engine = block(
+      backend,
+      "create or replace function public.flowmate_run_assignment(",
+      "revoke all on function public.flowmate_run_assignment",
+    );
     const warningCodes = [
-      "over_capacity",
-      "wip_exceeded",
-      "skill_mismatch",
+      "wip_override",
       "backup_skill",
       "member_partial",
-      "member_on_leave",
-      "deadline_capacity_gap",
-      "review_buffer_risk",
       "needs_split",
+      "review_buffer_risk",
+      "final_approved_buffer_risk",
     ];
-    for (const code of warningCodes) expect(backend).toContain(`'code', '${code}'`);
-    expect(backend.match(/'warnings', v_warnings/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(backend).toContain("'warnings', '[]'::jsonb");
+    for (const code of warningCodes) expect(engine).toContain(`'code', '${code}'`);
+    expect(engine).not.toContain("'code', 'over_capacity'");
+    expect(engine).not.toContain("'code', 'deadline_capacity_gap'");
+    expect(engine.match(/'warnings', v_warnings/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(engine).toContain("'warnings', '[]'::jsonb");
   });
 
   it("persists truthful overload and enforces allocation total equals effort", () => {

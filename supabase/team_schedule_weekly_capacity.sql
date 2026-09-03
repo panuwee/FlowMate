@@ -104,6 +104,22 @@ select
   ), 0) as assigned_effort,
   count(wi.id) filter (
     where wi.work_type = 'creative_request'
+      and wi.status = 'assigned'
+  ) as assigned_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'in_progress'
+  ) as in_progress_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'review'
+  ) as review_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
+      and wi.status = 'blocked'
+  ) as blocked_count,
+  count(wi.id) filter (
+    where wi.work_type = 'creative_request'
       and wi.status = 'in_progress'
       and wi.wip_counted = true
   ) as current_wip,
@@ -116,8 +132,6 @@ select
       and wi.due_date >= current_date
       and wi.due_date <= current_date + interval '2 days'
   ) as due_soon_count,
-  count(wi.id) filter (where wi.status = 'blocked') as blocked_count,
-  count(wi.id) filter (where wi.status = 'review') as review_count,
   count(wi.id) filter (where wi.work_type = 'quick_task' and wi.status not in ('delivered', 'cancelled')) as quick_task_count
 from public.team_members tm
 left join public.work_items wi on wi.final_owner_member_id = tm.id

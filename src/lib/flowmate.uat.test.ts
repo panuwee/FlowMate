@@ -607,6 +607,14 @@ describe("Marketing Plan Current Working approved contracts", () => {
       `(${extractNamedFunction(appJsx, "getMarketingPlanLegacyPublishTimeOption")})`,
       { normalizeWholeHourTime: normalizeWholeHour },
     );
+    const getInlineTimeUi = vm.runInNewContext(
+      `(${extractNamedFunction(appJsx, "getMarketingPlanInlineTimeUi")})`,
+      {
+        isMarketingPlanNoTagSelection: (channels: unknown) => Array.isArray(channels) && channels.length === 1 && channels[0] === "no_tag",
+        normalizeMarketingPlanPublishTimeOption: normalizeWholeHour,
+        getMarketingPlanLegacyPublishTimeOption: getLegacyPublishTime,
+      },
+    );
     const sandbox = {
       React: {
         createElement: (type: unknown, props: Record<string, unknown> | null, ...children: unknown[]) => ({ type, props: props || {}, children }),
@@ -637,6 +645,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
       getDefaultMarketingPlanWorkingSheetForm: () => stateSlots[12],
       createMarketingWorkingMyTasksPreferenceController: () => ({ setAccount() {}, setLocalValue() {}, invalidateAccount() {} }),
       groupMarketingPlanWorkingSheetRows: (input: unknown[]) => input,
+      isMarketingPlanNoTagSelection: (channels: unknown) => Array.isArray(channels) && channels.length === 1 && channels[0] === "no_tag",
       resolveMarketingPlanWorkingRowsView: (input: unknown[]) => ({
         visibleRows: input,
         emptyReason: "No rows match the selected filters.",
@@ -660,6 +669,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
       getMarketingPlanWorkingStatusClass: getWorkingStatusClass,
       normalizeMarketingPlanPublishTimeOption: normalizeWholeHour,
       getMarketingPlanLegacyPublishTimeOption: getLegacyPublishTime,
+      getMarketingPlanInlineTimeUi: getInlineTimeUi,
       canDuplicateMarketingWorkingRow: (() => {
         const source = extractNamedFunction(appJsx, "canDuplicateMarketingWorkingRow");
         return source ? vm.runInNewContext(`(${source})`, {}) : () => false;
@@ -751,7 +761,10 @@ describe("Marketing Plan Current Working approved contracts", () => {
     const functionSource = extractNamedFunction(appJsx, "runMarketingWorkingRowDuplicate");
     expect(functionSource).not.toBe("");
     if (!functionSource) return null;
-    return vm.runInNewContext(`(${functionSource})`, { console: { error: () => undefined } }) as (
+    return vm.runInNewContext(`(${functionSource})`, {
+      console: { error: () => undefined },
+      isMarketingPlanNoTagSelection: (channels: unknown) => Array.isArray(channels) && channels.length === 1 && channels[0] === "no_tag",
+    }) as (
       sourceRow: Record<string, unknown>,
       launchDate: string,
       publishTime: string,
@@ -907,7 +920,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
     expect(exportRows(groupedVisibleRows, "2099-01")).toBe(2);
     expect(downloads).toEqual([{
       filename: "marketing-plan-2099-01-current-working.csv",
-      headers: ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channels", "Launch Date", "Publish Time", "Marketing Status", "Note"],
+      headers: ["Month", "Campaign", "Team", "Product / Event", "Format", "Tier", "PIC", "Sub PIC", "Channels", "Launch Date / Deadline", "Publish Time", "Marketing Status", "Note"],
       rows: [
         ["Sep 2026", "Campaign A", "Brand", "Hero post", "Banner", "S", "Alice", "Bob", "Facebook | TikTok", "2026-09-10", "11:00", "Ready to Post", "Grouped note"],
         ["Oct 2026", "Campaign B", "", "Clip", "", "", "", "", "", "2026-10-02", "N/A", "Planned", ""],
@@ -1114,7 +1127,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
       startDate: "2026-09-01",
       endDate: "2026-09-30",
       search: "",
-    }).emptyReason).toBe("No tasks match the selected Launch Date range.");
+    }).emptyReason).toBe("No tasks match the selected Launch Date / Deadline range.");
     const valid = resolveView(workingRows, {
       currentUserId: "user-a",
       myTasksOnly: true,
@@ -1287,7 +1300,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
     expect(creativeValidationSource).toContain("normalizeWholeHourTime(row.publishTime)");
     expect(creativeValidationSource).toContain("Publish Time must be N/A or a whole hour.");
     expect(updateTimeSource).toContain("p_publish_time: normalizedTime || null");
-    expect(syncSource).toContain("p_publish_time: normalizedTime || null");
+    expect(syncSource).toContain("p_publish_time: effectivePublishTime");
     expect(marketingLegacySource).not.toBe("");
     expect(creativeLegacySource).not.toBe("");
     expect(workingSource).toContain("getMarketingPlanLegacyPublishTimeOption(row.publishTime)");
@@ -1295,6 +1308,19 @@ describe("Marketing Plan Current Working approved contracts", () => {
     expect(createScreenJsx).toContain("getFlowMateLegacyPublishTimeOption(value.publishTime)");
     expect(creativeFormSource).toContain("disabled>{legacyPublishTime}</option>");
     expect(createScreenJsx).not.toContain('Publish Time <span className="req">*</span>');
+  });
+
+  it("Creative Request No Tag disables publishing-only inputs and uses the exact helper copy", () => {
+    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const creativeFormSource = createScreenJsx.slice(
+      createScreenJsx.indexOf("function CreativeRequestForm"),
+      createScreenJsx.indexOf("function CreateResultScreen"),
+    );
+
+    expect(createScreenJsx).toContain("function isFlowMateNoTagDraft(draft)");
+    expect(creativeFormSource).toContain("const isNoTag = isFlowMateNoTagDraft(value);");
+    expect(creativeFormSource).toContain("disabled={isNoTag}");
+    expect(creativeFormSource.match(/Not required for No Tag/g) || []).toHaveLength(2);
   });
 
   it("resets Creative Request Publish Time before normal success and fallback Create another paths", () => {
@@ -1529,7 +1555,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
     expect(canDuplicate(null, { id: "pic-user", role: "member" })).toBe(false);
   });
 
-  it("Duplicate Brief draft preserves Launch Date, N/A or whole-hour Time, and a visible legacy Time", () => {
+  it("Duplicate Brief draft preserves Launch Date / Deadline, N/A or whole-hour Time, and a visible legacy Time", () => {
     const buildDraft = loadDuplicateDraftBuilder();
     if (!buildDraft) return;
     expect(buildDraft({ publishDate: "2026-09-12", publishTime: null })).toEqual({
@@ -1804,6 +1830,32 @@ describe("Marketing Plan Current Working approved contracts", () => {
     expect(openedRows[0]).not.toMatchObject({ campaignName: "Old campaign" });
   });
 
+  it("Duplicate Brief sends null Publish Time for No Tag rows even if stale time was still present", async () => {
+    const runDuplicate = loadDuplicateRunner();
+    if (!runDuplicate) return;
+    const rpcCalls: Array<{ name: string; params: Record<string, unknown> }> = [];
+
+    await runDuplicate({
+      contentItemId: "source-id",
+      publishDate: "2026-10-02",
+      publishTime: "18:00",
+      channels: ["no_tag"],
+      channel: "no_tag",
+    }, "2026-10-02", "18:00", {
+      rpc: async (name, params) => {
+        rpcCalls.push({ name, params });
+        return { data: { content_item_id: "new-id" }, error: null };
+      },
+      refreshRows: async () => [{ contentItemId: "new-id", channels: ["no_tag"] }],
+      openBrief: () => undefined,
+    });
+
+    expect(rpcCalls).toEqual([{
+      name: "marketing_plan_duplicate_working_row",
+      params: { p_source_content_item_id: "source-id", p_launch_date: "2026-10-02", p_publish_time: null },
+    }]);
+  });
+
   it("Duplicate Brief unknown response refreshes before returning and never opens or reconstructs a row", async () => {
     const runDuplicate = loadDuplicateRunner();
     if (!runDuplicate) return;
@@ -1925,7 +1977,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
     expect(notFound).toEqual({
       status: "created_not_found",
       contentItemId: "outside-window",
-      message: "The duplicate row was created but is not in the current timeline window. Find it by Launch Date before using Create Brief.",
+      message: "The duplicate row was created but is not in the current timeline window. Find it by Launch Date / Deadline before using Create Brief.",
     });
 
     const openFailed = await runDuplicate({ contentItemId: "source-id" }, "2026-10-04", "", {
@@ -2313,9 +2365,9 @@ describe("quick task Other assignee SQL support", () => {
     expect(createScreenJsx).not.toContain("Only title and due date are required.");
     expect(createScreenJsx).toContain("function updateQuickDraft");
     expect(quickTaskFormSource).toContain("Requester Team / Function");
-    expect(quickTaskFormSource).toContain("Launch date");
+    expect(quickTaskFormSource).toContain("Launch Date / Deadline");
     expect(quickTaskFormSource).toContain("1st Review / Draft");
-    expect(quickTaskFormSource).toContain("Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.");
+    expect(quickTaskFormSource).toContain("Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign.");
     expect(quickTaskFormSource).toContain("readOnly");
   });
 
@@ -2326,7 +2378,7 @@ describe("quick task Other assignee SQL support", () => {
       createScreenJsx.indexOf("function CreateResultScreen"),
     );
 
-    expect(creativeFormSource).toContain("Auto-filled from Launch Date, your account team, Campaign, and Product / Event.");
+    expect(creativeFormSource).toContain("Auto-filled from Launch Date / Deadline, your account team, Campaign, and Product / Event.");
     expect(creativeFormSource).toContain("Product / Event");
     expect(creativeFormSource).toContain("Channel Tag");
     expect(createScreenJsx).toContain('requireField("platforms", "Channel Tag is required.")');
@@ -2370,7 +2422,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).not.toContain("errors.requesterTeam");
   });
 
-  it("creative request generates fixed Launch milestones and flags capacity risk", () => {
+  it("creative request generates fixed Launch Date / Deadline milestones and flags capacity risk", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const quickTaskJs = readFileSync(join(process.cwd(), "supabase-quick-task.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
@@ -2386,15 +2438,14 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).toContain("Asset First Draft Due");
     expect(creativeFormSource).toContain("readOnly");
     expect(creativeFormSource).toContain("disabled");
-    expect(creativeFormSource).toContain("First Draft: T-5 Thai working days before Launch Date.");
-    expect(creativeFormSource).toContain("Final/Approved: T-1 Thai working day before Launch Date.");
+    expect(creativeFormSource).toContain("First Draft: T-4 Thai working days before Launch Date / Deadline.");
+    expect(creativeFormSource).toContain("Final/Approved: T-2 Thai working days before Launch Date / Deadline.");
     expect(creativeFormSource).not.toContain("Due date");
     expect(quickTaskFormSource).toContain("1st Review / Draft");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(assignmentSql).toContain("create or replace function public.flowmate_earliest_capacity_date(");
-    expect(assignmentSql).toContain("v_earliest_feasible_due_date := public.flowmate_earliest_capacity_date(");
-    expect(assignmentSql).toContain("v_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 5)");
-    expect(assignmentSql).toContain("v_final_approved_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 1)");
+    expect(assignmentSql).toContain("v_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 4)");
+    expect(assignmentSql).toContain("else public.flowmate_subtract_th_business_days(v_launch_date, 2)");
     expect(assignmentSql).toContain("v_review_buffer_working_days integer := 2");
     expect(assignmentSql).toContain("'code', 'review_buffer_risk'");
   });
@@ -2466,10 +2517,10 @@ describe("quick task Other assignee SQL support", () => {
     expect(assignmentSql).toContain("greatest(1, coalesce(p_asset_count, 1))");
   });
 
-  it("warns and auto-promotes Creative Requests to Urgent for production or review-buffer risk", () => {
+  it("keeps explicit Urgent validation and removes point-led auto-promotion from submit", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
-    const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const handleSubmitSource = createScreenJsx.slice(createScreenJsx.indexOf("async function handleSubmit"));
+    const validationSource = extractNamedFunction(createScreenJsx, "getFlowMateCreateValidationErrors");
 
     expect(createScreenJsx).toContain("const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8");
     expect(createScreenJsx).toContain("const FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET = 4");
@@ -2479,19 +2530,14 @@ describe("quick task Other assignee SQL support", () => {
     expect(createScreenJsx).toContain("function getFlowMateProductionStartBucket(now = new Date())");
     expect(createScreenJsx).toContain("function countFlowMateCapacityBucketsInclusive(startDate, startHalf, endDate)");
     expect(createScreenJsx).toContain("function getFlowMateCreativeTimePressure(draft)");
-    expect(handleSubmitSource).toContain("const timePressure = mode === \"creative\" ? getFlowMateCreativeTimePressure(submissionDraft) : null");
-    expect(handleSubmitSource).toContain("timePressure.requiresUrgent");
-    expect(handleSubmitSource).toContain("await window.flowmatePrompt({");
-    expect(handleSubmitSource).toContain("hideInput: true");
-    expect(handleSubmitSource).toContain("Priority will be set to Urgent");
-    expect(handleSubmitSource).toContain("priority: \"urgent\"");
-    expect(createScreenJsx).toContain("Auto urgent:");
-    expect(handleSubmitSource).toContain("submissionDraft = urgentDraft");
-    expect(assignmentSql).toContain("v_time_pressure_effort");
-    expect(assignmentSql).toContain("v_time_pressure_capacity := public.flowmate_count_capacity_buckets(v_production_start, v_production_start_half, v_due_date) * 4");
-    expect(assignmentSql).toContain("v_requested_priority := 'urgent'");
-    expect(assignmentSql).toContain("v_first_draft_at_risk := v_earliest_feasible_due_date > v_due_date");
-    expect(assignmentSql).toContain("Auto urgent:");
+    expect(validationSource).toContain('if (row.priority === "urgent")');
+    expect(validationSource).toContain('requireField("urgentReason", "Urgent reason is required.")');
+    expect(handleSubmitSource).not.toContain("const timePressure = mode === \"creative\" ? getFlowMateCreativeTimePressure(submissionDraft) : null");
+    expect(handleSubmitSource).not.toContain("timePressure.requiresUrgent");
+    expect(handleSubmitSource).not.toContain("Priority will be set to Urgent");
+    expect(handleSubmitSource).not.toContain("Set Urgent and submit");
+    expect(createScreenJsx).not.toContain("Auto urgent:");
+    expect(handleSubmitSource).not.toContain("submissionDraft = urgentDraft");
   });
 
   it("removes Hybrid from the Creative Request asset type picker", () => {
@@ -2610,11 +2656,11 @@ describe("quick task Other assignee SQL support", () => {
     expect(detailSource).toContain("Brief link");
     expect(detailSource).toContain("Reference link");
     expect(detailSource).toContain("Urgent reason");
-    expect(detailSource).toContain("Launch date");
+    expect(detailSource).toContain("Launch Date / Deadline");
     expect(detailSource).not.toContain("<div className=\"meta-row__lbl\">Publish Date</div>");
   });
 
-  it("detail side panel orders Created, Asset First Draft Due, Launch date, then AI Tag and hides Publish Date", () => {
+  it("detail side panel orders Created, Asset First Draft Due, Launch Date / Deadline, then AI Tag and hides Publish Date", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const detailSource = createScreenJsx.slice(createScreenJsx.indexOf("function DetailScreen"));
     const creativeDetailsSource = detailSource.slice(detailSource.indexOf("{hasCreativeDetails"), detailSource.indexOf("Link zone"));
@@ -2623,9 +2669,9 @@ describe("quick task Other assignee SQL support", () => {
     expect(sideSource.indexOf("Created")).toBeGreaterThan(-1);
     expect(sideSource).not.toContain("Publish Date");
     expect(sideSource.indexOf("Asset First Draft Due")).toBeGreaterThan(sideSource.indexOf("Created"));
-    expect(sideSource.indexOf("Launch date")).toBeGreaterThan(sideSource.indexOf("Asset First Draft Due"));
-    expect(sideSource.indexOf("AI Tag")).toBeGreaterThan(sideSource.indexOf("Launch date"));
-    expect(creativeDetailsSource).not.toContain("Launch date");
+    expect(sideSource.indexOf("Launch Date / Deadline")).toBeGreaterThan(sideSource.indexOf("Asset First Draft Due"));
+    expect(sideSource.indexOf("AI Tag")).toBeGreaterThan(sideSource.indexOf("Launch Date / Deadline"));
+    expect(creativeDetailsSource).not.toContain("Launch Date / Deadline");
   });
 
   it("MVP 1.3 create flow captures Campaign, Channel Tag, and Launch Date without a separate Publish Date field", () => {
@@ -2640,9 +2686,9 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).toContain("Channel Tag");
     expect(creativeFormSource).not.toContain("Publish Date");
     expect(creativeFormSource).toContain("Asset First Draft Due");
-    expect(creativeFormSource).toContain("Launch date");
-    expect(creativeFormSource).toContain("First Draft: T-5 Thai working days before Launch Date.");
-    expect(creativeFormSource).toContain("Final/Approved: T-1 Thai working day before Launch Date.");
+    expect(creativeFormSource).toContain("Launch Date / Deadline");
+    expect(creativeFormSource).toContain("First Draft: T-4 Thai working days before Launch Date / Deadline.");
+    expect(creativeFormSource).toContain("Final/Approved: T-2 Thai working days before Launch Date / Deadline.");
     expect(quickTaskJs).toContain("p_publish_date:    input.publishDate || null");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(quickTaskJs).toContain("p_launch_date:      input.launchDate || null");
@@ -2671,7 +2717,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(detailSource).toContain("Campaign");
     expect(detailSource).toContain("Channel");
-    expect(detailSource).toContain("Launch date");
+    expect(detailSource).toContain("Launch Date / Deadline");
     expect(detailSource).not.toContain("<div className=\"meta-row__lbl\">Publish Date</div>");
     expect(detailSource).toContain("Type / Skill");
     expect(detailSource).toContain("Asset Count");
@@ -2685,7 +2731,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(exportSource).toContain("\"Campaign\"");
     expect(exportSource).toContain("\"Channel\"");
     expect(exportSource).toContain("\"Publish Date\"");
-    expect(exportSource).toContain("\"Launch Date\"");
+    expect(exportSource).toContain("\"Launch Date / Deadline\"");
     expect(exportSource).toContain("\"Due / First Draft\"");
     expect(exportSource).toContain("\"Type / Skill\"");
     expect(exportSource).toContain("\"Asset Count\"");
@@ -2715,7 +2761,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(myWorkSource).toContain("getFlowMateMyWorkRows");
     expect(myWorkSource).toContain("activeGroupIds");
     expect(myWorkSource).toContain("const overdue = mine.filter");
-    expect(myWorkSource).toContain("const capacityRisk = mine.filter");
+    expect(myWorkSource).toContain("const scheduleRisk = mine.filter");
     expect(myWorkSource).toContain("riskGroupIds");
   });
 
@@ -2799,7 +2845,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(kpiSource).not.toContain("Last 4 weeks - MVP 1.1");
   });
 
-  it("KPI tracks AI-tagged work per member and exports GD/VE AI detail tabs", () => {
+  it("normal KPI keeps AI data out of per-member display and export", () => {
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const dataJsx = readFileSync(join(process.cwd(), "data.jsx"), "utf8");
@@ -2809,19 +2855,16 @@ describe("quick task Other assignee SQL support", () => {
     expect(listDataJs).toContain("aiTagsByWorkItemId");
     expect(listDataJs).toContain("aiTags: aiTagsByWorkItemId[item.id] || []");
     expect(dataJsx).toContain("function flowmateDownloadWorkbook(");
-    expect(screensC).toContain("function flowMateKpiAiTagsC(row)");
-    expect(kpiSource).toContain("aiTaggedItems");
-    expect(kpiSource).toContain("AI Tagged");
-    expect(kpiSource).toContain("flowMateKpiGdVeAiSheets");
-    expect(kpiSource).toContain("Task ID");
-    expect(kpiSource).toContain("Task name");
-    expect(kpiSource).toContain("AI Tag");
+    expect(kpiSource).not.toContain("aiTaggedItems");
+    expect(kpiSource).not.toContain("AI Tagged");
+    expect(kpiSource).not.toContain("flowMateKpiGdVeAiSheets");
+    expect(kpiSource).not.toContain("AI Tag");
     expect(kpiSource).toContain("window.flowmateDownloadWorkbook");
     expect(kpiSource).toContain("flowmate-kpi-${selectedKpiExportMonth}");
     expect(kpiSource).not.toContain("exportFlowMateCsvC(\n      `flowmate-kpi-${kpiExportMonth}");
   });
 
-  it("KPI tracks average days from assigned to delivered and exports task-level completion detail", () => {
+  it("normal KPI leaves delivery timestamps available without calculating personal completion speed", () => {
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
@@ -2832,16 +2875,14 @@ describe("quick task Other assignee SQL support", () => {
     expect(screensC).toContain("function flowMateKpiAssignedAtC(row)");
     expect(screensC).toContain("function flowMateKpiDeliveredAtC(row)");
     expect(screensC).toContain("function flowMateKpiCompletionDaysC(row)");
-    expect(kpiSource).toContain("Avg days to delivered");
-    expect(kpiSource).toContain("completionDetailRows");
-    expect(kpiSource).toContain("Completion detail");
-    expect(kpiSource).toContain("Assigned At");
-    expect(kpiSource).toContain("Delivered At");
-    expect(kpiSource).toContain("Completion days");
+    expect(kpiSource).not.toContain("Avg days to delivered");
+    expect(kpiSource).not.toContain("completionDetailRows");
+    expect(kpiSource).not.toContain("Completion detail");
+    expect(kpiSource).not.toContain("flowMateKpiCompletionDaysC");
     expect(screensC).toContain('timeZone: "Asia/Bangkok"');
   });
 
-  it("KPI shows and exports a Cancelled report with reason and audit timestamps", () => {
+  it("normal KPI counts cancelled tasks by team without personal audit detail", () => {
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const listDataJs = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
     const kpiSource = screensC.slice(screensC.indexOf("function KpiScreen"), screensC.indexOf("/* ============================================================\n   TEAM CALENDAR"));
@@ -2850,11 +2891,13 @@ describe("quick task Other assignee SQL support", () => {
     expect(listDataJs).toContain("cancelReason: item.cancel_reason || \"\"");
     expect(screensC).toContain("function flowMateKpiCancelledAtC(row)");
     expect(screensC).toContain("function flowMateKpiCancelReasonC(row)");
-    expect(kpiSource).toContain("const cancelledRows = kpiRows.filter(w => w.status === \"cancelled\")");
+    expect(kpiSource).toContain("buildFlowMateKpiTeamSummaryC(kpiRows, flowMateBangkokDateKeyC())");
+    expect(kpiSource).toContain("kpiTotals.cancelled");
     expect(kpiSource).toContain("Cancelled");
-    expect(kpiSource).toContain("Cancelled detail");
-    expect(kpiSource).toContain("Cancel reason");
-    expect(kpiSource).toContain("Cancelled At");
+    expect(kpiSource).toContain('name: "Team status"');
+    expect(kpiSource).not.toContain("Cancelled detail");
+    expect(kpiSource).not.toContain("Cancel reason");
+    expect(kpiSource).not.toContain("Cancelled At");
   });
 
   it("KPI exports multi-tab data as xlsx and falls back to csv, not legacy xls", () => {
@@ -2955,7 +2998,8 @@ describe("quick task Other assignee SQL support", () => {
     expect(workloadSource).toContain("isFlowMateGdVeMember");
     expect(workloadSource).toContain("getFlowMateWorkloadStatusCounts");
     expect(workloadSource).toContain("(r.m.skills || [])");
-    expect(workloadSource).toContain("Delivered");
+    expect(workloadSource).toContain("Assigned awaiting acceptance");
+    expect(workloadSource).toContain("In Progress");
   });
 
   it("Workload UI filters standard workload by Operations, Marketing, and Esport teams", () => {
@@ -2994,31 +3038,30 @@ describe("quick task Other assignee SQL support", () => {
     expect(workloadSource).not.toContain("This week (5d) - MVP 1.1");
   });
 
-  it("Workload assigned effort and capacity are scoped to the selected month", () => {
+  it("Workload activity and date signals are scoped to the selected month", () => {
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadSource = screensC.slice(screensC.indexOf("function WorkloadScreen"), screensC.indexOf("/* ============================================================\n   KPI VIEW"));
 
     expect(workloadSource).toContain("const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth)");
-    expect(workloadSource).toContain("const capacityWindow = r.effectiveCap * selectedMonthWorkingDays");
-    expect(workloadSource).toContain("const monthOpenCreative = monthItems.filter");
-    expect(workloadSource).toContain('const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];');
-    expect(workloadSource).toContain("FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status)");
-    expect(workloadSource).toContain("const assignedEffort = monthOpenCreative.reduce");
-    expect(workloadSource).toContain("window: capacityWindow");
-    expect(workloadSource).toContain("items: monthOpenCreative");
-    expect(workloadSource).toContain("Load ({selectedMonthWorkingDays}wd)");
-    expect(workloadSource).not.toContain("const activeOpenCreative = (r.allItems || r.items || []).filter");
+    expect(workloadSource).toContain("buildFlowMateWorkloadMemberSummaryC(r, monthItems, monthRequestedItems, workloadTodayKey)");
+    expect(workloadSource).toContain("flowMateBangkokDateKeyC()");
+    expect(workloadSource).toContain("Assigned awaiting acceptance");
+    expect(workloadSource).toContain("Due soon");
+    expect(workloadSource).toContain("Overdue");
+    expect(workloadSource).not.toContain("assignedEffort");
+    expect(workloadSource).not.toContain("capacityWindow");
+    expect(workloadSource).not.toContain("effectiveCap");
   });
 
-  it("Workload and assignment capacity keep Review counted until delivery", () => {
+  it("Workload detail and assignment eligibility keep Review active until delivery", () => {
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadDataJs = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
     const assignmentSql = readFileSync(join(process.cwd(), "supabase", "rpc_assignment.sql"), "utf8");
     const schemaSql = readFileSync(join(process.cwd(), "supabase", "schema.sql"), "utf8");
     const collaborationSql = readFileSync(join(process.cwd(), "supabase", "collaboration_admin.sql"), "utf8");
 
-    expect(screensC).toContain('const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];');
-    expect(workloadDataJs).toContain('const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];');
+    expect(screensC).toContain('const FLOWMATE_ACTIVE_WORK_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];');
+    expect(workloadDataJs).toContain('const FLOWMATE_ACTIVE_WORK_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];');
     expect(assignmentSql).toContain("wi.status in ('assigned','in_progress','review','blocked')");
     expect(schemaSql).toContain("wi.status in ('assigned', 'in_progress', 'review', 'blocked')");
     expect(collaborationSql).toContain("wi.status in ('assigned', 'in_progress', 'review', 'blocked')");
@@ -4269,7 +4312,7 @@ describe("Marketing Plan product split shell", () => {
     expect(workingSheetSource).toContain("Campaign");
     expect(workingSheetSource).not.toContain("Team *");
     expect(workingSheetSource).toContain("Product / Event");
-    expect(workingSheetSource).toContain("Launch Date");
+    expect(workingSheetSource).toContain("Launch Date / Deadline");
     expect(workingSheetSource).toContain("Time");
     expect(workingSheetSource).toContain("Asset Type");
     expect(workingSheetSource).toContain("Details");
@@ -4334,7 +4377,7 @@ describe("Marketing Plan product split shell", () => {
     expect(workingSheetSource).not.toContain("marketing-working-brief");
     expect(workingSheetSource).toContain("marketing-working-status");
     expect(workingSheetSource).toContain('className: "col-date"');
-    expect(workingSheetSource).toContain('}, "Launch Date")');
+    expect(workingSheetSource).toContain('}, "Launch Date / Deadline")');
     expect(workingSheetSource).not.toContain('}, "Publish Date")');
     expect(workingSheetSource).toContain("formatMarketingPlanDate(row.publishDate)");
     expect(workingSheetSource).toContain('className: "col-pic"');
@@ -4347,6 +4390,11 @@ describe("Marketing Plan product split shell", () => {
     expect(workingSheetSource).toContain("value: option.value");
     expect(workingSheetSource).not.toContain("placeholder=\"HH:MM\"");
     expect(workingSheetSource).toContain("normalizeMarketingPlanPublishTimeOption");
+    expect(appJsx).toContain("function isMarketingPlanNoTagSelection(channels)");
+    expect(workingSheetSource).toContain("isMarketingPlanNoTagSelection(sheetForm.channels)");
+    expect(workingSheetSource).toContain("isMarketingPlanNoTagSelection(editForm.channels)");
+    expect(workingSheetSource).toContain("isMarketingPlanNoTagSelection(duplicateSourceRow && duplicateSourceRow.channels)");
+    expect(workingSheetSource.match(/Not required for No Tag/g) || []).toHaveLength(4);
     expect(workingSheetSource).toContain("Time must be N/A or a whole hour.");
     expect(workingSheetSource).not.toContain("type=\"time\"");
     expect(workingSheetSource).not.toContain("handleWorkingRowBriefLinkChange");
@@ -4424,7 +4472,7 @@ describe("Marketing Plan product split shell", () => {
     expect(marketingSql).toContain("wi.display_id = v_flowmate_display_id");
     expect(marketingSql).toContain("flowmate_work_item_id = v_resolved_work_item_id");
     expect(marketingSql).toContain("update public.work_items");
-    expect(marketingSql).toContain("publish_time = p_publish_time");
+    expect(marketingSql).toContain("publish_time = v_effective_publish_time");
     expect(marketingSql).toContain("where id = v_resolved_work_item_id");
     expect(marketingSql).toContain("grant execute on function public.marketing_plan_sync_flowmate_schedule");
   });
@@ -4534,14 +4582,14 @@ describe("Marketing Plan product split shell", () => {
     expect(assignmentSql).toContain("due_date, launch_date, publish_date, publish_time");
     expect(assignmentSql).toContain("select pg_notify('pgrst', 'reload schema');");
     expect(quickTaskCreateSource).toContain("p_publish_time:    input.publishTime || null");
-    expect(draftSource).toContain("publishTime: getMarketingPlanWorkingRowPublishTime(row)");
+    expect(draftSource).toContain('publishTime: isMarketingPlanNoTagSelection(selectedChannels) ? "" : getMarketingPlanWorkingRowPublishTime(row)');
     expect(appJsx).toContain("window.dispatchEvent(new CustomEvent(\"flowmate:create-draft-updated\"");
     expect(createScreenJsx).toContain("window.addEventListener(\"flowmate:create-draft-updated\", onExternalCreateDraftUpdated)");
     expect(createScreenJsx).toContain("setCreativeDraft(withTitle);");
     expect(creativeFormSource).toContain("Publish Time");
     expect(createScreenJsx).toContain("const FLOWMATE_PUBLISH_TIME_OPTIONS = [");
     expect(createScreenJsx).toContain('{ value: "", label: "N/A" }');
-    expect(creativeFormSource).toContain('value={value.publishTime}');
+    expect(creativeFormSource).toContain('value={isNoTag ? "" : value.publishTime}');
     expect(creativeFormSource).toContain('onChange={e => update("publishTime", e.target.value)}');
     expect(creativeFormSource).toContain("FLOWMATE_PUBLISH_TIME_OPTIONS.map(option =>");
     expect(creativeFormSource).not.toContain("inputMode=\"numeric\"");
@@ -4779,9 +4827,11 @@ describe("Marketing Plan product split shell", () => {
     expect(workingSheetSource).toContain("async function handleWorkingRowTimeChange(row, nextTime)");
     expect(rowRenderSource).toContain("const canManageSchedule = canManageMarketingPlanSchedule(row);");
     expect(rowRenderSource).toContain("const rowStatusValue = getMarketingPlanWorkingSheetStatus(row);");
-    expect(rowRenderSource).toContain("disabled: !canManageSchedule || updatingRowId === row.contentItemId");
-    expect(rowRenderSource).toContain('title: canManageSchedule ? "" : "Only PIC, Sub PIC, Admin, or a schedule operator can change Time and Status."');
-    expect(rowRenderSource).toContain("onChange: event => handleWorkingRowTimeChange(row, event.target.value)");
+    expect(rowRenderSource).toContain("const inlineTimeUi = getMarketingPlanInlineTimeUi(row, canManageSchedule, updatingRowId);");
+    expect(rowRenderSource).toContain("value: inlineTimeUi.value");
+    expect(rowRenderSource).toContain("disabled: inlineTimeUi.disabled");
+    expect(rowRenderSource).toContain("title: inlineTimeUi.title");
+    expect(rowRenderSource).toContain("if (!inlineTimeUi.isNoTag) handleWorkingRowTimeChange(row, event.target.value);");
     expect(rowRenderSource).toContain("onChange: event => handleWorkingRowStatusChange(row, event.target.value)");
     expect(rowRenderSource).toContain("disabled: !canManageRow || updatingRowId === row.contentItemId");
     expect(rowRenderSource).toContain('title: canManageRow ? "" : "Only PIC, Sub PIC, or Admin can edit this row."');
@@ -4873,7 +4923,7 @@ describe("Marketing Plan product split shell", () => {
       appJsx.indexOf("function getMarketingPlanSupervisorMonthOptions"),
     );
 
-    expect(appJsx).toContain("async function loadMarketingPlanSupervisorRows(user)");
+    expect(appJsx).toContain("async function loadMarketingPlanSupervisorRows(user, options = {})");
     expect(loaderSource).toContain('if (!user || user.role !== "admin") return');
     expect(loaderSource).toContain('.from("marketing_plan_supervisor_monthly_v")');
     expect(loaderSource).toContain('.from("marketing_plan_supervisor_pic_v")');
@@ -4900,12 +4950,26 @@ describe("Marketing Plan product split shell", () => {
     expect(supervisorSource).not.toContain("Total Rows");
     expect(supervisorSource).toContain("Assigned");
     expect(supervisorSource).toContain("Unassigned");
-    expect(supervisorSource).toContain("Avg Working Days Before Launch");
+    expect(supervisorSource).toContain("Avg Working Days Before Launch Date / Deadline");
     expect(supervisorSource).toContain("Risk");
     expect(supervisorSource).toContain("Critical");
-    for (const tab of ["Monthly Overview", "PIC Performance", "Campaign Risk", "Channel Risk"]) {
+    for (const tab of ["Production Insights", "Monthly Overview", "PIC Overview", "Campaign Risk", "Channel Risk"]) {
       expect(supervisorSource).toContain(tab);
     }
+    expect(supervisorSource).toContain('const [activeTab, setActiveTab] = useStateApp("production");');
+    expect(supervisorSource).toContain("productionInsights.status");
+    expect(supervisorSource).toContain("productionStartDate");
+    expect(supervisorSource).toContain("productionEndDate");
+    expect(supervisorSource).toContain("Team");
+    expect(supervisorSource).toContain("Skill");
+    expect(supervisorSource).toContain("Priority");
+    expect(supervisorSource).toContain("getFlowMateProductionStatusOptions");
+    expect(supervisorSource).toContain("Month trend");
+    expect(supervisorSource).toContain("Variance");
+    for (const productionStatusLabel of ["In Progress", "Assigned awaiting acceptance", "Review", "Blocked", "Delivered"]) {
+      expect(supervisorSource).toContain(productionStatusLabel);
+    }
+    expect(supervisorSource).not.toContain("PIC Performance");
     expect(supervisorSource).toContain("getMarketingPlanSupervisorMonthOptions(monthlyRows)");
     expect(supervisorSource).toContain("filterMarketingPlanSupervisorRows(monthlyRows, filters)");
     expect(supervisorSource).toContain("loadSupervisorRows(isAlive);");
@@ -4918,19 +4982,24 @@ describe("Marketing Plan product split shell", () => {
     expect(appJsx).toContain("7 * 60 * 60 * 1000");
     expect(appJsx).toContain("getUTCFullYear()");
     expect(exportSource).toContain("formatMarketingPlanSupervisorExportDateTime(row.firstAssignedAt)");
+    expect(appJsx).toContain("function exportFlowMateProductionInsightsCsv");
+    expect(appJsx).toContain('"P50 active hours"');
+    expect(appJsx).toContain('"P85 active hours"');
+    expect(appJsx).toContain('"Legacy deadline gap count"');
+    expect(exportSource).not.toMatch(/fastest|slowest|speed rank|productivity rank/i);
     expect(exportSource).not.toContain("row.firstAssignedAt,\n    row.workingDaysBeforeLaunch");
     for (const field of [
       '"Month"',
       '"Campaign"',
       '"Product / Event"',
       '"Channel"',
-      '"Launch Date"',
+      '"Launch Date / Deadline"',
       '"Time"',
       '"PIC"',
       '"Effective Status"',
       '"Stored Status"',
       '"Assigned At"',
-      '"Working Days Before Launch"',
+      '"Working Days Before Launch Date / Deadline"',
       '"Risk Bucket"',
       '"Brief Link"',
     ]) {
@@ -5276,8 +5345,8 @@ describe("MVP 1.2 collaboration/admin backend SQL", () => {
     expect(repairSql).not.toContain("update public.team_members");
     expect(createScreenJsx).toContain("seenAssignmentResults");
     expect(createScreenJsx).toContain("metadata.reason");
-    expect(ganttScreenJsx).toContain("Daily workload shows total points planned automatically for each person");
-    expect(ganttScreenJsx).toContain("users do not need to schedule time slots manually");
+    expect(ganttScreenJsx).toContain("Use status, leave, and due dates to decide follow-up.");
+    expect(ganttScreenJsx).toContain("Gantt rule: the task bar runs from 1st Draft to Launch Date / Deadline.");
   });
 
   it("separates WIP failures from capacity failures and safely repairs the Aug 3 queued requests", () => {
@@ -5581,7 +5650,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appJsx).toContain("onOpen: open");
   });
 
-  it("adds Team Schedule below Calendar with Timeline and Workload", () => {
+  it("adds Team Schedule below Calendar with a timeline-first view", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
@@ -5603,9 +5672,8 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(ganttSource).toContain("todayOffset");
     expect(ganttSource).toContain("gantt__today-line");
     expect(ganttSource).toContain("flowmate-team-schedule-timeline-tab");
-    expect(ganttSource).toContain("flowmate-team-schedule-workload-tab");
     expect(ganttSource).toContain("priorityClass");
-    expect(ganttSource).toContain("Capacity = actual weekday capacity minus leave and holidays");
+    expect(ganttSource).toContain("Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled.");
     expect(ganttSource).toContain("window.flowmateSelectedWorkItem = null");
     expect(ganttSource).toContain("onOpen(item.id)");
     expect(appCss).toContain(".gantt");
@@ -5717,10 +5785,9 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appCss).toMatch(/\.gantt__leave\s*\{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;[\s\S]*text-overflow: ellipsis;[\s\S]*white-space: nowrap;/);
   });
 
-  it("shows simplified weekly capacity with task drill-down in Team Schedule", () => {
+  it("keeps Team Schedule timeline surfaces while removing the retired weekly capacity branch", () => {
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const listData = readFileSync(join(process.cwd(), "supabase-list-data.js"), "utf8");
-    const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const capacitySql = readFileSync(join(process.cwd(), "supabase", "gantt_capacity_allocation_read.sql"), "utf8");
     const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
 
@@ -5732,14 +5799,14 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(listData).toContain("window.loadFlowMateCapacityAllocationRows = loadFlowMateCapacityAllocationRows");
     expect(listData).toContain("async function loadFlowMateNonWorkingDays(startDate, endDate)");
     expect(listData).toContain("window.loadFlowMateNonWorkingDays = loadFlowMateNonWorkingDays");
-    expect(screensC).toContain("function teamScheduleWeeklyCellC(");
-    expect(ganttSource).toContain('data-testid="flowmate-team-schedule-workload"');
-    expect(ganttSource).toContain('data-testid="flowmate-team-schedule-capacity-cell"');
-    expect(ganttSource).toContain('data-testid="flowmate-team-schedule-workload-inspector"');
-    expect(ganttSource).toContain("selectedWorkload.entries.map");
-    expect(ganttSource).toContain("Assigned, In Progress, Review, and Blocked count toward workload");
-    expect(appCss).toContain(".team-schedule__capacity-cell.is-over");
-    expect(appCss).toContain('html[data-theme="dark"] .team-schedule__capacity-cell.is-over');
+    expect(ganttSource).toContain('data-testid="flowmate-team-gantt-chart"');
+    expect(ganttSource).toContain("Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled.");
+    expect(ganttSource).not.toContain("flowmate-team-schedule-workload-tab");
+    expect(screensC).not.toContain("function teamScheduleWeeklyCellC(");
+    expect(screensC).not.toContain('data-testid="flowmate-team-schedule-workload"');
+    expect(screensC).not.toContain('data-testid="flowmate-team-schedule-capacity-cell"');
+    expect(screensC).not.toContain('data-testid="flowmate-team-schedule-workload-inspector"');
+    expect(screensC).not.toContain("Production timing and weekly capacity for GD/VE");
     expect(capacitySql).toContain("alter table public.flowmate_capacity_allocations enable row level security");
     expect(capacitySql).toContain("public.flowmate_current_user_can_read_work_item(work_item_id)");
     expect(capacitySql).toContain("grant select on public.flowmate_capacity_allocations to authenticated");
@@ -5798,7 +5865,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(calendarSource).toContain("attachFlowMateLiveRefresh(loadRowsIfAlive)");
     expect(calendarSource).toContain('setViewMode("month")');
     expect(calendarSource).toContain('setViewMode("agenda")');
-    expect(calendarSource).toContain("Launch date");
+    expect(calendarSource).toContain("Launch Date / Deadline");
     expect(calendarSource).toContain("window.flowmateSelectedWorkItem = item");
     expect(calendarSource).toContain("onOpen(item.id)");
     expect(calendarSource).not.toContain("draggable=");
@@ -6663,7 +6730,13 @@ describe("MVP 1.2 Chat H team settings backend SQL", () => {
       "revoke all on function public.flowmate_run_assignment(uuid, public.assignment_trigger)",
       finalEngineStart,
     );
+    const manualReassignStart = assignmentSql.indexOf("create or replace function public.flowmate_change_creative_assignee(");
+    const manualReassignEnd = assignmentSql.indexOf(
+      "revoke all on function public.flowmate_change_creative_assignee(text, uuid, text)",
+      manualReassignStart,
+    );
     const finalEngineSql = assignmentSql.slice(finalEngineStart, finalEngineEnd);
+    const manualReassignSql = assignmentSql.slice(manualReassignStart, manualReassignEnd);
 
     expect(assignmentSql).toContain("v_required_skill text");
     expect(assignmentSql).toContain("v_required_skill := lower(trim(coalesce(v_det.asset_subtype, '')))");
@@ -6676,8 +6749,9 @@ describe("MVP 1.2 Chat H team settings backend SQL", () => {
     expect(assignmentSql).toContain("Re-running rpc_assignment.sql must preserve every manual skill");
     expect(seedSql).toMatch(/'pond'[\s\S]*array\[[^\]]*'new-web'[^\]]*\]::text\[\]/);
     expect(seedSql).toMatch(/'jo'[\s\S]*array\[[^\]]*'new-web'[^\]]*\]::text\[\]/);
-    expect(finalEngineSql).toContain("'code', 'skill_mismatch'");
+    expect(finalEngineSql).not.toContain("'code', 'skill_mismatch'");
     expect(finalEngineSql).toContain("'code', 'backup_skill'");
+    expect(manualReassignSql).toContain("'code', 'skill_mismatch'");
     expect(finalEngineSql).not.toContain("'result', 'queued'");
     expect(assignmentSql).not.toContain("v_det.asset_type = any (tm.skills)");
   });
@@ -7090,8 +7164,8 @@ describe("Marketing Plan schedule-operator backend contract", () => {
       expect(timeRpc).toContain("Publish Time must be N/A or a whole hour.");
       expect(timeRpc).toContain("using errcode = '22023'");
       expect(timeRpc).not.toContain("p_publish_time not in ('11:00', '14:00', '18:00', '21:00')");
-      expect(timeRpc).toContain("set source_start_time = p_publish_time");
-      expect(timeRpc).toContain("set publish_time = p_publish_time");
+      expect(timeRpc).toMatch(/set source_start_time = (?:v_effective_publish_time|p_publish_time)/);
+      expect(timeRpc).toMatch(/set publish_time = (?:case[\s\S]*v_effective_publish_time|p_publish_time)/);
       expect(timeRpc).toContain("where content_item_id = v_content.id");
       expect(timeRpc).toContain("where id = v_content.flowmate_work_item_id");
       expect(timeRpc).not.toContain("set placement_status =");
@@ -7139,7 +7213,7 @@ describe("Marketing Plan schedule-operator backend contract", () => {
       expect(syncRpc).toContain("p_publish_time is null");
       expect(syncRpc).toContain("extract(minute from p_publish_time) = 0");
       expect(syncRpc).toContain("extract(second from p_publish_time) = 0");
-      expect(syncRpc).toContain("publish_time = p_publish_time");
+      expect(syncRpc).toMatch(/publish_time = (?:v_effective_publish_time|p_publish_time)/);
       expect(syncRpc).not.toContain("publish_time = coalesce(p_publish_time");
     }
   });
@@ -7822,9 +7896,13 @@ describe("duplicate working row RPC", () => {
       expect(contract.body.match(/insert into public\.marketing_channel_placements/g), contract.sqlPath).toHaveLength(1);
       expect(contract.body, contract.sqlPath).not.toMatch(/\bexception\s+when\b/i);
       expect(contract.body, contract.sqlPath).not.toMatch(/\b(begin\s+transaction|commit|rollback)\b/i);
+      if (contract.body.includes("v_effective_publish_time")) {
+        expect(contract.body, contract.sqlPath).toContain("when v_source_placement.channel = 'no_tag' then null");
+        expect(contract.body, contract.sqlPath).toContain("'publish_time', v_effective_publish_time");
+      } else {
+        expect(contract.body, contract.sqlPath).toContain("'publish_time', p_publish_time");
+      }
     }
-
-    expect(contracts[0].definition).toBe(contracts[1].definition);
   });
 
   it("copies approved fields, uses current user names, resets integrations, and creates fresh placements", () => {
@@ -7856,11 +7934,17 @@ describe("duplicate working row RPC", () => {
         "id, content_item_id, channel, publish_date, publish_time, placement_status, posted_url, note",
       );
       expect(body, sqlPath).toContain("gen_random_uuid(), v_new_content_item_id, v_source_placement.channel, p_launch_date,");
-      expect(body, sqlPath).toContain("p_publish_time, 'planned', null, v_source_placement.note");
+      if (body.includes("v_effective_publish_time")) {
+        expect(body, sqlPath).toContain("v_effective_publish_time := null;");
+        expect(body, sqlPath).toContain("when v_source_placement.channel = 'no_tag' then null");
+        expect(body, sqlPath).toContain("'publish_time', v_effective_publish_time");
+      } else {
+        expect(body, sqlPath).toContain("p_publish_time, 'planned', null, v_source_placement.note");
+        expect(body, sqlPath).toContain("'publish_time', p_publish_time");
+      }
       expect(body, sqlPath).toContain("where source.content_item_id = v_source.id");
       expect(body, sqlPath).toContain("'content_item_id', v_new_content_item_id");
       expect(body, sqlPath).toContain("'launch_date', p_launch_date");
-      expect(body, sqlPath).toContain("'publish_time', p_publish_time");
 
       expect(sql, sqlPath).toContain("-- Manual rollback-safe verification checklist (do not run against production):");
       expect(sql, sqlPath).toContain("-- Unauthorized actor: function raises before either insert, leaving zero new rows.");

@@ -138,7 +138,7 @@ describe("FlowMate Trello + Asana hybrid frontend static UAT", () => {
     expect(screensA).toContain('result.kind === "unassigned" && "Request submitted - unassigned"');
     expect(screensA).toContain('result.kind === "need_brief" && "Request submitted - needs brief"');
     expect(screensA).toContain('{m?.name || result.ownerName || "Assigned owner"}');
-    expect(screensA).toContain("Owner selected by the assignment engine");
+    expect(screensA).toContain("Owner selected from Skill, active work, Assigned queue, and leave.");
     expect(screensA).toContain("<AssignmentWarningBadges work={resultWarningWork} limit={8} />");
     expect(screensA).toContain("Task created but needs manual assignment.");
     expect(screensA).toContain('onClick={() => onNav("attention")}');
@@ -146,24 +146,24 @@ describe("FlowMate Trello + Asana hybrid frontend static UAT", () => {
     expect(screensA).not.toContain('kind: "queued"');
   });
 
-  it("renders all 12 Attention categories with context and no rerun controls", () => {
+  it("renders the 10 approved Attention categories without retired capacity flags or rerun controls", () => {
     const attention = sliceBetween(screensB, "const FLOWMATE_ATTENTION_CATEGORIES_B", "/* ============================================================\n   ADMIN WHITELIST");
     const categoriesLiteral = sliceBetween(attention, "const FLOWMATE_ATTENTION_CATEGORIES_B", "];\n");
     const codes = [...categoriesLiteral.matchAll(/code:\s*"([^"]+)"/g)].map((match) => match[1]);
     expect(codes).toEqual([
       "unassigned",
-      "over_capacity",
       "wip_exceeded",
       "skill_mismatch",
       "backup_skill",
       "member_partial",
       "member_on_leave",
-      "deadline_capacity_gap",
       "review_buffer_risk",
       "review_delay",
       "blocked",
       "needs_split",
     ]);
+    expect(codes).not.toContain("over_capacity");
+    expect(codes).not.toContain("deadline_capacity_gap");
     expect(attention).toContain('<h1 className="page__title">Attention Needed</h1>');
     expect(attention).toContain("window.getFlowMateAttentionRows");
     expect(attention).toContain("window.getFlowMateAttentionGroups");
@@ -201,25 +201,28 @@ describe("FlowMate Trello + Asana hybrid frontend static UAT", () => {
     expect(screensB).toContain("<StatusBadge status={w.status} />");
   });
 
-  it("marks weekly Team Schedule workload above capacity and exposes drill-down", () => {
-    const capacityClass = functionSlice(screensC, "ganttCapacityClassC", "function ganttCapacityTitleC");
-    const capacityTitle = functionSlice(screensC, "ganttCapacityTitleC", "function TeamGanttScreen");
-    expect(capacityClass).toContain('if (usedPoint > bucketCapacity) return "is-over-capacity"');
-    expect(capacityClass.indexOf("usedPoint > bucketCapacity")).toBeLessThan(capacityClass.indexOf("usedPoint === bucketCapacity"));
-    expect(capacityTitle).toContain("const amountOver = Number((usedPoint - bucketCapacity).toFixed(2))");
-    expect(capacityTitle).toContain("OVER CAPACITY by ${amountOver} pt");
-    expect(screensC).toContain('stateClass === "is-over-capacity"');
-    expect(screensC).toContain('used > roundedAvailable ? "is-over"');
-    expect(screensC).toContain("selectedWorkload.entries.map");
-    expect(screensC).toContain("This view is read-only");
+  it("keeps the active Team Schedule date-led and omits retired capacity UI", () => {
+    const activeTeamSchedule = functionSlice(screensC, "TeamGanttScreen", "function CalendarScreen");
+    expect(screensC).toContain('const TEAM_SCHEDULE_CAPACITY_STATUSES_C = ["assigned", "in_progress", "review", "blocked"]');
+    expect(activeTeamSchedule).toContain('aria-selected="true"');
+    expect(activeTeamSchedule).toContain('data-testid="flowmate-team-schedule-timeline-tab"');
+    expect(activeTeamSchedule).toContain("Asset First Draft Due:");
+    expect(activeTeamSchedule).toContain("Asset Final/Approved Due:");
+    expect(activeTeamSchedule).toContain("Launch Date / Deadline:");
+    expect(activeTeamSchedule).toContain("Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled.");
+    expect(activeTeamSchedule).toContain("This view is read-only");
+    expect(activeTeamSchedule).not.toContain("gantt__capacity-summary");
+    expect(activeTeamSchedule).not.toContain("is-over-capacity");
+    expect(activeTeamSchedule).not.toContain("OVER CAPACITY");
+    expect(activeTeamSchedule).not.toContain("selectedWorkload");
   });
 
-  it("uses Unassigned and deduplicated Attention metrics instead of a current queued workflow", () => {
+  it("keeps Unassigned and operational Attention signals without the retired KPI attention detail", () => {
     expect(screensC).toContain("window.getFlowMateAttentionRows");
     expect(screensC).toContain("window.getFlowMateAttentionCategoryCodes");
     expect(screensC).toContain("Attention / at risk");
     expect(screensC).toContain("Current work without an owner");
-    expect(screensC).toContain("Deduplicated current attention items");
+    expect(screensC).not.toContain("Deduplicated current attention items");
     expect(screensC).not.toContain("Queued effort");
     expect(screensC).not.toMatch(/className="kpi__lbl">Queued</);
     expect(screensC).not.toMatch(/className="stat__lbl">Queued</);

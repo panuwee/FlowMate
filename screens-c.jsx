@@ -97,6 +97,187 @@ function flowMateWorkloadMonthOptionsC(rows) {
     .map(key => ({ key, label: flowMateMonthLabelC(key) }));
 }
 
+function flowMateDateKeyC(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return "";
+  const key = `${match[1]}-${match[2]}-${match[3]}`;
+  const date = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== key) return "";
+  return key;
+}
+
+function flowMateBangkokDateKeyC(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+function flowMateDueDateSignalC(row, todayKey) {
+  const status = String(row?.status || "").toLowerCase();
+  if (["delivered", "done", "cancelled", "queued"].includes(status)) {
+    return { dueSoon: false, overdue: false };
+  }
+  const dueKey = flowMateDateKeyC(row?.dueDate);
+  const normalizedTodayKey = flowMateDateKeyC(todayKey);
+  if (!dueKey || !normalizedTodayKey) return { dueSoon: false, overdue: false };
+  const dayDelta = Math.round((Date.parse(`${dueKey}T00:00:00Z`) - Date.parse(`${normalizedTodayKey}T00:00:00Z`)) / 86400000);
+  return {
+    dueSoon: dayDelta >= 0 && dayDelta <= 2,
+    overdue: dayDelta < 0,
+  };
+}
+
+function flowMateWorkloadStatusCountsC(items) {
+  return (items || []).reduce((counts, item) => {
+    const status = String(item?.status || "").toLowerCase();
+    if (status === "done") counts.delivered += 1;
+    else if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+    return counts;
+  }, { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 });
+}
+
+function buildFlowMateWorkloadMemberSummaryC(row, monthItems, monthRequestedItems, todayKey) {
+  const member = row?.m || {};
+  const items = monthItems || [];
+  const activeCreativeItems = items
+    .filter(item => item?.type === "creative" && ["assigned", "in_progress", "review", "blocked"].includes(item.status))
+    .map(item => {
+      const {
+        effort,
+        effortPoint,
+        effort_point,
+        assignedEffort,
+        effectiveCap,
+        capacityWindow,
+        available,
+        window,
+        wip,
+        ...operationalItem
+      } = item || {};
+      return operationalItem;
+    });
+  const dateSignals = items.map(item => flowMateDueDateSignalC(item, todayKey));
+  return {
+    m: {
+      id: member.id,
+      name: member.name,
+      discipline: member.discipline,
+      skills: member.skills || [],
+      availability: member.availability || "available",
+      leaveFractionToday: Number(member.leaveFractionToday || 0),
+    },
+    statusCounts: flowMateWorkloadStatusCountsC(items),
+    due_soon: dateSignals.filter(signal => signal.dueSoon).length,
+    overdue: dateSignals.filter(signal => signal.overdue).length,
+    blocked: items.filter(item => item?.status === "blocked").length,
+    review: items.filter(item => item?.status === "review").length,
+    quick: items.filter(item => item?.type === "quick" && !["delivered", "done", "cancelled"].includes(item.status)).length,
+    urgentAssigned: items.filter(item => item?.priority === "urgent").length,
+    urgentRequested: (monthRequestedItems || []).filter(item => item?.priority === "urgent").length,
+    items: activeCreativeItems,
+  };
+}
+
+function buildFlowMateKpiTeamSummaryC(rows, todayKey) {
+  const totals = {
+    active: 0,
+    assigned: 0,
+    inProgress: 0,
+    review: 0,
+    blocked: 0,
+    dueSoon: 0,
+    overdue: 0,
+    delivered: 0,
+    cancelled: 0,
+    unassigned: 0,
+  };
+  const teamMap = new Map();
+  (rows || []).forEach(row => {
+    const status = String(row?.status || "").toLowerCase();
+    const team = row?.requesterTeam || "No team";
+    const current = teamMap.get(team) || {
+      team,
+      total: 0,
+      assigned: 0,
+      inProgress: 0,
+      review: 0,
+      blocked: 0,
+      dueSoon: 0,
+      overdue: 0,
+      delivered: 0,
+      cancelled: 0,
+      unassigned: 0,
+    };
+    current.total += 1;
+    const isDelivered = status === "delivered" || status === "done";
+    const isCancelled = status === "cancelled";
+    const isActive = !["delivered", "done", "cancelled", "queued"].includes(status);
+    const isUnassigned = status === "unassigned" || row?.assignmentResult === "unassigned";
+    if (isActive) totals.active += 1;
+    if (status === "assigned") { totals.assigned += 1; current.assigned += 1; }
+    if (status === "in_progress") { totals.inProgress += 1; current.inProgress += 1; }
+    if (status === "review") { totals.review += 1; current.review += 1; }
+    if (status === "blocked") { totals.blocked += 1; current.blocked += 1; }
+    if (isDelivered) { totals.delivered += 1; current.delivered += 1; }
+    if (isCancelled) { totals.cancelled += 1; current.cancelled += 1; }
+    if (isUnassigned) { totals.unassigned += 1; current.unassigned += 1; }
+    const signal = flowMateDueDateSignalC(row, todayKey);
+    if (signal.dueSoon) { totals.dueSoon += 1; current.dueSoon += 1; }
+    if (signal.overdue) { totals.overdue += 1; current.overdue += 1; }
+    teamMap.set(team, current);
+  });
+  return {
+    totals,
+    teams: Array.from(teamMap.values()).sort((a, b) => a.team.localeCompare(b.team)),
+  };
+}
+
+function buildFlowMateKpiExportC(summary, monthLabel) {
+  const totals = summary?.totals || {};
+  const teams = summary?.teams || [];
+  const summaryRows = [
+    ["Metric", "Value"],
+    ["Export month", monthLabel],
+    ["Active work", totals.active || 0],
+    ["Assigned awaiting acceptance", totals.assigned || 0],
+    ["In Progress", totals.inProgress || 0],
+    ["Review", totals.review || 0],
+    ["Blocked", totals.blocked || 0],
+    ["Due soon", totals.dueSoon || 0],
+    ["Overdue", totals.overdue || 0],
+    ["Delivered", totals.delivered || 0],
+    ["Cancelled", totals.cancelled || 0],
+    ["Unassigned", totals.unassigned || 0],
+  ];
+  const teamStatusRows = [
+    ["Requester team", "All tasks", "Assigned awaiting acceptance", "In Progress", "Review", "Blocked", "Due soon", "Overdue", "Delivered", "Cancelled", "Unassigned"],
+    ...teams.map(row => [row.team, row.total, row.assigned, row.inProgress, row.review, row.blocked, row.dueSoon, row.overdue, row.delivered, row.cancelled, row.unassigned]),
+  ];
+  return {
+    summaryRows,
+    teamStatusRows,
+    csvColumns: [
+      { label: "Requester team", value: "team" },
+      { label: "All tasks", value: "total" },
+      { label: "Assigned awaiting acceptance", value: "assigned" },
+      { label: "In Progress", value: "inProgress" },
+      { label: "Review", value: "review" },
+      { label: "Blocked", value: "blocked" },
+      { label: "Due soon", value: "dueSoon" },
+      { label: "Overdue", value: "overdue" },
+      { label: "Delivered", value: "delivered" },
+      { label: "Cancelled", value: "cancelled" },
+      { label: "Unassigned", value: "unassigned" },
+    ],
+    csvRows: teams,
+  };
+}
+
 const FLOWMATE_PLANNING_CHANNELS_C = ["Facebook", "Instagram", "TikTok", "YouTube", "Website", "In-game", "LINE", "Other"];
 
 function normalizeFlowMatePlanningChannelC(value) {
@@ -367,30 +548,20 @@ Object.assign(window, {
    ============================================================ */
 function WorkloadScreen({ onOpen }) {
   const WORKLOAD_TEAM_FILTERS = ["All", "Operations", "Marketing", "Esport"];
-  const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
+  const FLOWMATE_ACTIVE_WORK_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
   const localRows = MEMBERS.map(m => {
     const mine = WORK.filter(w => w.assignee === m.id);
     const requestedItems = WORK.filter(w => w.requesterUserId && w.requesterUserId === (m.userId || m.id));
-    const openCreative = mine.filter(w => w.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(w.status));
-    const wip = mine.filter(w => w.status === "in_progress" && w.type === "creative").length;
-    const assignedEffort = openCreative.reduce((s, w) => s + (w.effort || 0), 0);
-    const effectiveCap = m.availability === "partial" ? (m.capacityOverride || 0) : (m.availability === "leave" ? 0 : m.capacityPerDay);
-    // Window of 5 working days
-    const capacityWindow = effectiveCap * 5;
+    const activeCreative = mine.filter(w => w.type === "creative" && FLOWMATE_ACTIVE_WORK_STATUS_KEYS.includes(w.status));
     return {
       m,
       statusCounts: window.getFlowMateWorkloadStatusCounts ? window.getFlowMateWorkloadStatusCounts(mine) : { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 },
-      assignedEffort,
-      effectiveCap,
-      window: capacityWindow,
-      available: Math.max(0, capacityWindow - assignedEffort),
-      wip,
       due_soon: mine.filter(w => w.dueDelta != null && w.dueDelta >= 0 && w.dueDelta <= 2 && ["assigned","in_progress","review"].includes(w.status)).length,
       overdue: mine.filter(w => w.overdue).length,
       blocked: mine.filter(w => w.status === "blocked").length,
       review: mine.filter(w => w.status === "review").length,
       quick: mine.filter(w => w.type === "quick" && !["delivered","cancelled"].includes(w.status)).length,
-      items: openCreative,
+      items: activeCreative,
       allItems: mine,
       requestedItems,
     };
@@ -444,7 +615,6 @@ function WorkloadScreen({ onOpen }) {
       ...r.m,
       skills: r.m.skills || [],
       availability: r.m.availability || "available",
-      wipLimit: r.m.wipLimit || 0,
     },
     statusCounts: r.statusCounts || { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0 },
     items: r.items || [],
@@ -458,6 +628,7 @@ function WorkloadScreen({ onOpen }) {
   const selectedWorkloadMonth = effectiveWorkloadMonthOptions.some(option => option.key === workloadMonth)
     ? workloadMonth
     : effectiveWorkloadMonthOptions[0].key;
+  const workloadTodayKey = flowMateBangkokDateKeyC();
   const selectedMonthWorkingDays = flowMateWorkingDaysInMonthC(selectedWorkloadMonth);
   const selectedMonthWorkloadItems = flowMateFilterRowsByMonthC(workloadItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"])
     .filter(item => item.status !== "queued");
@@ -471,31 +642,7 @@ function WorkloadScreen({ onOpen }) {
   const monthRows = safeRows.map(r => {
     const monthItems = flowMateFilterRowsByMonthC(r.allItems || r.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
     const monthRequestedItems = flowMateFilterRowsByMonthC(r.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-    const monthOpenCreative = monthItems.filter(item =>
-      item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status)
-    );
-    const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
-    const capacityWindow = r.effectiveCap * selectedMonthWorkingDays;
-    const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
-    const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
-    return {
-      ...r,
-      statusCounts: window.getFlowMateWorkloadStatusCounts
-        ? window.getFlowMateWorkloadStatusCounts(monthItems)
-        : r.statusCounts,
-      assignedEffort,
-      window: capacityWindow,
-      available: Math.max(0, capacityWindow - assignedEffort),
-      due_soon: monthItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
-      overdue: monthItems.filter(item => item.overdue || (item.dueDelta != null && item.dueDelta < 0)).length,
-      blocked: monthItems.filter(item => item.status === "blocked").length,
-      review: monthItems.filter(item => item.status === "review").length,
-      quick: monthItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
-      urgentAssigned,
-      urgentRequested,
-      items: monthOpenCreative,
-      requestedItems: monthRequestedItems,
-    };
+    return buildFlowMateWorkloadMemberSummaryC(r, monthItems, monthRequestedItems, workloadTodayKey);
   });
   const tabRows = monthRows.filter(r => {
     const isGdVe = window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(r.m) : false;
@@ -514,15 +661,12 @@ function WorkloadScreen({ onOpen }) {
     return totals;
   }, { assigned: 0, in_progress: 0, review: 0, blocked: 0, delivered: 0, urgentAssigned: 0, urgentRequested: 0 });
   const totals = {
-    capacity: visibleRows.reduce((s, r) => s + r.window, 0),
-    assigned: visibleRows.reduce((s, r) => s + r.assignedEffort, 0),
     unassigned: workloadUnassignedRows.length,
     attention: workloadAttentionRows.length,
     overdue: visibleRows.reduce((s, r) => s + r.overdue, 0),
     urgentAssigned: visibleRows.reduce((s, r) => s + (r.urgentAssigned || 0), 0),
     urgentRequested: visibleRows.reduce((s, r) => s + (r.urgentRequested || 0), 0),
   };
-  totals.available = totals.capacity - totals.assigned;
 
   const [expanded, setExpanded] = useStateC(new Set());
   function toggle(id) {
@@ -532,48 +676,24 @@ function WorkloadScreen({ onOpen }) {
   }
 
   function exportWorkloadRows() {
-    const exportRows = visibleRows.map(row => {
-      const monthItems = flowMateFilterRowsByMonthC(row.allItems || row.items || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-      const monthRequestedItems = flowMateFilterRowsByMonthC(row.requestedItems || [], selectedWorkloadMonth, ["calendarDate", "dueDate", "launchDate"]);
-      const monthOpenCreative = monthItems.filter(item =>
-        item.type === "creative" && FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status)
-      );
-      const assignedEffort = monthOpenCreative.reduce((sum, item) => sum + (item.effort || 0), 0);
-      const urgentAssigned = monthItems.filter(item => item.priority === "urgent").length;
-      const urgentRequested = monthRequestedItems.filter(item => item.priority === "urgent").length;
-      return {
-        ...row,
-        exportMonthLabel: flowMateMonthLabelC(selectedWorkloadMonth),
-        statusCounts: window.getFlowMateWorkloadStatusCounts
-          ? window.getFlowMateWorkloadStatusCounts(monthItems)
-          : row.statusCounts,
-        assignedEffort,
-        available: Math.max(0, row.window - assignedEffort),
-        wip: monthItems.filter(item => item.status === "in_progress" && item.type === "creative").length,
-        due_soon: monthItems.filter(item => item.dueDelta != null && item.dueDelta >= 0 && item.dueDelta <= 2 && ["assigned","in_progress","review"].includes(item.status)).length,
-        overdue: monthItems.filter(item => item.overdue || (item.dueDelta != null && item.dueDelta < 0)).length,
-        blocked: monthItems.filter(item => item.status === "blocked").length,
-        review: monthItems.filter(item => item.status === "review").length,
-        quick: monthItems.filter(item => item.type === "quick" && !["delivered","cancelled"].includes(item.status)).length,
-        urgentAssigned,
-        urgentRequested,
-      };
-    });
+    const exportRows = visibleRows.map(row => ({
+      ...row,
+      exportMonthLabel: flowMateMonthLabelC(selectedWorkloadMonth),
+    }));
     exportFlowMateCsvC(
       `flowmate-workload-${selectedWorkloadMonth}-${new Date().toISOString().slice(0, 10)}.csv`,
       [
         { label: "Export month", value: "exportMonthLabel" },
         { label: "Member", value: row => row.m.name },
         { label: "Team", value: row => row.m.discipline },
-        { label: "Capacity", value: "window" },
-        { label: "Assigned effort", value: "assignedEffort" },
-        { label: "Available", value: "available" },
-        { label: "WIP", value: "wip" },
-        { label: "Assigned", value: row => row.statusCounts.assigned || 0 },
-        { label: "In progress", value: row => row.statusCounts.in_progress || 0 },
+        { label: "Availability", value: row => row.m.availability },
+        { label: "Assigned awaiting acceptance", value: row => row.statusCounts.assigned || 0 },
+        { label: "In Progress", value: row => row.statusCounts.in_progress || 0 },
         { label: "Review", value: row => row.statusCounts.review || 0 },
         { label: "Blocked", value: row => row.statusCounts.blocked || 0 },
-        { label: "Delivered", value: row => row.statusCounts.delivered || 0 },
+        { label: "Due soon", value: "due_soon" },
+        { label: "Overdue", value: "overdue" },
+        { label: "Quick tasks", value: "quick" },
         { label: "Urgent assigned", value: "urgentAssigned" },
         { label: "Urgent requested", value: "urgentRequested" },
       ],
@@ -586,7 +706,7 @@ function WorkloadScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Workload</h1>
-          <div className="page__sub">Per-member effort for {flowMateMonthLabelC(selectedWorkloadMonth)} ({selectedMonthWorkingDays} working days) - {loadState.message}</div>
+          <div className="page__sub">Per-member active work and date signals for {flowMateMonthLabelC(selectedWorkloadMonth)} ({selectedMonthWorkingDays} working days) - {loadState.message}</div>
         </div>
         <div className="page__actions">
           <select
@@ -619,11 +739,12 @@ function WorkloadScreen({ onOpen }) {
       {workloadTab === "standard" ? (
         <>
           <div className="stat-strip" style={{ gridTemplateColumns: "repeat(9, 1fr)" }}>
-            <div className="stat"><div className="stat__num mono">{statusTotals.assigned}</div><div className="stat__lbl">Assigned</div></div>
-            <div className="stat stat--info"><div className="stat__num mono">{statusTotals.in_progress}</div><div className="stat__lbl">In progress</div></div>
+            <div className="stat"><div className="stat__num mono">{statusTotals.assigned}</div><div className="stat__lbl">Assigned awaiting acceptance</div></div>
+            <div className="stat stat--info"><div className="stat__num mono">{statusTotals.in_progress}</div><div className="stat__lbl">In Progress</div></div>
             <div className="stat"><div className="stat__num mono">{statusTotals.review}</div><div className="stat__lbl">Review</div></div>
             <div className="stat stat--accent"><div className="stat__num mono">{statusTotals.blocked}</div><div className="stat__lbl">Blocked</div></div>
-            <div className="stat stat--ok"><div className="stat__num mono">{statusTotals.delivered}</div><div className="stat__lbl">Delivered</div></div>
+            <div className="stat stat--warn"><div className="stat__num mono">{visibleRows.reduce((s, r) => s + r.due_soon, 0)}</div><div className="stat__lbl">Due soon</div></div>
+            <div className="stat stat--accent"><div className="stat__num mono">{visibleRows.reduce((s, r) => s + r.overdue, 0)}</div><div className="stat__lbl">Overdue</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{statusTotals.urgentAssigned}</div><div className="stat__lbl">Urgent assigned</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{statusTotals.urgentRequested}</div><div className="stat__lbl">Urgent requested</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{totals.unassigned}</div><div className="stat__lbl">Unassigned</div></div>
@@ -635,11 +756,12 @@ function WorkloadScreen({ onOpen }) {
               <thead>
                 <tr>
                   <th>Member</th>
-                  <th>Assigned</th>
+                  <th>Assigned awaiting acceptance</th>
                   <th>In Progress</th>
                   <th>Review</th>
                   <th>Blocked</th>
-                  <th>Delivered</th>
+                  <th>Due soon</th>
+                  <th>Overdue</th>
                   <th>Urgent assigned</th>
                   <th>Urgent requested</th>
                 </tr>
@@ -656,7 +778,8 @@ function WorkloadScreen({ onOpen }) {
                     <td className="mono">{r.statusCounts.in_progress}</td>
                     <td className="mono">{r.statusCounts.review}</td>
                     <td className="mono">{r.statusCounts.blocked}</td>
-                    <td className="mono">{r.statusCounts.delivered}</td>
+                    <td className="mono">{r.due_soon}</td>
+                    <td className="mono">{r.overdue}</td>
                     <td className="mono">{r.urgentAssigned}</td>
                     <td className="mono">{r.urgentRequested}</td>
                   </tr>
@@ -671,9 +794,9 @@ function WorkloadScreen({ onOpen }) {
       ) : (
         <>
           <div className="stat-strip" style={{ gridTemplateColumns: "repeat(8, 1fr)" }}>
-            <div className="stat"><div className="stat__num mono">{totals.capacity}</div><div className="stat__lbl">Total capacity (pt)</div><div className="stat__delta">across {visibleRows.length} members - {selectedMonthWorkingDays} working days</div></div>
-            <div className="stat stat--info"><div className="stat__num mono">{totals.assigned}</div><div className="stat__lbl">Assigned effort</div></div>
-            <div className="stat stat--ok"><div className="stat__num mono">{totals.available}</div><div className="stat__lbl">Available</div></div>
+            <div className="stat"><div className="stat__num mono">{visibleRows.reduce((s, r) => s + (r.statusCounts.assigned || 0), 0)}</div><div className="stat__lbl">Assigned awaiting acceptance</div><div className="stat__delta">across {visibleRows.length} members - {selectedMonthWorkingDays} working days</div></div>
+            <div className="stat stat--info"><div className="stat__num mono">{visibleRows.reduce((s, r) => s + (r.statusCounts.in_progress || 0), 0)}</div><div className="stat__lbl">In Progress</div></div>
+            <div className="stat stat--ok"><div className="stat__num mono">{visibleRows.reduce((s, r) => s + (r.statusCounts.review || 0), 0)}</div><div className="stat__lbl">Review</div></div>
             <div className="stat stat--warn"><div className="stat__num mono">{totals.unassigned}</div><div className="stat__lbl">Unassigned</div></div>
             <div className="stat stat--accent"><div className="stat__num mono">{totals.attention}</div><div className="stat__lbl">Attention / at risk</div></div>
             <div className="stat stat--accent"><div className="stat__num mono">{totals.overdue}</div><div className="stat__lbl">Overdue</div></div>
@@ -689,25 +812,18 @@ function WorkloadScreen({ onOpen }) {
               <th>Member</th>
               <th>Skills</th>
               <th>Availability</th>
-              <th>Cap / day</th>
-              <th>Assigned effort</th>
-              <th style={{ width: 200 }}>Load ({selectedMonthWorkingDays}wd)</th>
-              <th>WIP</th>
+              <th>Assigned awaiting acceptance</th>
+              <th>In Progress</th>
               <th>Due soon</th>
               <th>Overdue</th>
               <th>Blocked</th>
               <th>Review</th>
               <th>Quick</th>
               <th>Urgent</th>
-              <th>Flags</th>
             </tr>
           </thead>
           <tbody>
             {visibleRows.map(r => {
-              const pct = r.window > 0 ? Math.min(100, (r.assignedEffort / r.window) * 100) : 0;
-              const over = r.assignedEffort > r.window;
-              const wipFull = r.wip >= r.m.wipLimit;
-              const partialNoOverride = r.m.availability === "partial" && !r.m.capacityOverride;
               const isOpen = expanded.has(r.m.id);
               return (
                 <React.Fragment key={r.m.id}>
@@ -728,38 +844,23 @@ function WorkloadScreen({ onOpen }) {
                     <td>
                       <span className={`avail avail--${r.m.availability}`}><span className="avail__dot"></span>
                         {r.m.availability === "available" && "Available"}
-                        {r.m.availability === "partial" && (r.m.capacityOverride ? `Partial - ${r.m.capacityOverride}/d` : "Partial - no override")}
+                        {r.m.availability === "partial" && "Partial leave"}
                         {r.m.availability === "leave" && "On leave"}
                       </span>
                     </td>
-                    <td className="mono">{r.effectiveCap}</td>
-                    <td className="mono"><span className={over ? "cell-bad" : ""}>{r.assignedEffort}</span> <span className="muted">/ {r.window}</span></td>
-                    <td>
-                      <div className="meter">
-                        <div className={`meter__fill ${over ? "meter__fill--over" : pct > 80 ? "meter__fill--warn" : ""}`} style={{ width: `${pct}%` }}></div>
-                      </div>
-                      <div className="mono muted" style={{ fontSize: 11, marginTop: 4 }}>{r.available} pt available</div>
-                    </td>
-                    <td><span className={wipFull ? "cell-bad" : ""}>{r.wip}/{r.m.wipLimit}</span></td>
+                    <td className="mono">{r.statusCounts.assigned || 0}</td>
+                    <td className="mono">{r.statusCounts.in_progress || 0}</td>
                     <td><span className={r.due_soon > 0 ? "cell-warn" : "cell-grey"}>{r.due_soon}</span></td>
                     <td><span className={r.overdue > 0 ? "cell-bad" : "cell-grey"}>{r.overdue}</span></td>
                     <td><span className={r.blocked > 0 ? "cell-bad" : "cell-grey"}>{r.blocked}</span></td>
                     <td className="cell-grey">{r.review}</td>
                     <td className="cell-grey">{r.quick}</td>
                     <td><span className={r.urgentAssigned > 0 ? "cell-warn" : "cell-grey"}>{r.urgentAssigned}</span></td>
-                    <td>
-                      <span className="row" style={{ gap: 4, flexWrap: "wrap" }}>
-                        {over && <span className="tag" style={{ background: "var(--garena-red-light-2)", color: "var(--garena-red)" }}>Over cap</span>}
-                        {wipFull && <span className="tag" style={{ background: "#FDEFE0", color: "#8A4A12" }}>WIP full</span>}
-                        {partialNoOverride && <span className="tag" style={{ background: "#FDEFE0", color: "#8A4A12" }}>No override</span>}
-                        {r.overdue > 0 && <span className="tag" style={{ background: "var(--garena-red-light-2)", color: "var(--garena-red)" }}>Overdue</span>}
-                      </span>
-                    </td>
                   </tr>
                   {isOpen && (
                     <tr style={{ background: "#FCFCFC" }}>
                       <td></td>
-                      <td colSpan="14" style={{ padding: "12px 14px" }}>
+                      <td colSpan="12" style={{ padding: "12px 14px" }}>
                         <div className="muted" style={{ fontSize: 11, marginBottom: 8, letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700 }}>
                           Active creative work - {r.items.length}
                         </div>
@@ -775,7 +876,6 @@ function WorkloadScreen({ onOpen }) {
                                   <td className="col-title">{w.title}</td>
                                   <td><StatusBadge status={w.status} /></td>
                                   <td><PriorityBadge level={w.priority} /></td>
-                                  <td><Effort value={w.effort} /></td>
                                   <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
                                 </tr>
                               ))}
@@ -789,7 +889,7 @@ function WorkloadScreen({ onOpen }) {
               );
             })}
                 {visibleRows.length === 0 && (
-                  <tr><td colSpan="15" className="muted">No GD/VE workload rows loaded.</td></tr>
+                  <tr><td colSpan="12" className="muted">No GD/VE workload rows loaded.</td></tr>
                 )}
           </tbody>
         </table>
@@ -987,7 +1087,7 @@ function PlanningChannelViewScreen({ onOpen }) {
         <div className="team-settings-empty" style={{ marginTop: 12 }}>No active Creative Requests match the selected filters.</div>
       )}
 
-      <Source>{loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows"} - publish date with launch date fallback</Source>
+      <Source>{loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows"} - publish date with Launch Date / Deadline fallback</Source>
     </div>
   );
 }
@@ -1270,7 +1370,7 @@ function PlanningContentCalendarScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Content Calendar</h1>
-          <div className="page__sub">Planning calendar by publish date, with launch date fallback - {loadState.message}</div>
+          <div className="page__sub">Planning calendar by publish date, with Launch Date / Deadline fallback - {loadState.message}</div>
         </div>
         <div className="page__actions">
           <button className="btn btn--secondary" onClick={() => shiftPlanningMonth(-1)}><Icon name="chevron" style={{ transform: "rotate(180deg)" }} /> Prev</button>
@@ -1327,7 +1427,7 @@ function PlanningContentCalendarScreen({ onOpen }) {
         <div className="team-settings-empty" style={{ marginTop: 12 }}>No active Creative Requests match the selected filters.</div>
       )}
 
-      <Source>{loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows"} - publish date first, launch date fallback; Team Calendar still uses 1st Draft/due date</Source>
+      <Source>{loadState.status === "live" ? "Supabase planning_work_items_v or live list rows" : "No static fallback rows"} - publish date first, Launch Date / Deadline fallback; Team Calendar still uses 1st Draft/due date</Source>
     </div>
   );
 }
@@ -1456,7 +1556,7 @@ function flowMateKpiGdVeAiSheets(rows) {
     .map(([ownerName, memberRows]) => ({
       name: `AI - ${ownerName}`,
       rows: [
-        ["Task ID", "Task name", "Status", "Assignee", "Requester", "Requester team", "Type", "Priority", "Effort", "1st Draft / Due", "Launch", "AI Tag", "Campaign / project", "Platform", "Size / format", "Brief link"],
+        ["Task ID", "Task name", "Status", "Assignee", "Requester", "Requester team", "Type", "Priority", "1st Draft / Due", "Launch Date / Deadline", "AI Tag", "Campaign / project", "Platform", "Size / format", "Brief link"],
         ...memberRows
           .slice()
           .sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")))
@@ -1469,7 +1569,6 @@ function flowMateKpiGdVeAiSheets(rows) {
             row.requesterTeam || "",
             row.type || "",
             row.priority || "",
-            row.effort || "",
             row.dueFullLabel || row.dueDate || "",
             row.launchFullLabel || row.launchDate || "",
             flowMateKpiAiTagTextC(row),
@@ -1483,15 +1582,6 @@ function flowMateKpiGdVeAiSheets(rows) {
 }
 
 function KpiScreen() {
-  function Bar({ value, max, color = "var(--garena-deep-blue)" }) {
-    const pct = max ? (value / max) * 100 : 0;
-    return (
-      <span style={{ display: "inline-block", width: 100, height: 8, background: "var(--garena-light-grey)", borderRadius: 4, position: "relative", overflow: "hidden", verticalAlign: "middle" }}>
-        <span style={{ position: "absolute", inset: `0 ${100 - pct}% 0 0`, background: color }}></span>
-      </span>
-    );
-  }
-
   const [rows, setRows] = useStateC([]);
   const [kpiExportMonth, setKpiExportMonth] = useStateC(flowMateDefaultExportMonthC());
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
@@ -1530,208 +1620,16 @@ function KpiScreen() {
   const effectiveKpiMonthOptions = flowMateMonthOptionsC();
   const selectedKpiExportMonth = kpiExportMonth;
   const kpiRows = flowMateFilterRowsByMonthC(rows, selectedKpiExportMonth, ["calendarDate", "dueDate"]);
-  const deliveredRows = kpiRows.filter(w => w.status === "delivered" || w.status === "done");
-  const cancelledRows = kpiRows.filter(w => w.status === "cancelled");
-  const activeRows = kpiRows.filter(w => !["delivered", "done", "cancelled", "queued"].includes(w.status));
-  const deliveredEffort = deliveredRows.reduce((sum, w) => sum + (w.effort || 0), 0);
-  const blockedRows = activeRows.filter(w => w.status === "blocked");
-  const fallbackUnassignedRows = activeRows.filter(w => w.status === "unassigned" || w.assignmentResult === "unassigned");
-  const attentionRows = window.getFlowMateAttentionRows
-    ? window.getFlowMateAttentionRows(activeRows)
-    : fallbackUnassignedRows;
-  const unassignedRows = window.getFlowMateAttentionCategoryCodes
-    ? attentionRows.filter(row => window.getFlowMateAttentionCategoryCodes(row).includes("unassigned"))
-    : fallbackUnassignedRows;
-  const quickClosedRows = deliveredRows.filter(w => w.type === "quick");
-
-  const ownerMap = new Map();
-  deliveredRows.forEach(w => {
-    const id = w.assignee || "unassigned";
-    const owner = MEMBERS_BY_ID[id];
-    const current = ownerMap.get(id) || {
-      id,
-      name: owner?.name || w.assigneeOtherName || "Unassigned",
-      delivered: 0,
-      items: 0,
-      blocked: 0,
-      aiTagged: 0,
-      aiTaggedItems: [],
-      completionDaysTotal: 0,
-      completionDaysCount: 0,
-      completionItems: [],
-    };
-    const completionDays = flowMateKpiCompletionDaysC(w);
-    current.delivered += w.effort || 0;
-    current.items += 1;
-    if (completionDays != null) {
-      current.completionDaysTotal += completionDays;
-      current.completionDaysCount += 1;
-      current.completionItems.push(w);
-    }
-    ownerMap.set(id, current);
-  });
-  blockedRows.forEach(w => {
-    const id = w.assignee || "unassigned";
-    const owner = MEMBERS_BY_ID[id];
-    const current = ownerMap.get(id) || {
-      id,
-      name: owner?.name || w.assigneeOtherName || "Unassigned",
-      delivered: 0,
-      items: 0,
-      blocked: 0,
-      aiTagged: 0,
-      aiTaggedItems: [],
-      completionDaysTotal: 0,
-      completionDaysCount: 0,
-      completionItems: [],
-    };
-    current.blocked += 1;
-    ownerMap.set(id, current);
-  });
-  kpiRows.forEach(w => {
-    if (!flowMateKpiAiTagsC(w).length) return;
-    const id = w.assignee || "unassigned";
-    const owner = MEMBERS_BY_ID[id];
-    const current = ownerMap.get(id) || {
-      id,
-      name: owner?.name || w.assigneeOtherName || "Unassigned",
-      delivered: 0,
-      items: 0,
-      blocked: 0,
-      aiTagged: 0,
-      aiTaggedItems: [],
-      completionDaysTotal: 0,
-      completionDaysCount: 0,
-      completionItems: [],
-    };
-    current.aiTagged += 1;
-    current.aiTaggedItems.push(w);
-    ownerMap.set(id, current);
-  });
-  const ownerRows = Array.from(ownerMap.values())
-    .map(row => ({
-      ...row,
-      avgCompletionDays: row.completionDaysCount ? row.completionDaysTotal / row.completionDaysCount : null,
-    }))
-    .sort((a, b) => b.delivered - a.delivered || a.name.localeCompare(b.name));
-  const maxOwnerDelivered = Math.max(1, ...ownerRows.map(row => row.delivered));
-  const completionDetailRows = deliveredRows
-    .map(row => ({
-      ...row,
-      assignedAt: flowMateKpiAssignedAtC(row),
-      deliveredAt: flowMateKpiDeliveredAtC(row),
-      completionDays: flowMateKpiCompletionDaysC(row),
-    }))
-    .filter(row => row.completionDays != null);
-
-  const teamMap = new Map();
-  kpiRows.forEach(w => {
-    const team = w.requesterTeam || "No team";
-    teamMap.set(team, (teamMap.get(team) || 0) + 1);
-  });
-  const teamRows = Array.from(teamMap.entries())
-    .map(([team, count]) => ({ team, count, share: kpiRows.length ? Math.round((count / kpiRows.length) * 100) : 0 }))
-    .sort((a, b) => b.count - a.count || a.team.localeCompare(b.team));
-  const maxTeamShare = Math.max(1, ...teamRows.map(row => row.share));
+  const kpiSummary = buildFlowMateKpiTeamSummaryC(kpiRows, flowMateBangkokDateKeyC());
+  const kpiTotals = kpiSummary.totals;
+  const teamRows = kpiSummary.teams;
 
   function exportKpiRows() {
     const filename = `flowmate-kpi-${selectedKpiExportMonth}-${new Date().toISOString().slice(0, 10)}.xlsx`;
-    const allWorkRows = [
-      ["Export month", "Task ID", "Task name", "Type", "Status", "Assignee", "Requester", "Requester team", "Effort", "Priority", "1st Draft / Due", "Launch", "Assigned At", "Delivered At", "Completion days", "AI Tag", "Campaign / project", "Platform", "Size / format"],
-      ...kpiRows.map(row => [
-        flowMateMonthLabelC(selectedKpiExportMonth),
-        row.id || "",
-        row.title || "",
-        row.type || "",
-        row.status || "",
-        flowMateKpiOwnerNameC(row),
-        row.requester || "",
-        row.requesterTeam || "",
-        row.effort || "",
-        row.priority || "",
-        row.dueFullLabel || row.dueDate || "",
-        row.launchFullLabel || row.launchDate || "",
-        flowMateKpiFormatDateTimeC(flowMateKpiAssignedAtC(row)),
-        flowMateKpiFormatDateTimeC(flowMateKpiDeliveredAtC(row)),
-        flowMateKpiFormatDaysC(flowMateKpiCompletionDaysC(row)),
-        flowMateKpiAiTagTextC(row),
-        row.campaign || "",
-        row.platform || "",
-        row.size || "",
-      ]),
-    ];
-    const perMemberRows = [
-      ["Member", "Delivered effort", "Delivered items", "Avg days to delivered", "Blocked", "AI Tagged", "AI tagged task IDs"],
-      ...ownerRows.map(row => [
-        row.name,
-        row.delivered,
-        row.items,
-        flowMateKpiFormatDaysC(row.avgCompletionDays),
-        row.blocked,
-        row.aiTagged,
-        (row.aiTaggedItems || []).map(item => item.id).join(", "),
-      ]),
-    ];
-    const requesterTeamRows = [
-      ["Requester team", "Requests", "Share"],
-      ...teamRows.map(row => [row.team, row.count, `${row.share}%`]),
-    ];
-    const summaryRows = [
-      ["Metric", "Value"],
-      ["Export month", flowMateMonthLabelC(selectedKpiExportMonth)],
-      ["Delivered effort", deliveredEffort],
-      ["Delivered items", deliveredRows.length],
-      ["Active work", activeRows.length],
-      ["Blocked", blockedRows.length],
-      ["Unassigned", unassignedRows.length],
-      ["Attention / at risk", attentionRows.length],
-      ["Cancelled", cancelledRows.length],
-      ["Quick tasks closed", quickClosedRows.length],
-      ["AI tagged tasks", kpiRows.filter(row => flowMateKpiAiTagsC(row).length).length],
-      ["Avg days to delivered", flowMateKpiFormatDaysC(completionDetailRows.length ? completionDetailRows.reduce((sum, row) => sum + row.completionDays, 0) / completionDetailRows.length : null)],
-    ];
-    const completionRows = [
-      ["Task ID", "Task name", "Assignee", "Status", "Assigned At", "Delivered At", "Completion days", "Effort", "Campaign / project", "Type", "Priority"],
-      ...completionDetailRows.map(row => [
-        row.id || "",
-        row.title || "",
-        flowMateKpiOwnerNameC(row),
-        row.status || "",
-        flowMateKpiFormatDateTimeC(row.assignedAt),
-        flowMateKpiFormatDateTimeC(row.deliveredAt),
-        flowMateKpiFormatDaysC(row.completionDays),
-        row.effort || "",
-        row.campaign || "",
-        row.type || "",
-        row.priority || "",
-      ]),
-    ];
-    const cancelledDetailRows = [
-      ["Task ID", "Task name", "Type", "Assignee", "Requester", "Requester team", "Campaign / project", "Priority", "Effort", "1st Draft / Due", "Launch", "Cancelled At", "Cancel reason"],
-      ...cancelledRows.map(row => [
-        row.id || "",
-        row.title || "",
-        row.type || "",
-        flowMateKpiOwnerNameC(row),
-        row.requester || "",
-        row.requesterTeam || "",
-        row.campaign || "",
-        row.priority || "",
-        row.effort || "",
-        row.dueFullLabel || row.dueDate || "",
-        row.launchFullLabel || row.launchDate || "",
-        flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)),
-        flowMateKpiCancelReasonC(row),
-      ]),
-    ];
+    const exportData = buildFlowMateKpiExportC(kpiSummary, flowMateMonthLabelC(selectedKpiExportMonth));
     const sheets = [
-      { name: "Summary", rows: summaryRows },
-      { name: "All work", rows: allWorkRows },
-      { name: "Per member", rows: perMemberRows },
-      { name: "Completion detail", rows: completionRows },
-      { name: "Cancelled detail", rows: cancelledDetailRows },
-      { name: "Requester team", rows: requesterTeamRows },
-      ...flowMateKpiGdVeAiSheets(kpiRows),
+      { name: "Summary", rows: exportData.summaryRows },
+      { name: "Team status", rows: exportData.teamStatusRows },
     ];
 
     if (window.flowmateDownloadWorkbook) {
@@ -1739,11 +1637,7 @@ function KpiScreen() {
       return;
     }
 
-    exportFlowMateCsvC(filename.replace(/\.xlsx$/, ".csv"), [
-      { label: "ID", value: "id" },
-      { label: "Title", value: "title" },
-      { label: "AI Tag", value: row => flowMateKpiAiTagTextC(row) },
-    ], kpiRows);
+    exportFlowMateCsvC(filename.replace(/\.xlsx$/, ".csv"), exportData.csvColumns, exportData.csvRows);
   }
 
   return (
@@ -1770,146 +1664,83 @@ function KpiScreen() {
 
       <div className="kpi-grid">
         <div className="kpi">
-          <div className="kpi__lbl">Delivered effort</div>
-          <div className="kpi__num mono">{deliveredEffort}<span style={{ fontSize: 14, color: "var(--garena-grey)", marginLeft: 4, fontWeight: 400 }}>pt</span></div>
-          <div className="kpi__delta">{deliveredRows.length} delivered items</div>
-        </div>
-        <div className="kpi">
-          <div className="kpi__lbl">Throughput</div>
-          <div className="kpi__num mono">{deliveredRows.length}<span style={{ fontSize: 14, color: "var(--garena-grey)", marginLeft: 4, fontWeight: 400 }}>delivered</span></div>
-          <div className="kpi__delta">Creative + quick tasks</div>
-        </div>
-        <div className="kpi">
           <div className="kpi__lbl">Active work</div>
-          <div className="kpi__num mono">{activeRows.length}</div>
-          <div className="kpi__delta">Excludes delivered and cancelled</div>
+          <div className="kpi__num mono">{kpiTotals.active}</div>
+          <div className="kpi__delta">Current tasks in {flowMateMonthLabelC(selectedKpiExportMonth)}</div>
         </div>
         <div className="kpi">
-          <div className="kpi__lbl">Avg review rounds</div>
-          <div className="kpi__num mono">{kpiRows.length ? (kpiRows.reduce((sum, w) => sum + (w.reviewRound || 0), 0) / kpiRows.length).toFixed(1) : "0.0"}</div>
-          <div className="kpi__delta">Across {flowMateMonthLabelC(selectedKpiExportMonth)} rows</div>
+          <div className="kpi__lbl">Delivered</div>
+          <div className="kpi__num mono">{kpiTotals.delivered}</div>
+          <div className="kpi__delta">Completed tasks</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi__lbl">Due soon</div>
+          <div className="kpi__num mono">{kpiTotals.dueSoon}</div>
+          <div className="kpi__delta">Due within two days</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi__lbl">Overdue</div>
+          <div className="kpi__num mono">{kpiTotals.overdue}</div>
+          <div className="kpi__delta">Past the current deadline</div>
         </div>
       </div>
 
       <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <div className="kpi"><div className="kpi__lbl">Blocked</div><div className="kpi__num mono">{blockedRows.length}</div><div className="kpi__delta">Active blocked work</div></div>
-        <div className="kpi"><div className="kpi__lbl">Unassigned</div><div className="kpi__num mono">{unassignedRows.length}</div><div className="kpi__delta">Current work without an owner</div></div>
-        <div className="kpi"><div className="kpi__lbl">Attention / at risk</div><div className="kpi__num mono">{attentionRows.length}</div><div className="kpi__delta">Deduplicated current attention items</div></div>
-        <div className="kpi"><div className="kpi__lbl">Cancelled</div><div className="kpi__num mono">{cancelledRows.length}</div><div className="kpi__delta">Cancelled work in selected month</div></div>
+        <div className="kpi"><div className="kpi__lbl">Assigned awaiting acceptance</div><div className="kpi__num mono">{kpiTotals.assigned}</div><div className="kpi__delta">Assigned but not accepted</div></div>
+        <div className="kpi"><div className="kpi__lbl">In Progress</div><div className="kpi__num mono">{kpiTotals.inProgress}</div><div className="kpi__delta">Work being produced</div></div>
+        <div className="kpi"><div className="kpi__lbl">Review</div><div className="kpi__num mono">{kpiTotals.review}</div><div className="kpi__delta">Waiting for review</div></div>
+        <div className="kpi"><div className="kpi__lbl">Blocked</div><div className="kpi__num mono">{kpiTotals.blocked}</div><div className="kpi__delta">Active blocked work</div></div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
-        <div className="card">
-          <div className="card__head">
-            <span className="card__title">Per member</span>
-            <span className="card__sub">delivered effort - delivered items - average delivery days</span>
-          </div>
-          <div className="card__body" style={{ padding: 0 }}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Member</th>
-                  <th>Delivered effort</th>
-                  <th>Distribution</th>
-                  <th>Delivered items</th>
-                  <th>Avg days to delivered</th>
-                  <th>Blocked</th>
-                  <th>AI Tagged</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ownerRows.map(r => (
-                  <tr key={r.id}>
-                    <td className="col-name strong">
-                      <span className="row" style={{ gap: 6 }}>
-                        <Avatar memberId={r.id} /> {r.name}
-                      </span>
-                    </td>
-                    <td className="mono">{r.delivered} pt</td>
-                    <td><Bar value={r.delivered} max={maxOwnerDelivered} /></td>
-                    <td className="mono">{r.items}</td>
-                    <td className="mono">{flowMateKpiFormatDaysC(r.avgCompletionDays)}</td>
-                    <td className="mono">{r.blocked}</td>
-                    <td className="mono">{r.aiTagged}</td>
-                  </tr>
-                ))}
-                {ownerRows.length === 0 && (
-                  <tr><td colSpan="7" className="muted">No delivered, blocked, or AI-tagged rows loaded.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card__head"><span className="card__title">By requester team</span><span className="card__sub">{flowMateMonthLabelC(selectedKpiExportMonth)} rows</span></div>
-          <div className="card__body" style={{ padding: 0 }}>
-            <table className="tbl">
-              <thead>
-                <tr><th>Team</th><th>Requests</th><th>Share</th></tr>
-              </thead>
-              <tbody>
-                {teamRows.map(t => (
-                  <tr key={t.team}>
-                    <td className="strong">{t.team}</td>
-                    <td className="mono">{t.count}</td>
-                    <td>
-                      <div className="row" style={{ gap: 8 }}>
-                        <Bar value={t.share} max={maxTeamShare} color="var(--garena-orange)" />
-                        <span className="mono muted" style={{ fontSize: 11 }}>{t.share}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {teamRows.length === 0 && (
-                  <tr><td colSpan="3" className="muted">No live rows loaded.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+        <div className="kpi"><div className="kpi__lbl">Unassigned</div><div className="kpi__num mono">{kpiTotals.unassigned}</div><div className="kpi__delta">Current work without an owner</div></div>
+        <div className="kpi"><div className="kpi__lbl">Cancelled</div><div className="kpi__num mono">{kpiTotals.cancelled}</div><div className="kpi__delta">Cancelled work in selected month</div></div>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>
         <div className="card__head">
-          <span className="card__title">Cancelled report</span>
-          <span className="card__sub">cancelled task audit for {flowMateMonthLabelC(selectedKpiExportMonth)}</span>
+          <span className="card__title">Team task status</span>
+          <span className="card__sub">state and date counts for {flowMateMonthLabelC(selectedKpiExportMonth)}</span>
         </div>
         <div className="card__body" style={{ padding: 0, overflowX: "auto" }}>
           <table className="tbl">
             <thead>
               <tr>
-                <th>Task ID</th>
-                <th>Task name</th>
-                <th>Assignee</th>
-                <th>Requester</th>
-                <th>Campaign</th>
-                <th>Cancelled At</th>
-                <th>Cancel reason</th>
+                <th>Requester team</th>
+                <th>All tasks</th>
+                <th>Assigned awaiting acceptance</th>
+                <th>In Progress</th>
+                <th>Review</th>
+                <th>Blocked</th>
+                <th>Due soon</th>
+                <th>Overdue</th>
+                <th>Delivered</th>
+                <th>Cancelled</th>
+                <th>Unassigned</th>
               </tr>
             </thead>
             <tbody>
-              {cancelledRows.map(row => (
-                <tr key={row.id}>
-                  <td className="mono strong">{row.id}</td>
-                  <td>{row.title}</td>
-                  <td>{flowMateKpiOwnerNameC(row)}</td>
-                  <td>{row.requester || "-"}</td>
-                  <td>{row.campaign || "-"}</td>
-                  <td className="mono">{flowMateKpiFormatDateTimeC(flowMateKpiCancelledAtC(row)) || "-"}</td>
-                  <td>{flowMateKpiCancelReasonC(row) || "-"}</td>
+              {teamRows.map(row => (
+                <tr key={row.team}>
+                  <td className="strong">{row.team}</td>
+                  <td className="mono">{row.total}</td>
+                  <td className="mono">{row.assigned}</td>
+                  <td className="mono">{row.inProgress}</td>
+                  <td className="mono">{row.review}</td>
+                  <td className="mono">{row.blocked}</td>
+                  <td className="mono">{row.dueSoon}</td>
+                  <td className="mono">{row.overdue}</td>
+                  <td className="mono">{row.delivered}</td>
+                  <td className="mono">{row.cancelled}</td>
+                  <td className="mono">{row.unassigned}</td>
                 </tr>
               ))}
-              {cancelledRows.length === 0 && (
-                <tr><td colSpan="7" className="muted">No cancelled rows in this month.</td></tr>
+              {teamRows.length === 0 && (
+                <tr><td colSpan="11" className="muted">No team task rows in this month.</td></tr>
               )}
             </tbody>
           </table>
         </div>
-      </div>
-
-      <div style={{ marginTop: 16 }} className="reason-box">
-        Productivity index is calculated as <span className="mono">delivered_effort x on_time_factor x rework_factor</span> and is intentionally <strong>not displayed as a personal ranking</strong> in MVP - see PRD section 12.
       </div>
 
       <Source>{loadState.status === "live" ? "Supabase work_items table" : "No local fallback data"} - {flowMateMonthLabelC(selectedKpiExportMonth)} - {TODAY}</Source>
@@ -2027,27 +1858,20 @@ function ganttSubtractWorkingDaysC(dateKey, workingDays) {
   return calendarUtcKeyC(cursor);
 }
 
-function ganttSuggestedStartKeyC(row, allocationStartKey) {
+function ganttTaskStartKeyC(row) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return "";
   const actualStartKey = ganttDateKeyFromRowC(row, ["startedAt", "started_at"]);
   if (actualStartKey) return actualStartKey;
-  const persistedSuggestedStartKey = ganttDateKeyFromRowC(row, ["suggestedStartDate", "suggested_start_date"]);
-  if (persistedSuggestedStartKey) return persistedSuggestedStartKey;
-  if (allocationStartKey) return allocationStartKey;
-  const member = MEMBERS_BY_ID[row?.assignee];
-  const capacityPerDay = Math.max(1, Number(member?.capacityPerDay || 8));
-  const effort = Math.max(1, Number(row?.effort || 1));
-  const workingDays = Math.max(1, Math.ceil(effort / capacityPerDay));
-  return ganttSubtractWorkingDaysC(dueKey, workingDays - 1);
+  return dueKey;
 }
 
-function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
+function ganttTaskModelC(row, monthKey, ganttWindow) {
   const dueKey = ganttDateKeyFromRowC(row, ["dueDate", "calendarDate"]);
   if (!dueKey) return null;
   const launchKey = ganttDateKeyFromRowC(row, ["launchDate", "launch_date"]);
   const finalApprovedKey = ganttDateKeyFromRowC(row, ["finalApprovedDueDate", "final_approved_due_date"]);
-  const rawStartKey = ganttSuggestedStartKeyC(row, allocationStartKey) || dueKey;
+  const rawStartKey = ganttTaskStartKeyC(row) || dueKey;
   const rawEndKey = launchKey && launchKey > dueKey ? launchKey : dueKey;
   const timeline = ganttWindow || ganttTimelineWindowC(monthKey);
   if (rawEndKey < timeline.startKey || rawStartKey > timeline.endKey) return null;
@@ -2078,7 +1902,7 @@ function ganttTaskModelC(row, monthKey, ganttWindow, allocationStartKey) {
     launchOffset,
     finalApprovedOffset,
     spansToLaunch: Boolean(launchKey && launchKey > dueKey),
-    isSuggestedStart: !ganttDateKeyFromRowC(row, ["startedAt", "started_at"]),
+    isActualStart: Boolean(ganttDateKeyFromRowC(row, ["startedAt", "started_at"])),
     priorityClass: row.priority === "urgent" ? "is-urgent" : row.priority === "high" ? "is-high" : row.priority === "low" ? "is-low" : "is-normal",
     statusClass: row.status ? `is-status-${row.status}` : "is-status-unknown",
     displayLabel: row.type === "creative" ? "1st Draft" : "Due",
@@ -2225,82 +2049,12 @@ function teamScheduleMonthOptionsC(rows, currentMonthKey) {
   return options.sort((a, b) => b.key.localeCompare(a.key));
 }
 
-function teamScheduleWeekStartC(dateKey) {
-  const date = calendarParseKeyC(dateKey);
-  const day = date.getUTCDay();
-  return calendarAddDaysC(dateKey, day === 0 ? -6 : 1 - day);
-}
-
-function teamScheduleWeeksC(ganttWindow) {
-  const weeks = [];
-  let weekStart = teamScheduleWeekStartC(ganttWindow.startKey);
-  while (weekStart <= ganttWindow.endKey) {
-    const weekEnd = calendarAddDaysC(weekStart, 6);
-    const visibleStart = weekStart < ganttWindow.startKey ? ganttWindow.startKey : weekStart;
-    const visibleEnd = weekEnd > ganttWindow.endKey ? ganttWindow.endKey : weekEnd;
-    weeks.push({
-      key: weekStart,
-      startKey: weekStart,
-      endKey: weekEnd,
-      visibleStart,
-      visibleEnd,
-      label: `${calendarParseKeyC(visibleStart).getUTCDate()}-${calendarParseKeyC(visibleEnd).getUTCDate()} ${ganttWindow.dayCells.find(cell => cell.dateKey === visibleEnd)?.monthLabel || ""}`,
-    });
-    weekStart = calendarAddDaysC(weekStart, 7);
-  }
-  return weeks;
-}
-
-function teamScheduleLeaveUnitsC(leaves, assigneeId, dateKey) {
-  return (leaves || []).reduce((sum, leave) => {
-    if (leave.item?.assignee !== assigneeId || leave.leaveKey !== dateKey) return sum;
-    const units = Number(leave.item?.leaveUnits || 0);
-    return Math.min(1, sum + (units > 0 ? units : 1));
-  }, 0);
-}
-
-function teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows) {
-  const memberId = member?.id || "unassigned";
-  const dailyCapacity = member?.availability === "leave"
-    ? 0
-    : member?.availability === "partial"
-      ? Number(member?.capacityOverridePerDay || 0)
-      : Number(member?.capacityPerDay || 8);
-  let available = 0;
-  let cursor = week.visibleStart;
-  while (cursor <= week.visibleEnd) {
-    const date = calendarParseKeyC(cursor);
-    if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6 && !holidayKeys.has(cursor)) {
-      available += dailyCapacity * Math.max(0, 1 - teamScheduleLeaveUnitsC(leaves, memberId, cursor));
-    }
-    cursor = calendarAddDaysC(cursor, 1);
-  }
-
-  const sourceByWorkId = new Map((sourceRows || []).map(row => [row.workItemId, row]));
-  const entryMap = new Map();
-  (capacityRows || []).forEach(allocation => {
-    const dateKey = String(allocation?.bucketDate || "").slice(0, 10);
-    if (allocation?.assignee !== memberId || dateKey < week.visibleStart || dateKey > week.visibleEnd) return;
-    const item = sourceByWorkId.get(allocation.workItemId);
-    if (!item || !TEAM_SCHEDULE_CAPACITY_STATUSES_C.includes(item.status)) return;
-    const current = entryMap.get(item.id) || { item, point: 0 };
-    current.point = Number((current.point + Math.max(0, Number(allocation.capacityPoint || 0))).toFixed(2));
-    entryMap.set(item.id, current);
-  });
-  const entries = Array.from(entryMap.values()).sort((a, b) => b.point - a.point || a.item.id.localeCompare(b.item.id));
-  const used = Number(entries.reduce((sum, entry) => sum + entry.point, 0).toFixed(2));
-  const roundedAvailable = Number(available.toFixed(2));
-  const percent = roundedAvailable > 0 ? Math.round((used / roundedAvailable) * 100) : used > 0 ? 999 : 0;
-  const stateClass = used > roundedAvailable ? "is-over" : percent >= 85 ? "is-near" : used > 0 ? "is-healthy" : "is-available";
-  return { memberId, week, used, available: roundedAvailable, percent, entries, stateClass };
-}
-
 function LegacyTeamGanttScreen({ onOpen }) {
   const [sourceRows, setSourceRows] = useStateC(WORK);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Supabase data..." });
   const [capacityRows, setCapacityRows] = useStateC([]);
   const [capacityLoadState, setCapacityLoadState] = useStateC({ status: "loading", message: "Loading capacity..." });
-  const [showCapacity, setShowCapacity] = useStateC(true);
+  const [showCapacity] = useStateC(false);
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
 
   useEffectC(() => {
@@ -2455,18 +2209,9 @@ function LegacyTeamGanttScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Team Gantt Chart</h1>
-          <div className="page__sub">Work timeline and production capacity grouped by team and assignee - {loadState.message} - {capacityLoadState.message}</div>
+          <div className="page__sub">Work timeline grouped by team and assignee - {loadState.message}</div>
         </div>
         <div className="page__actions">
-          <button
-            type="button"
-            className={`btn btn--sm gantt__capacity-toggle ${showCapacity ? "is-active" : ""}`}
-            onClick={() => setShowCapacity(value => !value)}
-            aria-pressed={showCapacity}
-            data-testid="flowmate-gantt-capacity-toggle"
-          >
-            {showCapacity ? "Hide workload" : "Show workload"}
-          </button>
           <select
             className="select"
             value={selectedGanttMonth}
@@ -2484,21 +2229,18 @@ function LegacyTeamGanttScreen({ onOpen }) {
         <div className="gantt__legend">
           <span><i className="gantt__legend-dot gantt__legend-dot--normal"></i>Normal</span>
           <span><i className="gantt__legend-dot gantt__legend-dot--urgent"></i>Urgent</span>
-          <span><i className="gantt__legend-diamond"></i>Launch</span>
+          <span><i className="gantt__legend-diamond"></i>Launch Date / Deadline</span>
           <span><i className="gantt__legend-leave"></i>Leave / partial leave</span>
-          <span><i className="gantt__legend-capacity gantt__legend-capacity--available"></i>Available</span>
-          <span><i className="gantt__legend-capacity gantt__legend-capacity--used"></i>Daily workload</span>
-          <span><i className="gantt__legend-capacity gantt__legend-capacity--over"></i>Over capacity (advisory)</span>
           <span><i className="gantt__legend-line"></i>Today</span>
         </div>
-        <span className="muted" style={{ fontSize: 12 }}>Daily workload is planned automatically. Over-capacity warnings are advisory; adjust priority or reassign when needed.</span>
+        <span className="muted" style={{ fontSize: 12 }}>Use status, leave, and due dates to decide follow-up.</span>
       </div>
 
       <div className="stat-strip" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="stat"><div className="stat__num mono">{ganttTasks.length}</div><div className="stat__lbl">Visible tasks</div></div>
         <div className="stat stat--info"><div className="stat__num mono">{teamGroups.length}</div><div className="stat__lbl">Teams</div></div>
         <div className="stat stat--ok"><div className="stat__num mono">{teamGroups.reduce((sum, team) => sum + team.assignees.length, 0)}</div><div className="stat__lbl">Assignees</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{ganttCapacityBuckets.reduce((sum, bucket) => sum + bucket.halves.am.point + bucket.halves.pm.point, 0)}</div><div className="stat__lbl">Planned pt</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{ganttTasks.filter(task => task.item.dueDelta != null && task.item.dueDelta >= 0 && task.item.dueDelta <= 2).length}</div><div className="stat__lbl">Due soon</div></div>
       </div>
 
       <div className="gantt" data-testid="flowmate-team-gantt-chart">
@@ -2533,7 +2275,7 @@ function LegacyTeamGanttScreen({ onOpen }) {
           <section key={team.teamName} className="gantt__team">
             <div className="gantt__team-title">
               <span>{team.teamName}</span>
-            <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks - {team.assignees.reduce((sum, assignee) => sum + assignee.capacityBuckets.reduce((bucketSum, bucket) => bucketSum + bucket.halves.am.point + bucket.halves.pm.point, 0), 0)} pt</span>
+            <span className="tag">{team.assignees.reduce((sum, assignee) => sum + assignee.tasks.length, 0)} tasks</span>
           </div>
             {team.assignees.map(assignee => {
               const capacityByDate = new Map(assignee.capacityBuckets.map(bucket => [bucket.bucketDate, bucket]));
@@ -2544,7 +2286,7 @@ function LegacyTeamGanttScreen({ onOpen }) {
                   <Avatar memberId={assignee.assigneeId} size="avatar--lg" />
                   <span>
                     <span className="gantt__owner-name">{assignee.assigneeName}</span>
-                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}{showCapacity && capacityLoadState.status === "live" ? ` - ${allocatedPoint} pt planned` : ""}</span>
+                    <span className="muted">{assignee.member ? assignee.member.discipline : "Unassigned"}</span>
                   </span>
                 </div>
                 <div className="gantt__tracks" style={{ "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
@@ -2637,7 +2379,7 @@ function LegacyTeamGanttScreen({ onOpen }) {
                       {task.launchKey && (
                         <span
                           className="gantt__launch-marker"
-                          title={`Launch: ${calendarDateLabelC(task.launchKey)}`}
+                          title={`Launch Date / Deadline: ${calendarDateLabelC(task.launchKey)}`}
                           data-testid="flowmate-gantt-launch-marker"
                         ></span>
                       )}
@@ -2656,9 +2398,9 @@ function LegacyTeamGanttScreen({ onOpen }) {
       </div>
 
       <div className="reason-box" style={{ marginTop: 16 }}>
-        Gantt rule: the task bar runs from 1st Draft to Launch. Daily workload shows total points planned automatically for each person; users do not need to schedule time slots manually. Over-capacity warnings are advisory. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not reserve production capacity.
+        Gantt rule: the task bar runs from 1st Draft to Launch Date / Deadline. Need Brief, Unassigned, historical Queued, Review, Delivered, and Cancelled work do not appear in the active production timeline.
       </div>
-      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - {capacityLoadState.status === "live" ? "flowmate_capacity_allocations" : "capacity unavailable"} - Team Gantt Chart - {flowMateMonthLabelC(selectedGanttMonth)} plus next month</Source>
+      <Source>{loadState.status === "live" ? "Supabase calendar/list loader" : "No local fallback data"} - Team Gantt Chart - {flowMateMonthLabelC(selectedGanttMonth)} plus next month</Source>
     </div>
   );
 }
@@ -2667,19 +2409,11 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
   const isTaskAssignProduct = product === "task-assign";
   const [sourceRows, setSourceRows] = useStateC([]);
   const [members, setMembers] = useStateC([]);
-  const [capacityRows, setCapacityRows] = useStateC([]);
-  const [holidays, setHolidays] = useStateC([]);
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading Team Schedule..." });
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
-  const [viewMode, setViewMode] = useStateC(() => {
-    if (isTaskAssignProduct) return "timeline";
-    try { return sessionStorage.getItem("flowmate:team-schedule:view") || "timeline"; } catch (error) { return "timeline"; }
-  });
   const [assigneeFilter, setAssigneeFilter] = useStateC("all");
   const [statusFilter, setStatusFilter] = useStateC("all");
   const [skillFilter, setSkillFilter] = useStateC("all");
-  const [overOnly, setOverOnly] = useStateC(false);
-  const [selectedWorkload, setSelectedWorkload] = useStateC(null);
 
   useEffectC(() => {
     let alive = true;
@@ -2712,51 +2446,10 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
   const monthOptions = teamScheduleMonthOptionsC(sourceRows, monthKey);
   const ganttWindow = ganttTimelineWindowC(monthKey);
 
-  useEffectC(() => {
-    let alive = true;
-    async function loadCapacityAndHolidays() {
-      try {
-        if (isTaskAssignProduct) {
-          if (alive) { setCapacityRows([]); setHolidays([]); }
-          return;
-        }
-        const [allocationRows, holidayRows] = await Promise.all([
-          window.loadFlowMateCapacityAllocationRows
-            ? window.loadFlowMateCapacityAllocationRows(ganttWindow.startKey, ganttWindow.endKey)
-            : Promise.resolve([]),
-          window.loadFlowMateNonWorkingDays
-            ? window.loadFlowMateNonWorkingDays(ganttWindow.startKey, ganttWindow.endKey)
-            : Promise.resolve([]),
-        ]);
-        if (!alive) return;
-        setCapacityRows(allocationRows || []);
-        setHolidays(holidayRows || []);
-      } catch (error) {
-        if (!alive) return;
-        console.error("[FlowMate Team Schedule] capacity load failed:", error);
-        setCapacityRows([]);
-        setHolidays([]);
-      }
-    }
-    loadCapacityAndHolidays();
-    return () => { alive = false; };
-  }, [monthKey, isTaskAssignProduct]);
-
-  useEffectC(() => {
-    try { sessionStorage.setItem("flowmate:team-schedule:view", viewMode); } catch (error) {}
-  }, [viewMode]);
-
-  const todayKey = calendarUtcKeyC(new Date());
+  const todayKey = flowMateBangkokDateKeyC();
   const todayOffset = todayKey >= ganttWindow.startKey && todayKey <= ganttWindow.endKey
     ? Math.floor((calendarParseKeyC(todayKey).getTime() - ganttWindow.startDate.getTime()) / 86400000)
     : null;
-  const allocationStartByWorkId = new Map();
-  capacityRows.forEach(allocation => {
-    const dateKey = String(allocation?.bucketDate || "").slice(0, 10);
-    if (!dateKey || !allocation?.workItemId) return;
-    const previous = allocationStartByWorkId.get(allocation.workItemId);
-    if (!previous || dateKey < previous) allocationStartByWorkId.set(allocation.workItemId, dateKey);
-  });
   const skillOptions = Array.from(new Set(sourceRows
     .filter(row => row && row.type !== "leave")
     .map(row => row.subtype || row.assetType)
@@ -2769,34 +2462,23 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
     return true;
   });
   const tasks = filteredRows
-    .map(row => ganttTaskModelC(row, monthKey, ganttWindow, allocationStartByWorkId.get(row.workItemId)))
+    .map(row => ganttTaskModelC(row, monthKey, ganttWindow))
     .filter(Boolean)
     .sort((a, b) => a.startOffset - b.startOffset || a.dueKey.localeCompare(b.dueKey));
   const leaves = sourceRows
     .filter(row => row?.type === "leave")
     .map(row => ganttLeaveModelC(row, monthKey, ganttWindow))
     .filter(Boolean);
-  const holidayKeys = new Set(holidays.filter(row => row.active !== false).map(row => String(row.date || row.day || "").slice(0, 10)));
-  const weeks = teamScheduleWeeksC(ganttWindow);
 
   const memberMap = new Map();
   (members || []).forEach(member => memberMap.set(member.id, member));
   tasks.forEach(task => {
     const id = task.item.assignee || "unassigned";
-    if (!memberMap.has(id)) memberMap.set(id, MEMBERS_BY_ID[id] || { id, name: task.item.assigneeOtherName || "Unassigned", discipline: "GD/VE", capacityPerDay: 8 });
+    if (!memberMap.has(id)) memberMap.set(id, MEMBERS_BY_ID[id] || { id, name: task.item.assigneeOtherName || "Unassigned", discipline: "GD/VE" });
   });
   const visibleMembers = Array.from(memberMap.values())
     .filter(member => assigneeFilter === "all" || member.id === assigneeFilter)
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  const cellsByMember = new Map(visibleMembers.map(member => [member.id, weeks.map(week =>
-    teamScheduleWeeklyCellC(member, week, ganttWindow, leaves, holidayKeys, capacityRows, sourceRows))]));
-  const visibleMembersAfterOverFilter = !isTaskAssignProduct && overOnly
-    ? visibleMembers.filter(member => (cellsByMember.get(member.id) || []).some(cell => cell.stateClass === "is-over"))
-    : visibleMembers;
-  const overCapacityWeeks = new Set();
-  cellsByMember.forEach(cells => cells.forEach(cell => {
-    if (cell.stateClass === "is-over") overCapacityWeeks.add(cell.week.key);
-  }));
   const dueSoonCount = filteredRows.filter(row => {
     const dueKey = ganttDateKeyFromRowC(row, ["dueDate"]);
     return dueKey && dueKey >= todayKey && dueKey <= calendarAddDaysC(todayKey, 7);
@@ -2814,7 +2496,6 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
     setAssigneeFilter("all");
     setStatusFilter("all");
     setSkillFilter("all");
-    setOverOnly(false);
   }
 
   return (
@@ -2822,7 +2503,7 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
       <div className="page__header team-schedule__header">
         <div>
           <h1 className="page__title">Team Schedule</h1>
-          <div className="page__sub">{isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch date" : "Production timing and weekly capacity for GD/VE"} - {loadState.message}</div>
+          <div className="page__sub">{isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline" : "Production timeline, owner, and milestone status for GD/VE"} - {loadState.message}</div>
         </div>
         <select className="select" value={monthKey} onChange={event => setMonthKey(event.target.value)} data-testid="flowmate-gantt-month" aria-label="Schedule month">
           {monthOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
@@ -2831,8 +2512,7 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
 
       <div className="team-schedule__controls">
         <div className="team-schedule__view-tabs" role="tablist" aria-label="Team Schedule view">
-          <button type="button" role="tab" aria-selected={viewMode === "timeline"} className={viewMode === "timeline" ? "is-active" : ""} onClick={() => setViewMode("timeline")} data-testid="flowmate-team-schedule-timeline-tab">Timeline</button>
-          {!isTaskAssignProduct && <button type="button" role="tab" aria-selected={viewMode === "workload"} className={viewMode === "workload" ? "is-active" : ""} onClick={() => setViewMode("workload")} data-testid="flowmate-team-schedule-workload-tab">Workload</button>}
+          <button type="button" role="tab" aria-selected="true" className="is-active" data-testid="flowmate-team-schedule-timeline-tab">Timeline</button>
         </div>
         <div className="team-schedule__filters">
           <select className="select" value={assigneeFilter} onChange={event => setAssigneeFilter(event.target.value)} aria-label="Filter assignee">
@@ -2847,37 +2527,35 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
             <option value="all">All skills</option>
             {skillOptions.map(skill => <option key={skill} value={skill}>{skill}</option>)}
           </select>}
-          {!isTaskAssignProduct && <label className="team-schedule__over-filter"><input type="checkbox" checked={overOnly} onChange={event => setOverOnly(event.target.checked)} /> Over capacity only</label>}
           <button type="button" className="btn btn--sm" onClick={resetFilters}>Clear</button>
         </div>
       </div>
 
       <div className="stat-strip team-schedule__stats">
         <div className="stat"><div className="stat__num mono">{tasks.length}</div><div className="stat__lbl">Active tasks</div></div>
-        <div className="stat stat--info"><div className="stat__num mono">{visibleMembersAfterOverFilter.length}</div><div className="stat__lbl">Assignees</div></div>
-        <div className="stat stat--warn"><div className="stat__num mono">{isTaskAssignProduct ? tasks.filter(task => task.launchKey && task.launchKey < todayKey).length : overCapacityWeeks.size}</div><div className="stat__lbl">{isTaskAssignProduct ? "Past launch" : "Over-capacity weeks"}</div></div>
+        <div className="stat stat--info"><div className="stat__num mono">{visibleMembers.length}</div><div className="stat__lbl">Assignees</div></div>
+        <div className="stat stat--warn"><div className="stat__num mono">{tasks.filter(task => task.item.overdue || (task.item.dueDelta != null && task.item.dueDelta < 0)).length}</div><div className="stat__lbl">Overdue</div></div>
         <div className="stat stat--ok"><div className="stat__num mono">{dueSoonCount}</div><div className="stat__lbl">Due in 7 days</div></div>
       </div>
 
-      {viewMode === "timeline" ? (
-        <>
-          <div className="team-schedule__legend" aria-label="Timeline legend">
-            <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>{isTaskAssignProduct ? "1st Review / Draft" : "Asset First Draft"}</span>{!isTaskAssignProduct && <span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span>}<span><i className="gantt__legend-diamond"></i>Launch</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
-          </div>
-          <div className="gantt team-schedule__timeline" data-testid="flowmate-team-gantt-chart">
-            <div className="gantt__header">
-              <div className="gantt__owner-head">Assignee</div>
-              <div className="gantt__timeline-head" style={{ "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
-                <div className="gantt__month-scale" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}>
-                  <div className="gantt__month-group" style={{ gridColumn: `1 / span ${ganttWindow.totalDays}` }}>{flowMateMonthLabelC(monthKey)}</div>
-                </div>
-                <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`, "--gantt-days": ganttWindow.totalDays }}>
-                  {ganttWindow.dayCells.map(cell => <div key={cell.dateKey} className={`gantt__day ${cell.isWeekend ? "is-weekend" : ""}`}><span className="mono">{cell.day}</span><span>{cell.label}</span></div>)}
-                </div>
-                {todayOffset !== null && <div className="gantt__today-line gantt__today-line--header" aria-hidden="true"></div>}
+      <>
+        <div className="team-schedule__legend" aria-label="Timeline legend">
+          <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>{isTaskAssignProduct ? "1st Review / Draft" : "Asset First Draft"}</span>{!isTaskAssignProduct && <span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span>}<span><i className="gantt__legend-diamond"></i>Launch Date / Deadline</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
+        </div>
+        <div className="gantt team-schedule__timeline" data-testid="flowmate-team-gantt-chart">
+          <div className="gantt__header">
+            <div className="gantt__owner-head">Assignee</div>
+            <div className="gantt__timeline-head" style={{ "--gantt-days": ganttWindow.totalDays, "--gantt-today-offset": todayOffset ?? 0 }}>
+              <div className="gantt__month-scale" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}>
+                <div className="gantt__month-group" style={{ gridColumn: `1 / span ${ganttWindow.totalDays}` }}>{flowMateMonthLabelC(monthKey)}</div>
               </div>
+              <div className="gantt__scale" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))`, "--gantt-days": ganttWindow.totalDays }}>
+                {ganttWindow.dayCells.map(cell => <div key={cell.dateKey} className={`gantt__day ${cell.isWeekend ? "is-weekend" : ""}`}><span className="mono">{cell.day}</span><span>{cell.label}</span></div>)}
+              </div>
+              {todayOffset !== null && <div className="gantt__today-line gantt__today-line--header" aria-hidden="true"></div>}
             </div>
-            {visibleMembersAfterOverFilter.map(member => {
+          </div>
+          {visibleMembers.map(member => {
               const memberTasks = tasks.filter(task => task.item.assignee === member.id);
               const memberLeaves = mergeGanttLeaveSegmentsC(leaves.filter(leave => leave.item.assignee === member.id));
               return <div key={member.id} className="gantt__row team-schedule__row">
@@ -2886,47 +2564,24 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
                   {todayOffset !== null && <div className="gantt__today-line" aria-hidden="true"></div>}
                   <div className="gantt__lane team-schedule__lane" style={{ gridTemplateColumns: `repeat(${ganttWindow.totalDays}, minmax(30px, 1fr))` }}>
                     {memberLeaves.map(leave => <div key={leave.segmentKey} className={`gantt__leave ${leave.isPartial ? "is-partial" : ""}`} style={{ gridColumn: `${leave.startOffset + 1} / span ${leave.spanDays}` }}>{leave.isPartial ? "Half leave" : "Leave"}</div>)}
-                    {memberTasks.map(task => <button key={task.item.id} type="button" className={`team-schedule__task ${task.statusClass} ${task.priorityClass}`} style={{ gridColumn: `${task.startOffset + 1} / span ${task.spanDays}` }} onClick={() => openScheduleItem(task.item)} title={`${task.item.id} ${task.item.title}\n${task.isSuggestedStart ? "Suggested" : "Actual"} start: ${calendarDateLabelC(ganttSuggestedStartKeyC(task.item, allocationStartByWorkId.get(task.item.workItemId)))}\nAsset First Draft Due: ${calendarDateLabelC(task.dueKey)}\nAsset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}\nLaunch: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}`} data-testid="flowmate-gantt-task-bar">
+                    {memberTasks.map(task => <button key={task.item.id} type="button" className={`team-schedule__task ${task.statusClass} ${task.priorityClass}`} style={{ gridColumn: `${task.startOffset + 1} / span ${task.spanDays}` }} onClick={() => openScheduleItem(task.item)} title={`${task.item.id} ${task.item.title}\n${task.isActualStart ? "Actual start" : "Date-led start (Asset First Draft Due)"}: ${calendarDateLabelC(ganttTaskStartKeyC(task.item))}\nAsset First Draft Due: ${calendarDateLabelC(task.dueKey)}\nAsset Final/Approved Due: ${task.finalApprovedKey ? calendarDateLabelC(task.finalApprovedKey) : "-"}\nLaunch Date / Deadline: ${task.launchKey ? calendarDateLabelC(task.launchKey) : "-"}`} data-testid="flowmate-gantt-task-bar">
                       <span className="team-schedule__production" style={{ width: `${Math.min(100, (task.productionSpanDays / task.spanDays) * 100)}%` }}></span>
                       {task.reviewSpanDays > 0 && <span className="team-schedule__review-span" style={{ left: `${Math.max(0, ((task.draftOffset - task.startOffset) / task.spanDays) * 100)}%`, width: `${Math.min(100, (task.reviewSpanDays / task.spanDays) * 100)}%` }}></span>}
                       <span className="team-schedule__task-label">{task.item.priority === "urgent" ? "⚑ " : ""}<b className="mono">{task.item.id}</b> {task.item.title}</span>
                       <span className="team-schedule__draft-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.draftOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%` }} title="Asset First Draft Due"></span>
                       {task.finalApprovedOffset !== null && <span className="team-schedule__final-approved-marker" style={{ left: `${Math.min(100, Math.max(0, ((task.finalApprovedOffset - task.startOffset + 0.5) / task.spanDays) * 100))}%`, position: "absolute", top: -3, bottom: -3, zIndex: 3, width: 2, background: "#2563EB", pointerEvents: "none" }} title={`Final/Approved: ${calendarDateLabelC(task.finalApprovedKey)}`}></span>}
-                      {task.launchOffset !== null && <span className="gantt__launch-marker" title="Launch"></span>}
+                      {task.launchOffset !== null && <span className="gantt__launch-marker" title="Launch Date / Deadline"></span>}
                     </button>)}
                   </div>
                 </div>
               </div>;
-            })}
-            {visibleMembersAfterOverFilter.length === 0 && <div className="gantt__empty">No assignees match the active filters.</div>}
-          </div>
-        </>
-      ) : (
-        <div className="team-schedule__workload-wrap">
-          <div className="team-schedule__workload" style={{ "--schedule-weeks": weeks.length }} data-testid="flowmate-team-schedule-workload">
-            <div className="team-schedule__workload-head"><span>Assignee</span>{weeks.map(week => <span key={week.key}>Week {week.label}</span>)}</div>
-            {visibleMembersAfterOverFilter.map(member => <div key={member.id} className="team-schedule__workload-row">
-              <div className="team-schedule__workload-owner"><Avatar memberId={member.id} /><span><b>{member.name}</b><small>{Number(member.capacityPerDay || 8)} pt/day</small></span></div>
-              {(cellsByMember.get(member.id) || []).map(cell => <button key={cell.week.key} type="button" className={`team-schedule__capacity-cell ${cell.stateClass}`} onClick={() => setSelectedWorkload({ ...cell, member })} aria-label={`${member.name}, week ${cell.week.label}: ${cell.used} of ${cell.available} points`} data-testid="flowmate-team-schedule-capacity-cell">
-                <strong>{cell.used} / {cell.available} pt</strong><span>{cell.percent > 999 ? "Over" : `${cell.percent}%`}</span>
-              </button>)}
-            </div>)}
-          </div>
-          <aside className={`team-schedule__inspector ${selectedWorkload ? "is-open" : ""}`} aria-live="polite" data-testid="flowmate-team-schedule-workload-inspector">
-            {selectedWorkload ? <>
-              <div className="team-schedule__inspector-head"><div><b>{selectedWorkload.member.name}</b><span>Week {selectedWorkload.week.label}</span></div><button type="button" className="icon-btn" onClick={() => setSelectedWorkload(null)} aria-label="Close workload details">×</button></div>
-              <div className="team-schedule__inspector-total"><strong>{selectedWorkload.used} / {selectedWorkload.available} pt</strong><span>{selectedWorkload.percent}% allocated</span></div>
-              <div className="team-schedule__inspector-list">
-                {selectedWorkload.entries.map(entry => <button type="button" key={entry.item.id} onClick={() => openScheduleItem(entry.item)}><span><b className="mono">{entry.item.id}</b>{entry.item.title}</span><strong>{entry.point} pt</strong></button>)}
-                {selectedWorkload.entries.length === 0 && <p className="muted">No allocated tasks in this week.</p>}
-              </div>
-            </> : <p className="muted">Select a week to see every contributing task and point allocation.</p>}
-          </aside>
+          })}
+          {visibleMembers.length === 0 && <div className="gantt__empty">No assignees match the active filters.</div>}
         </div>
-      )}
+      </>
 
-      <div className="reason-box team-schedule__rule">{isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch. GD/VE capacity and leave calculations do not apply." : "Capacity = actual weekday capacity minus leave and holidays. Assigned, In Progress, Review, and Blocked count toward workload; Delivered and Cancelled do not. This view is read-only—open a task to make changes."}</div>
-      <Source>{isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + flowmate_capacity_allocations + leave_requests + flowmate_non_working_days`}</Source>
+      <div className="reason-box team-schedule__rule">{isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch Date / Deadline. Leave calculations do not apply." : "Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled. This view is read-only; open a task to make changes."}</div>
+      <Source>{isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + leave_requests + flowmate_non_working_days`}</Source>
     </div>
   );
 }
@@ -3147,7 +2802,7 @@ function CalendarScreen({ onOpen }) {
           <span className="muted" style={{ fontSize: 11, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{isLeaveItem ? leavePeriodLabel : `${owner} - ${STATUS_LABEL[item.status] || item.status}`}</span>
           {!compact && item.type === "creative" && item.dueLabel && <span className="muted" style={{ fontSize: 11 }}>First Draft: {item.dueFullLabel || item.dueLabel}</span>}
           {item.type === "creative" && item.finalApprovedDueLabel && <span className="muted" style={{ fontSize: 11 }}>Final / Approved: {item.finalApprovedDueFullLabel || item.finalApprovedDueLabel}</span>}
-          {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch date: {item.launchFullLabel || item.launchLabel}</span>}
+          {!compact && item.launchLabel && <span className="muted" style={{ fontSize: 11 }}>Launch Date / Deadline: {item.launchFullLabel || item.launchLabel}</span>}
         </span>
       </button>
     );
@@ -3282,7 +2937,7 @@ function CalendarScreen({ onOpen }) {
                 <th>Status</th>
                 <th>Assignee</th>
                 <th>Priority</th>
-                <th>Launch date</th>
+                <th>Launch Date / Deadline</th>
               </tr>
             </thead>
             <tbody>
@@ -3668,13 +3323,13 @@ function TaskAssignScheduleScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Team Schedule</h1>
-          <div className="page__sub">Quick Task delivery timeline: 1st Review / Draft to Launch date - {loadState.message}</div>
+          <div className="page__sub">Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline - {loadState.message}</div>
         </div>
       </div>
       <div className="card">
         <div className="card__body" style={{ padding: 0, overflowX: "auto" }}>
           <table className="tbl">
-            <thead><tr><th>ID</th><th>Task</th><th>Function</th><th>Assignee</th><th>1st Review / Draft</th><th>Launch date</th><th>Status</th></tr></thead>
+            <thead><tr><th>ID</th><th>Task</th><th>Function</th><th>Assignee</th><th>1st Review / Draft</th><th>Launch Date / Deadline</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map(row => (
                 <tr key={row.id} onClick={() => onOpen(row.id)} style={{ cursor: "pointer" }}>
@@ -3725,8 +3380,8 @@ function TaskAssignAttentionScreen({ onOpen }) {
   });
   function reasonFor(row) {
     if (row.status === "blocked") return "Blocked";
-    if (!row.dueDate || !row.launchDate) return "Missing 1st Review / Draft or Launch date";
-    if (row.launchDate < today) return "Launch date is overdue";
+    if (!row.dueDate || !row.launchDate) return "Missing 1st Review / Draft or Launch Date / Deadline";
+    if (row.launchDate < today) return "Launch Date / Deadline is overdue";
     return "1st Review / Draft is overdue";
   }
 

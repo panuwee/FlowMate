@@ -1,12 +1,19 @@
 const isVisibleMemberCode = (memberCode) => String(memberCode || "").toLowerCase() !== "gear";
-const FLOWMATE_CAPACITY_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
+const FLOWMATE_ACTIVE_WORK_STATUS_KEYS = ["assigned", "in_progress", "review", "blocked"];
 
-function flowmateWorkloadTodayKey() {
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(now.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+function flowmateWorkloadBangkokDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const byType = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+function flowmateWorkloadTodayKey(value = new Date()) {
+  return flowmateWorkloadBangkokDateKey(value);
 }
 
 async function loadFlowMateWorkloadRows() {
@@ -18,7 +25,7 @@ async function loadFlowMateWorkloadRows() {
   const [workloadResult, membersResult, leaveResult, activeItems] = await Promise.all([
     window.flowmateSupabase
       .from("member_workload_v")
-      .select("team_member_id,member_code,display_name,discipline_short,skills,backup_skills,availability,effective_capacity_per_day,assigned_effort,current_wip,overdue_count,due_soon_count,blocked_count,review_count,quick_task_count")
+      .select("team_member_id,member_code,display_name,discipline_short,skills,backup_skills,availability,assigned_count,in_progress_count,review_count,blocked_count,current_wip,overdue_count,due_soon_count,quick_task_count")
       .order("member_code", { ascending: true }),
     window.flowmateSupabase
       .from("team_members")
@@ -41,9 +48,6 @@ async function loadFlowMateWorkloadRows() {
       .map((member) => [member.id, member]),
   );
 
-  const queuedEffort = (activeItems || [])
-    .filter((item) => item.status === "queued")
-    .reduce((sum, item) => sum + (item.effort || 0), 0);
   const leaveCapacityByMemberId = new Map();
   (leaveResult.data || []).forEach((leave) => {
     const isStartToday = leave.start_date === todayKey;
@@ -67,13 +71,9 @@ async function loadFlowMateWorkloadRows() {
     const openCreativeItems = memberItems.filter(
       (item) =>
         item.type === "creative" &&
-        FLOWMATE_CAPACITY_STATUS_KEYS.includes(item.status),
+        FLOWMATE_ACTIVE_WORK_STATUS_KEYS.includes(item.status),
     );
     const leaveFractionToday = leaveCapacityByMemberId.get(row.team_member_id) || 0;
-    const effectiveCap = Math.max(0, Number(row.effective_capacity_per_day || 0) * (1 - leaveFractionToday));
-    const assignedEffort = Number(row.assigned_effort || 0);
-    const windowCapacity = effectiveCap * 5;
-
     return {
       m: {
         id: row.team_member_id,
@@ -86,19 +86,17 @@ async function loadFlowMateWorkloadRows() {
           ...((row.skills || []).map(flowmateToKebab)),
           ...((row.backup_skills || []).map((skill) => `${flowmateToKebab(skill)}-backup`)),
         ],
-        capacityPerDay: Number(member.capacity_per_day || effectiveCap),
-        capacityOverride: leaveFractionToday > 0 && leaveFractionToday < 1
-          ? effectiveCap
-          : member.capacity_override_per_day,
+        capacityPerDay: Number(member.capacity_per_day || 0),
+        capacityOverride: member.capacity_override_per_day,
         wipLimit: Number(member.wip_limit || 0),
         availability: leaveFractionToday >= 1 ? "leave" : (leaveFractionToday > 0 ? "partial" : row.availability),
         leaveFractionToday,
       },
       statusCounts,
-      assignedEffort,
-      effectiveCap,
-      window: windowCapacity,
-      available: Math.max(0, windowCapacity - assignedEffort),
+      assignedCount: Number(row.assigned_count || statusCounts.assigned || 0),
+      inProgressCount: Number(row.in_progress_count || statusCounts.in_progress || 0),
+      reviewCount: Number(row.review_count || statusCounts.review || 0),
+      blockedCount: Number(row.blocked_count || statusCounts.blocked || 0),
       wip: Number(row.current_wip || 0),
       due_soon: Number(row.due_soon_count || 0),
       overdue: Number(row.overdue_count || 0),
@@ -112,7 +110,6 @@ async function loadFlowMateWorkloadRows() {
     };
   });
 
-  rows.queuedEffort = queuedEffort;
   return rows;
 }
 

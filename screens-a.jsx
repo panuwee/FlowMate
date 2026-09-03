@@ -187,17 +187,17 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
   const overdueIds = new Set(overdue.map(w => w.id));
   const blocked = mine.filter(w => w.status === "blocked" && !overdueIds.has(w.id));
   const blockedIds = new Set(blocked.map(w => w.id));
-  const capacityRisk = mine.filter(w => {
+  const scheduleRisk = mine.filter(w => {
     if (overdueIds.has(w.id) || blockedIds.has(w.id)) return false;
     const codes = new Set((window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : []).map(warning => warning.code));
-    return codes.has("over_capacity") || codes.has("deadline_capacity_gap") || codes.has("review_buffer_risk");
+    return codes.has("review_buffer_risk");
   });
-  const capacityRiskIds = new Set(capacityRisk.map(w => w.id));
-  const dueToday = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && w.dueDelta === 0);
+  const scheduleRiskIds = new Set(scheduleRisk.map(w => w.id));
+  const dueToday = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !scheduleRiskIds.has(w.id) && w.dueDelta === 0);
   const dueTodayIds = new Set(dueToday.map(w => w.id));
-  const dueSoon = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !capacityRiskIds.has(w.id) && !dueTodayIds.has(w.id) && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2);
+  const dueSoon = mine.filter(w => !overdueIds.has(w.id) && !blockedIds.has(w.id) && !scheduleRiskIds.has(w.id) && !dueTodayIds.has(w.id) && w.dueDelta != null && w.dueDelta > 0 && w.dueDelta <= 2);
   const dueSoonIds = new Set(dueSoon.map(w => w.id));
-  const riskGroupIds = new Set([...overdueIds, ...blockedIds, ...capacityRiskIds, ...dueTodayIds, ...dueSoonIds]);
+  const riskGroupIds = new Set([...overdueIds, ...blockedIds, ...scheduleRiskIds, ...dueTodayIds, ...dueSoonIds]);
   const inProgress = mine.filter(w => w.status === "in_progress" && !riskGroupIds.has(w.id));
   const assigned = mine.filter(w => w.status === "assigned" && !riskGroupIds.has(w.id));
   const review = mine.filter(w => w.status === "review" && !riskGroupIds.has(w.id));
@@ -229,7 +229,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
       <div className="stat-strip">
         <div className="stat stat--accent"><div className="stat__num">{overdue.length}</div><div className="stat__lbl">Overdue</div></div>
         <div className="stat stat--warn"><div className="stat__num">{dueToday.length}</div><div className="stat__lbl">Due today</div></div>
-        <div className="stat stat--info"><div className="stat__num">{capacityRisk.length}</div><div className="stat__lbl">Capacity / deadline risk</div></div>
+        <div className="stat stat--info"><div className="stat__num">{scheduleRisk.length}</div><div className="stat__lbl">Schedule risk</div></div>
         <div className="stat"><div className="stat__num">{review.length + dueSoon.filter(d=>d.status==="review").length + dueToday.filter(d=>d.status==="review").length}</div><div className="stat__lbl">Review</div></div>
         <div className="stat"><div className="stat__num">{blocked.length}</div><div className="stat__lbl">Blocked</div></div>
       </div>
@@ -251,7 +251,7 @@ function MyWorkScreen({ onOpen, onNav, searchQuery = "" }) {
 
       <MyWorkGroup title="Overdue" tone="overdue" items={overdue} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
       <MyWorkGroup title="Blocked" items={blocked} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
-      <MyWorkGroup title="Capacity / deadline risk" items={capacityRisk} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
+      <MyWorkGroup title="Schedule risk" items={scheduleRisk} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
       <MyWorkGroup title="Due today" items={dueToday} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
       <MyWorkGroup title="Due soon" items={dueSoon} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
       <MyWorkGroup title="In progress" items={inProgress} onOpen={onOpen} onQuickDone={handleQuickDone} onCreativeTransition={handleCreativeTransition} transitionPending={transitionPending} />
@@ -285,7 +285,6 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
               <th>Type</th>
               <th>Status</th>
               <th>Priority</th>
-              <th>Effort</th>
               <th>Checklist</th>
               <th>Due</th>
               <th className="col-right">Action</th>
@@ -302,7 +301,6 @@ function MyWorkGroup({ title, items, onOpen, onQuickDone, onCreativeTransition, 
                 <td><TypePill type={w.type} /></td>
                 <td><StatusBadge status={w.status} /></td>
                 <td><PriorityBadge level={w.priority} /></td>
-                <td><Effort value={w.effort} /></td>
                 <td><Progress {...(w.checklist || { done: 0, total: 0 })} /></td>
                 <td><DueBadge delta={w.dueDelta} label={w.dueLabel} status={w.status} /></td>
                 <td className="col-right" onClick={(e) => e.stopPropagation()}>
@@ -546,6 +544,11 @@ function normalizeFlowMateCreativeChannels(value) {
   return Array.from(new Set(normalizedLabels));
 }
 
+function isFlowMateNoTagDraft(draft) {
+  const channels = normalizeFlowMateCreativeChannels(draft && draft.platforms);
+  return channels.length === 1 && channels[0] === "No Tag";
+}
+
 function formatFlowMateCreativeChannels(value) {
   return normalizeFlowMateCreativeChannels(value).join(", ");
 }
@@ -608,8 +611,8 @@ const FLOWMATE_NORMAL_CREATIVE_CAPACITY_PER_DAY = 8;
 const FLOWMATE_CREATIVE_CAPACITY_PER_BUCKET = 4;
 const FLOWMATE_MIDDAY_CUTOFF_HOUR = 12;
 const FLOWMATE_PRODUCTION_CUTOFF_HOUR = 15;
-const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 5;
-const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 1;
+const FLOWMATE_ASSET_FIRST_DRAFT_WORKING_DAYS = 4;
+const FLOWMATE_ASSET_FINAL_APPROVED_WORKING_DAYS = 2;
 const FLOWMATE_TH_COMPLETE_CALENDAR_YEARS = new Set([2025, 2026, 2027]);
 // UI preview mirror of the reviewed nationwide BOT calendar. Supabase remains
 // authoritative on submit and rejects calculations outside complete years.
@@ -814,13 +817,6 @@ function getFlowMateCreativeTimePressure(draft) {
   };
 }
 
-function getFlowMateAutoUrgentReason(timePressure) {
-  if (timePressure.isReviewBufferAtRisk && !timePressure.isInsufficient) {
-    return `Auto urgent: the earliest feasible Asset First Draft is ${timePressure.dueDate}, after the fixed Asset First Draft Due date before Launch ${timePressure.launchDate}.`;
-  }
-  return `Auto urgent: ${timePressure.skillLabel} x${timePressure.assetCount} requires ${timePressure.effort} pt but only ${timePressure.workingDays} working day(s) / ${timePressure.normalCapacity} pt remain before Asset First Draft Due.`;
-}
-
 function normalizeFlowMateQuickDraft(draft) {
   const nextDraft = { ...getDefaultQuickDraft(), ...(draft || {}) };
   return {
@@ -835,6 +831,8 @@ function normalizeFlowMateCreativeDraft(draft) {
   const creativeType = getFlowMateCreativeTypeOption(nextDraft.assetSubtype);
   const creativeType2 = String(nextDraft.assetSubtype2 || "").trim() ? getFlowMateCreativeTypeOption(nextDraft.assetSubtype2) : null;
   const launchDate = clampFlowMateDateToToday(nextDraft.launchDate);
+  const normalizedChannels = normalizeFlowMateCreativeChannels(nextDraft.platforms);
+  const nextIsNoTag = normalizedChannels.length === 1 && normalizedChannels[0] === "No Tag";
   const assetCountNumber = Number(nextDraft.assetCount);
   const assetCount = Number.isInteger(assetCountNumber) && assetCountNumber >= 1 ? String(assetCountNumber) : "1";
   const assetCount2Number = Number(nextDraft.assetCount2);
@@ -848,13 +846,14 @@ function normalizeFlowMateCreativeDraft(draft) {
     assetType2: creativeType2 ? creativeType2.assetType : "",
     assetSubtype2: creativeType2 ? creativeType2.key : "",
     assetCount2,
-    publishTime: normalizeWholeHourTime(nextDraft.publishTime) || getFlowMateLegacyPublishTimeOption(nextDraft.publishTime),
+    platforms: normalizedChannels.join(", "),
+    publishTime: nextIsNoTag ? "" : normalizeWholeHourTime(nextDraft.publishTime) || getFlowMateLegacyPublishTimeOption(nextDraft.publishTime),
     launchDate,
   };
   return {
     ...normalizedDraft,
     dueDate: getFlowMateAutoCreativeDraftDate(normalizedDraft),
-    finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(launchDate),
+    finalApprovedDueDate: nextIsNoTag ? "" : getFlowMateFinalApprovedDateForLaunchDate(launchDate),
   };
 }
 
@@ -1026,9 +1025,9 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     requireField("requesterTeam", "Requester team is required.");
     requireField("projectName", "Project / campaign is required.");
     requireField("dueDate", "1st Review / Draft is required.");
-    requireField("launchDate", "Launch date is required.");
+    requireField("launchDate", "Launch Date / Deadline is required.");
     requireNotPast("dueDate", "1st Review / Draft cannot be before today.");
-    requireNotPast("launchDate", "Launch date cannot be before today.");
+    requireNotPast("launchDate", "Launch Date / Deadline cannot be before today.");
     return errors;
   }
 
@@ -1054,7 +1053,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   requireHttpUrl("briefLink", FLOWMATE_INVALID_BRIEF_LINK_MESSAGE);
   requireField("priority", "Priority is required.");
   requireField("dueDate", "1st Draft is required.");
-  requireField("launchDate", "Launch date is required.");
+  requireField("launchDate", "Launch Date / Deadline is required.");
   const launchCalendarYear = Number(String(row.launchDate || "").slice(0, 4));
   if (Number.isInteger(launchCalendarYear) && !FLOWMATE_TH_COMPLETE_CALENDAR_YEARS.has(launchCalendarYear)) {
     errors.launchDate = `Thai holiday calendar for ${launchCalendarYear} is not available. Ask an administrator to review that year before creating this request.`;
@@ -1062,7 +1061,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   if (String(row.publishTime || "").trim() && !normalizeWholeHourTime(row.publishTime)) {
     errors.publishTime = "Publish Time must be N/A or a whole hour.";
   }
-  requireNotPast("launchDate", "Launch date cannot be before today.");
+  requireNotPast("launchDate", "Launch Date / Deadline cannot be before today.");
 
   if (row.priority === "urgent") {
     requireField("urgentReason", "Urgent reason is required.");
@@ -1256,7 +1255,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
   async function handleSubmit() {
     if (isSubmitting) return;
     const activeDraft = mode === "quick" ? quickDraft : creativeDraft;
-    let submissionDraft = activeDraft;
+    const submissionDraft = activeDraft;
     const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);
     if (Object.keys(nextValidationErrors).length > 0) {
       const hasInvalidBriefLink = nextValidationErrors.briefLink === FLOWMATE_INVALID_BRIEF_LINK_MESSAGE;
@@ -1271,33 +1270,6 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
       setValidationErrors(nextValidationErrors);
       setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please correct the highlighted fields.");
       return;
-    }
-
-    const timePressure = mode === "creative" ? getFlowMateCreativeTimePressure(submissionDraft) : null;
-    if (timePressure && timePressure.requiresUrgent && submissionDraft.priority !== "urgent") {
-      const autoUrgentReason = getFlowMateAutoUrgentReason(timePressure);
-      const confirmed = window.flowmatePrompt
-        ? await window.flowmatePrompt({
-            title: "เวลาไม่เพียงพอ",
-            hideInput: true,
-            note: timePressure.isInsufficient
-              ? `This request needs ${timePressure.effort} pt, but only ${timePressure.normalCapacity} pt (${timePressure.workingDays} working day(s)) remain before Asset First Draft Due. Priority will be set to Urgent.`
-              : `The earliest feasible Asset First Draft is ${timePressure.dueDate}, after the fixed Asset First Draft Due date. Priority will be set to Urgent.`,
-            confirmText: "Set Urgent and submit",
-          })
-        : "";
-      if (confirmed === null) {
-        setCreateAlert("Submit cancelled. Please adjust Launch date, Asset Count, or Priority.");
-        return;
-      }
-      const urgentDraft = {
-        ...submissionDraft,
-        priority: "urgent",
-        urgentReason: submissionDraft.urgentReason || autoUrgentReason,
-      };
-      submissionDraft = urgentDraft;
-      setCreativeDraft(urgentDraft);
-      saveFlowMateCreateDraft("creative", urgentDraft);
     }
 
     setValidationErrors({});
@@ -1420,17 +1392,17 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
           <div className="choice-card__title"><Icon name="zap" /> Quick task</div>
           <div className="choice-card__sub">Small internal task, follow-up, or reminder. Stays in your team's quick-task list.</div>
           <ul className="choice-card__list">
-            <li>No effort calculation, no auto-assignment</li>
+            <li>No brief or routing review required</li>
             <li>Self-assign or pick a teammate</li>
-            <li>Counted separately from creative capacity</li>
+            <li>Tracked separately from creative requests</li>
           </ul>
         </button>}
         {!isTaskAssignProduct && <button className={`choice-card ${mode === "creative" ? "is-active" : ""}`} onClick={() => switchCreateMode("creative")}>
           <div className="choice-card__title"><Icon name="layers" /> Creative request</div>
           <div className="choice-card__sub">Structured request for production creative - banner, video, motion, esport pack.</div>
           <ul className="choice-card__list">
-            <li>Brief validation, auto effort point, auto routing</li>
-            <li>Owner is decided by the engine - no preferred owner</li>
+            <li>Brief validation and structured request details</li>
+            <li>Owner is confirmed after routing review</li>
           </ul>
         </button>}
       </div>
@@ -1502,8 +1474,8 @@ function QuickTaskForm({ value, onChange, assigneeOptions, product = "task-assig
     <div className="form-grid">
       <div className="field field--full">
         <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Project Name]" title="Auto-filled from Launch Date, Requester Team / Function, and Project / campaign." />
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, Requester Team / Function, and Project / campaign.</div>
+        <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Project Name]" title="Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign." />
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign.</div>
       </div>
       <div className="field field--full">
         <label className="field__label">Note</label>
@@ -1571,7 +1543,7 @@ function QuickTaskForm({ value, onChange, assigneeOptions, product = "task-assig
         {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
       </div>
       <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
-        <label className="field__label">Launch date <span className="req">*</span></label>
+        <label className="field__label">Launch Date / Deadline <span className="req">*</span></label>
         <input className="input" value={value.launchDate} onChange={(e) => update("launchDate", e.target.value)} type="date" min={todayDate} />
         {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
       </div>
@@ -1594,6 +1566,7 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
   const [campaignOptions, setCampaignOptions] = useState(() => window.FLOWMATE_MARKETING_CAMPAIGNS || []);
   const [formatPrompt, setFormatPrompt] = useState("");
   const selectedChannels = normalizeFlowMateCreativeChannels(value.platforms);
+  const isNoTag = isFlowMateNoTagDraft(value);
   const formatOptions = getFlowMateCreativeFormatOptions(selectedChannels);
   const selectedFormatKeys = getFlowMateSelectedCreativeFormatKeys(value);
   const invalidSelectedFormatKeys = selectedFormatKeys.filter(formatKey => !formatOptions.includes(formatKey));
@@ -1631,7 +1604,9 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
     const applyCreativeMilestones = (nextValue) => ({
       ...nextValue,
       dueDate: getFlowMateAutoCreativeDraftDate(nextValue),
-      finalApprovedDueDate: getFlowMateFinalApprovedDateForLaunchDate(nextValue.launchDate),
+      finalApprovedDueDate: isFlowMateNoTagDraft(nextValue)
+        ? ""
+        : getFlowMateFinalApprovedDateForLaunchDate(nextValue.launchDate),
     });
     if (field === "assetSubtype") {
       const nextType = getFlowMateCreativeTypeOption(next);
@@ -1667,9 +1642,13 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
         ? currentChannels.filter(channel => channel !== "No Tag" && channel !== channelLabel)
         : [...currentChannels.filter(channel => channel !== "No Tag"), channelLabel]);
     const normalizedNextChannels = nextChannels.length ? nextChannels : [channelLabel];
+    const nextIsNoTag = normalizedNextChannels.length === 1
+      && normalizedNextChannels[0] === "No Tag";
     const nextValue = {
       ...value,
       platforms: normalizedNextChannels.join(", "),
+      publishTime: nextIsNoTag ? "" : value.publishTime,
+      finalApprovedDueDate: nextIsNoTag ? "" : getFlowMateFinalApprovedDateForLaunchDate(value.launchDate),
     };
     const nextFormatKeys = getFlowMateCreativeFormatOptions(normalizedNextChannels);
     nextValue.sizeFormats = nextFormatKeys;
@@ -1696,8 +1675,8 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
       <div className="form-grid">
         <div className="field field--full">
           <label className="field__label">Title <span className="req">*</span></label>
-          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Campaign][Product / Event]" title="Auto-filled from Launch Date, your account team, Campaign, and Product / Event." />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date, your account team, Campaign, and Product / Event.</div>
+          <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Campaign][Product / Event]" title="Auto-filled from Launch Date / Deadline, your account team, Campaign, and Product / Event." />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date / Deadline, your account team, Campaign, and Product / Event.</div>
         </div>
         <div className={`field ${errors.campaignName ? "field--error" : ""}`}>
           <label className="field__label">Campaign <span className="req">*</span></label>
@@ -1812,32 +1791,33 @@ function CreativeRequestForm({ value, onChange, errors = {} }) {
         <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
           <label className="field__label">Asset First Draft Due <span className="req">*</span></label>
           <input className="input" type="date" value={value.dueDate} readOnly disabled min={todayDate} />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>First Draft: T-5 Thai working days before Launch Date.</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>First Draft: T-4 Thai working days before Launch Date / Deadline.</div>
           {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
         </div>
         <div className="field">
           <label className="field__label">Asset Final/Approved Due</label>
-          <input className="input" type="date" value={value.finalApprovedDueDate || getFlowMateFinalApprovedDateForLaunchDate(value.launchDate)} readOnly disabled min={todayDate} />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Final/Approved: T-1 Thai working day before Launch Date.</div>
+          <input className="input" type="date" value={isNoTag ? "" : value.finalApprovedDueDate || getFlowMateFinalApprovedDateForLaunchDate(value.launchDate)} readOnly disabled={isNoTag} min={todayDate} />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{isNoTag ? "Not required for No Tag" : "Final/Approved: T-2 Thai working days before Launch Date / Deadline."}</div>
         </div>
         <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
-          <label className="field__label">Launch date <span className="req">*</span></label>
+          <label className="field__label">Launch Date / Deadline <span className="req">*</span></label>
           <input className="input" type="date" value={value.launchDate} onChange={e => update("launchDate", e.target.value)} min={todayDate} />
           {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
         </div>
         <div className={`field ${errors.publishTime ? "field--error" : ""}`}>
           <label className="field__label">Publish Time</label>
-          <select className="select" value={value.publishTime} onChange={e => update("publishTime", e.target.value)}>
-            {legacyPublishTime && <option value={legacyPublishTime} disabled>{legacyPublishTime}</option>}
+          <select className="select" value={isNoTag ? "" : value.publishTime} onChange={e => update("publishTime", e.target.value)} disabled={isNoTag}>
+            {legacyPublishTime && !isNoTag && <option value={legacyPublishTime} disabled>{legacyPublishTime}</option>}
             {FLOWMATE_PUBLISH_TIME_OPTIONS.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{isNoTag ? "Not required for No Tag" : ""}</div>
           {errors.publishTime && <div className="field__error">{errors.publishTime}</div>}
         </div>
         <div className="field field--full">
           <div className="reason-box">
-            <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. The engine sets effort and owner based on skill, capacity, WIP, and fairness rules.
+            <strong>Note - fields not collected:</strong> preferred owner, manual effort, complexity. Assignment details are set after submission in the workflow.
           </div>
         </div>
       </div>
@@ -1870,11 +1850,12 @@ function CreateResultScreen({ result, onAgain, onNav }) {
                 <Avatar memberId={result.owner} size="avatar--xl" />
                 <div>
                   <div className="strong" style={{ fontSize: 16 }}>{m?.name || result.ownerName || "Assigned owner"}</div>
-                  <div className="muted" style={{ fontSize: 12 }}>{m ? `${m.discipline} - capacity ${m.capacityPerDay} pt/day` : "Owner selected by the assignment engine"}</div>
+                  <div className="muted" style={{ fontSize: 12 }}>{m?.discipline || "Assigned by FlowMate"}</div>
                 </div>
                 <div className="spacer"></div>
-                <Effort value={result.effort} lg />
-                <span className="muted" style={{ fontSize: 12 }}>effort points</span>
+              </div>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Owner selected from Skill, active work, Assigned queue, and leave.
               </div>
               {result.reason && <div className="reason-box">{result.reason}</div>}
               <AssignmentWarningBadges work={resultWarningWork} limit={8} />
@@ -1883,12 +1864,6 @@ function CreateResultScreen({ result, onAgain, onNav }) {
           {result.kind === "unassigned" && (
             <div className="col" style={{ gap: 12 }}>
               <div className="muted">Task created but needs manual assignment.</div>
-              {result.effort != null && (
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <Effort value={result.effort} lg />
-                  <span className="muted" style={{ fontSize: 12 }}>effort points</span>
-                </div>
-              )}
               {result.reason && <div className="reason-box reason-box--queued">{result.reason}</div>}
               <button type="button" className="btn btn--secondary" onClick={() => onNav("attention")}><Icon name="alert" /> Open Attention Needed</button>
             </div>
@@ -2702,7 +2677,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row"><div className="meta-row__lbl">Project / campaign</div><div className="meta-row__val">{w.campaign || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Assignee</div><div className="meta-row__val">{owner?.name || "Unassigned"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">1st Review / Draft</div><div className="meta-row__val">{w.dueLabel || "-"}</div></div>
-                <div className="meta-row"><div className="meta-row__lbl">Launch date</div><div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div></div>
+                <div className="meta-row"><div className="meta-row__lbl">Launch Date / Deadline</div><div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div></div>
                 <div className="meta-row"><div className="meta-row__lbl">Priority</div><div className="meta-row__val"><PriorityBadge level={w.priority} /></div></div>
               </div>
             </div>
@@ -2836,10 +2811,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 <div className="meta-row__val">{w.requester || "-"} <span className="muted">- {w.requesterTeam || "No team"}</span></div>
               </div>
               <div className="meta-row">
-                <div className="meta-row__lbl">Effort</div>
-                <div className="meta-row__val"><Effort value={w.effort} lg /> <span className="muted" style={{ fontSize: 11, marginLeft: 6 }}>~{w.effort}h</span></div>
-              </div>
-              <div className="meta-row">
                 <div className="meta-row__lbl">Review round</div>
                 <div className="meta-row__val">{w.reviewRound - 0} <span className="muted" style={{ fontSize: 11 }}>(incremented only on requested changes)</span></div>
               </div>
@@ -2913,7 +2884,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                 </div>
               )}
               <div className="meta-row">
-                <div className="meta-row__lbl">Launch date</div>
+                <div className="meta-row__lbl">Launch Date / Deadline</div>
                 <div className="meta-row__val">{w.launchFullLabel || w.launchLabel || "-"}</div>
               </div>
               <div className="meta-row">

@@ -191,8 +191,8 @@ Object.assign(window, {
   runFlowMateBoardRefresh
 });
 function exportRowsCsv(rows) {
-  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date", "Due / First Draft", "Final / Approved", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Effort", "Priority"];
-  const csvRows = rows.map(w => [w.id, w.title, w.type, STATUS_LABEL[w.status] || w.status, w.campaign || "", w.channel || w.platform || "", w.publishFullLabel || w.publishLabel || w.publishDate || "", w.launchFullLabel || w.launchLabel || w.launchDate || "", w.dueFullLabel || w.dueLabel || w.dueDate || "", w.type === "creative" ? w.finalApprovedDueFullLabel || w.finalApprovedDueLabel || w.finalApprovedDueDate || "" : "", w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : ASSET_LABEL[w.assetType] || w.assetType || "", w.assetCount || "", w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned", w.requester || "", w.requesterTeam || "", ASSET_LABEL[w.assetType] || w.assetType || "", w.effort || "", w.priority || ""]);
+  const columns = ["ID", "Title", "Type", "Status", "Campaign", "Channel", "Publish Date", "Launch Date / Deadline", "Due / First Draft", "Final / Approved", "Type / Skill", "Asset Count", "Owner", "Requester", "Team", "Asset", "Priority"];
+  const csvRows = rows.map(w => [w.id, w.title, w.type, STATUS_LABEL[w.status] || w.status, w.campaign || "", w.channel || w.platform || "", w.publishFullLabel || w.publishLabel || w.publishDate || "", w.launchFullLabel || w.launchLabel || w.launchDate || "", w.dueFullLabel || w.dueLabel || w.dueDate || "", w.type === "creative" ? w.finalApprovedDueFullLabel || w.finalApprovedDueLabel || w.finalApprovedDueDate || "" : "", w.subtype && typeof getFlowMateCreativeTypeLabel === "function" ? getFlowMateCreativeTypeLabel(w.subtype) : ASSET_LABEL[w.assetType] || w.assetType || "", w.assetCount || "", w.assignee && MEMBERS_BY_ID[w.assignee] ? MEMBERS_BY_ID[w.assignee].name : "Unassigned", w.requester || "", w.requesterTeam || "", ASSET_LABEL[w.assetType] || w.assetType || "", w.priority || ""]);
   window.flowmateDownloadCsv(`flowmate-list-${new Date().toISOString().slice(0, 10)}.csv`, columns, csvRows);
 }
 function ListScreen({
@@ -444,7 +444,7 @@ function ListScreen({
     className: "tbl"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
     className: "col-id"
-  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Publish Date"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Requester / Team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Effort"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Due / First Draft"), React.createElement("th", null, "Final / Approved"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, rows.map(w => React.createElement("tr", {
+  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Type"), React.createElement("th", null, "Status"), React.createElement("th", null, "Campaign"), React.createElement("th", null, "Channel"), React.createElement("th", null, "Publish Date"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Requester / Team"), React.createElement("th", null, "Asset"), React.createElement("th", null, "Priority"), React.createElement("th", null, "Due / First Draft"), React.createElement("th", null, "Final / Approved"), React.createElement("th", null, "Flags"))), React.createElement("tbody", null, rows.map(w => React.createElement("tr", {
     key: w.id,
     className: w.overdue ? "is-overdue" : "",
     onClick: () => openListWorkItem(w)
@@ -497,9 +497,7 @@ function ListScreen({
     style: {
       fontSize: 12
     }
-  }, ASSET_LABEL[w.assetType] || "-")), React.createElement("td", null, React.createElement(Effort, {
-    value: w.effort
-  })), React.createElement("td", null, React.createElement(PriorityBadge, {
+  }, ASSET_LABEL[w.assetType] || "-")), React.createElement("td", null, React.createElement(PriorityBadge, {
     level: w.priority
   })), React.createElement("td", null, React.createElement("div", {
     className: "muted",
@@ -1502,9 +1500,7 @@ function BoardScreen({
         memberId: row.assignee
       }), React.createElement("span", {
         className: "board-card__owner"
-      }, row.ownerName || "Unassigned"), React.createElement(Effort, {
-        value: row.effort
-      }), React.createElement(Progress, row.checklist || {
+      }, row.ownerName || "Unassigned"), React.createElement(Progress, row.checklist || {
         done: 0,
         total: 0
       })), React.createElement("div", {
@@ -1679,10 +1675,6 @@ const FLOWMATE_ATTENTION_CATEGORIES_B = [{
   label: "Unassigned",
   hint: "Choose an active GD/VE owner from the work item detail."
 }, {
-  code: "over_capacity",
-  label: "Over capacity",
-  hint: "Owner workload exceeds their normal daily capacity; review priority or reassign the task."
-}, {
   code: "wip_exceeded",
   label: "WIP exceeded",
   hint: "Owner has more active production work than their WIP limit."
@@ -1703,13 +1695,9 @@ const FLOWMATE_ATTENTION_CATEGORIES_B = [{
   label: "Member on leave",
   hint: "Assigned owner has leave during the production window."
 }, {
-  code: "deadline_capacity_gap",
-  label: "Deadline capacity gap",
-  hint: "Available capacity does not fully cover work before 1st Draft."
-}, {
   code: "review_buffer_risk",
   label: "Review buffer risk",
-  hint: "The review window before Launch is compressed."
+  hint: "The review window before Launch Date / Deadline is compressed."
 }, {
   code: "review_delay",
   label: "Review delay",
@@ -1814,9 +1802,9 @@ function QueueScreen({
     className: "stat stat--warn"
   }, React.createElement("div", {
     className: "stat__num"
-  }, (attentionGroups.over_capacity || []).length + (attentionGroups.deadline_capacity_gap || []).length), React.createElement("div", {
+  }, (attentionGroups.review_buffer_risk || []).length + (attentionGroups.needs_split || []).length), React.createElement("div", {
     className: "stat__lbl"
-  }, "Capacity risk")), React.createElement("div", {
+  }, "Planning signals")), React.createElement("div", {
     className: "stat stat--accent"
   }, React.createElement("div", {
     className: "stat__num"
