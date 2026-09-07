@@ -184,6 +184,15 @@ function makeNestedListLoaderSupabase() {
 }
 
 describe("FlowMate Board and Delivered frontend", () => {
+  it("shows the requester only for Review delay attention rows", () => {
+    const source = readRepo("screens-b.jsx");
+    const attentionGroup = source.slice(source.indexOf("function AttentionGroup"), source.indexOf("/* ============================================================\n   ADMIN WHITELIST"));
+
+    expect(attentionGroup).toContain('const showRequester = category.code === "review_delay";');
+    expect(attentionGroup).toContain('{showRequester && <th>Requester</th>}');
+    expect(attentionGroup).toContain('{showRequester && <td>{work.requester || "-"}</td>}');
+  });
+
   it("shares one List backend batch for concurrent consumers and expires it after 30 seconds", async () => {
     let now = 1_000;
     class FixedDate extends Date {

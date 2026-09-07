@@ -1310,6 +1310,7 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
 
 function AttentionGroup({ category, items, onOpen }) {
   if (!items.length) return null;
+  const showRequester = category.code === "review_delay";
   return (
     <section className="section" aria-labelledby={`attention-${category.code}`}>
       <div className="section__head">
@@ -1319,7 +1320,7 @@ function AttentionGroup({ category, items, onOpen }) {
         <span className="muted" style={{ fontSize: 12 }}>{category.hint}</span>
       </div>
       <table className="tbl">
-        <thead><tr><th className="col-id">ID</th><th>Title</th><th>Status</th><th>Owner</th><th>Due</th><th style={{ width: "36%" }}>Actionable context</th><th className="col-right">Action</th></tr></thead>
+        <thead><tr><th className="col-id">ID</th><th>Title</th><th>Status</th><th>Owner</th>{showRequester && <th>Requester</th>}<th>Due</th><th style={{ width: showRequester ? "30%" : "36%" }}>Actionable context</th><th className="col-right">Action</th></tr></thead>
         <tbody>
           {items.map((work) => (
             <tr key={`${category.code}:${work.id}`} onClick={() => onOpen(work)}>
@@ -1327,6 +1328,7 @@ function AttentionGroup({ category, items, onOpen }) {
               <td className="col-title"><div>{work.title}</div><AssignmentWarningBadges work={work} limit={2} /></td>
               <td><StatusBadge status={work.status} /></td>
               <td>{work.assignee && MEMBERS_BY_ID[work.assignee] ? MEMBERS_BY_ID[work.assignee].name : "Unassigned"}</td>
+              {showRequester && <td>{work.requester || "-"}</td>}
               <td><DueBadge delta={work.dueDelta} label={work.dueLabel} status={work.status} /></td>
               <td><div className="reason-box reason-box--queued" style={{ padding: "6px 10px", fontSize: 12 }}>{flowMateAttentionContextB(work, category.code)}</div></td>
               <td className="col-right"><button type="button" className="btn btn--xs btn--secondary" onClick={(event) => { event.stopPropagation(); onOpen(work); }}>Open detail</button></td>

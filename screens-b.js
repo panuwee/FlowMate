@@ -1829,6 +1829,7 @@ function AttentionGroup({
   onOpen
 }) {
   if (!items.length) return null;
+  const showRequester = category.code === "review_delay";
   return React.createElement("section", {
     className: "section",
     "aria-labelledby": `attention-${category.code}`
@@ -1850,9 +1851,9 @@ function AttentionGroup({
     className: "tbl"
   }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", {
     className: "col-id"
-  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Status"), React.createElement("th", null, "Owner"), React.createElement("th", null, "Due"), React.createElement("th", {
+  }, "ID"), React.createElement("th", null, "Title"), React.createElement("th", null, "Status"), React.createElement("th", null, "Owner"), showRequester && React.createElement("th", null, "Requester"), React.createElement("th", null, "Due"), React.createElement("th", {
     style: {
-      width: "36%"
+      width: showRequester ? "30%" : "36%"
     }
   }, "Actionable context"), React.createElement("th", {
     className: "col-right"
@@ -1868,7 +1869,7 @@ function AttentionGroup({
     limit: 2
   })), React.createElement("td", null, React.createElement(StatusBadge, {
     status: work.status
-  })), React.createElement("td", null, work.assignee && MEMBERS_BY_ID[work.assignee] ? MEMBERS_BY_ID[work.assignee].name : "Unassigned"), React.createElement("td", null, React.createElement(DueBadge, {
+  })), React.createElement("td", null, work.assignee && MEMBERS_BY_ID[work.assignee] ? MEMBERS_BY_ID[work.assignee].name : "Unassigned"), showRequester && React.createElement("td", null, work.requester || "-"), React.createElement("td", null, React.createElement(DueBadge, {
     delta: work.dueDelta,
     label: work.dueLabel,
     status: work.status
