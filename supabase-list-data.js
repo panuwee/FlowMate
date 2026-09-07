@@ -1518,10 +1518,22 @@ async function loadFlowMateTeamScheduleRows() {
         effort: 0,
       }));
   }
-  const { data, error } = await window.flowmateSupabase
-    .from("flowmate_team_schedule_v")
-    .select("work_item_id,display_id,title,status,priority,effort_point,owner_member_id,first_draft_date,final_approved_due_date,launch_date,first_assigned_at,actual_started_at,suggested_start_date,asset_type,asset_subtype")
-    .order("first_draft_date", { ascending: true });
+  let { data, error } = await window.flowmateSupabase
+    .rpc("flowmate_list_team_schedule");
+
+  const missingScheduleRpc = error && (
+    ["42883", "PGRST202"].includes(error.code)
+    || /could not find the function public\.flowmate_list_team_schedule|function public\.flowmate_list_team_schedule\(\) does not exist/i.test(error.message || "")
+  );
+  if (missingScheduleRpc) {
+    const fallbackResult = await window.flowmateSupabase
+      .from("flowmate_team_schedule_v")
+      .select("work_item_id,display_id,title,status,priority,owner_member_id,first_draft_date,final_approved_due_date,launch_date,first_assigned_at,actual_started_at,suggested_start_date,asset_type,asset_subtype")
+      .in("status", ["assigned", "in_progress", "review", "blocked"])
+      .order("first_draft_date", { ascending: true });
+    data = fallbackResult.data;
+    error = fallbackResult.error;
+  }
   if (error && ["42P01", "PGRST205"].includes(error.code)) return loadFlowMateCalendarRows();
   if (error) throw error;
   const leaveRows = await loadFlowMateLeaveRows();
@@ -1532,7 +1544,7 @@ async function loadFlowMateTeamScheduleRows() {
     title: row.title,
     status: row.status,
     priority: row.priority,
-    effort: Number(row.effort_point || 0),
+    effort: 0,
     assignee: row.owner_member_id,
     dueDate: row.first_draft_date,
     finalApprovedDueDate: row.final_approved_due_date,

@@ -359,6 +359,28 @@ button:disabled {
   color: var(--garena-grey);
   padding: 14px var(--s-5) 6px;
 }
+.nav-section--team-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.nav-section__team-prefix { flex: 0 0 auto; }
+.nav-section__team-select {
+  min-width: 0;
+  max-width: 108px;
+  padding: 2px 18px 2px 3px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--garena-iron);
+  font: inherit;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.nav-section__team-select:hover { background: var(--garena-badge-bg); }
+.nav-section__team-select:focus-visible { outline: 0; box-shadow: var(--shadow-focus); }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   padding: 7px var(--s-5);
@@ -3407,16 +3429,6 @@ form[aria-label="Change creative assignee"] .select {
   box-shadow: var(--shadow-1);
   font-weight: var(--weight-bold);
 }
-.team-workspace-selector {
-  display: inline-flex;
-  min-width: 142px;
-}
-.team-workspace-selector__control {
-  width: 100%;
-  min-height: 32px;
-  padding-top: 5px;
-  padding-bottom: 5px;
-}
 .marketing-working-filters {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) auto repeat(2, minmax(145px, 1fr)) minmax(190px, 1.5fr) auto auto auto;
@@ -3753,9 +3765,6 @@ html[data-theme="dark"] .product-book-cms__message--error {
   .theme-toggle__option {
     min-width: 38px;
     padding: 0 6px;
-  }
-  .team-workspace-selector {
-    min-width: 124px;
   }
   .app__main--marketing {
     padding: 12px;

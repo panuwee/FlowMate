@@ -75,7 +75,13 @@ function getFlowMateAccessibleTeams(user) {
   const requesterTeamKey = normalizeFlowMateTeamKey(currentUser.requester_team || currentUser.requesterTeam || currentUser.team);
   if (requesterTeamKey) keys.push(requesterTeamKey);
   const allowed = new Set(keys);
-  return FLOWMATE_TEAM_WORKSPACES.filter(team => allowed.has(team.key));
+  const accessibleTeams = FLOWMATE_TEAM_WORKSPACES.filter(team => allowed.has(team.key));
+  if (!requesterTeamKey) return accessibleTeams;
+  return accessibleTeams.sort((left, right) => {
+    if (left.key === requesterTeamKey) return -1;
+    if (right.key === requesterTeamKey) return 1;
+    return 0;
+  });
 }
 function getStoredFlowMateActiveTeam() {
   try {
@@ -87,13 +93,13 @@ function getStoredFlowMateActiveTeam() {
 const NAV = [{
   group: "Personal",
   items: [{
-    key: "my-work",
-    label: "My work",
-    icon: "inbox"
-  }, {
     key: "create",
     label: "Create",
     icon: "plus"
+  }, {
+    key: "my-work",
+    label: "My work",
+    icon: "inbox"
   }]
 }, {
   group: "Team",
@@ -110,13 +116,16 @@ const NAV = [{
     label: "Calendar",
     icon: "calendar"
   }, {
-    key: "gantt",
-    label: "Team Schedule",
-    icon: "chart"
-  }, {
     key: "attention",
     label: "Attention Needed",
     icon: "queue"
+  }]
+}, {
+  group: "Creative",
+  items: [{
+    key: "gantt",
+    label: "Creative Gantt",
+    icon: "chart"
   }]
 }, {
   group: "Supervisor",
@@ -138,7 +147,7 @@ const ADMIN_NAV_GROUP = {
     icon: "users"
   }]
 };
-const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === "Personal" || group.group === "Team");
+const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));
 const TASK_ASSIGN_NAV = [{
   group: "Task Assign",
   items: [{
@@ -174,7 +183,7 @@ const TITLE_MAP = {
   "list": "All work",
   "board": "Board",
   "calendar": "Team calendar",
-  "gantt": "Team Schedule",
+  "gantt": "Creative Gantt",
   "attention": "Attention Needed",
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
@@ -953,11 +962,7 @@ function App() {
       fontSize: 12,
       marginRight: 10
     }
-  }, "All functions · cross-function view is read-only") : React.createElement(TeamWorkspaceSelector, {
-    teams: accessibleTeams,
-    activeTeamKey: activeTeamKey,
-    onChange: handleActiveTeamChange
-  }), React.createElement("div", {
+  }, "All functions · cross-function view is read-only") : null, React.createElement("div", {
     className: "searchbar-wrap",
     ref: searchWrapRef
   }, React.createElement("div", {
@@ -1076,7 +1081,11 @@ function App() {
     className: "app__sidebar"
   }, visibleNavGroups.map(group => React.createElement("div", {
     key: group.group
-  }, React.createElement("div", {
+  }, group.group === "Team" && !isTaskAssignProduct ? React.createElement(SidebarTeamSectionHeader, {
+    teams: accessibleTeams,
+    activeTeamKey: activeTeamKey,
+    onChange: handleActiveTeamChange
+  }) : React.createElement("div", {
     className: "nav-section"
   }, group.group), group.items.map(it => {
     const itemCount = navCounts[it.key];
@@ -1224,28 +1233,35 @@ function ThemeToggle() {
     "data-testid": "appearance-dark"
   }, "Dark"));
 }
-function TeamWorkspaceSelector({
+function SidebarTeamSectionHeader({
   teams,
   activeTeamKey,
   onChange
 }) {
   const options = Array.isArray(teams) ? teams : [];
-  if (options.length === 0) return null;
+  const activeTeam = options.find(team => team.key === activeTeamKey) || options[0];
+  const activeLabel = activeTeam ? activeTeam.label.replace(/^Team\s+/i, "") : "";
+  if (options.length <= 1) {
+    return React.createElement("div", {
+      className: "nav-section",
+      "data-testid": "sidebar-team-workspace-label"
+    }, activeLabel ? `Team - ${activeLabel}` : "Team");
+  }
   return React.createElement("label", {
-    className: "team-workspace-selector"
+    className: "nav-section nav-section--team-selector"
   }, React.createElement("span", {
-    className: "sr-only"
-  }, "Team workspace"), React.createElement("select", {
-    className: "select team-workspace-selector__control",
+    className: "nav-section__team-prefix"
+  }, "Team -"), React.createElement("select", {
+    className: "nav-section__team-select",
     value: activeTeamKey || options[0].key,
     onChange: event => onChange(event.target.value),
-    "aria-label": "Team workspace",
-    "data-testid": "team-workspace-switcher"
+    "aria-label": "Function workspace",
+    "data-testid": "sidebar-team-workspace-switcher"
   }, options.map(team => React.createElement("option", {
     key: team.key,
     value: team.key,
     "data-testid": `team-workspace-option-${team.key}`
-  }, team.label))));
+  }, team.label.replace(/^Team\s+/i, "")))));
 }
 function ProductChoiceScreen({
   currentUserName,

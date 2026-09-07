@@ -5653,22 +5653,28 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     expect(appJsx).toContain("onOpen: open");
   });
 
-  it("adds Team Schedule below Calendar with a timeline-first view", () => {
+  it("moves Creative Gantt into its own sidebar section with a timeline-first view", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
     const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
-    const calendarIndex = navSource.indexOf('key: "calendar"');
+    const teamGroupSource = navSource.slice(navSource.indexOf('group: "Team"'), navSource.indexOf('group: "Creative"'));
+    const creativeGroupSource = navSource.slice(navSource.indexOf('group: "Creative"'));
+    const calendarIndex = teamGroupSource.indexOf('key: "calendar"');
     const ganttIndex = navSource.indexOf('key: "gantt"');
     const ganttSource = screensC.slice(screensC.indexOf("function TeamGanttScreen"), screensC.indexOf("function CalendarScreen"));
 
     expect(calendarIndex).toBeGreaterThan(-1);
-    expect(ganttIndex).toBeGreaterThan(calendarIndex);
-    expect(appJsx).toContain('"gantt": "Team Schedule"');
+    expect(teamGroupSource).not.toContain('key: "gantt"');
+    expect(creativeGroupSource).toContain('key: "gantt"');
+    expect(creativeGroupSource).toContain('label: "Creative Gantt"');
+    expect(ganttIndex).toBeGreaterThan(navSource.indexOf('group: "Creative"'));
+    expect(appJsx).toContain('"gantt": "Creative Gantt"');
     expect(appJsx).toContain('route === "gantt"');
     expect(appJsx).toContain("React.createElement(TeamGanttScreen");
     expect(appJsx).toContain("onOpen: open");
     expect(ganttSource).toContain('function TeamGanttScreen({ onOpen, product = "flowmate" })');
+    expect(ganttSource).toContain('const scheduleName = isTaskAssignProduct ? "Team Schedule" : "Creative Gantt"');
     expect(ganttSource).toContain("data-testid=\"flowmate-team-gantt-route\"");
     expect(ganttSource).toContain("data-testid=\"flowmate-team-gantt-chart\"");
     expect(ganttSource).not.toContain("Trello Power-Up Lite");
@@ -6437,10 +6443,10 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
     expect(appJsx).toContain("onNav: nav");
   });
 
-  it("limits member FlowMate navigation to Personal and Team while admins see Supervisor and Admin", () => {
+  it("limits member FlowMate navigation to Personal, Function Team, and Creative while admins see Supervisor and Admin", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
-    expect(appJsx).toContain("const MEMBER_NAV_GROUPS = NAV.filter(group => group.group === \"Personal\" || group.group === \"Team\");");
+    expect(appJsx).toContain('const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));');
     expect(appJsx).toContain("function getVisibleNavGroups(role)");
     expect(appJsx).toContain("return role === \"admin\" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;");
     expect(appJsx).toContain("const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat([\"detail\"]));");

@@ -2742,11 +2742,12 @@ function TeamGanttScreen({
   product = "flowmate"
 }) {
   const isTaskAssignProduct = product === "task-assign";
+  const scheduleName = isTaskAssignProduct ? "Team Schedule" : "Creative Gantt";
   const [sourceRows, setSourceRows] = useStateC([]);
   const [members, setMembers] = useStateC([]);
   const [loadState, setLoadState] = useStateC({
     status: "loading",
-    message: "Loading Team Schedule..."
+    message: `Loading ${scheduleName}...`
   });
   const [monthKey, setMonthKey] = useStateC(flowMateDefaultExportMonthC());
   const [assigneeFilter, setAssigneeFilter] = useStateC("all");
@@ -2759,7 +2760,7 @@ function TeamGanttScreen({
       if (!taskLoader) {
         if (alive) setLoadState({
           status: "error",
-          message: "Team Schedule loader is not ready."
+          message: `${scheduleName} loader is not ready.`
         });
         return;
       }
@@ -2777,7 +2778,7 @@ function TeamGanttScreen({
         console.error("[FlowMate Team Schedule] load failed:", error);
         setLoadState({
           status: "error",
-          message: window.flowmateUserError(error, "Could not load Team Schedule.")
+          message: window.flowmateUserError(error, `Could not load ${scheduleName}.`)
         });
       }
     }
@@ -2834,9 +2835,9 @@ function TeamGanttScreen({
     className: "page__header team-schedule__header"
   }, React.createElement("div", null, React.createElement("h1", {
     className: "page__title"
-  }, "Team Schedule"), React.createElement("div", {
+  }, scheduleName), React.createElement("div", {
     className: "page__sub"
-  }, isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline" : "Production timeline, owner, and milestone status for GD/VE", " - ", loadState.message)), React.createElement("select", {
+  }, isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline" : "All teams can see active GD/VE workload, milestones, and leave", " - ", loadState.message)), React.createElement("select", {
     className: "select",
     value: monthKey,
     onChange: event => setMonthKey(event.target.value),
@@ -2850,7 +2851,7 @@ function TeamGanttScreen({
   }, React.createElement("div", {
     className: "team-schedule__view-tabs",
     role: "tablist",
-    "aria-label": "Team Schedule view"
+    "aria-label": `${scheduleName} view`
   }, React.createElement("button", {
     type: "button",
     role: "tab",
@@ -3067,7 +3068,7 @@ function TeamGanttScreen({
     className: "gantt__empty"
   }, "No assignees match the active filters."))), React.createElement("div", {
     className: "reason-box team-schedule__rule"
-  }, isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch Date / Deadline. Leave calculations do not apply." : "Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled. This view is read-only; open a task to make changes."), React.createElement(Source, null, isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Team Schedule - ${flowMateMonthLabelC(monthKey)} - work_items + leave_requests + flowmate_non_working_days`));
+  }, isTaskAssignProduct ? "This read-only timeline shows Quick Tasks only, from 1st Review / Draft through Launch Date / Deadline. Leave calculations do not apply." : "Assigned, In Progress, Review, and Blocked stay visible here until work is delivered or cancelled. This view is read-only; task details remain limited to workspaces you can access."), React.createElement(Source, null, isTaskAssignProduct ? `Task Assign Team Schedule - ${flowMateMonthLabelC(monthKey)} - quick_task work_items` : `Creative Gantt - ${flowMateMonthLabelC(monthKey)} - work_items + leave_requests + flowmate_non_working_days`));
 }
 function CalendarScreen({
   onOpen
