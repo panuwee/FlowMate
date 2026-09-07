@@ -4964,7 +4964,9 @@ function MarketingPlanTimelineScreen({
     value: campaignManagerName,
     onChange: event => setCampaignManagerName(event.target.value),
     placeholder: "New campaign tag"
-  }), React.createElement("select", {
+  }), React.createElement("label", {
+    className: "marketing-campaign-manager__function"
+  }, React.createElement("span", null, "Function Colour Tag"), React.createElement("select", {
     className: "select",
     value: campaignManagerFunction,
     onChange: event => setCampaignManagerFunction(event.target.value),
@@ -4973,12 +4975,7 @@ function MarketingPlanTimelineScreen({
   }, campaignFunctionOptions.map(option => React.createElement("option", {
     key: option.code,
     value: option.code
-  }, option.label))), React.createElement("span", {
-    className: "muted",
-    style: {
-      fontSize: 12
-    }
-  }, "Function Colour Tag"),
+  }, option.label)))),
   React.createElement("button", {
     type: "submit",
     className: "btn btn--primary",
