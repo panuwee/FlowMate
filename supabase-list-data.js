@@ -1093,7 +1093,14 @@ async function loadFlowMateBoardSummary() {
       asOf: new Date().toISOString(),
     };
   }
-  const result = await window.flowmateSupabase.rpc("flowmate_board_summary");
+  const activeTeam = window.getFlowMateActiveTeam
+    ? window.getFlowMateActiveTeam()
+    : window.FLOWMATE_ACTIVE_TEAM;
+  const normalizedTeam = String(activeTeam || "").trim().toLowerCase();
+  const owningTeamCode = normalizedTeam && normalizedTeam !== "gdve" ? normalizedTeam : null;
+  const result = await window.flowmateSupabase.rpc("flowmate_board_summary_by_function", {
+    p_owning_team_code: owningTeamCode,
+  });
   if (result.error) throw result.error;
   const payload = Array.isArray(result.data) ? (result.data[0] || {}) : (result.data || {});
   const rawCounts = payload.counts || {};

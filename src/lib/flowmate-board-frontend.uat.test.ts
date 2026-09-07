@@ -834,7 +834,7 @@ describe("FlowMate Board and Delivered frontend", () => {
     });
   });
 
-  it("loads Board counts and WIP from the summary RPC without scanning work_items", async () => {
+  it("loads Function-scoped Board counts and WIP from the summary RPC without scanning work_items", async () => {
     const from = vi.fn();
     const rpc = vi.fn(async () => ({
       data: {
@@ -856,7 +856,7 @@ describe("FlowMate Board and Delivered frontend", () => {
 
     const result = await windowObject.loadFlowMateBoardSummary();
 
-    expect(rpc).toHaveBeenCalledWith("flowmate_board_summary");
+    expect(rpc).toHaveBeenCalledWith("flowmate_board_summary_by_function", { p_owning_team_code: "mkt" });
     expect(from).not.toHaveBeenCalled();
     expect(result).toEqual({
       counts: { unassigned: 2, assigned: 4, in_progress: 3, review: 9, blocked: 1 },
@@ -867,6 +867,40 @@ describe("FlowMate Board and Delivered frontend", () => {
       },
       asOf: "2026-08-04T01:00:00Z",
     });
+  });
+
+  it("refreshes Board lane counts within the selected Function workspace", async () => {
+    let activeTeam = "ops";
+    const countsByTeam: Record<string, Record<string, number>> = {
+      ops: { unassigned: 1, assigned: 5, in_progress: 2, review: 3, blocked: 0 },
+      mkt: { unassigned: 4, assigned: 9, in_progress: 6, review: 1, blocked: 2 },
+    };
+    const rpc = vi.fn(async (_name: string, params?: { p_owning_team_code?: string | null }) => ({
+      data: {
+        counts: countsByTeam[String(params?.p_owning_team_code || "all")] || {
+          unassigned: 5,
+          assigned: 14,
+          in_progress: 8,
+          review: 4,
+          blocked: 2,
+        },
+        wip: { in_progress_by_owner: [], review_team_limit: 8 },
+      },
+      error: null,
+    }));
+    const windowObject = loadBrowserScript("supabase-list-data.js", {
+      getFlowMateActiveTeam: () => activeTeam,
+      flowmateSupabase: { from: vi.fn(), rpc },
+    });
+
+    const opsSummary = await windowObject.loadFlowMateBoardSummary();
+    activeTeam = "mkt";
+    const mktSummary = await windowObject.loadFlowMateBoardSummary();
+
+    expect(rpc).toHaveBeenNthCalledWith(1, "flowmate_board_summary_by_function", { p_owning_team_code: "ops" });
+    expect(rpc).toHaveBeenNthCalledWith(2, "flowmate_board_summary_by_function", { p_owning_team_code: "mkt" });
+    expect(opsSummary.counts).toEqual(countsByTeam.ops);
+    expect(mktSummary.counts).toEqual(countsByTeam.mkt);
   });
 
   it("requires a restore reason and calls the admin restore RPC once", async () => {

@@ -12,6 +12,7 @@ const schemaSql = () => sql("schema.sql");
 const adminSql = () => sql("collaboration_admin.sql");
 const workflowSql = () => sql("rpc_quick_task.sql");
 const urgentInstallerSql = () => sql("board_urgent_wip_override.sql");
+const functionScopedSummarySql = () => sql("board_summary_function_scope.sql");
 
 const functionBlock = (source: string, signature: string, endMarker: string) => {
   const start = source.indexOf(signature);
@@ -272,6 +273,24 @@ describe("FlowMate Board delivered/archive SQL lifecycle", () => {
       const signature = summary.slice(0, summary.indexOf("returns jsonb"));
       expect(signature).not.toMatch(/p_(user|team)/i);
       expect(source).toContain("grant execute on function public.flowmate_board_summary() to authenticated");
+    }
+  });
+
+  it("provides an RLS-invoker Board summary scoped to creative work for the selected Function", () => {
+    for (const source of [featureSql(), schemaSql(), functionScopedSummarySql()]) {
+      expect(source).toContain("create or replace function public.flowmate_board_summary_by_function(");
+      const summary = functionBlock(
+        source,
+        "create or replace function public.flowmate_board_summary_by_function(",
+        "\n$$;",
+      );
+      expect(summary).toContain("p_owning_team_code text");
+      expect(summary).toContain("security invoker");
+      expect(summary).toContain("set search_path = ''");
+      expect(summary).toContain("wi.work_type = 'creative_request'");
+      expect(summary).toContain("wi.owning_team_code = scope.owning_team_code");
+      expect(source).toContain("revoke all on function public.flowmate_board_summary_by_function(text) from public, anon, authenticated");
+      expect(source).toContain("grant execute on function public.flowmate_board_summary_by_function(text) to authenticated");
     }
   });
 
