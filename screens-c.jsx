@@ -1818,16 +1818,27 @@ function flowMateKpiBenchmarkC(teamRows, monthKey) {
 
 function flowMateKpiProgressTextC(rows, field, { lowerBetter = false, unit = "" } = {}) {
   const eligible = (rows || []).filter(row => !row.empty && !row.smallSample && row[field] != null);
-  if (eligible.length < 2) return "Small sample — trend call withheld";
+  if (eligible.length < 2) return "Not enough data to compare";
   const current = Number(eligible[eligible.length - 1][field]);
   const previous = Number(eligible[eligible.length - 2][field]);
   const difference = current - previous;
-  if (Math.abs(difference) < 0.05) return "Stable vs prior eligible month";
+  if (Math.abs(difference) < 0.05) return "Similar to last month";
   const improved = lowerBetter ? difference < 0 : difference > 0;
-  return `${improved ? "Improved" : "Needs attention"} ${flowMateKpiFormatValueC(Math.abs(difference), unit)} vs prior eligible month`;
+  return `${improved ? "Improved" : "Needs attention"} by ${flowMateKpiFormatValueC(Math.abs(difference), unit)} from last month`;
 }
 
-function FlowMateKpiTrendChartC({ rows, primaryField, secondaryField, title, description, unit = " d" }) {
+function flowMateKpiBenchmarkStatusC(value, benchmarkValue, { lowerBetter = false } = {}) {
+  if (value == null || benchmarkValue == null) return null;
+  const difference = Number(value) - Number(benchmarkValue);
+  if (!Number.isFinite(difference)) return null;
+  if (Math.abs(difference) < 0.05) return { emoji: "😐", label: "Same as team", tone: "neutral" };
+  const better = lowerBetter ? difference < 0 : difference > 0;
+  return better
+    ? { emoji: "🙂", label: "Better than team", tone: "better" }
+    : { emoji: "🙁", label: "Needs attention", tone: "attention" };
+}
+
+function FlowMateKpiTrendChartC({ rows, primaryField, title, description, unit = " d" }) {
   const width = 720;
   const height = 240;
   const left = 46;
@@ -1836,7 +1847,7 @@ function FlowMateKpiTrendChartC({ rows, primaryField, secondaryField, title, des
   const bottom = 48;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
-  const values = rows.flatMap(row => [row[primaryField], row[secondaryField]]).filter(value => value != null && !Number.isNaN(Number(value))).map(Number);
+  const values = rows.map(row => row[primaryField]).filter(value => value != null && !Number.isNaN(Number(value))).map(Number);
   const maxValue = Math.max(1, ...values) * 1.12;
   const point = (row, index, field) => {
     const x = rows.length > 1 ? left + (index / (rows.length - 1)) * plotWidth : left + plotWidth / 2;
@@ -1869,28 +1880,21 @@ function FlowMateKpiTrendChartC({ rows, primaryField, secondaryField, title, des
     <section className="creative-kpi__chart-card">
       <div className="creative-kpi__section-head">
         <div><h2>{title}</h2><p>{description}</p></div>
-        <div className="creative-kpi__legend" aria-label="Chart legend">
-          <span><i className="creative-kpi__legend-line creative-kpi__legend-line--p50"></i>P50 typical</span>
-          <span><i className="creative-kpi__legend-line creative-kpi__legend-line--p85"></i>P85 slower cases</span>
-        </div>
       </div>
       <div className="creative-kpi__chart">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title}, monthly P50 and P85 trend`}>
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title}, monthly trend`}>
           {[0, 1, 2, 3].map(index => {
             const y = top + (index / 3) * plotHeight;
             const value = maxValue * (1 - index / 3);
             return <g key={index}><line className="creative-kpi__grid-line" x1={left} x2={width - right} y1={y} y2={y} /><text className="creative-kpi__axis-label" x={left - 8} y={y + 4} textAnchor="end">{flowMateKpiFormatValueC(value)}</text></g>;
           })}
-          <path className="creative-kpi__series creative-kpi__series--p85" d={pathFor(secondaryField)} />
-          <path className="creative-kpi__series creative-kpi__series--p50" d={pathFor(primaryField)} />
+          <path className="creative-kpi__series creative-kpi__series--primary" d={pathFor(primaryField)} />
           {rows.map((row, index) => {
-            const p50 = point(row, index, primaryField);
-            const p85 = point(row, index, secondaryField);
+            const monthlyPoint = point(row, index, primaryField);
             return <g key={row.reviewMonth || index}>
-              {p85.y != null && <circle className="creative-kpi__point creative-kpi__point--p85" cx={p85.x} cy={p85.y} r="4"><title>{`${flowMateKpiMonthShortC(row.reviewMonth)} P85 ${flowMateKpiFormatValueC(p85.value, unit)} · n=${row.n || 0}`}</title></circle>}
-              {p50.y != null && <circle className="creative-kpi__point creative-kpi__point--p50" cx={p50.x} cy={p50.y} r="4"><title>{`${flowMateKpiMonthShortC(row.reviewMonth)} P50 ${flowMateKpiFormatValueC(p50.value, unit)} · n=${row.n || 0}`}</title></circle>}
-              <text className="creative-kpi__month-label" x={p50.x} y={height - 22} textAnchor="middle">{flowMateKpiMonthShortC(row.reviewMonth)}</text>
-              <text className="creative-kpi__sample-label" x={p50.x} y={height - 7} textAnchor="middle">n={row.n || 0}</text>
+              {monthlyPoint.y != null && <circle className="creative-kpi__point creative-kpi__point--primary" cx={monthlyPoint.x} cy={monthlyPoint.y} r="4"><title>{`${flowMateKpiMonthShortC(row.reviewMonth)} ${flowMateKpiFormatValueC(monthlyPoint.value, unit)} · ${row.n || 0} jobs`}</title></circle>}
+              <text className="creative-kpi__month-label" x={monthlyPoint.x} y={height - 22} textAnchor="middle">{flowMateKpiMonthShortC(row.reviewMonth)}</text>
+              <text className="creative-kpi__sample-label" x={monthlyPoint.x} y={height - 7} textAnchor="middle">{row.n || 0} jobs</text>
             </g>;
           })}
         </svg>
@@ -1899,38 +1903,143 @@ function FlowMateKpiTrendChartC({ rows, primaryField, secondaryField, title, des
   );
 }
 
-function FlowMateKpiMetricC({ label, value, note, benchmark, sample }) {
+function FlowMateKpiMetricC({ label, value, rawValue, note, benchmark, benchmarkValue, lowerBetter = false, sample }) {
+  const benchmarkStatus = sample?.small
+    ? { emoji: "ℹ️", label: "Not enough data", tone: "sample" }
+    : flowMateKpiBenchmarkStatusC(rawValue, benchmarkValue, { lowerBetter });
   return (
     <div className="creative-kpi__metric">
-      <div className="creative-kpi__metric-label">{label}</div>
+      <div className="creative-kpi__metric-head">
+        <div className="creative-kpi__metric-label">{label}</div>
+        {benchmarkStatus && <span className={`creative-kpi__benchmark-status is-${benchmarkStatus.tone}`} aria-label={benchmarkStatus.label}><span aria-hidden="true">{benchmarkStatus.emoji}</span> {benchmarkStatus.label}</span>}
+      </div>
       <div className="creative-kpi__metric-value mono">{value}</div>
       <div className="creative-kpi__metric-note">{note}</div>
-      {benchmark && <div className="creative-kpi__benchmark">Team benchmark <strong>{benchmark}</strong></div>}
-      {sample && <div className={`creative-kpi__sample ${sample.small ? "is-small" : ""}`}>{sample.small ? "Small sample" : "Eligible sample"} · n={sample.n || 0}</div>}
+      {benchmarkStatus && benchmark && <div className="creative-kpi__benchmark-value">Team {benchmark}</div>}
+      {sample && <div className={`creative-kpi__sample ${sample.small ? "is-small" : ""}`}>{sample.small ? "Small sample" : "Based on"} · {sample.n || 0} jobs</div>}
     </div>
+  );
+}
+
+function flowMateKpiJoinLabelsC(labels) {
+  const values = (labels || []).filter(Boolean);
+  if (values.length <= 1) return values[0] || "";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+
+function flowMateKpiInsightMetricsC(mode) {
+  return mode === "requester" ? [
+    { field: "briefLeadP50", label: "Brief ready before Launch", unit: " d" },
+    { field: "reviewResponseP50", label: "Time to respond", unit: " d", lowerBetter: true },
+    { field: "reviewSlaPct", label: "Responded within 1 day", unit: "%" },
+    { field: "briefCompleteFirstPassPct", label: "Brief passed first check", unit: "%" },
+  ] : [
+    { field: "timeToStartP50", label: "Time to start", unit: " d", lowerBetter: true },
+    { field: "productionP50", label: "Production time", unit: " d", lowerBetter: true },
+    { field: "firstDraftOnTimePct", label: "First draft on time", unit: "%" },
+  ];
+}
+
+function flowMateKpiTrendToneC(rows, latest, metric) {
+  if (!latest || latest.smallSample || latest[metric.field] == null) return null;
+  const eligible = (rows || []).filter(row => !row.empty && !row.smallSample && row[metric.field] != null);
+  const currentIndex = eligible.findIndex(row => flowMateKpiMonthKeyC(row.reviewMonth) === flowMateKpiMonthKeyC(latest.reviewMonth));
+  if (currentIndex < 1) return null;
+  const difference = Number(eligible[currentIndex][metric.field]) - Number(eligible[currentIndex - 1][metric.field]);
+  if (!Number.isFinite(difference) || Math.abs(difference) < 0.05) return "neutral";
+  return (metric.lowerBetter ? difference < 0 : difference > 0) ? "better" : "attention";
+}
+
+function FlowMateKpiInsightsC({ mode, rows, latest, benchmark }) {
+  if (!latest) return null;
+  if (latest.smallSample) {
+    return (
+      <section className="creative-kpi__insights" aria-labelledby="creative-kpi-insights-title">
+        <div className="creative-kpi__insights-head"><h2 id="creative-kpi-insights-title">Performance insights</h2><p>{flowMateKpiMonthShortC(latest.reviewMonth)} · individual view</p></div>
+        <ul className="creative-kpi__insight-list"><li className="is-sample"><strong>Data note:</strong> Team comparison is paused until there are at least 5 jobs. This month has {latest.n || 0}.</li></ul>
+      </section>
+    );
+  }
+
+  const metrics = flowMateKpiInsightMetricsC(mode);
+  const comparisons = benchmark ? metrics.map(metric => ({
+    metric,
+    status: flowMateKpiBenchmarkStatusC(latest[metric.field], benchmark[metric.field], { lowerBetter: metric.lowerBetter }),
+  })).filter(item => item.status) : [];
+  const better = comparisons.filter(item => item.status.tone === "better");
+  const attention = comparisons.filter(item => item.status.tone === "attention");
+  const same = comparisons.filter(item => item.status.tone === "neutral");
+  const trend = metrics.map(metric => ({ metric, tone: flowMateKpiTrendToneC(rows, latest, metric) })).filter(item => item.tone);
+  const improved = trend.filter(item => item.tone === "better").map(item => item.metric.label);
+  const declined = trend.filter(item => item.tone === "attention").map(item => item.metric.label);
+  const steady = trend.filter(item => item.tone === "neutral").map(item => item.metric.label);
+  const missing = mode === "requester"
+    ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0)
+    : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0);
+  const insights = [];
+
+  if (better.length) {
+    insights.push({ tone: "positive", label: "Strength:", text: `Ahead of team in ${flowMateKpiJoinLabelsC(better.map(item => item.metric.label))}.` });
+  } else if (same.length) {
+    insights.push({ tone: "neutral", label: "Strength:", text: `In line with team in ${flowMateKpiJoinLabelsC(same.map(item => item.metric.label))}.` });
+  }
+
+  if (attention.length) {
+    const details = attention.map(({ metric }) => `${metric.label} (${flowMateKpiFormatValueC(latest[metric.field], metric.unit)}; team ${flowMateKpiFormatValueC(benchmark[metric.field], metric.unit)})`);
+    insights.push({ tone: "attention", label: "Focus:", text: `${flowMateKpiJoinLabelsC(details)}.` });
+  } else if (comparisons.length) {
+    insights.push({ tone: "positive", label: "Focus:", text: "No comparable indicator is below team this month." });
+  } else {
+    insights.push({ tone: "neutral", label: "Focus:", text: "Team comparison is not available for this month." });
+  }
+
+  let trendText = "Not enough history to compare with a previous month.";
+  let trendTone = "neutral";
+  if (improved.length || declined.length || steady.length) {
+    const parts = [];
+    if (improved.length) parts.push(`${flowMateKpiJoinLabelsC(improved)} improved`);
+    if (declined.length) parts.push(`${flowMateKpiJoinLabelsC(declined)} declined`);
+    if (steady.length) parts.push(`${flowMateKpiJoinLabelsC(steady)} stayed similar`);
+    trendText = `${parts.join("; ")} versus the previous month with data.`;
+    trendTone = declined.length ? "attention" : improved.length ? "positive" : "neutral";
+  }
+  insights.push({ tone: trendTone, label: "Month-over-month:", text: trendText });
+
+  const dataLead = mode === "gdve"
+    ? `Completed ${Math.round(Number(latest.throughputN || 0)).toLocaleString("en-US")} jobs in ${flowMateKpiMonthShortC(latest.reviewMonth)}`
+    : `Based on ${latest.n || 0} jobs in ${flowMateKpiMonthShortC(latest.reviewMonth)}`;
+  insights.push({ tone: latest.exceptionN || missing ? "attention" : "neutral", label: "Data note:", text: `${dataLead}. Missing ${missing}; exceptions ${latest.exceptionN || 0}.` });
+
+  return (
+    <section className="creative-kpi__insights" aria-labelledby="creative-kpi-insights-title">
+      <div className="creative-kpi__insights-head"><h2 id="creative-kpi-insights-title">Performance insights</h2><p>{flowMateKpiMonthShortC(latest.reviewMonth)} · compared with team and previous month</p></div>
+      <ul className="creative-kpi__insight-list">{insights.map((insight, index) => <li key={`${insight.label}-${index}`} className={`is-${insight.tone}`}><strong>{insight.label}</strong> {insight.text}</li>)}</ul>
+    </section>
   );
 }
 
 function FlowMateKpiMonthlyTableC({ rows, mode }) {
   const isRequester = mode === "requester";
+  const visibleRows = rows.filter(row => !row.empty);
   return (
     <section className="creative-kpi__table-card">
       <div className="creative-kpi__section-head"><div><h2>Monthly detail</h2><p>Use sample size and data gaps before drawing conclusions.</p></div></div>
       <div className="creative-kpi__table-wrap">
         <table className="tbl creative-kpi__table">
           <thead><tr>
-            <th>Month</th><th>n</th>
-            <th>{isRequester ? "Brief lead P50 / P85" : "Start P50 / P85"}</th>
-            <th>{isRequester ? "Response P50 / P85" : "Production P50 / P85"}</th>
-            <th>{isRequester ? "Review SLA" : "1st draft on time"}</th>
+            <th>Month</th><th>Jobs</th>
+            <th>{isRequester ? "Brief ready before Launch" : "Time to start"}</th>
+            <th>{isRequester ? "Time to respond" : "Production time"}</th>
+            <th>{isRequester ? "Within 1 day" : "First draft on time"}</th>
             <th>Missing</th><th>Exceptions</th>
           </tr></thead>
           <tbody>
-            {rows.map(row => <tr key={row.reviewMonth} className={row.empty ? "is-empty" : ""}>
+            {visibleRows.map(row => <tr key={row.reviewMonth}>
               <td className="strong">{flowMateKpiMonthShortC(row.reviewMonth)}</td>
               <td className="mono">{row.n || 0}{row.smallSample && <span className="creative-kpi__small-dot" title="Small sample">Small sample</span>}</td>
-              <td className="mono">{isRequester ? `${flowMateKpiFormatValueC(row.briefLeadP50)} / ${flowMateKpiFormatValueC(row.briefLeadP85)} d` : `${flowMateKpiFormatValueC(row.timeToStartP50)} / ${flowMateKpiFormatValueC(row.timeToStartP85)} d`}</td>
-              <td className="mono">{isRequester ? `${flowMateKpiFormatValueC(row.reviewResponseP50)} / ${flowMateKpiFormatValueC(row.reviewResponseP85)} d` : `${flowMateKpiFormatValueC(row.productionP50)} / ${flowMateKpiFormatValueC(row.productionP85)} d`}</td>
+              <td className="mono">{flowMateKpiFormatValueC(isRequester ? row.briefLeadP50 : row.timeToStartP50, " d")}</td>
+              <td className="mono">{flowMateKpiFormatValueC(isRequester ? row.reviewResponseP50 : row.productionP50, " d")}</td>
               <td className="mono">{flowMateKpiFormatValueC(isRequester ? row.reviewSlaPct : row.firstDraftOnTimePct, "%")}</td>
               <td className="mono">{isRequester ? (row.briefLeadMissingN || 0) + (row.reviewResponseMissingN || 0) : (row.timeToStartMissingN || 0) + (row.productionMissingN || 0)}</td>
               <td className="mono">{row.exceptionN || 0}</td>
@@ -1950,6 +2059,7 @@ function CreativeKpiScreen() {
   const [data, setData] = useStateC({ gdveRows: [], requesterRows: [] });
   const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading monthly KPI history..." });
   const [showLegacyReport, setShowLegacyReport] = useStateC(false);
+  const [showMonthlyDetail, setShowMonthlyDetail] = useStateC(false);
 
   async function loadMonthlyKpi() {
     if (!window.loadFlowMateCreativeKpiMonthly) {
@@ -1991,20 +2101,20 @@ function CreativeKpiScreen() {
     { key: "requester", label: "Requester" },
   ];
   const metricRows = activeTab === "team" ? [
-    { label: "Time to start", value: flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP50, " d"), note: `P85 ${flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP85, " d")}`, sample: latestGdveTeam },
-    { label: "Production", value: flowMateKpiFormatValueC(latestGdveTeam?.productionP50, " d"), note: `P85 ${flowMateKpiFormatValueC(latestGdveTeam?.productionP85, " d")}`, sample: latestGdveTeam },
-    { label: "Brief lead", value: flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP50, " d"), note: `P85 ${flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP85, " d")}`, sample: latestRequesterTeam },
-    { label: "Review SLA", value: flowMateKpiFormatValueC(latestRequesterTeam?.reviewSlaPct, "%"), note: `${latestRequesterTeam?.pendingReviewOverSlaN || 0} pending over SLA`, sample: latestRequesterTeam },
+    { label: "Time to start", value: flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP50, " d"), note: "Fewer days is better", sample: latestGdveTeam },
+    { label: "Production time", value: flowMateKpiFormatValueC(latestGdveTeam?.productionP50, " d"), note: "Fewer days is better", sample: latestGdveTeam },
+    { label: "Brief ready before Launch", value: flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP50, " d"), note: "More days is better", sample: latestRequesterTeam },
+    { label: "Responded within 1 day", value: flowMateKpiFormatValueC(latestRequesterTeam?.reviewSlaPct, "%"), note: `${latestRequesterTeam?.pendingReviewOverSlaN || 0} waiting over 1 day`, sample: latestRequesterTeam },
   ] : activeTab === "gdve" ? [
-    { label: "Time to start", value: flowMateKpiFormatValueC(latest?.timeToStartP50, " d"), note: flowMateKpiProgressTextC(series, "timeToStartP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.timeToStartP50, " d"), sample: latest },
-    { label: "Production", value: flowMateKpiFormatValueC(latest?.productionP50, " d"), note: flowMateKpiProgressTextC(series, "productionP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.productionP50, " d"), sample: latest },
-    { label: "1st draft on time", value: flowMateKpiFormatValueC(latest?.firstDraftOnTimePct, "%"), note: flowMateKpiProgressTextC(series, "firstDraftOnTimePct", { unit: " pt" }), benchmark: flowMateKpiFormatValueC(benchmark?.firstDraftOnTimePct, "%"), sample: latest },
-    { label: "Throughput", value: flowMateKpiFormatValueC(latest?.throughputN), note: flowMateKpiProgressTextC(series, "throughputN", { unit: " jobs" }), benchmark: flowMateKpiFormatValueC(benchmark?.throughputN), sample: latest },
+    { label: "Time to start", value: flowMateKpiFormatValueC(latest?.timeToStartP50, " d"), rawValue: latest?.timeToStartP50, note: flowMateKpiProgressTextC(series, "timeToStartP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.timeToStartP50, " d"), benchmarkValue: benchmark?.timeToStartP50, lowerBetter: true, sample: latest },
+    { label: "Production time", value: flowMateKpiFormatValueC(latest?.productionP50, " d"), rawValue: latest?.productionP50, note: flowMateKpiProgressTextC(series, "productionP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.productionP50, " d"), benchmarkValue: benchmark?.productionP50, lowerBetter: true, sample: latest },
+    { label: "First draft on time", value: flowMateKpiFormatValueC(latest?.firstDraftOnTimePct, "%"), rawValue: latest?.firstDraftOnTimePct, note: flowMateKpiProgressTextC(series, "firstDraftOnTimePct", { unit: " pt" }), benchmark: flowMateKpiFormatValueC(benchmark?.firstDraftOnTimePct, "%"), benchmarkValue: benchmark?.firstDraftOnTimePct, sample: latest },
+    { label: "Completed work", value: flowMateKpiFormatValueC(latest?.throughputN), note: flowMateKpiProgressTextC(series, "throughputN", { unit: " jobs" }), sample: latest },
   ] : [
-    { label: "Brief lead", value: flowMateKpiFormatValueC(latest?.briefLeadP50, " d"), note: flowMateKpiProgressTextC(series, "briefLeadP50", { unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.briefLeadP50, " d"), sample: latest },
-    { label: "Review response", value: flowMateKpiFormatValueC(latest?.reviewResponseP50, " d"), note: flowMateKpiProgressTextC(series, "reviewResponseP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.reviewResponseP50, " d"), sample: latest },
-    { label: "Review SLA", value: flowMateKpiFormatValueC(latest?.reviewSlaPct, "%"), note: `${latest?.pendingReviewOverSlaN || 0} pending over SLA`, benchmark: flowMateKpiFormatValueC(benchmark?.reviewSlaPct, "%"), sample: latest },
-    { label: "Brief complete", value: flowMateKpiFormatValueC(latest?.briefCompleteFirstPassPct, "%"), note: `${latest?.briefLateOrSameDayN || 0} late or same-day briefs`, benchmark: flowMateKpiFormatValueC(benchmark?.briefCompleteFirstPassPct, "%"), sample: latest },
+    { label: "Brief ready before Launch", value: flowMateKpiFormatValueC(latest?.briefLeadP50, " d"), rawValue: latest?.briefLeadP50, note: flowMateKpiProgressTextC(series, "briefLeadP50", { unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.briefLeadP50, " d"), benchmarkValue: benchmark?.briefLeadP50, sample: latest },
+    { label: "Time to respond", value: flowMateKpiFormatValueC(latest?.reviewResponseP50, " d"), rawValue: latest?.reviewResponseP50, note: flowMateKpiProgressTextC(series, "reviewResponseP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.reviewResponseP50, " d"), benchmarkValue: benchmark?.reviewResponseP50, lowerBetter: true, sample: latest },
+    { label: "Responded within 1 day", value: flowMateKpiFormatValueC(latest?.reviewSlaPct, "%"), rawValue: latest?.reviewSlaPct, note: `${latest?.pendingReviewOverSlaN || 0} waiting over 1 day`, benchmark: flowMateKpiFormatValueC(benchmark?.reviewSlaPct, "%"), benchmarkValue: benchmark?.reviewSlaPct, sample: latest },
+    { label: "Brief passed first check", value: flowMateKpiFormatValueC(latest?.briefCompleteFirstPassPct, "%"), rawValue: latest?.briefCompleteFirstPassPct, note: `${latest?.briefLateOrSameDayN || 0} late or same-day briefs`, benchmark: flowMateKpiFormatValueC(benchmark?.briefCompleteFirstPassPct, "%"), benchmarkValue: benchmark?.briefCompleteFirstPassPct, sample: latest },
   ];
 
   return (
@@ -2040,19 +2150,21 @@ function CreativeKpiScreen() {
       {loadState.status === "live" && allRows.length > 0 && <>
         <div className="creative-kpi__context">
           <div><strong>{activeTab === "team" ? "All Creative work" : currentPerson ? currentPerson.name : activeTab === "gdve" ? "All GD/VE" : "All Requesters"}</strong><span>{latest ? flowMateKpiMonthShortC(latest.reviewMonth) : "No latest month"}</span></div>
-          <p>{visibleDataMonths} of {months.length} months contain eligible data. Cohort month is the first Review submission in Bangkok time.</p>
+          <p>{visibleDataMonths}/{months.length} months with data · Month starts at first Review</p>
         </div>
         <div className="creative-kpi__metrics">{metricRows.map(metric => <FlowMateKpiMetricC key={metric.label} {...metric} sample={metric.sample ? { n: metric.sample.n, small: metric.sample.smallSample } : null} />)}</div>
+        {activeTab !== "team" && selectedPersonId && <FlowMateKpiInsightsC mode={activeTab} rows={series} latest={latest} benchmark={benchmark} />}
 
         {activeTab === "team" ? <div className="creative-kpi__chart-grid">
-          <FlowMateKpiTrendChartC rows={flowMateKpiSeriesC(data.gdveRows, months, "")} primaryField="productionP50" secondaryField="productionP85" title="Creative production time" description="In Progress to first Review, excluding recorded Blocked intervals." />
-          <FlowMateKpiTrendChartC rows={flowMateKpiSeriesC(data.requesterRows, months, "")} primaryField="reviewResponseP50" secondaryField="reviewResponseP85" title="Requester response time" description="First Review submission to the first requester activity." />
+          <FlowMateKpiTrendChartC rows={flowMateKpiSeriesC(data.gdveRows, months, "")} primaryField="productionP50" title="Creative production time" description="Working days from In Progress to first Review. Fewer is better." />
+          <FlowMateKpiTrendChartC rows={flowMateKpiSeriesC(data.requesterRows, months, "")} primaryField="reviewResponseP50" title="Requester response time" description="Working days after first Review. Fewer is better." />
         </div> : <div className="creative-kpi__chart-grid">
-          <FlowMateKpiTrendChartC rows={series} primaryField={activeTab === "gdve" ? "timeToStartP50" : "briefLeadP50"} secondaryField={activeTab === "gdve" ? "timeToStartP85" : "briefLeadP85"} title={activeTab === "gdve" ? "Assigned to In Progress" : "Brief lead before Launch"} description={activeTab === "gdve" ? "How quickly accepted work starts moving." : "Working days between request creation and Launch Date."} />
-          <FlowMateKpiTrendChartC rows={series} primaryField={activeTab === "gdve" ? "productionP50" : "reviewResponseP50"} secondaryField={activeTab === "gdve" ? "productionP85" : "reviewResponseP85"} title={activeTab === "gdve" ? "In Progress to Review" : "Review response time"} description={activeTab === "gdve" ? "Production cycle time with Blocked intervals removed." : "Time from first Review submission to requester activity."} />
+          <FlowMateKpiTrendChartC rows={series} primaryField={activeTab === "gdve" ? "timeToStartP50" : "briefLeadP50"} title={activeTab === "gdve" ? "Time to start" : "Brief ready before Launch"} description={activeTab === "gdve" ? "Working days after assignment. Fewer is better." : "Working days before Launch. More is better."} />
+          <FlowMateKpiTrendChartC rows={series} primaryField={activeTab === "gdve" ? "productionP50" : "reviewResponseP50"} title={activeTab === "gdve" ? "Production time" : "Time to respond"} description={activeTab === "gdve" ? "Working days from In Progress to Review. Fewer is better." : "Working days after first Review. Fewer is better."} />
         </div>}
-        {activeTab !== "team" && <FlowMateKpiMonthlyTableC rows={series} mode={activeTab} />}
-        <div className="creative-kpi__quality"><strong>Read with context</strong><span>Missing {latest ? (activeTab === "requester" ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0) : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0)) : 0}</span><span>Exceptions {latest?.exceptionN || 0}</span><span>P50 describes the typical case; P85 exposes slower tail cases.</span></div>
+        {activeTab !== "team" && <div className="creative-kpi__details-row"><button type="button" className="btn btn--secondary" data-testid="flowmate-kpi-monthly-details" aria-expanded={showMonthlyDetail} onClick={() => setShowMonthlyDetail(current => !current)}>{showMonthlyDetail ? "Hide monthly details" : "Show monthly details"}</button></div>}
+        {activeTab !== "team" && showMonthlyDetail && <FlowMateKpiMonthlyTableC rows={series} mode={activeTab} />}
+        <div className="creative-kpi__quality"><strong>Data checks</strong><span>Missing {latest ? (activeTab === "requester" ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0) : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0)) : 0}</span><span>Exceptions {latest?.exceptionN || 0}</span></div>
       </>}
 
       {showLegacyReport && <section className="creative-kpi__legacy" aria-label="Legacy KPI export and operational detail"><KpiScreen /></section>}

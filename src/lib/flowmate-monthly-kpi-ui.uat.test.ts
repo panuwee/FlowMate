@@ -29,15 +29,22 @@ describe("FlowMate Creative monthly KPI UI", () => {
     expect(screen).toContain('data-testid="flowmate-kpi-range-filter"');
   });
 
-  it("shows progression with sample size, percentiles, team benchmark, and resilient states", () => {
+  it("shows plain-language progression, benchmark status, and progressive detail", () => {
     const screen = readRepo("screens-c.jsx");
     const monthlyScreen = screen.slice(screen.indexOf("function CreativeKpiScreen"), screen.indexOf("function calendarUtcKeyC"));
     const css = readRepo("app.css");
 
     expect(screen).toContain("function FlowMateKpiTrendChartC");
-    expect(screen).toContain("P50 typical");
-    expect(screen).toContain("P85 slower cases");
-    expect(screen).toContain("Team benchmark");
+    expect(screen).not.toContain("P50 typical");
+    expect(screen).not.toContain("P85 slower cases");
+    expect(screen).not.toContain("P50 / P85");
+    expect(screen).toContain("Better than team");
+    expect(screen).toContain("Same as team");
+    expect(screen).toContain("Needs attention");
+    expect(screen).toContain('aria-label={benchmarkStatus.label}');
+    expect(screen).toContain("Show monthly details");
+    expect(screen).toContain("Hide monthly details");
+    expect(screen).toContain("const visibleRows = rows.filter(row => !row.empty)");
     expect(screen).toContain("Small sample");
     expect(screen).toContain("No eligible monthly data");
     expect(screen).toContain("Retry");
@@ -45,6 +52,24 @@ describe("FlowMate Creative monthly KPI UI", () => {
     expect(screen).toContain("Exceptions");
     expect(monthlyScreen).toContain("not ranking");
     expect(css).toContain(".creative-kpi__chart");
+    expect(css).toContain(".creative-kpi__benchmark-status");
     expect(css).toContain("@media (max-width: 760px)");
+  });
+
+  it("summarizes selected-person performance without ranking or comparing team-total throughput", () => {
+    const screen = readRepo("screens-c.jsx");
+    const css = readRepo("app.css");
+
+    expect(screen).toContain("function FlowMateKpiInsightsC");
+    expect(screen).toContain("Performance insights");
+    expect(screen).toContain("Strength:");
+    expect(screen).toContain("Focus:");
+    expect(screen).toContain("Month-over-month:");
+    expect(screen).toContain("Data note:");
+    expect(screen).toContain('activeTab !== "team" && selectedPersonId');
+    expect(screen).toContain("Team comparison is paused until there are at least 5 jobs");
+    expect(screen).toContain('label: "Completed work", value: flowMateKpiFormatValueC(latest?.throughputN), note: flowMateKpiProgressTextC');
+    expect(css).toContain(".creative-kpi__insights");
+    expect(css).toContain(".creative-kpi__insight-list");
   });
 });

@@ -2106,18 +2106,39 @@ function flowMateKpiProgressTextC(rows, field, {
   unit = ""
 } = {}) {
   const eligible = (rows || []).filter(row => !row.empty && !row.smallSample && row[field] != null);
-  if (eligible.length < 2) return "Small sample — trend call withheld";
+  if (eligible.length < 2) return "Not enough data to compare";
   const current = Number(eligible[eligible.length - 1][field]);
   const previous = Number(eligible[eligible.length - 2][field]);
   const difference = current - previous;
-  if (Math.abs(difference) < 0.05) return "Stable vs prior eligible month";
+  if (Math.abs(difference) < 0.05) return "Similar to last month";
   const improved = lowerBetter ? difference < 0 : difference > 0;
-  return `${improved ? "Improved" : "Needs attention"} ${flowMateKpiFormatValueC(Math.abs(difference), unit)} vs prior eligible month`;
+  return `${improved ? "Improved" : "Needs attention"} by ${flowMateKpiFormatValueC(Math.abs(difference), unit)} from last month`;
+}
+function flowMateKpiBenchmarkStatusC(value, benchmarkValue, {
+  lowerBetter = false
+} = {}) {
+  if (value == null || benchmarkValue == null) return null;
+  const difference = Number(value) - Number(benchmarkValue);
+  if (!Number.isFinite(difference)) return null;
+  if (Math.abs(difference) < 0.05) return {
+    emoji: "😐",
+    label: "Same as team",
+    tone: "neutral"
+  };
+  const better = lowerBetter ? difference < 0 : difference > 0;
+  return better ? {
+    emoji: "🙂",
+    label: "Better than team",
+    tone: "better"
+  } : {
+    emoji: "🙁",
+    label: "Needs attention",
+    tone: "attention"
+  };
 }
 function FlowMateKpiTrendChartC({
   rows,
   primaryField,
-  secondaryField,
   title,
   description,
   unit = " d"
@@ -2130,7 +2151,7 @@ function FlowMateKpiTrendChartC({
   const bottom = 48;
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
-  const values = rows.flatMap(row => [row[primaryField], row[secondaryField]]).filter(value => value != null && !Number.isNaN(Number(value))).map(Number);
+  const values = rows.map(row => row[primaryField]).filter(value => value != null && !Number.isNaN(Number(value))).map(Number);
   const maxValue = Math.max(1, ...values) * 1.12;
   const point = (row, index, field) => {
     const x = rows.length > 1 ? left + index / (rows.length - 1) * plotWidth : left + plotWidth / 2;
@@ -2168,19 +2189,12 @@ function FlowMateKpiTrendChartC({
     className: "creative-kpi__chart-card"
   }, React.createElement("div", {
     className: "creative-kpi__section-head"
-  }, React.createElement("div", null, React.createElement("h2", null, title), React.createElement("p", null, description)), React.createElement("div", {
-    className: "creative-kpi__legend",
-    "aria-label": "Chart legend"
-  }, React.createElement("span", null, React.createElement("i", {
-    className: "creative-kpi__legend-line creative-kpi__legend-line--p50"
-  }), "P50 typical"), React.createElement("span", null, React.createElement("i", {
-    className: "creative-kpi__legend-line creative-kpi__legend-line--p85"
-  }), "P85 slower cases"))), React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("h2", null, title), React.createElement("p", null, description))), React.createElement("div", {
     className: "creative-kpi__chart"
   }, React.createElement("svg", {
     viewBox: `0 0 ${width} ${height}`,
     role: "img",
-    "aria-label": `${title}, monthly P50 and P85 trend`
+    "aria-label": `${title}, monthly trend`
   }, [0, 1, 2, 3].map(index => {
     const y = top + index / 3 * plotHeight;
     const value = maxValue * (1 - index / 3);
@@ -2199,65 +2213,233 @@ function FlowMateKpiTrendChartC({
       textAnchor: "end"
     }, flowMateKpiFormatValueC(value)));
   }), React.createElement("path", {
-    className: "creative-kpi__series creative-kpi__series--p85",
-    d: pathFor(secondaryField)
-  }), React.createElement("path", {
-    className: "creative-kpi__series creative-kpi__series--p50",
+    className: "creative-kpi__series creative-kpi__series--primary",
     d: pathFor(primaryField)
   }), rows.map((row, index) => {
-    const p50 = point(row, index, primaryField);
-    const p85 = point(row, index, secondaryField);
+    const monthlyPoint = point(row, index, primaryField);
     return React.createElement("g", {
       key: row.reviewMonth || index
-    }, p85.y != null && React.createElement("circle", {
-      className: "creative-kpi__point creative-kpi__point--p85",
-      cx: p85.x,
-      cy: p85.y,
+    }, monthlyPoint.y != null && React.createElement("circle", {
+      className: "creative-kpi__point creative-kpi__point--primary",
+      cx: monthlyPoint.x,
+      cy: monthlyPoint.y,
       r: "4"
-    }, React.createElement("title", null, `${flowMateKpiMonthShortC(row.reviewMonth)} P85 ${flowMateKpiFormatValueC(p85.value, unit)} · n=${row.n || 0}`)), p50.y != null && React.createElement("circle", {
-      className: "creative-kpi__point creative-kpi__point--p50",
-      cx: p50.x,
-      cy: p50.y,
-      r: "4"
-    }, React.createElement("title", null, `${flowMateKpiMonthShortC(row.reviewMonth)} P50 ${flowMateKpiFormatValueC(p50.value, unit)} · n=${row.n || 0}`)), React.createElement("text", {
+    }, React.createElement("title", null, `${flowMateKpiMonthShortC(row.reviewMonth)} ${flowMateKpiFormatValueC(monthlyPoint.value, unit)} · ${row.n || 0} jobs`)), React.createElement("text", {
       className: "creative-kpi__month-label",
-      x: p50.x,
+      x: monthlyPoint.x,
       y: height - 22,
       textAnchor: "middle"
     }, flowMateKpiMonthShortC(row.reviewMonth)), React.createElement("text", {
       className: "creative-kpi__sample-label",
-      x: p50.x,
+      x: monthlyPoint.x,
       y: height - 7,
       textAnchor: "middle"
-    }, "n=", row.n || 0));
+    }, row.n || 0, " jobs"));
   }))));
 }
 function FlowMateKpiMetricC({
   label,
   value,
+  rawValue,
   note,
   benchmark,
+  benchmarkValue,
+  lowerBetter = false,
   sample
 }) {
+  const benchmarkStatus = sample?.small ? {
+    emoji: "ℹ️",
+    label: "Not enough data",
+    tone: "sample"
+  } : flowMateKpiBenchmarkStatusC(rawValue, benchmarkValue, {
+    lowerBetter
+  });
   return React.createElement("div", {
     className: "creative-kpi__metric"
   }, React.createElement("div", {
+    className: "creative-kpi__metric-head"
+  }, React.createElement("div", {
     className: "creative-kpi__metric-label"
-  }, label), React.createElement("div", {
+  }, label), benchmarkStatus && React.createElement("span", {
+    className: `creative-kpi__benchmark-status is-${benchmarkStatus.tone}`,
+    "aria-label": benchmarkStatus.label
+  }, React.createElement("span", {
+    "aria-hidden": "true"
+  }, benchmarkStatus.emoji), " ", benchmarkStatus.label)), React.createElement("div", {
     className: "creative-kpi__metric-value mono"
   }, value), React.createElement("div", {
     className: "creative-kpi__metric-note"
-  }, note), benchmark && React.createElement("div", {
-    className: "creative-kpi__benchmark"
-  }, "Team benchmark ", React.createElement("strong", null, benchmark)), sample && React.createElement("div", {
+  }, note), benchmarkStatus && benchmark && React.createElement("div", {
+    className: "creative-kpi__benchmark-value"
+  }, "Team ", benchmark), sample && React.createElement("div", {
     className: `creative-kpi__sample ${sample.small ? "is-small" : ""}`
-  }, sample.small ? "Small sample" : "Eligible sample", " · n=", sample.n || 0));
+  }, sample.small ? "Small sample" : "Based on", " · ", sample.n || 0, " jobs"));
+}
+function flowMateKpiJoinLabelsC(labels) {
+  const values = (labels || []).filter(Boolean);
+  if (values.length <= 1) return values[0] || "";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
+}
+function flowMateKpiInsightMetricsC(mode) {
+  return mode === "requester" ? [{
+    field: "briefLeadP50",
+    label: "Brief ready before Launch",
+    unit: " d"
+  }, {
+    field: "reviewResponseP50",
+    label: "Time to respond",
+    unit: " d",
+    lowerBetter: true
+  }, {
+    field: "reviewSlaPct",
+    label: "Responded within 1 day",
+    unit: "%"
+  }, {
+    field: "briefCompleteFirstPassPct",
+    label: "Brief passed first check",
+    unit: "%"
+  }] : [{
+    field: "timeToStartP50",
+    label: "Time to start",
+    unit: " d",
+    lowerBetter: true
+  }, {
+    field: "productionP50",
+    label: "Production time",
+    unit: " d",
+    lowerBetter: true
+  }, {
+    field: "firstDraftOnTimePct",
+    label: "First draft on time",
+    unit: "%"
+  }];
+}
+function flowMateKpiTrendToneC(rows, latest, metric) {
+  if (!latest || latest.smallSample || latest[metric.field] == null) return null;
+  const eligible = (rows || []).filter(row => !row.empty && !row.smallSample && row[metric.field] != null);
+  const currentIndex = eligible.findIndex(row => flowMateKpiMonthKeyC(row.reviewMonth) === flowMateKpiMonthKeyC(latest.reviewMonth));
+  if (currentIndex < 1) return null;
+  const difference = Number(eligible[currentIndex][metric.field]) - Number(eligible[currentIndex - 1][metric.field]);
+  if (!Number.isFinite(difference) || Math.abs(difference) < 0.05) return "neutral";
+  return (metric.lowerBetter ? difference < 0 : difference > 0) ? "better" : "attention";
+}
+function FlowMateKpiInsightsC({
+  mode,
+  rows,
+  latest,
+  benchmark
+}) {
+  if (!latest) return null;
+  if (latest.smallSample) {
+    return React.createElement("section", {
+      className: "creative-kpi__insights",
+      "aria-labelledby": "creative-kpi-insights-title"
+    }, React.createElement("div", {
+      className: "creative-kpi__insights-head"
+    }, React.createElement("h2", {
+      id: "creative-kpi-insights-title"
+    }, "Performance insights"), React.createElement("p", null, flowMateKpiMonthShortC(latest.reviewMonth), " · individual view")), React.createElement("ul", {
+      className: "creative-kpi__insight-list"
+    }, React.createElement("li", {
+      className: "is-sample"
+    }, React.createElement("strong", null, "Data note:"), " Team comparison is paused until there are at least 5 jobs. This month has ", latest.n || 0, ".")));
+  }
+  const metrics = flowMateKpiInsightMetricsC(mode);
+  const comparisons = benchmark ? metrics.map(metric => ({
+    metric,
+    status: flowMateKpiBenchmarkStatusC(latest[metric.field], benchmark[metric.field], {
+      lowerBetter: metric.lowerBetter
+    })
+  })).filter(item => item.status) : [];
+  const better = comparisons.filter(item => item.status.tone === "better");
+  const attention = comparisons.filter(item => item.status.tone === "attention");
+  const same = comparisons.filter(item => item.status.tone === "neutral");
+  const trend = metrics.map(metric => ({
+    metric,
+    tone: flowMateKpiTrendToneC(rows, latest, metric)
+  })).filter(item => item.tone);
+  const improved = trend.filter(item => item.tone === "better").map(item => item.metric.label);
+  const declined = trend.filter(item => item.tone === "attention").map(item => item.metric.label);
+  const steady = trend.filter(item => item.tone === "neutral").map(item => item.metric.label);
+  const missing = mode === "requester" ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0) : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0);
+  const insights = [];
+  if (better.length) {
+    insights.push({
+      tone: "positive",
+      label: "Strength:",
+      text: `Ahead of team in ${flowMateKpiJoinLabelsC(better.map(item => item.metric.label))}.`
+    });
+  } else if (same.length) {
+    insights.push({
+      tone: "neutral",
+      label: "Strength:",
+      text: `In line with team in ${flowMateKpiJoinLabelsC(same.map(item => item.metric.label))}.`
+    });
+  }
+  if (attention.length) {
+    const details = attention.map(({
+      metric
+    }) => `${metric.label} (${flowMateKpiFormatValueC(latest[metric.field], metric.unit)}; team ${flowMateKpiFormatValueC(benchmark[metric.field], metric.unit)})`);
+    insights.push({
+      tone: "attention",
+      label: "Focus:",
+      text: `${flowMateKpiJoinLabelsC(details)}.`
+    });
+  } else if (comparisons.length) {
+    insights.push({
+      tone: "positive",
+      label: "Focus:",
+      text: "No comparable indicator is below team this month."
+    });
+  } else {
+    insights.push({
+      tone: "neutral",
+      label: "Focus:",
+      text: "Team comparison is not available for this month."
+    });
+  }
+  let trendText = "Not enough history to compare with a previous month.";
+  let trendTone = "neutral";
+  if (improved.length || declined.length || steady.length) {
+    const parts = [];
+    if (improved.length) parts.push(`${flowMateKpiJoinLabelsC(improved)} improved`);
+    if (declined.length) parts.push(`${flowMateKpiJoinLabelsC(declined)} declined`);
+    if (steady.length) parts.push(`${flowMateKpiJoinLabelsC(steady)} stayed similar`);
+    trendText = `${parts.join("; ")} versus the previous month with data.`;
+    trendTone = declined.length ? "attention" : improved.length ? "positive" : "neutral";
+  }
+  insights.push({
+    tone: trendTone,
+    label: "Month-over-month:",
+    text: trendText
+  });
+  const dataLead = mode === "gdve" ? `Completed ${Math.round(Number(latest.throughputN || 0)).toLocaleString("en-US")} jobs in ${flowMateKpiMonthShortC(latest.reviewMonth)}` : `Based on ${latest.n || 0} jobs in ${flowMateKpiMonthShortC(latest.reviewMonth)}`;
+  insights.push({
+    tone: latest.exceptionN || missing ? "attention" : "neutral",
+    label: "Data note:",
+    text: `${dataLead}. Missing ${missing}; exceptions ${latest.exceptionN || 0}.`
+  });
+  return React.createElement("section", {
+    className: "creative-kpi__insights",
+    "aria-labelledby": "creative-kpi-insights-title"
+  }, React.createElement("div", {
+    className: "creative-kpi__insights-head"
+  }, React.createElement("h2", {
+    id: "creative-kpi-insights-title"
+  }, "Performance insights"), React.createElement("p", null, flowMateKpiMonthShortC(latest.reviewMonth), " · compared with team and previous month")), React.createElement("ul", {
+    className: "creative-kpi__insight-list"
+  }, insights.map((insight, index) => React.createElement("li", {
+    key: `${insight.label}-${index}`,
+    className: `is-${insight.tone}`
+  }, React.createElement("strong", null, insight.label), " ", insight.text))));
 }
 function FlowMateKpiMonthlyTableC({
   rows,
   mode
 }) {
   const isRequester = mode === "requester";
+  const visibleRows = rows.filter(row => !row.empty);
   return React.createElement("section", {
     className: "creative-kpi__table-card"
   }, React.createElement("div", {
@@ -2266,9 +2448,8 @@ function FlowMateKpiMonthlyTableC({
     className: "creative-kpi__table-wrap"
   }, React.createElement("table", {
     className: "tbl creative-kpi__table"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Month"), React.createElement("th", null, "n"), React.createElement("th", null, isRequester ? "Brief lead P50 / P85" : "Start P50 / P85"), React.createElement("th", null, isRequester ? "Response P50 / P85" : "Production P50 / P85"), React.createElement("th", null, isRequester ? "Review SLA" : "1st draft on time"), React.createElement("th", null, "Missing"), React.createElement("th", null, "Exceptions"))), React.createElement("tbody", null, rows.map(row => React.createElement("tr", {
-    key: row.reviewMonth,
-    className: row.empty ? "is-empty" : ""
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Month"), React.createElement("th", null, "Jobs"), React.createElement("th", null, isRequester ? "Brief ready before Launch" : "Time to start"), React.createElement("th", null, isRequester ? "Time to respond" : "Production time"), React.createElement("th", null, isRequester ? "Within 1 day" : "First draft on time"), React.createElement("th", null, "Missing"), React.createElement("th", null, "Exceptions"))), React.createElement("tbody", null, visibleRows.map(row => React.createElement("tr", {
+    key: row.reviewMonth
   }, React.createElement("td", {
     className: "strong"
   }, flowMateKpiMonthShortC(row.reviewMonth)), React.createElement("td", {
@@ -2278,9 +2459,9 @@ function FlowMateKpiMonthlyTableC({
     title: "Small sample"
   }, "Small sample")), React.createElement("td", {
     className: "mono"
-  }, isRequester ? `${flowMateKpiFormatValueC(row.briefLeadP50)} / ${flowMateKpiFormatValueC(row.briefLeadP85)} d` : `${flowMateKpiFormatValueC(row.timeToStartP50)} / ${flowMateKpiFormatValueC(row.timeToStartP85)} d`), React.createElement("td", {
+  }, flowMateKpiFormatValueC(isRequester ? row.briefLeadP50 : row.timeToStartP50, " d")), React.createElement("td", {
     className: "mono"
-  }, isRequester ? `${flowMateKpiFormatValueC(row.reviewResponseP50)} / ${flowMateKpiFormatValueC(row.reviewResponseP85)} d` : `${flowMateKpiFormatValueC(row.productionP50)} / ${flowMateKpiFormatValueC(row.productionP85)} d`), React.createElement("td", {
+  }, flowMateKpiFormatValueC(isRequester ? row.reviewResponseP50 : row.productionP50, " d")), React.createElement("td", {
     className: "mono"
   }, flowMateKpiFormatValueC(isRequester ? row.reviewSlaPct : row.firstDraftOnTimePct, "%")), React.createElement("td", {
     className: "mono"
@@ -2302,6 +2483,7 @@ function CreativeKpiScreen() {
     message: "Loading monthly KPI history..."
   });
   const [showLegacyReport, setShowLegacyReport] = useStateC(false);
+  const [showMonthlyDetail, setShowMonthlyDetail] = useStateC(false);
   async function loadMonthlyKpi() {
     if (!window.loadFlowMateCreativeKpiMonthly) {
       setLoadState({
@@ -2363,85 +2545,101 @@ function CreativeKpiScreen() {
   const metricRows = activeTab === "team" ? [{
     label: "Time to start",
     value: flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP50, " d"),
-    note: `P85 ${flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP85, " d")}`,
+    note: "Fewer days is better",
     sample: latestGdveTeam
   }, {
-    label: "Production",
+    label: "Production time",
     value: flowMateKpiFormatValueC(latestGdveTeam?.productionP50, " d"),
-    note: `P85 ${flowMateKpiFormatValueC(latestGdveTeam?.productionP85, " d")}`,
+    note: "Fewer days is better",
     sample: latestGdveTeam
   }, {
-    label: "Brief lead",
+    label: "Brief ready before Launch",
     value: flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP50, " d"),
-    note: `P85 ${flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP85, " d")}`,
+    note: "More days is better",
     sample: latestRequesterTeam
   }, {
-    label: "Review SLA",
+    label: "Responded within 1 day",
     value: flowMateKpiFormatValueC(latestRequesterTeam?.reviewSlaPct, "%"),
-    note: `${latestRequesterTeam?.pendingReviewOverSlaN || 0} pending over SLA`,
+    note: `${latestRequesterTeam?.pendingReviewOverSlaN || 0} waiting over 1 day`,
     sample: latestRequesterTeam
   }] : activeTab === "gdve" ? [{
     label: "Time to start",
     value: flowMateKpiFormatValueC(latest?.timeToStartP50, " d"),
+    rawValue: latest?.timeToStartP50,
     note: flowMateKpiProgressTextC(series, "timeToStartP50", {
       lowerBetter: true,
       unit: " d"
     }),
     benchmark: flowMateKpiFormatValueC(benchmark?.timeToStartP50, " d"),
+    benchmarkValue: benchmark?.timeToStartP50,
+    lowerBetter: true,
     sample: latest
   }, {
-    label: "Production",
+    label: "Production time",
     value: flowMateKpiFormatValueC(latest?.productionP50, " d"),
+    rawValue: latest?.productionP50,
     note: flowMateKpiProgressTextC(series, "productionP50", {
       lowerBetter: true,
       unit: " d"
     }),
     benchmark: flowMateKpiFormatValueC(benchmark?.productionP50, " d"),
+    benchmarkValue: benchmark?.productionP50,
+    lowerBetter: true,
     sample: latest
   }, {
-    label: "1st draft on time",
+    label: "First draft on time",
     value: flowMateKpiFormatValueC(latest?.firstDraftOnTimePct, "%"),
+    rawValue: latest?.firstDraftOnTimePct,
     note: flowMateKpiProgressTextC(series, "firstDraftOnTimePct", {
       unit: " pt"
     }),
     benchmark: flowMateKpiFormatValueC(benchmark?.firstDraftOnTimePct, "%"),
+    benchmarkValue: benchmark?.firstDraftOnTimePct,
     sample: latest
   }, {
-    label: "Throughput",
+    label: "Completed work",
     value: flowMateKpiFormatValueC(latest?.throughputN),
     note: flowMateKpiProgressTextC(series, "throughputN", {
       unit: " jobs"
     }),
-    benchmark: flowMateKpiFormatValueC(benchmark?.throughputN),
     sample: latest
   }] : [{
-    label: "Brief lead",
+    label: "Brief ready before Launch",
     value: flowMateKpiFormatValueC(latest?.briefLeadP50, " d"),
+    rawValue: latest?.briefLeadP50,
     note: flowMateKpiProgressTextC(series, "briefLeadP50", {
       unit: " d"
     }),
     benchmark: flowMateKpiFormatValueC(benchmark?.briefLeadP50, " d"),
+    benchmarkValue: benchmark?.briefLeadP50,
     sample: latest
   }, {
-    label: "Review response",
+    label: "Time to respond",
     value: flowMateKpiFormatValueC(latest?.reviewResponseP50, " d"),
+    rawValue: latest?.reviewResponseP50,
     note: flowMateKpiProgressTextC(series, "reviewResponseP50", {
       lowerBetter: true,
       unit: " d"
     }),
     benchmark: flowMateKpiFormatValueC(benchmark?.reviewResponseP50, " d"),
+    benchmarkValue: benchmark?.reviewResponseP50,
+    lowerBetter: true,
     sample: latest
   }, {
-    label: "Review SLA",
+    label: "Responded within 1 day",
     value: flowMateKpiFormatValueC(latest?.reviewSlaPct, "%"),
-    note: `${latest?.pendingReviewOverSlaN || 0} pending over SLA`,
+    rawValue: latest?.reviewSlaPct,
+    note: `${latest?.pendingReviewOverSlaN || 0} waiting over 1 day`,
     benchmark: flowMateKpiFormatValueC(benchmark?.reviewSlaPct, "%"),
+    benchmarkValue: benchmark?.reviewSlaPct,
     sample: latest
   }, {
-    label: "Brief complete",
+    label: "Brief passed first check",
     value: flowMateKpiFormatValueC(latest?.briefCompleteFirstPassPct, "%"),
+    rawValue: latest?.briefCompleteFirstPassPct,
     note: `${latest?.briefLateOrSameDayN || 0} late or same-day briefs`,
     benchmark: flowMateKpiFormatValueC(benchmark?.briefCompleteFirstPassPct, "%"),
+    benchmarkValue: benchmark?.briefCompleteFirstPassPct,
     sample: latest
   }];
   return React.createElement("div", {
@@ -2521,7 +2719,7 @@ function CreativeKpiScreen() {
     className: "creative-kpi__empty"
   }, React.createElement("strong", null, "No eligible monthly data"), React.createElement("p", null, "This account has no permitted KPI rows, or no Creative Request has reached Review yet.")), loadState.status === "live" && allRows.length > 0 && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "creative-kpi__context"
-  }, React.createElement("div", null, React.createElement("strong", null, activeTab === "team" ? "All Creative work" : currentPerson ? currentPerson.name : activeTab === "gdve" ? "All GD/VE" : "All Requesters"), React.createElement("span", null, latest ? flowMateKpiMonthShortC(latest.reviewMonth) : "No latest month")), React.createElement("p", null, visibleDataMonths, " of ", months.length, " months contain eligible data. Cohort month is the first Review submission in Bangkok time.")), React.createElement("div", {
+  }, React.createElement("div", null, React.createElement("strong", null, activeTab === "team" ? "All Creative work" : currentPerson ? currentPerson.name : activeTab === "gdve" ? "All GD/VE" : "All Requesters"), React.createElement("span", null, latest ? flowMateKpiMonthShortC(latest.reviewMonth) : "No latest month")), React.createElement("p", null, visibleDataMonths, "/", months.length, " months with data · Month starts at first Review")), React.createElement("div", {
     className: "creative-kpi__metrics"
   }, metricRows.map(metric => React.createElement(FlowMateKpiMetricC, {
     key: metric.label,
@@ -2530,40 +2728,49 @@ function CreativeKpiScreen() {
       n: metric.sample.n,
       small: metric.sample.smallSample
     } : null
-  }))), activeTab === "team" ? React.createElement("div", {
+  }))), activeTab !== "team" && selectedPersonId && React.createElement(FlowMateKpiInsightsC, {
+    mode: activeTab,
+    rows: series,
+    latest: latest,
+    benchmark: benchmark
+  }), activeTab === "team" ? React.createElement("div", {
     className: "creative-kpi__chart-grid"
   }, React.createElement(FlowMateKpiTrendChartC, {
     rows: flowMateKpiSeriesC(data.gdveRows, months, ""),
     primaryField: "productionP50",
-    secondaryField: "productionP85",
     title: "Creative production time",
-    description: "In Progress to first Review, excluding recorded Blocked intervals."
+    description: "Working days from In Progress to first Review. Fewer is better."
   }), React.createElement(FlowMateKpiTrendChartC, {
     rows: flowMateKpiSeriesC(data.requesterRows, months, ""),
     primaryField: "reviewResponseP50",
-    secondaryField: "reviewResponseP85",
     title: "Requester response time",
-    description: "First Review submission to the first requester activity."
+    description: "Working days after first Review. Fewer is better."
   })) : React.createElement("div", {
     className: "creative-kpi__chart-grid"
   }, React.createElement(FlowMateKpiTrendChartC, {
     rows: series,
     primaryField: activeTab === "gdve" ? "timeToStartP50" : "briefLeadP50",
-    secondaryField: activeTab === "gdve" ? "timeToStartP85" : "briefLeadP85",
-    title: activeTab === "gdve" ? "Assigned to In Progress" : "Brief lead before Launch",
-    description: activeTab === "gdve" ? "How quickly accepted work starts moving." : "Working days between request creation and Launch Date."
+    title: activeTab === "gdve" ? "Time to start" : "Brief ready before Launch",
+    description: activeTab === "gdve" ? "Working days after assignment. Fewer is better." : "Working days before Launch. More is better."
   }), React.createElement(FlowMateKpiTrendChartC, {
     rows: series,
     primaryField: activeTab === "gdve" ? "productionP50" : "reviewResponseP50",
-    secondaryField: activeTab === "gdve" ? "productionP85" : "reviewResponseP85",
-    title: activeTab === "gdve" ? "In Progress to Review" : "Review response time",
-    description: activeTab === "gdve" ? "Production cycle time with Blocked intervals removed." : "Time from first Review submission to requester activity."
-  })), activeTab !== "team" && React.createElement(FlowMateKpiMonthlyTableC, {
+    title: activeTab === "gdve" ? "Production time" : "Time to respond",
+    description: activeTab === "gdve" ? "Working days from In Progress to Review. Fewer is better." : "Working days after first Review. Fewer is better."
+  })), activeTab !== "team" && React.createElement("div", {
+    className: "creative-kpi__details-row"
+  }, React.createElement("button", {
+    type: "button",
+    className: "btn btn--secondary",
+    "data-testid": "flowmate-kpi-monthly-details",
+    "aria-expanded": showMonthlyDetail,
+    onClick: () => setShowMonthlyDetail(current => !current)
+  }, showMonthlyDetail ? "Hide monthly details" : "Show monthly details")), activeTab !== "team" && showMonthlyDetail && React.createElement(FlowMateKpiMonthlyTableC, {
     rows: series,
     mode: activeTab
   }), React.createElement("div", {
     className: "creative-kpi__quality"
-  }, React.createElement("strong", null, "Read with context"), React.createElement("span", null, "Missing ", latest ? activeTab === "requester" ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0) : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0) : 0), React.createElement("span", null, "Exceptions ", latest?.exceptionN || 0), React.createElement("span", null, "P50 describes the typical case; P85 exposes slower tail cases."))), showLegacyReport && React.createElement("section", {
+  }, React.createElement("strong", null, "Data checks"), React.createElement("span", null, "Missing ", latest ? activeTab === "requester" ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0) : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0) : 0), React.createElement("span", null, "Exceptions ", latest?.exceptionN || 0))), showLegacyReport && React.createElement("section", {
     className: "creative-kpi__legacy",
     "aria-label": "Legacy KPI export and operational detail"
   }, React.createElement(KpiScreen, null)), React.createElement(Source, null, loadState.status === "live" ? "Supabase Creative KPI monthly views" : "No local fallback data", " · manual refresh"));
