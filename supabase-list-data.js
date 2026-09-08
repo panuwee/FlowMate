@@ -1355,6 +1355,47 @@ async function loadFlowMateKpiRows({ month } = {}) {
   return (data || []).map(normalizeFlowMateKpiRow);
 }
 
+function normalizeFlowMateCreativeKpiMonthlyRow(row) {
+  const normalized = {
+    scope: row.scope || "person",
+    reviewMonth: String(row.review_month || "").slice(0, 7),
+    personId: row.person_id || "",
+    personName: row.person_name || "Unknown",
+    personGroup: row.person_group || "N/A",
+    smallSample: row.small_sample === true,
+  };
+  Object.entries(row || {}).forEach(([key, value]) => {
+    if (["scope", "review_month", "person_id", "person_name", "person_group", "small_sample"].includes(key)) return;
+    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    normalized[camelKey] = value == null ? null : Number(value);
+  });
+  return normalized;
+}
+
+async function loadFlowMateCreativeKpiMonthly() {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const [gdveResult, requesterResult] = await Promise.all([
+    window.flowmateSupabase
+      .from("flowmate_creative_kpi_gdve_monthly_v")
+      .select("*")
+      .order("review_month", { ascending: true }),
+    window.flowmateSupabase
+      .from("flowmate_creative_kpi_requester_monthly_v")
+      .select("*")
+      .order("review_month", { ascending: true }),
+  ]);
+  if (gdveResult.error) {
+    throw new Error(`Creative KPI GD/VE history is unavailable: ${gdveResult.error.message || "monthly view query failed."}`);
+  }
+  if (requesterResult.error) {
+    throw new Error(`Creative KPI requester history is unavailable: ${requesterResult.error.message || "monthly view query failed."}`);
+  }
+  return {
+    gdveRows: (gdveResult.data || []).map(normalizeFlowMateCreativeKpiMonthlyRow),
+    requesterRows: (requesterResult.data || []).map(normalizeFlowMateCreativeKpiMonthlyRow),
+  };
+}
+
 async function loadFlowMateWorkItemById(displayId, { includeArchived = false } = {}) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   const normalizedId = String(displayId || "").trim().toUpperCase();
@@ -1700,6 +1741,7 @@ window.loadFlowMateBoardSummary = loadFlowMateBoardSummary;
 window.loadFlowMateActiveBoard = loadFlowMateActiveBoard;
 window.loadFlowMateDeliveredHistory = loadFlowMateDeliveredHistory;
 window.loadFlowMateKpiRows = loadFlowMateKpiRows;
+window.loadFlowMateCreativeKpiMonthly = loadFlowMateCreativeKpiMonthly;
 window.loadFlowMateWorkItemById = loadFlowMateWorkItemById;
 window.loadFlowMateLeaveRows = loadFlowMateLeaveRows;
 window.loadFlowMateCalendarRows = loadFlowMateCalendarRows;

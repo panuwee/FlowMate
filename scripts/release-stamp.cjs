@@ -15,6 +15,7 @@ const VERSIONED_ASSETS = [
   "app.css",
   "ot-request-domain.js",
   "supabase-ot-request.js",
+  "supabase-list-data.js",
   "supabase-workload-data.js",
   "screens-c.js",
   "screens-ot.js",

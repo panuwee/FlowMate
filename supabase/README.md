@@ -53,6 +53,8 @@ Local Vitest checks validate source and application contracts only. Before UAT o
 | `marketing_plan_supervisor.sql` | Admin-only Marketing Plan Supervisor assignment timestamping, event log, working-day helper, monthly risk view, and summary views |
 | `flowmate_production_insights.sql` | Admin-only Supervisor Production Insights views for historical active production time, current operations context, and retired capacity-warning history |
 | `flowmate_production_insights_verify.sql` | Rollback-only Production Insights verifier for anon denial, non-admin empty reads, active-hour metrics, and retired warning fixtures |
+| `creative_monthly_kpi_data_foundation.sql` | Supervisor-only Creative KPI monthly data foundation for team, GD/VE, and Requester progression metrics |
+| `creative_monthly_kpi_data_foundation_verify.sql` | Read-only verification for Creative KPI views, grants, metric invariants, and current data readiness |
 | `creative_request_date_led_preview.sql` | Read-only Creative Request T-5/T-1 to T-4/T-2 active-data preview with No Tag, skip, retained-history, and Thai calendar counts |
 | `creative_request_date_led_apply.sql` | Separately approved recoverable active Creative Request date-led backfill with guarded current-value checks |
 | `creative_request_date_led_verify.sql` | Post-apply invariant verifier plus a commented rollback block that requires separate rollback approval |

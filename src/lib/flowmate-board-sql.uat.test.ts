@@ -167,28 +167,53 @@ describe("FlowMate Board delivered/archive SQL lifecycle", () => {
       workflow.indexOf("drop function if exists public.transition_creative_work_status"),
     );
 
-    expect(transition).toContain("v_wip_override boolean := false;");
-    expect(transition).toContain("v_work.priority = 'urgent'");
-    expect(transition).toContain("length(trim(coalesce(v_work.urgent_reason, ''))) > 0");
-    expect(transition).toContain("v_wip_override := true;");
-    expect(transition).toContain("'wip_override', v_wip_override");
-    expect(transition).toContain("'wip_snapshot', v_wip_now");
-    expect(transition).toContain("'wip_limit', v_wip_limit");
-    expect(transition).toContain("'urgent_reason', case when v_wip_override then v_work.urgent_reason else null end");
-    expect(transition.match(/v_wip_now >= v_wip_limit/g)?.length).toBe(3);
-    expect(transition).toContain("Only owner can start this work");
-    expect(transition).toContain("Only requester can request changes");
-    expect(transition).toContain("Only owner can resume this work");
-    expect(transition).toContain("review_round = review_round + 1");
-    expect(transition).toContain("update public.marketing_channel_placements mcp");
+    const expectUrgentWipContract = (source: string) => {
+      expect(source).toContain("v_wip_override boolean := false;");
+      expect(source).toContain("v_work.priority = 'urgent'");
+      expect(source).toContain("length(trim(coalesce(v_work.urgent_reason, ''))) > 0");
+      expect(source).toContain("v_wip_override := true;");
+      expect(source).toContain("'wip_override', v_wip_override");
+      expect(source).toContain("'wip_snapshot', v_wip_now");
+      expect(source).toContain("'wip_limit', v_wip_limit");
+      expect(source).toContain("'urgent_reason', case when v_wip_override then v_work.urgent_reason else null end");
+      expect(source.match(/v_wip_now >= v_wip_limit/g)?.length).toBe(3);
+      expect(source).toContain("Only owner can start this work");
+      expect(source).toContain("Only requester can request changes");
+      expect(source).toContain("Only owner can resume this work");
+      expect(source).toContain("review_round = review_round + 1");
+      expect(source).toContain("update public.marketing_channel_placements mcp");
+    };
+
+    expectUrgentWipContract(transition);
 
     const installer = urgentInstallerSql();
-    const installerTransition = functionBlock(
-      installer,
-      "create or replace function public.transition_creative_work_status",
-      "drop function if exists public.transition_creative_work_status",
-    );
-    expect(installerTransition).toBe(transition.trim());
+    const privateSignature = "create or replace function private.flowmate_transition_creative_work_status";
+    const usesSharedEngine = installer.includes(privateSignature);
+    const installerMutation = usesSharedEngine
+      ? functionBlock(installer, privateSignature, "create or replace function public.transition_creative_work_status")
+      : functionBlock(
+        installer,
+        "create or replace function public.transition_creative_work_status",
+        "drop function if exists public.transition_creative_work_status",
+      );
+
+    expectUrgentWipContract(installerMutation);
+
+    if (usesSharedEngine) {
+      const installerWrapper = functionBlock(
+        installer,
+        "create or replace function public.transition_creative_work_status",
+        "revoke all on function private.flowmate_transition_creative_work_status",
+      );
+      expect(installerWrapper).toContain("public.flowmate_actor_user_id()");
+      expect(installerWrapper).toContain("public.flowmate_assert_actor_matches(p_actor_user_id, v_actor_id)");
+      expect(installerWrapper).toContain("return private.flowmate_transition_creative_work_status(");
+      expect(installerWrapper).not.toContain("update public.work_items");
+      expect(installer).toContain("revoke all on function private.flowmate_transition_creative_work_status(");
+      expect(installer).toContain(") from public, anon, authenticated;");
+    } else {
+      expect(installerMutation).toBe(transition.trim());
+    }
   });
 
   it("resets the retention clock on every transition into Delivered", () => {

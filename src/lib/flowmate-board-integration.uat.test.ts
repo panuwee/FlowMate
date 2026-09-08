@@ -78,12 +78,12 @@ describe("FlowMate Board integration contracts", () => {
       "app.js",
     ];
     const currentReleaseAssets = new Set([
-      "supabase-list-data.js",
       "search-utils.js",
       "screens-b.js",
     ]);
     const automatedReleaseAssets = new Set([
       "app.css",
+      "supabase-list-data.js",
       "supabase-workload-data.js",
       "screens-c.js",
       "app.js",
@@ -98,8 +98,6 @@ describe("FlowMate Board integration contracts", () => {
       expect(new Set(versions).size, `${assetName} cache tokens must match`).toBe(1);
       if (automatedReleaseAssets.has(assetName)) {
         expect(versions[0], `${assetName} must use the automated release token`).toMatch(/^[0-9]{8}-[a-f0-9]{6}$/);
-      } else if (assetName === "supabase-list-data.js") {
-        expect(versions[0], "supabase-list-data.js must use the current release token").toBe("20260907-01");
       } else if (currentReleaseAssets.has(assetName)) {
         expect(versions[0], `${assetName} must use the current release token`).toBe("20260806-01");
       }

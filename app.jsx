@@ -130,7 +130,7 @@ const NAV = [{
   group: "Supervisor",
   items: [{
     key: "kpi",
-    label: "KPI",
+    label: "Creative KPI",
     icon: "chart"
   }, {
     key: "settings",
@@ -187,7 +187,7 @@ const TITLE_MAP = {
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
-  "kpi": "KPI",
+  "kpi": "Creative KPI",
   "settings": "Team settings",
   "admin-whitelist": "Whitelist"
 };
@@ -1132,7 +1132,7 @@ function App() {
     onOpen: open
   }), allowedRoute && route === "planning-calendar" && React.createElement(PlanningContentCalendarScreen, {
     onOpen: open
-  }), allowedRoute && route === "kpi" && React.createElement(KpiScreen, null), allowedRoute && route === "settings" && React.createElement(SettingsScreen, null), allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
+  }), allowedRoute && route === "kpi" && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "settings" && React.createElement(SettingsScreen, null), allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
     onNav: nav
   })), isGlobalLeaveModalOpen && React.createElement(GlobalLeaveRequestModal, {
     onClose: () => setIsGlobalLeaveModalOpen(false)

@@ -1751,6 +1751,316 @@ function KpiScreen() {
 /* ============================================================
    TEAM CALENDAR
    ============================================================ */
+function flowMateKpiMonthKeyC(value) {
+  return String(value || "").slice(0, 7);
+}
+
+function flowMateKpiShiftMonthC(monthKey, delta) {
+  const [year, month] = flowMateKpiMonthKeyC(monthKey).split("-").map(Number);
+  if (!year || !month) return "";
+  const date = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function flowMateKpiMonthWindowC(rows, range) {
+  const available = Array.from(new Set((rows || []).map(row => flowMateKpiMonthKeyC(row.reviewMonth)).filter(Boolean))).sort();
+  if (!available.length) return [];
+  if (range === "all") return available;
+  const count = Number(range || 6);
+  const latest = available[available.length - 1];
+  return Array.from({ length: count }, (_, index) => flowMateKpiShiftMonthC(latest, index - count + 1));
+}
+
+function flowMateKpiMonthShortC(monthKey) {
+  const [year, month] = flowMateKpiMonthKeyC(monthKey).split("-").map(Number);
+  if (!year || !month) return monthKey || "-";
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("en-US", {
+    month: "short",
+    year: "2-digit",
+    timeZone: "UTC",
+  });
+}
+
+function flowMateKpiFormatValueC(value, unit = "") {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+  const number = Number(value);
+  const formatted = number >= 100 ? Math.round(number).toLocaleString("en-US") : number.toFixed(1);
+  return `${formatted}${unit}`;
+}
+
+function flowMateKpiPersonOptionsC(rows) {
+  const people = new Map();
+  (rows || []).filter(row => row.scope === "person" && row.personId).forEach(row => {
+    if (!people.has(row.personId)) {
+      people.set(row.personId, {
+        id: row.personId,
+        name: row.personName || "Unknown",
+        group: row.personGroup || "N/A",
+      });
+    }
+  });
+  return Array.from(people.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function flowMateKpiSeriesC(rows, months, personId) {
+  const scopedRows = (rows || []).filter(row => personId ? row.scope === "person" && row.personId === personId : row.scope === "team");
+  const byMonth = new Map(scopedRows.map(row => [flowMateKpiMonthKeyC(row.reviewMonth), row]));
+  return (months || []).map(month => byMonth.get(month) || { reviewMonth: month, empty: true, n: 0 });
+}
+
+function flowMateKpiLatestC(rows) {
+  return (rows || []).filter(row => !row.empty).slice(-1)[0] || null;
+}
+
+function flowMateKpiBenchmarkC(teamRows, monthKey) {
+  return (teamRows || []).find(row => row.scope === "team" && flowMateKpiMonthKeyC(row.reviewMonth) === monthKey) || null;
+}
+
+function flowMateKpiProgressTextC(rows, field, { lowerBetter = false, unit = "" } = {}) {
+  const eligible = (rows || []).filter(row => !row.empty && !row.smallSample && row[field] != null);
+  if (eligible.length < 2) return "Small sample — trend call withheld";
+  const current = Number(eligible[eligible.length - 1][field]);
+  const previous = Number(eligible[eligible.length - 2][field]);
+  const difference = current - previous;
+  if (Math.abs(difference) < 0.05) return "Stable vs prior eligible month";
+  const improved = lowerBetter ? difference < 0 : difference > 0;
+  return `${improved ? "Improved" : "Needs attention"} ${flowMateKpiFormatValueC(Math.abs(difference), unit)} vs prior eligible month`;
+}
+
+function FlowMateKpiTrendChartC({ rows, primaryField, secondaryField, title, description, unit = " d" }) {
+  const width = 720;
+  const height = 240;
+  const left = 46;
+  const right = 20;
+  const top = 18;
+  const bottom = 48;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const values = rows.flatMap(row => [row[primaryField], row[secondaryField]]).filter(value => value != null && !Number.isNaN(Number(value))).map(Number);
+  const maxValue = Math.max(1, ...values) * 1.12;
+  const point = (row, index, field) => {
+    const x = rows.length > 1 ? left + (index / (rows.length - 1)) * plotWidth : left + plotWidth / 2;
+    const raw = row[field];
+    const y = raw == null ? null : top + plotHeight - (Number(raw) / maxValue) * plotHeight;
+    return { x, y, value: raw };
+  };
+  const pathFor = field => {
+    let drawing = false;
+    return rows.map((row, index) => {
+      const current = point(row, index, field);
+      if (current.y == null) {
+        drawing = false;
+        return "";
+      }
+      const command = drawing ? "L" : "M";
+      drawing = true;
+      return `${command}${current.x.toFixed(1)},${current.y.toFixed(1)}`;
+    }).join(" ");
+  };
+  if (!values.length) {
+    return (
+      <section className="creative-kpi__chart-card">
+        <div className="creative-kpi__section-head"><div><h2>{title}</h2><p>{description}</p></div></div>
+        <div className="creative-kpi__empty">No eligible monthly data for this metric.</div>
+      </section>
+    );
+  }
+  return (
+    <section className="creative-kpi__chart-card">
+      <div className="creative-kpi__section-head">
+        <div><h2>{title}</h2><p>{description}</p></div>
+        <div className="creative-kpi__legend" aria-label="Chart legend">
+          <span><i className="creative-kpi__legend-line creative-kpi__legend-line--p50"></i>P50 typical</span>
+          <span><i className="creative-kpi__legend-line creative-kpi__legend-line--p85"></i>P85 slower cases</span>
+        </div>
+      </div>
+      <div className="creative-kpi__chart">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title}, monthly P50 and P85 trend`}>
+          {[0, 1, 2, 3].map(index => {
+            const y = top + (index / 3) * plotHeight;
+            const value = maxValue * (1 - index / 3);
+            return <g key={index}><line className="creative-kpi__grid-line" x1={left} x2={width - right} y1={y} y2={y} /><text className="creative-kpi__axis-label" x={left - 8} y={y + 4} textAnchor="end">{flowMateKpiFormatValueC(value)}</text></g>;
+          })}
+          <path className="creative-kpi__series creative-kpi__series--p85" d={pathFor(secondaryField)} />
+          <path className="creative-kpi__series creative-kpi__series--p50" d={pathFor(primaryField)} />
+          {rows.map((row, index) => {
+            const p50 = point(row, index, primaryField);
+            const p85 = point(row, index, secondaryField);
+            return <g key={row.reviewMonth || index}>
+              {p85.y != null && <circle className="creative-kpi__point creative-kpi__point--p85" cx={p85.x} cy={p85.y} r="4"><title>{`${flowMateKpiMonthShortC(row.reviewMonth)} P85 ${flowMateKpiFormatValueC(p85.value, unit)} · n=${row.n || 0}`}</title></circle>}
+              {p50.y != null && <circle className="creative-kpi__point creative-kpi__point--p50" cx={p50.x} cy={p50.y} r="4"><title>{`${flowMateKpiMonthShortC(row.reviewMonth)} P50 ${flowMateKpiFormatValueC(p50.value, unit)} · n=${row.n || 0}`}</title></circle>}
+              <text className="creative-kpi__month-label" x={p50.x} y={height - 22} textAnchor="middle">{flowMateKpiMonthShortC(row.reviewMonth)}</text>
+              <text className="creative-kpi__sample-label" x={p50.x} y={height - 7} textAnchor="middle">n={row.n || 0}</text>
+            </g>;
+          })}
+        </svg>
+      </div>
+    </section>
+  );
+}
+
+function FlowMateKpiMetricC({ label, value, note, benchmark, sample }) {
+  return (
+    <div className="creative-kpi__metric">
+      <div className="creative-kpi__metric-label">{label}</div>
+      <div className="creative-kpi__metric-value mono">{value}</div>
+      <div className="creative-kpi__metric-note">{note}</div>
+      {benchmark && <div className="creative-kpi__benchmark">Team benchmark <strong>{benchmark}</strong></div>}
+      {sample && <div className={`creative-kpi__sample ${sample.small ? "is-small" : ""}`}>{sample.small ? "Small sample" : "Eligible sample"} · n={sample.n || 0}</div>}
+    </div>
+  );
+}
+
+function FlowMateKpiMonthlyTableC({ rows, mode }) {
+  const isRequester = mode === "requester";
+  return (
+    <section className="creative-kpi__table-card">
+      <div className="creative-kpi__section-head"><div><h2>Monthly detail</h2><p>Use sample size and data gaps before drawing conclusions.</p></div></div>
+      <div className="creative-kpi__table-wrap">
+        <table className="tbl creative-kpi__table">
+          <thead><tr>
+            <th>Month</th><th>n</th>
+            <th>{isRequester ? "Brief lead P50 / P85" : "Start P50 / P85"}</th>
+            <th>{isRequester ? "Response P50 / P85" : "Production P50 / P85"}</th>
+            <th>{isRequester ? "Review SLA" : "1st draft on time"}</th>
+            <th>Missing</th><th>Exceptions</th>
+          </tr></thead>
+          <tbody>
+            {rows.map(row => <tr key={row.reviewMonth} className={row.empty ? "is-empty" : ""}>
+              <td className="strong">{flowMateKpiMonthShortC(row.reviewMonth)}</td>
+              <td className="mono">{row.n || 0}{row.smallSample && <span className="creative-kpi__small-dot" title="Small sample">Small sample</span>}</td>
+              <td className="mono">{isRequester ? `${flowMateKpiFormatValueC(row.briefLeadP50)} / ${flowMateKpiFormatValueC(row.briefLeadP85)} d` : `${flowMateKpiFormatValueC(row.timeToStartP50)} / ${flowMateKpiFormatValueC(row.timeToStartP85)} d`}</td>
+              <td className="mono">{isRequester ? `${flowMateKpiFormatValueC(row.reviewResponseP50)} / ${flowMateKpiFormatValueC(row.reviewResponseP85)} d` : `${flowMateKpiFormatValueC(row.productionP50)} / ${flowMateKpiFormatValueC(row.productionP85)} d`}</td>
+              <td className="mono">{flowMateKpiFormatValueC(isRequester ? row.reviewSlaPct : row.firstDraftOnTimePct, "%")}</td>
+              <td className="mono">{isRequester ? (row.briefLeadMissingN || 0) + (row.reviewResponseMissingN || 0) : (row.timeToStartMissingN || 0) + (row.productionMissingN || 0)}</td>
+              <td className="mono">{row.exceptionN || 0}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function CreativeKpiScreen() {
+  const [activeTab, setActiveTab] = useStateC("team");
+  const [range, setRange] = useStateC("6");
+  const [gdvePersonId, setGdvePersonId] = useStateC("");
+  const [requesterPersonId, setRequesterPersonId] = useStateC("");
+  const [data, setData] = useStateC({ gdveRows: [], requesterRows: [] });
+  const [loadState, setLoadState] = useStateC({ status: "loading", message: "Loading monthly KPI history..." });
+  const [showLegacyReport, setShowLegacyReport] = useStateC(false);
+
+  async function loadMonthlyKpi() {
+    if (!window.loadFlowMateCreativeKpiMonthly) {
+      setLoadState({ status: "error", message: "Monthly KPI loader is not ready. Rebuild the FlowMate frontend and try again." });
+      return;
+    }
+    setLoadState({ status: "loading", message: "Loading monthly KPI history..." });
+    try {
+      const nextData = await window.loadFlowMateCreativeKpiMonthly();
+      setData(nextData);
+      setLoadState({ status: "live", message: "Updated from approved Creative KPI views" });
+    } catch (error) {
+      console.error("[FlowMate Creative KPI] load failed:", error);
+      setData({ gdveRows: [], requesterRows: [] });
+      setLoadState({ status: "error", message: window.flowmateUserError(error, "Monthly KPI data could not be loaded.") });
+    }
+  }
+
+  useEffectC(() => { loadMonthlyKpi(); }, []);
+
+  const allRows = [...data.gdveRows, ...data.requesterRows];
+  const months = flowMateKpiMonthWindowC(allRows, range);
+  const gdvePeople = flowMateKpiPersonOptionsC(data.gdveRows);
+  const requesterPeople = flowMateKpiPersonOptionsC(data.requesterRows);
+  const selectedPersonId = activeTab === "requester" ? requesterPersonId : gdvePersonId;
+  const selectedRows = activeTab === "requester" ? data.requesterRows : data.gdveRows;
+  const series = flowMateKpiSeriesC(selectedRows, months, activeTab === "team" ? "" : selectedPersonId);
+  const latest = flowMateKpiLatestC(series);
+  const benchmark = latest && activeTab !== "team" && selectedPersonId ? flowMateKpiBenchmarkC(selectedRows, latest.reviewMonth) : null;
+  const visibleDataMonths = series.filter(row => !row.empty).length;
+  const currentPeople = activeTab === "requester" ? requesterPeople : gdvePeople;
+  const currentPerson = currentPeople.find(person => person.id === selectedPersonId);
+  const latestGdveTeam = flowMateKpiLatestC(flowMateKpiSeriesC(data.gdveRows, months, ""));
+  const latestRequesterTeam = flowMateKpiLatestC(flowMateKpiSeriesC(data.requesterRows, months, ""));
+
+  const tabs = [
+    { key: "team", label: "Team overview" },
+    { key: "gdve", label: "GD/VE" },
+    { key: "requester", label: "Requester" },
+  ];
+  const metricRows = activeTab === "team" ? [
+    { label: "Time to start", value: flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP50, " d"), note: `P85 ${flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP85, " d")}`, sample: latestGdveTeam },
+    { label: "Production", value: flowMateKpiFormatValueC(latestGdveTeam?.productionP50, " d"), note: `P85 ${flowMateKpiFormatValueC(latestGdveTeam?.productionP85, " d")}`, sample: latestGdveTeam },
+    { label: "Brief lead", value: flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP50, " d"), note: `P85 ${flowMateKpiFormatValueC(latestRequesterTeam?.briefLeadP85, " d")}`, sample: latestRequesterTeam },
+    { label: "Review SLA", value: flowMateKpiFormatValueC(latestRequesterTeam?.reviewSlaPct, "%"), note: `${latestRequesterTeam?.pendingReviewOverSlaN || 0} pending over SLA`, sample: latestRequesterTeam },
+  ] : activeTab === "gdve" ? [
+    { label: "Time to start", value: flowMateKpiFormatValueC(latest?.timeToStartP50, " d"), note: flowMateKpiProgressTextC(series, "timeToStartP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.timeToStartP50, " d"), sample: latest },
+    { label: "Production", value: flowMateKpiFormatValueC(latest?.productionP50, " d"), note: flowMateKpiProgressTextC(series, "productionP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.productionP50, " d"), sample: latest },
+    { label: "1st draft on time", value: flowMateKpiFormatValueC(latest?.firstDraftOnTimePct, "%"), note: flowMateKpiProgressTextC(series, "firstDraftOnTimePct", { unit: " pt" }), benchmark: flowMateKpiFormatValueC(benchmark?.firstDraftOnTimePct, "%"), sample: latest },
+    { label: "Throughput", value: flowMateKpiFormatValueC(latest?.throughputN), note: flowMateKpiProgressTextC(series, "throughputN", { unit: " jobs" }), benchmark: flowMateKpiFormatValueC(benchmark?.throughputN), sample: latest },
+  ] : [
+    { label: "Brief lead", value: flowMateKpiFormatValueC(latest?.briefLeadP50, " d"), note: flowMateKpiProgressTextC(series, "briefLeadP50", { unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.briefLeadP50, " d"), sample: latest },
+    { label: "Review response", value: flowMateKpiFormatValueC(latest?.reviewResponseP50, " d"), note: flowMateKpiProgressTextC(series, "reviewResponseP50", { lowerBetter: true, unit: " d" }), benchmark: flowMateKpiFormatValueC(benchmark?.reviewResponseP50, " d"), sample: latest },
+    { label: "Review SLA", value: flowMateKpiFormatValueC(latest?.reviewSlaPct, "%"), note: `${latest?.pendingReviewOverSlaN || 0} pending over SLA`, benchmark: flowMateKpiFormatValueC(benchmark?.reviewSlaPct, "%"), sample: latest },
+    { label: "Brief complete", value: flowMateKpiFormatValueC(latest?.briefCompleteFirstPassPct, "%"), note: `${latest?.briefLateOrSameDayN || 0} late or same-day briefs`, benchmark: flowMateKpiFormatValueC(benchmark?.briefCompleteFirstPassPct, "%"), sample: latest },
+  ];
+
+  return (
+    <div className="page creative-kpi" data-testid="flowmate-creative-kpi">
+      <div className="page__header creative-kpi__header">
+        <div>
+          <h1 className="page__title">Creative KPI</h1>
+          <div className="page__sub">Monthly workflow health for coaching and process improvement — not ranking.</div>
+        </div>
+        <div className="page__actions">
+          <button className="btn btn--secondary" onClick={loadMonthlyKpi} disabled={loadState.status === "loading"}><Icon name="rerun" /> {loadState.status === "loading" ? "Refreshing..." : "Refresh"}</button>
+          <button className="btn btn--secondary" onClick={() => setShowLegacyReport(current => !current)}><Icon name="download" /> {showLegacyReport ? "Close" : "Export"}</button>
+        </div>
+      </div>
+
+      <div className="creative-kpi__toolbar">
+        <div className="creative-kpi__tabs" role="tablist" aria-label="Creative KPI view">
+          {tabs.map(tab => <button key={tab.key} type="button" role="tab" aria-label={tab.label} aria-selected={activeTab === tab.key} className={activeTab === tab.key ? "is-active" : ""} onClick={() => setActiveTab(tab.key)} data-testid={`flowmate-kpi-tab-${tab.key}`}><span className="creative-kpi__tab-full">{tab.label}</span><span className="creative-kpi__tab-short">{tab.key === "team" ? "Overview" : tab.label}</span></button>)}
+        </div>
+        <div className="creative-kpi__filters">
+          {activeTab !== "team" && <label><span>Person</span><select className="select" value={selectedPersonId} onChange={event => activeTab === "requester" ? setRequesterPersonId(event.target.value) : setGdvePersonId(event.target.value)} data-testid="flowmate-kpi-person-filter">
+            <option value="">All {activeTab === "requester" ? "Requesters" : "GD/VE"}</option>
+            {currentPeople.map(person => <option key={person.id} value={person.id}>{person.name} · {person.group}</option>)}
+          </select></label>}
+          <label><span>Trend range</span><select className="select" value={range} onChange={event => setRange(event.target.value)} data-testid="flowmate-kpi-range-filter"><option value="6">Last 6 months</option><option value="12">Last 12 months</option><option value="all">All available</option></select></label>
+        </div>
+      </div>
+
+      {loadState.status === "loading" && <div className="creative-kpi__loading" role="status"><span></span><span></span><span></span><p>Loading monthly KPI history...</p></div>}
+      {loadState.status === "error" && <div className="creative-kpi__error" role="alert"><div><strong>Monthly KPI could not be loaded</strong><p>{loadState.message}</p></div><button className="btn btn--secondary" onClick={loadMonthlyKpi}>Retry</button></div>}
+      {loadState.status === "live" && !allRows.length && <div className="creative-kpi__empty"><strong>No eligible monthly data</strong><p>This account has no permitted KPI rows, or no Creative Request has reached Review yet.</p></div>}
+
+      {loadState.status === "live" && allRows.length > 0 && <>
+        <div className="creative-kpi__context">
+          <div><strong>{activeTab === "team" ? "All Creative work" : currentPerson ? currentPerson.name : activeTab === "gdve" ? "All GD/VE" : "All Requesters"}</strong><span>{latest ? flowMateKpiMonthShortC(latest.reviewMonth) : "No latest month"}</span></div>
+          <p>{visibleDataMonths} of {months.length} months contain eligible data. Cohort month is the first Review submission in Bangkok time.</p>
+        </div>
+        <div className="creative-kpi__metrics">{metricRows.map(metric => <FlowMateKpiMetricC key={metric.label} {...metric} sample={metric.sample ? { n: metric.sample.n, small: metric.sample.smallSample } : null} />)}</div>
+
+        {activeTab === "team" ? <div className="creative-kpi__chart-grid">
+          <FlowMateKpiTrendChartC rows={flowMateKpiSeriesC(data.gdveRows, months, "")} primaryField="productionP50" secondaryField="productionP85" title="Creative production time" description="In Progress to first Review, excluding recorded Blocked intervals." />
+          <FlowMateKpiTrendChartC rows={flowMateKpiSeriesC(data.requesterRows, months, "")} primaryField="reviewResponseP50" secondaryField="reviewResponseP85" title="Requester response time" description="First Review submission to the first requester activity." />
+        </div> : <div className="creative-kpi__chart-grid">
+          <FlowMateKpiTrendChartC rows={series} primaryField={activeTab === "gdve" ? "timeToStartP50" : "briefLeadP50"} secondaryField={activeTab === "gdve" ? "timeToStartP85" : "briefLeadP85"} title={activeTab === "gdve" ? "Assigned to In Progress" : "Brief lead before Launch"} description={activeTab === "gdve" ? "How quickly accepted work starts moving." : "Working days between request creation and Launch Date."} />
+          <FlowMateKpiTrendChartC rows={series} primaryField={activeTab === "gdve" ? "productionP50" : "reviewResponseP50"} secondaryField={activeTab === "gdve" ? "productionP85" : "reviewResponseP85"} title={activeTab === "gdve" ? "In Progress to Review" : "Review response time"} description={activeTab === "gdve" ? "Production cycle time with Blocked intervals removed." : "Time from first Review submission to requester activity."} />
+        </div>}
+        {activeTab !== "team" && <FlowMateKpiMonthlyTableC rows={series} mode={activeTab} />}
+        <div className="creative-kpi__quality"><strong>Read with context</strong><span>Missing {latest ? (activeTab === "requester" ? (latest.briefLeadMissingN || 0) + (latest.reviewResponseMissingN || 0) : (latest.timeToStartMissingN || 0) + (latest.productionMissingN || 0)) : 0}</span><span>Exceptions {latest?.exceptionN || 0}</span><span>P50 describes the typical case; P85 exposes slower tail cases.</span></div>
+      </>}
+
+      {showLegacyReport && <section className="creative-kpi__legacy" aria-label="Legacy KPI export and operational detail"><KpiScreen /></section>}
+      <Source>{loadState.status === "live" ? "Supabase Creative KPI monthly views" : "No local fallback data"} · manual refresh</Source>
+    </div>
+  );
+}
+
 function calendarUtcKeyC(date) {
   const y = date.getUTCFullYear();
   const m = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -3398,4 +3708,4 @@ function TaskAssignAttentionScreen({ onOpen }) {
   );
 }
 
-Object.assign(window, { WorkloadScreen, PlanningChannelViewScreen, PlanningCampaignViewScreen, PlanningContentCalendarScreen, KpiScreen, CalendarScreen, TeamGanttScreen, TaskAssignScheduleScreen, TaskAssignAttentionScreen, SettingsScreen });
+Object.assign(window, { WorkloadScreen, PlanningChannelViewScreen, PlanningCampaignViewScreen, PlanningContentCalendarScreen, KpiScreen, CreativeKpiScreen, CalendarScreen, TeamGanttScreen, TaskAssignScheduleScreen, TaskAssignAttentionScreen, SettingsScreen });
