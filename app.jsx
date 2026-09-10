@@ -192,7 +192,7 @@ const TITLE_MAP = {
   "admin-whitelist": "Whitelist"
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
-const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
+const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-planner", "campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const OT_REQUEST_HASH_KEYS = new Set([OT_REQUEST_PRODUCT_KEY]);
 const TASK_ASSIGN_HASH_KEYS = new Set(["task-assign-create", "task-assign-board", "task-assign-list", "task-assign-calendar", "task-assign-schedule", "task-assign-attention", "task-assign-detail"]);
@@ -4582,6 +4582,290 @@ function getMarketingCampaignFunctionStyle(campaign) {
     "--campaign-function-fg-dark": campaign && campaign.darkForeground || "#F7F7F7"
   };
 }
+// Campaign Planner helpers: dates are calendar dates, independent of browser timezone.
+function getCampaignPlannerWindow(anchor, span = 3) {
+  const count = [3, 6, 12].includes(Number(span)) ? Number(span) : 3;
+  const [year, month] = anchor.split("-").map(Number);
+  const firstMonth = count === 12 ? 0 : Math.floor((month - 1) / count) * count;
+  const start = new Date(Date.UTC(year, firstMonth, 1));
+  const end = new Date(Date.UTC(year, firstMonth + count, 0));
+  const months = Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(year, firstMonth + index, 1));
+    const days = new Date(Date.UTC(year, firstMonth + index + 1, 0)).getUTCDate();
+    return { key: date.toISOString().slice(0, 7), label: date.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }), days, weeks: [] };
+  });
+  const axisStart = new Date(start);
+  axisStart.setUTCDate(axisStart.getUTCDate() - (axisStart.getUTCDay() + 6) % 7);
+  const weeks = [];
+  for (let cursor = new Date(axisStart); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 7)) {
+    const weekEnd = new Date(cursor);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+    const owner = months.find(month => month.key === cursor.toISOString().slice(0, 7)) || months[0];
+    const week = { start: cursor.toISOString().slice(0, 10), end: weekEnd.toISOString().slice(0, 10), days: 7, monthStart: owner.weeks.length === 0 };
+    owner.weeks.push(week);
+    weeks.push(week);
+  }
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10), months, weeks, days: Math.round((end - start) / 86400000) + 1, axisStart: axisStart.toISOString().slice(0, 10), axisDays: weeks.length * 7 };
+}
+function getCampaignPlannerWorkingRow(item) {
+  const placements = [...(item.working_placements || [])].sort((a, b) => String(a.launch_date || "").localeCompare(String(b.launch_date || ""))
+    || String(a.publish_time || "").localeCompare(String(b.publish_time || "")) || String(a.channel || "").localeCompare(String(b.channel || "")));
+  const primary = placements[0];
+  const channels = [...new Set(placements.map(row => row.channel).filter(Boolean))];
+  const statuses = new Set(placements.map(row => normalizeMarketingPlanWorkingStatus(row.status)));
+  return { channels, launchDate: primary?.launch_date || "", status: primary ? getMarketingPlanWorkingSheetStatus({ placementStatus: primary.status }) : "", hasMixedStatus: statuses.size > 1 };
+}
+function shiftCampaignPlannerWindow(start, amount) {
+  const [year, month] = start.slice(0, 7).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1 + amount, 1)).toISOString().slice(0, 7);
+}
+function getCampaignPlannerBar(start, end, range) {
+  if (!start || !end || end < start || start > range.end || end < range.start) return null;
+  const clippedStart = start < range.start ? range.start : start;
+  const clippedEnd = end > range.end ? range.end : end;
+  return {
+    left: ((Date.parse(clippedStart) - Date.parse(range.axisStart)) / 86400000) / range.axisDays * 100,
+    width: ((Date.parse(clippedEnd) - Date.parse(clippedStart)) / 86400000 + 1) / range.axisDays * 100,
+    before: start < range.start, after: end > range.end
+  };
+}
+function validateCampaignPlannerForm(form) {
+  const errors = {};
+  if (!/^.+\s\[(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-[1-9]\d{3}\]$/.test(String(form.name || "").trim())) {
+    errors.name = "กรุณาระบุชื่อแคมเปญพร้อมเดือนและปี เช่น Summer Sale [Jul-2026]";
+  }
+  if (!form.functionCode) errors.functionCode = "กรุณาเลือก Function Colour Tag";
+  if (String(form.tagline || "").length > 300) errors.tagline = "Tagline ต้องไม่เกิน 300 ตัวอักษร";
+  if (Boolean(form.startDate) !== Boolean(form.endDate)) errors.dates = "กรุณาระบุทั้งวันเริ่มและวันสิ้นสุด หรือเว้นว่างทั้งคู่";
+  else if (form.startDate && form.endDate < form.startDate) errors.dates = "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
+  return errors;
+}
+function getCampaignPlannerProgress(campaign) {
+  const total = Number(campaign.total_items || 0);
+  const done = Number(campaign.completed_items || 0);
+  if (!total) return Number(campaign.cancelled_items || 0) ? "ยกเลิกทั้งหมด" : "ยังไม่มีงาน";
+  return `เสร็จ ${done}/${total} งาน · ${Math.round(done / total * 100)}%`;
+}
+async function loadCampaignPlannerPages(makeQuery) {
+  const rows = [];
+  for (let offset = 0; ; offset += 500) {
+    const result = await makeQuery().range(offset, offset + 499);
+    if (result.error) throw result.error;
+    rows.push(...(result.data || []));
+    if ((result.data || []).length < 500) return rows;
+  }
+}
+function MarketingPlanCampaignPlannerScreen({ user }) {
+  const [anchor, setAnchor] = useStateApp(getMarketingPlanCurrentMonthKey);
+  const [span, setSpan] = useStateApp(3);
+  const [campaigns, setCampaigns] = useStateApp([]);
+  const [functions, setFunctions] = useStateApp([]);
+  const [canManage, setCanManage] = useStateApp(false);
+  const [state, setState] = useStateApp({ status: "loading", message: "" });
+  const [search, setSearch] = useStateApp("");
+  const [functionFilter, setFunctionFilter] = useStateApp("all");
+  const [includeArchived, setIncludeArchived] = useStateApp(false);
+  const [manageMode, setManageMode] = useStateApp(false);
+  const [managerSort, setManagerSort] = useStateApp("newest");
+  const [expanded, setExpanded] = useStateApp([]);
+  const [items, setItems] = useStateApp({});
+  const [itemErrors, setItemErrors] = useStateApp({});
+  const [selected, setSelected] = useStateApp(null);
+  const [editing, setEditing] = useStateApp(false);
+  const [form, setForm] = useStateApp({});
+  const [errors, setErrors] = useStateApp({});
+  const [saving, setSaving] = useStateApp(false);
+  const [saveError, setSaveError] = useStateApp("");
+  const dialogRef = useRefApp(null);
+  const aliveRef = useRefApp(true);
+  const loadIdRef = useRefApp(0);
+  const range = getCampaignPlannerWindow(anchor, span);
+  const isAdmin = user && user.role === "admin";
+  const client = window.flowmateSupabase;
+  const dateLabel = value => value ? formatMarketingPlanDate(value) : "ยังไม่กำหนด";
+  async function refresh() {
+    const requestId = ++loadIdRef.current;
+    setState({ status: "loading", message: "" });
+    try {
+      if (!client) throw new Error("เชื่อมต่อไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง");
+      const [rows, functionRows, permission] = await Promise.all([
+        loadCampaignPlannerPages(() => client.from("marketing_campaign_planner_v").select("*").order("campaign_tag_id")),
+        loadMarketingPlanCampaignFunctions(), client.rpc("marketing_campaign_planner_can_manage")
+      ]);
+      if (permission.error) throw permission.error;
+      if (!aliveRef.current || requestId !== loadIdRef.current) return;
+      setCampaigns(rows); setFunctions(functionRows); setCanManage(isAdmin && permission.data === true);
+      setItems({}); setItemErrors({}); setExpanded([]);
+      setState({ status: "ready", message: "" });
+    } catch (error) {
+      if (!aliveRef.current || requestId !== loadIdRef.current) return;
+      setCanManage(false);
+      setState({ status: "error", message: isWorkflowMvpCatalogUnavailable(error)
+        ? "Campaign Planner ยังไม่พร้อมใช้งาน กรุณาให้ Admin ตรวจการตั้งค่าแล้วลองอีกครั้ง"
+        : "โหลด Campaign Planner ไม่สำเร็จ กรุณาลองอีกครั้ง" });
+      console.error("[Campaign Planner]", error);
+    }
+  }
+  useEffectApp(() => {
+    aliveRef.current = true; refresh();
+    return () => { aliveRef.current = false; ++loadIdRef.current; };
+  }, []);
+  useEffectApp(() => {
+    if (selected && dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal();
+  }, [selected]);
+  async function loadItems(id) {
+    const generation = loadIdRef.current;
+    setItemErrors(current => ({ ...current, [id]: "" }));
+    try {
+      const rows = await loadCampaignPlannerPages(() => client.from("marketing_campaign_planner_items_v").select("*").eq("campaign_tag_id", id).order("content_item_id"));
+      if (aliveRef.current && generation === loadIdRef.current) setItems(current => ({ ...current, [id]: rows }));
+    } catch (error) {
+      if (aliveRef.current && generation === loadIdRef.current) setItemErrors(current => ({ ...current, [id]: "โหลดงานไม่สำเร็จ" }));
+    }
+  }
+  function toggleItems(id) {
+    setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
+    if (!items[id]) loadItems(id);
+  }
+  function openCampaign(campaign, edit = false) {
+    setSelected(campaign); setEditing(edit); setErrors({}); setSaveError("");
+    setForm({ name: campaign.name || "", tagline: campaign.tagline || "", functionCode: campaign.function_code || "", startDate: campaign.start_date || "", endDate: campaign.end_date || "" });
+    if (campaign.campaign_tag_id && !items[campaign.campaign_tag_id]) loadItems(campaign.campaign_tag_id);
+  }
+  function closeDialog() { if (!saving) { dialogRef.current?.close(); setSelected(null); } }
+  async function saveCampaign(event) {
+    event.preventDefault();
+    const nextErrors = validateCampaignPlannerForm(form);
+    setErrors(nextErrors); setSaveError("");
+    if (Object.keys(nextErrors).length) {
+      const field = nextErrors.name ? "name" : nextErrors.tagline ? "tagline" : nextErrors.functionCode ? "functionCode" : "startDate";
+      event.currentTarget.elements.namedItem(field)?.focus();
+      return;
+    }
+    setSaving(true);
+    try {
+      const result = await client.rpc("marketing_campaign_planner_save", {
+        p_campaign_tag_id: selected.campaign_tag_id || null, p_name: form.name.trim(),
+        p_function_code: form.functionCode, p_tagline: form.tagline.trim(),
+        p_start_date: form.startDate || null, p_end_date: form.endDate || null,
+        p_expected_updated_at: selected.updated_at || null
+      });
+      if (result.error) throw result.error;
+      dialogRef.current?.close(); setSelected(null);
+      invalidateMarketingPlanDataCache();
+      await refresh();
+      await loadMarketingPlanCampaignOptions();
+    } catch (error) {
+      setSaveError(error.code === "40001" ? "มีผู้แก้แคมเปญนี้แล้ว กรุณาปิดและรีเฟรชก่อนแก้อีกครั้ง" : (error.message || "บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง"));
+    } finally { setSaving(false); }
+  }
+  async function archiveCampaign(campaign) {
+    if (!window.confirm(`${campaign.is_archived ? "Restore" : "Archive"} “${campaign.name}”? ข้อมูลงานเดิมจะยังคงอยู่`)) return;
+    setSaving(true); setSaveError("");
+    try {
+      if (campaign.is_archived) await restoreMarketingPlanCampaignTag(campaign.campaign_tag_id);
+      else await archiveMarketingPlanCampaignTag(campaign.campaign_tag_id);
+      dialogRef.current?.close(); setSelected(null); invalidateMarketingPlanDataCache(); await refresh();
+    } catch (error) { setSaveError(error.message || "เปลี่ยนสถานะไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  }
+  const filtered = campaigns.filter(campaign => (includeArchived || !campaign.is_archived)
+    && (functionFilter === "all" || campaign.function_code === functionFilter)
+    && `${campaign.name} ${campaign.tagline}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const scheduled = filtered.filter(campaign => getCampaignPlannerBar(campaign.start_date, campaign.end_date, range))
+    .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.name.localeCompare(b.name));
+  const unscheduled = filtered.filter(campaign => !campaign.start_date || !campaign.end_date);
+  const managementRows = [...filtered].sort((a, b) => managerSort === "oldest"
+    ? String(a.created_at || "").localeCompare(String(b.created_at || ""))
+    : managerSort === "recently-used" ? String(b.last_used_at || "").localeCompare(String(a.last_used_at || ""))
+    : String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  const today = getMarketingPlanTodayKey();
+  const todayBar = getCampaignPlannerBar(today, today, range);
+  function renderItems(campaign) {
+    const id = campaign.campaign_tag_id;
+    if (itemErrors[id]) return <div role="alert">{itemErrors[id]} <button className="btn btn--secondary" onClick={() => loadItems(id)}>ลองอีกครั้ง</button></div>;
+    if (!items[id]) return <p role="status">กำลังโหลดงาน…</p>;
+    if (!items[id].length) return <p className="muted">ยังไม่มีงานในแคมเปญนี้</p>;
+    return <div className="campaign-planner__working-scroll"><table className="campaign-planner__working"><thead><tr><th scope="col">Product / Event</th><th scope="col">Channel</th><th scope="col">Launch Date</th><th scope="col">Status</th></tr></thead><tbody>{items[id].map(item => {
+      const row = getCampaignPlannerWorkingRow(item);
+      return <tr key={item.content_item_id}><td>{item.content_title}</td><td>{row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"}</td><td>{row.launchDate ? dateLabel(row.launchDate) : "—"}</td><td>{row.status ? <span className={`badge ${getMarketingPlanStatusClass(row.status)}`}>{getMarketingPlanStatusLabel(row.status)}{row.hasMixedStatus ? " (mixed)" : ""}</span> : "—"}</td></tr>;
+    })}</tbody></table></div>;
+  }
+  function campaignName(campaign) {
+    return <><button className="campaign-planner__name" onClick={() => openCampaign(campaign)}>{campaign.name}</button>
+      <span className="muted">{campaign.function_label || "Unassigned"}{campaign.is_archived ? " · Archived" : ""}</span>
+      <span className="campaign-planner__progress">{getCampaignPlannerProgress(campaign)}</span>
+      {campaign.start_date && <span className="campaign-planner__progress muted">{dateLabel(campaign.start_date)} – {dateLabel(campaign.end_date)}</span>}</>;
+  }
+  return <section className="campaign-planner">
+    <div className="page-head"><div><h1>Campaign Planner</h1></div>
+      <div className="campaign-planner__actions">
+        {canManage && <button className={`btn ${manageMode ? "btn--primary" : "btn--secondary"}`} aria-label="Manage Campaign" title="Manage Campaign" aria-pressed={manageMode} onClick={() => setManageMode(!manageMode)}><Icon name="settings" /></button>}
+        {canManage && <button className="btn btn--primary" onClick={() => openCampaign({}, true)}><Icon name="plus" /> New Campaign</button>}
+        <button className="btn btn--secondary" aria-label="Refresh" title="Refresh" disabled={state.status === "loading"} onClick={refresh}><Icon name="rerun" /></button>
+      </div></div>
+    {state.status === "error" && <div className="reason-box reason-box--need" role="alert">{state.message}</div>}
+    {state.status === "loading" && <p role="status">กำลังโหลด Campaign Planner…</p>}
+    {state.status === "ready" && <>
+      <div className="campaign-planner__toolbar">
+        <div className="campaign-planner__actions"><label><select className="select" aria-label="มุมมอง" value={span} onChange={event => setSpan(Number(event.target.value))}><option value={3}>3 เดือน</option><option value={6}>6 เดือน</option><option value={12}>ทั้งปี</option></select></label>
+          <button className="btn btn--secondary" aria-label="ช่วงก่อนหน้า" onClick={() => setAnchor(shiftCampaignPlannerWindow(range.start, -span))}><Icon name="chevron" style={{ transform: "rotate(180deg)" }} /></button>
+          <label><input aria-label="เลือกเดือน" className="input" type="month" min="1000-01" max="9998-12" value={anchor} onChange={event => { if (/^[1-9]\d{3}-\d{2}$/.test(event.target.value)) setAnchor(event.target.value); }} /></label>
+          <button className="btn btn--secondary" aria-label="ช่วงถัดไป" onClick={() => setAnchor(shiftCampaignPlannerWindow(range.start, span))}><Icon name="chevron" /></button>
+          <button className="btn btn--secondary" onClick={() => setAnchor(getMarketingPlanCurrentMonthKey())}>Today</button></div>
+        <p className="campaign-planner__range">{range.months[0].label} – {range.months[range.months.length - 1].label} {range.start.slice(0, 4)}</p>
+      </div>
+      <div className="campaign-planner__filters">
+        <label><input aria-label="ค้นหาแคมเปญ" className="input" type="search" placeholder="ชื่อแคมเปญหรือ Tagline" value={search} onChange={event => setSearch(event.target.value)} /></label>
+        <label><select aria-label="Function" className="select" value={functionFilter} onChange={event => setFunctionFilter(event.target.value)}><option value="all">All functions</option>{functions.map(fn => <option key={fn.code} value={fn.code}>{fn.label}</option>)}</select></label>
+        <label className="check-pill"><input type="checkbox" checked={includeArchived} onChange={event => setIncludeArchived(event.target.checked)} /> Include archived</label>
+      </div>
+      {manageMode && canManage ? <section aria-label="Manage Campaign" className="campaign-planner__catalog"><h2>Manage Campaign</h2>
+        <label>เรียงลำดับ<select className="select" aria-label="เรียงลำดับแคมเปญ" value={managerSort} onChange={event => setManagerSort(event.target.value)}><option value="newest">Newest</option><option value="oldest">Oldest</option><option value="recently-used">Most recently used</option></select></label>
+        {filtered.length === 0 && <p>ไม่พบแคมเปญที่ตรงกับตัวกรอง</p>}
+        {managementRows.map(campaign => <div key={campaign.campaign_tag_id} className="campaign-planner__catalog-row"><div>{campaignName(campaign)}</div><span>{dateLabel(campaign.start_date)} – {dateLabel(campaign.end_date)}</span><button className="btn btn--secondary" onClick={() => openCampaign(campaign, !campaign.is_archived)}>{campaign.is_archived ? "รายละเอียด" : "แก้ไข"}</button></div>)}
+      </section> : <>
+        <div className="campaign-planner__scroller" tabIndex={0} aria-label="ช่วงเวลาแคมเปญ เลื่อนแนวนอนได้">
+          <div className="campaign-planner__grid" style={{ minWidth: Math.max(860, 290 + range.weeks.length * 28) }}>
+            <div className="campaign-planner__row campaign-planner__header"><div className="campaign-planner__identity">Campaign / ความคืบหน้า</div><div><div className="campaign-planner__months" style={{ gridTemplateColumns: range.months.map(month => `${month.weeks.length}fr`).join(" ") }}>{range.months.map(month => <div key={month.key}>{month.label}</div>)}</div><div className="campaign-planner__weeks" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} title={`${dateLabel(week.start)} – ${dateLabel(week.end)}`}><span>{Number(week.start.slice(-2))}</span></span>)}</div></div></div>
+            {scheduled.map(campaign => {
+              const bar = getCampaignPlannerBar(campaign.start_date, campaign.end_date, range);
+              const colour = getMarketingCampaignFunctionStyle({ lightBackground: campaign.light_background, lightForeground: campaign.light_foreground, darkBackground: campaign.dark_background, darkForeground: campaign.dark_foreground });
+              return <React.Fragment key={campaign.campaign_tag_id}><div className="campaign-planner__row"><div className="campaign-planner__identity"><button className="iconbtn" aria-label={`${expanded.includes(campaign.campaign_tag_id) ? "ยุบ" : "ขยาย"}งาน ${campaign.name}`} aria-expanded={expanded.includes(campaign.campaign_tag_id)} onClick={() => toggleItems(campaign.campaign_tag_id)}><Icon name="chevron" style={{ transform: expanded.includes(campaign.campaign_tag_id) ? "rotate(90deg)" : "none" }} /></button><div>{campaignName(campaign)}</div></div>
+                <div className="campaign-planner__track"><div className="campaign-planner__guides" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} data-month-start={week.monthStart} />)}</div>
+                  {todayBar && <span className="campaign-planner__today" style={{ left: `${todayBar.left}%` }} title={`Today ${today}`} />}
+                  <button className="campaign-planner__bar" data-compact={bar.width < 3} style={{ ...colour, left: `${bar.left}%`, width: `${bar.width}%` }} title={`${campaign.name}: ${dateLabel(campaign.start_date)} – ${dateLabel(campaign.end_date)}`} aria-label={`${campaign.name} ${dateLabel(campaign.start_date)} ถึง ${dateLabel(campaign.end_date)}${bar.before ? " เริ่มก่อนช่วงที่แสดง" : ""}${bar.after ? " ต่อเนื่องหลังช่วงที่แสดง" : ""}`} onClick={() => openCampaign(campaign)}>{bar.before && <Icon name="chevron" size={12} style={{ transform: "rotate(180deg)" }} />}<span>{campaign.tagline || campaign.name}</span>{bar.after && <Icon name="chevron" size={12} />}</button>
+                </div></div>{expanded.includes(campaign.campaign_tag_id) && <div className="campaign-planner__expanded">{renderItems(campaign)}</div>}</React.Fragment>;
+            })}
+          </div>
+        </div>
+        {!scheduled.length && <p className="campaign-planner__empty">ไม่มีแคมเปญในช่วงนี้ ลองเปลี่ยนช่วงเวลาหรือตัวกรอง</p>}
+        {unscheduled.length > 0 && <section className="campaign-planner__unscheduled"><h2>รอกำหนดช่วงเวลา <span className="muted">({unscheduled.length})</span></h2>{unscheduled.map(campaign => <div className="campaign-planner__catalog-row" key={campaign.campaign_tag_id}><div>{campaignName(campaign)}</div>{canManage && !campaign.is_archived && <button className="btn btn--secondary" onClick={() => openCampaign(campaign, true)}>กำหนดช่วงเวลา</button>}</div>)}</section>}
+      </>}
+    </>}
+    {selected && <dialog className="campaign-planner__dialog" ref={dialogRef} onCancel={event => { if (saving) event.preventDefault(); else setSelected(null); }} onClose={() => { if (!saving) setSelected(null); }} aria-labelledby="campaign-planner-dialog-title">
+      <div className="campaign-planner__dialog-head"><h2 id="campaign-planner-dialog-title">{editing ? selected.campaign_tag_id ? "แก้ไขแคมเปญ" : "New Campaign" : selected.name}</h2><button className="iconbtn" aria-label="ปิดรายละเอียดแคมเปญ" disabled={saving} onClick={closeDialog}><Icon name="x" /></button></div>
+      {saveError && <p role="alert" className="reason-box reason-box--need">{saveError}</p>}
+      {editing ? <form onSubmit={saveCampaign} noValidate><fieldset disabled={saving} className="campaign-planner__form">
+        <label>ชื่อแคมเปญ<input autoFocus name="name" className="input" value={form.name} aria-invalid={Boolean(errors.name)} aria-describedby="planner-name-help" onChange={event => setForm({ ...form, name: event.target.value })} /><span id="planner-name-help" className={errors.name ? "campaign-planner__error" : "muted"}>{errors.name || "ตัวอย่าง Summer Sale [Jul-2026]"}</span></label>
+        <label>Tagline (optional)<textarea name="tagline" className="input" maxLength={300} rows={2} value={form.tagline} onChange={event => setForm({ ...form, tagline: event.target.value })} />{errors.tagline && <span role="alert">{errors.tagline}</span>}</label>
+        <label>Function Colour Tag<select name="functionCode" className="select" aria-label="Function Colour Tag" aria-invalid={Boolean(errors.functionCode)} aria-describedby={errors.functionCode ? "planner-function-error" : undefined} value={form.functionCode} onChange={event => setForm({ ...form, functionCode: event.target.value })}><option value="">เลือก Function</option>{functions.map(fn => <option value={fn.code} key={fn.code}>{fn.label}</option>)}</select>{errors.functionCode && <span id="planner-function-error" className="campaign-planner__error">{errors.functionCode}</span>}</label>
+        <div className="campaign-planner__dates"><label>วันเริ่มกิจกรรม<input name="startDate" className="input" type="date" aria-invalid={Boolean(errors.dates)} aria-describedby={errors.dates ? "planner-dates-error" : undefined} value={form.startDate} onChange={event => setForm({ ...form, startDate: event.target.value })} /></label><label>วันสิ้นสุดกิจกรรม<input className="input" type="date" aria-invalid={Boolean(errors.dates)} aria-describedby={errors.dates ? "planner-dates-error" : undefined} value={form.endDate} onChange={event => setForm({ ...form, endDate: event.target.value })} /></label></div>
+        {errors.dates && <p id="planner-dates-error" role="alert" className="campaign-planner__error">{errors.dates}</p>}
+        <div className="campaign-planner__actions"><button className="btn btn--primary" type="submit">{saving ? "กำลังบันทึก…" : "บันทึกแคมเปญ"}</button><button type="button" className="btn btn--secondary" onClick={closeDialog}>ยกเลิก</button></div>
+      </fieldset></form> : <>
+        <p>{selected.tagline || "ยังไม่มี Tagline"}</p><p><strong>ช่วงกิจกรรม:</strong> {dateLabel(selected.start_date)} – {dateLabel(selected.end_date)}</p>
+        <p><strong>ช่วงเผยแพร่จากงาน:</strong> {dateLabel(selected.first_publish_date)} – {dateLabel(selected.last_publish_date)}</p>
+        <p>{getCampaignPlannerProgress(selected)} · ยกเลิก {selected.cancelled_items || 0} งาน</p>
+
+        {canManage && !selected.is_archived && <button className="btn btn--primary" disabled={saving} onClick={() => setEditing(true)}>แก้ไขแคมเปญ</button>}
+        <h3>งานย่อย</h3>{renderItems(selected)}
+      </>}
+      {isAdmin && selected.campaign_tag_id && <div className="campaign-planner__archive"><button className="btn btn--secondary" disabled={saving} onClick={() => archiveCampaign(selected)}>{selected.is_archived ? "Restore Campaign" : "Archive Campaign"}</button></div>}
+    </dialog>}
+  </section>;
+}
+
 function MarketingPlanTimelineScreen({
   channelMode = "official"
 } = {}) {
@@ -4591,23 +4875,9 @@ function MarketingPlanTimelineScreen({
   const [selectedMonth, setSelectedMonth] = useStateApp(getMarketingPlanCurrentMonthKey);
   const [monthOptions, setMonthOptions] = useStateApp(() => [getMarketingPlanCurrentMonthKey()]);
   const [selectedFunctionCodes, setSelectedFunctionCodes] = useStateApp(MARKETING_PLAN_FUNCTION_FILTER_OPTIONS.map(option => option.code));
-  const [campaignMessage, setCampaignMessage] = useStateApp("");
-  const [isCampaignManagerOpen, setIsCampaignManagerOpen] = useStateApp(false);
-  const [campaignManagerRows, setCampaignManagerRows] = useStateApp([]);
-  const [campaignManagerName, setCampaignManagerName] = useStateApp("");
-  const [campaignManagerFunction, setCampaignManagerFunction] = useStateApp("mkt");
-  const [campaignManagerSearch, setCampaignManagerSearch] = useStateApp("");
-  const [campaignManagerFunctionFilter, setCampaignManagerFunctionFilter] = useStateApp("all");
-  const [campaignManagerSort, setCampaignManagerSort] = useStateApp("newest");
-  const [campaignManagerIncludeArchived, setCampaignManagerIncludeArchived] = useStateApp(false);
-  const [campaignFunctionOptions, setCampaignFunctionOptions] = useStateApp([]);
   const [campaignCatalogRows, setCampaignCatalogRows] = useStateApp([]);
   const [collapsedCampaignKeys, setCollapsedCampaignKeys] = useStateApp(() => getStoredMarketingTimelineCollapsedCampaigns(collapseStorageKey));
   const timelineScrollRef = useRefApp(null);
-  const [campaignManagerState, setCampaignManagerState] = useStateApp({
-    status: "idle",
-    message: ""
-  });
   const [loadState, setLoadState] = useStateApp({
     status: "loading",
     message: "Loading Marketing Plan timeline..."
@@ -4684,7 +4954,6 @@ function MarketingPlanTimelineScreen({
   const timelineRows = isFacebookEsportTimeline ? visibleCampaignRows.filter(row => row.channel === "facebook_esport") : visibleCampaignRows.filter(row => row.channel !== "facebook_esport" && isMarketingPlanPublishableChannel(row.channel));
   const groupedCampaigns = prioritizeMarketingPlanCampaignsForDate(groupMarketingPlanTimelineRows(timelineRows, selectedMonth), getMarketingPlanTodayKey());
   const campaignCatalogByName = new Map(campaignCatalogRows.map(campaign => [getMarketingPlanCampaignKey(campaign.name), campaign]));
-  const canArchiveCampaignTags = Boolean(window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.role === "admin");
   const timelineCountChannels = isFacebookEsportTimeline ? MARKETING_PLAN_ESPORT_TIMELINE_COUNT_CHANNELS : MARKETING_PLAN_TIMELINE_COUNT_CHANNELS;
   const channelCountsByDay = getMarketingPlanTimelineChannelCountsByDay(timelineRows, selectedMonth, timelineCountChannels);
   const columnWidth = 38;
@@ -4696,177 +4965,12 @@ function MarketingPlanTimelineScreen({
     if (!timelineScroller || todayIndex < 0) return;
     timelineScroller.scrollLeft = Math.max(0, todayIndex * columnWidth - columnWidth * 2);
   }, [selectedMonth, loadState.status]);
-  async function loadCampaignManagerRows() {
-    if (!window.loadFlowMateMarketingCampaignOptions) return;
-    const campaigns = await window.loadFlowMateMarketingCampaignOptions({
-      includeArchived: true,
-      announce: false
-    });
-    setCampaignManagerRows(campaigns || []);
-    setCampaignCatalogRows(campaigns || []);
-    if (window.loadFlowMateMarketingCampaignFunctions) {
-      const functions = await window.loadFlowMateMarketingCampaignFunctions();
-      setCampaignFunctionOptions(functions || []);
-      if (functions && functions.length && !functions.some(option => option.code === campaignManagerFunction)) {
-        setCampaignManagerFunction(functions[0].code);
-      }
-    }
-  }
-  async function openCampaignManager() {
-    setCampaignManagerState({
-      status: "idle",
-      message: ""
-    });
-    await loadCampaignManagerRows();
-    setIsCampaignManagerOpen(true);
-  }
-  async function handleManagerAddCampaign(event) {
-    event.preventDefault();
-    if (!window.addFlowMateMarketingCampaignTag) {
-      setCampaignManagerState({
-        status: "error",
-        message: "Campaign manager is not ready. Please refresh the page."
-      });
-      return;
-    }
-    const campaignName = campaignManagerName.trim();
-    if (!campaignName) {
-      setCampaignManagerState({
-        status: "error",
-        message: "Campaign name is required."
-      });
-      return;
-    }
-    try {
-      const result = await window.addFlowMateMarketingCampaignTag(campaignName, selectedMonth || flowMateTodayDateKey().slice(0, 7), campaignManagerFunction);
-      setCampaignManagerName("");
-      setCampaignManagerState({
-        status: "saved",
-        message: `Added "${result.campaignName}" to ${getMarketingPlanMonthLabel(result.monthKey)}.`
-      });
-      await loadCampaignManagerRows();
-      await loadTimelineRows(() => true, {
-        force: true
-      });
-    } catch (error) {
-      console.error("[Marketing Plan] Add campaign failed:", error);
-      setCampaignManagerState({
-        status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Add Campaign failed.") : "Add Campaign failed."
-      });
-    }
-  }
-  async function handleCampaignArchiveRestore(campaign) {
-    setCampaignManagerState({
-      status: "saving",
-      message: "Updating campaign tag..."
-    });
-    try {
-      if (campaign.isArchived) {
-        await window.restoreFlowMateMarketingCampaignTag(campaign.id);
-      } else {
-        const usageMessage = campaign.usageCount > 0 ? ` It remains attached to ${campaign.usageCount} historical request${campaign.usageCount === 1 ? "" : "s"}.` : "";
-        if (!window.confirm(`Archive "${campaign.name}"?${usageMessage}`)) {
-          setCampaignManagerState({
-            status: "idle",
-            message: ""
-          });
-          return;
-        }
-        await window.archiveFlowMateMarketingCampaignTag(campaign.id);
-      }
-      await loadCampaignManagerRows();
-      setCampaignManagerState({
-        status: "saved",
-        message: campaign.isArchived ? "Campaign tag restored." : "Campaign tag archived and removed from new campaign selectors."
-      });
-    } catch (error) {
-      setCampaignManagerState({
-        status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Campaign archive update failed.") : "Campaign archive update failed."
-      });
-    }
-  }
-  async function handleCampaignFunctionUpdate(campaign, functionCode) {
-    setCampaignManagerState({
-      status: "saving",
-      message: "Updating Colour Tag..."
-    });
-    try {
-      await window.updateFlowMateMarketingCampaignTagFunction(campaign.id, functionCode);
-      await loadCampaignManagerRows();
-      setCampaignManagerState({
-        status: "saved",
-        message: `Updated Colour Tag for "${campaign.name}".`
-      });
-      await loadTimelineRows(() => true, {
-        force: true
-      });
-    } catch (error) {
-      setCampaignManagerState({
-        status: "error",
-        message: window.flowmateUserError ? window.flowmateUserError(error, "Colour Tag update failed.") : error && error.message || "Colour Tag update failed."
-      });
-    }
-  }
   function toggleCampaignCollapsed(campaignKey) {
     setCollapsedCampaignKeys(current => {
       const next = current.includes(campaignKey) ? current.filter(key => key !== campaignKey) : [...current, campaignKey];
       window.sessionStorage.setItem(collapseStorageKey, JSON.stringify(next));
       return next;
     });
-  }
-  const filteredCampaignManagerRows = campaignManagerRows.filter(campaign => {
-    if (!campaignManagerIncludeArchived && campaign.isArchived) return false;
-    if (campaignManagerFunctionFilter !== "all" && campaign.functionCode !== campaignManagerFunctionFilter) return false;
-    return !campaignManagerSearch.trim() || campaign.name.toLowerCase().includes(campaignManagerSearch.trim().toLowerCase());
-  }).sort((a, b) => {
-    if (campaignManagerSort === "oldest") return String(a.createdAt).localeCompare(String(b.createdAt));
-    if (campaignManagerSort === "recently-used") return String(b.lastUsedAt || "").localeCompare(String(a.lastUsedAt || ""));
-    return String(b.createdAt).localeCompare(String(a.createdAt));
-  });
-  function renderCampaignManagerRow(campaign) {
-    return <div
-      key={campaign.id || campaign.name}
-      className={`marketing-campaign-manager__row${campaign.isArchived ? " is-archived" : ""}`}
-    >
-      <div className="marketing-campaign-manager__identity">
-        <div className="strong">{campaign.name}</div>
-        <div className="muted" style={{ fontSize: 12 }}>
-          {campaign.usageCount} historical request{campaign.usageCount === 1 ? "" : "s"}
-          {campaign.lastUsedAt ? ` · Last used ${formatMarketingPlanDate(String(campaign.lastUsedAt).slice(0, 10))}` : ""}
-        </div>
-        <span className="campaign-function-tag" style={getMarketingCampaignFunctionStyle(campaign)}>
-          {campaign.functionLabel || "Unassigned"}
-        </span>
-      </div>
-      <div className="marketing-campaign-manager__actions">
-        <label className="campaign-colour-action">
-          <span>Colour Tag</span>
-          <select
-            className="select"
-            value={campaign.functionCode || ""}
-            disabled={campaign.isArchived || campaignManagerState.status === "saving"}
-            onChange={event => handleCampaignFunctionUpdate(campaign, event.target.value)}
-            aria-label={`Colour Tag for ${campaign.name}`}
-          >
-            <option value="" disabled>Select function</option>
-            {campaignFunctionOptions.map(option => <option key={option.code} value={option.code}>{option.label}</option>)}
-          </select>
-        </label>
-        <span className={`badge ${campaign.isArchived ? "badge--neutral" : "badge--delivered"}`}>
-          {campaign.isArchived ? "Archived" : "Active"}
-        </span>
-        {canArchiveCampaignTags && <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={() => handleCampaignArchiveRestore(campaign)}
-          disabled={campaignManagerState.status === "saving"}
-        >
-          {campaign.isArchived ? "Restore" : "Archive"}
-        </button>}
-      </div>
-    </div>;
   }
   function renderPlacementBadge(placement) {
     const statusClass = getMarketingPlanStatusClass(placement.status);
@@ -4916,12 +5020,6 @@ function MarketingPlanTimelineScreen({
     value: monthKey
   }, getMarketingPlanMonthLabel(monthKey)))), React.createElement("button", {
     type: "button",
-    className: "btn btn--primary",
-    onClick: openCampaignManager
-  }, React.createElement(Icon, {
-    name: "settings"
-  }), " Manage Campaign"), React.createElement("button", {
-    type: "button",
     className: "btn btn--secondary",
     onClick: () => window.dispatchEvent(new CustomEvent("flowmate:refresh-request"))
   }, React.createElement(Icon, {
@@ -4929,111 +5027,7 @@ function MarketingPlanTimelineScreen({
   }), " Refresh"))), React.createElement(MarketingPlanFunctionFilter, {
     selectedCodes: selectedFunctionCodes,
     onChange: setSelectedFunctionCodes
-  }), campaignMessage && React.createElement("div", {
-    className: "reason-box",
-    style: {
-      marginBottom: 16
-    }
-  }, campaignMessage), isCampaignManagerOpen && React.createElement("div", {
-    className: "modal-backdrop",
-    role: "presentation",
-    onMouseDown: () => setIsCampaignManagerOpen(false)
-  }, React.createElement("div", {
-    className: "modal modal--settings",
-    role: "dialog",
-    "aria-modal": "true",
-    onMouseDown: event => event.stopPropagation()
-  }, React.createElement("div", {
-    className: "modal__head"
-  }, React.createElement("div", null, React.createElement("h2", null, "Manage Campaign"), React.createElement("p", null, "Search, colour, archive, and restore Campaign tags without removing historical records.")), React.createElement("button", {
-    type: "button",
-    className: "iconbtn",
-    onClick: () => setIsCampaignManagerOpen(false)
-  }, React.createElement(Icon, {
-    name: "x"
-  }))), React.createElement("form", {
-    className: "row",
-    style: {
-      gap: 8,
-      padding: "12px 16px 0",
-      alignItems: "center"
-    },
-    onSubmit: handleManagerAddCampaign
-  }, React.createElement("input", {
-    className: "input",
-    value: campaignManagerName,
-    onChange: event => setCampaignManagerName(event.target.value),
-    placeholder: "New campaign tag"
-  }), React.createElement("label", {
-    className: "marketing-campaign-manager__function"
-  }, React.createElement("span", null, "Function Colour Tag"), React.createElement("select", {
-    className: "select",
-    value: campaignManagerFunction,
-    onChange: event => setCampaignManagerFunction(event.target.value),
-    "aria-label": "Campaign Function Colour Tag",
-    required: true
-  }, campaignFunctionOptions.map(option => React.createElement("option", {
-    key: option.code,
-    value: option.code
-  }, option.label)))),
-  React.createElement("button", {
-    type: "submit",
-    className: "btn btn--primary",
-    disabled: campaignManagerState.status === "saving"
-  }, React.createElement(Icon, {
-    name: "plus"
-  }), " Add")), React.createElement("div", {
-    className: "marketing-campaign-manager__filters"
-  }, React.createElement("input", {
-    className: "input",
-    type: "search",
-    value: campaignManagerSearch,
-    onChange: event => setCampaignManagerSearch(event.target.value),
-    placeholder: "Search campaign tags",
-    "aria-label": "Search campaign tags"
-  }), React.createElement("select", {
-    className: "select",
-    value: campaignManagerFunctionFilter,
-    onChange: event => setCampaignManagerFunctionFilter(event.target.value),
-    "aria-label": "Filter campaign function"
-  }, React.createElement("option", {
-    value: "all"
-  }, "All functions"), campaignFunctionOptions.map(option => React.createElement("option", {
-    key: option.code,
-    value: option.code
-  }, option.label))), React.createElement("select", {
-    className: "select",
-    value: campaignManagerSort,
-    onChange: event => setCampaignManagerSort(event.target.value),
-    "aria-label": "Sort campaign tags"
-  }, React.createElement("option", {
-    value: "newest"
-  }, "Newest"), React.createElement("option", {
-    value: "oldest"
-  }, "Oldest"), React.createElement("option", {
-    value: "recently-used"
-  }, "Most recently used")), React.createElement("label", {
-    className: "check-pill"
-  }, React.createElement("input", {
-    type: "checkbox",
-    checked: campaignManagerIncludeArchived,
-    onChange: event => setCampaignManagerIncludeArchived(event.target.checked)
-  }), React.createElement("span", null, "Include archived"))), campaignManagerState.message && React.createElement("div", {
-    className: `reason-box ${campaignManagerState.status === "error" ? "reason-box--need" : ""}`,
-    style: {
-      margin: "12px 16px 0"
-    }
-  }, campaignManagerState.message), React.createElement("div", {
-    className: "marketing-campaign-manager"
-  }, filteredCampaignManagerRows.map(renderCampaignManagerRow), filteredCampaignManagerRows.length === 0 && React.createElement("div", {
-    className: "muted"
-  }, "No campaign tags match these filters.")), React.createElement("div", {
-    className: "modal__actions"
-  }, React.createElement("button", {
-    type: "button",
-    className: "btn btn--primary",
-    onClick: () => setIsCampaignManagerOpen(false)
-  }, "Done")))), loadState.status === "loading" && React.createElement("div", {
+  }), loadState.status === "loading" && React.createElement("div", {
     className: "reason-box"
   }, "Loading Marketing Plan timeline..."), loadState.status === "error" && React.createElement("div", {
     className: "reason-box reason-box--need"
@@ -7650,6 +7644,11 @@ function MarketingPlanShell({
     icon: "chart"
   };
   const baseSections = [{
+    key: "campaign-planner",
+    label: "Campaign Planner",
+    detail: "Plan campaigns and activity dates across months.",
+    icon: "calendar"
+  }, {
     key: "campaign-timeline",
     label: "Campaign Timeline",
     detail: "Campaign rows with Product / Event sub-rows and publish dates.",
@@ -7746,7 +7745,7 @@ function MarketingPlanShell({
     size: 15
   }), React.createElement("span", null, section.label))))), React.createElement("main", {
     className: "app__main app__main--marketing"
-  }, activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, {
+  }, activeSection.key === "campaign-planner" && React.createElement(MarketingPlanCampaignPlannerScreen, { user }), activeSection.key === "campaign-timeline" && React.createElement(MarketingPlanTimelineScreen, {
     channelMode: "official"
   }), activeSection.key === "facebook-esport-timeline" && React.createElement(MarketingPlanTimelineScreen, {
     channelMode: "facebook_esport"
