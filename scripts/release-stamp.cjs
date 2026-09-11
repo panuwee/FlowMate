@@ -12,6 +12,11 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 const ENTRY_PAGES = ["index.html", "home/index.html", "product-book/index.html"];
 const VERSIONED_ASSETS = [
+  "data.js",
+  "creative-kpi-report.css",
+  "creative-kpi-report.js",
+  "supabase-creative-kpi-report.js",
+  "screens-creative-kpi.js",
   "app.css",
   "ot-request-domain.js",
   "supabase-ot-request.js",

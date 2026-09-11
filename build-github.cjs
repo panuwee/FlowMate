@@ -19,7 +19,7 @@ const babel = require("@babel/core");
 
 const targetArg = process.argv[2] || ".";
 const dir = path.resolve(__dirname, targetArg);
-const FILES = ["data.jsx", "screens-a.jsx", "screens-b.jsx", "screens-c.jsx", "screens-ot.jsx", "app.jsx"];
+const FILES = ["data.jsx", "screens-a.jsx", "screens-b.jsx", "screens-c.jsx", "screens-creative-kpi.jsx", "screens-ot.jsx", "app.jsx"];
 const normalizeEol = value => value.replace(/\r\n/g, "\n");
 
 let ok = 0;

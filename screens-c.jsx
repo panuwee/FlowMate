@@ -2051,8 +2051,8 @@ function FlowMateKpiMonthlyTableC({ rows, mode }) {
   );
 }
 
-function CreativeKpiScreen() {
-  const [activeTab, setActiveTab] = useStateC("team");
+function CreativeKpiMonthlyScreenC({ requesterOnly = false } = {}) {
+  const [activeTab, setActiveTab] = useStateC(requesterOnly ? "requester" : "team");
   const [range, setRange] = useStateC("6");
   const [gdvePersonId, setGdvePersonId] = useStateC("");
   const [requesterPersonId, setRequesterPersonId] = useStateC("");
@@ -2099,7 +2099,7 @@ function CreativeKpiScreen() {
     { key: "team", label: "Team overview" },
     { key: "gdve", label: "GD/VE" },
     { key: "requester", label: "Requester" },
-  ];
+  ].filter(tab => !requesterOnly || tab.key === "requester");
   const metricRows = activeTab === "team" ? [
     { label: "Time to start", value: flowMateKpiFormatValueC(latestGdveTeam?.timeToStartP50, " d"), note: "Fewer days is better", sample: latestGdveTeam },
     { label: "Production time", value: flowMateKpiFormatValueC(latestGdveTeam?.productionP50, " d"), note: "Fewer days is better", sample: latestGdveTeam },
@@ -2171,6 +2171,10 @@ function CreativeKpiScreen() {
       <Source>{loadState.status === "live" ? "Supabase Creative KPI monthly views" : "No local fallback data"} · manual refresh</Source>
     </div>
   );
+}
+
+function CreativeKpiScreen() {
+  return <window.FlowMateCreativeReportScreen requesterView={CreativeKpiMonthlyScreenC} />;
 }
 
 function calendarUtcKeyC(date) {

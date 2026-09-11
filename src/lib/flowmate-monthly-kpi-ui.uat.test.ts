@@ -31,7 +31,7 @@ describe("FlowMate Creative monthly KPI UI", () => {
 
   it("shows plain-language progression, benchmark status, and progressive detail", () => {
     const screen = readRepo("screens-c.jsx");
-    const monthlyScreen = screen.slice(screen.indexOf("function CreativeKpiScreen"), screen.indexOf("function calendarUtcKeyC"));
+    const monthlyScreen = screen.slice(screen.indexOf("function CreativeKpiMonthlyScreenC"), screen.indexOf("function calendarUtcKeyC"));
     const css = readRepo("app.css");
 
     expect(screen).toContain("function FlowMateKpiTrendChartC");
