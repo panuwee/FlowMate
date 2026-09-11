@@ -2155,6 +2155,19 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     const when = formatFlowMateActivityAt(event.created_at);
     const suffix = when ? ` at ${when}` : "";
     const action = metadata.action || "";
+    if (action === "assignee_changed") {
+      const memberName = (id, code) => {
+        if (id === null) return "Unassigned";
+        if (!id) return code || "Unknown assignee";
+        const member = window.MEMBERS_BY_ID?.[id] || activeCreativeMembers.find(item => item.id === id);
+        return member?.name || code || "Unknown assignee";
+      };
+      const previous = memberName(metadata.old_member_id, metadata.old_member_code);
+      const next = memberName(metadata.new_member_id, metadata.new_member_code);
+      const changedBy = event.actor_user_id && actor === "System" ? "Unknown user" : actor;
+      const reason = String(metadata.reason || "").trim() || "Not recorded";
+      return `${changedBy} changed assignee from ${previous} to ${next} — Reason: ${reason}${suffix}`;
+    }
     if (action === "add_link") {
       const addedFields = ["URL"];
       if (String(metadata.description || "").trim()) addedFields.push("Description");
