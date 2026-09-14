@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>เชื่อม Google · Battle Pass Automation</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f6f9;color:#14233b;font:16px/1.7 system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif}
+    main{max-width:620px;margin:64px auto;padding:32px;background:white;border:1px solid #dce2ea;border-radius:16px}
+    a{color:#165cca}h1{font-size:28px;line-height:1.4;margin:12px 0 16px}.label{font-size:13px;color:#52637b;margin-top:24px}
+    .account{padding:16px;background:#f3f6fa;border-radius:10px;margin:24px 0}.account small{display:block;color:#52637b}#account{overflow-wrap:anywhere;font-weight:600}
+    #status{min-height:54px}button{font:inherit;border:0;border-radius:9px;background:#165cca;color:white;padding:12px 24px;cursor:pointer}
+    button:disabled{background:#dce2ea;color:#52637b;cursor:default}button:focus-visible,a:focus-visible{outline:3px solid #e49b00;outline-offset:4px}
+    .note{font-size:14px;color:#52637b;margin-top:24px}#status[data-error="true"]{color:#a32424}[hidden]{display:none!important}
+    @media(max-width:660px){main{margin:20px 16px;padding:24px}h1{font-size:24px}button{width:100%}}
+  </style>
+</head>
+<body>
+<main>
+  <a href="./">กลับ Workgrid</a>
+  <p class="label">BATTLE PASS AUTOMATION</p>
+  <h1>เชื่อมบัญชี Google ของคุณ</h1>
+  <p>อนุญาตให้ระบบอ่านข้อมูลสำหรับบรีฟจาก Google Sheets และ Drive และจัดการไฟล์ที่แอปสร้างหรือคุณเลือกให้แอปเข้าถึง</p>
+  <p>สิทธิ์อ่านที่ Google ขอครอบคลุมไฟล์ที่บัญชีคุณเข้าถึงได้ ส่วน Automation จะใช้แหล่งข้อมูลที่กำหนดไว้ในโปรเจกต์</p>
+  <div class="account"><small>บัญชี Workgrid ที่ใช้อยู่</small><span id="account">กำลังตรวจบัญชี…</span></div>
+  <p id="status" role="status" aria-live="polite">กำลังตรวจการเข้าสู่ระบบ</p>
+  <p id="login" hidden><a href="./">เข้าสู่ระบบ Workgrid</a> แล้วกลับมาเปิดหน้านี้อีกครั้ง</p>
+  <button id="connect" type="button" disabled>เชื่อม Google</button>
+  <p class="note">ขั้นตอนนี้เชื่อมบัญชีเท่านั้น ยังไม่เปิด Automation สร้างงานหรือมอบหมาย GD</p>
+</main>
+<script src="../supabase-js-local.js"></script>
+<script src="../supabase-client.js"></script>
+<script id="connection-code">
+(function () {
+  "use strict";
+  const endpoint = "https://jbavahimqjalvcfawgqw.supabase.co/functions/v1/battle-pass-google-oauth/start";
+  const account = document.getElementById("account");
+  const status = document.getElementById("status");
+  const login = document.getElementById("login");
+  const button = document.getElementById("connect");
+  const client = window.flowmateSupabase;
+  let busy = false;
+  function message(text, error) { status.textContent = text; status.dataset.error = error ? "true" : "false"; }
+  const errors = {
+    oauth_not_configured: "การตั้งค่าการเชื่อมต่อยังไม่ครบ กรุณาติดต่อผู้ดูแล",
+    connection_owner_required: "บัญชี Workgrid นี้ยังไม่ได้รับอนุญาตให้เชื่อม Google กรุณาตรวจอีเมลที่ตั้งค่าไว้กับผู้ดูแล",
+    origin_not_allowed: "ที่อยู่หน้า Workgrid นี้ยังไม่ได้รับอนุญาตให้เชื่อม Google",
+    connection_failed_restart_connection: "เริ่มเชื่อมต่อไม่สำเร็จ กรุณาลองใหม่ หากยังไม่สำเร็จให้ติดต่อผู้ดูแล"
+  };
+  async function session() {
+    const checked = await client.auth.getUser();
+    if (checked.error || !checked.data || !checked.data.user) return null;
+    const result = await client.auth.getSession();
+    if (result.error || !result.data || !result.data.session || !result.data.session.access_token
+      || !result.data.session.user || result.data.session.user.id !== checked.data.user.id) return null;
+    return { user: checked.data.user, token: result.data.session.access_token };
+  }
+  function requireLogin() {
+    account.textContent = "ยังไม่ได้เข้าสู่ระบบ";
+    login.hidden = false;
+    message("กรุณาเข้าสู่ระบบ Workgrid ด้วยบัญชีบริษัทที่ใช้เชื่อม Google", true);
+    button.disabled = true;
+  }
+  async function initialize() {
+    if (!client || !client.auth) { account.textContent = "ตรวจบัญชีไม่ได้"; message("โหลดระบบเข้าสู่ระบบไม่สำเร็จ กรุณารีเฟรชหน้า", true); return; }
+    try {
+      const current = await session();
+      if (!current) { requireLogin(); return; }
+      account.textContent = current.user.email || "บัญชีที่เข้าสู่ระบบแล้ว";
+      message("พร้อมเปิดหน้า Google เพื่อให้คุณตรวจและอนุญาตสิทธิ์", false);
+      button.disabled = false;
+    } catch { message("ตรวจบัญชีไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองใหม่", true); }
+  }
+  button.addEventListener("click", async function () {
+    if (busy) return;
+    busy = true; button.disabled = true;
+    message("กำลังเตรียมการเชื่อมต่อ Google…", false);
+    try {
+      const current = await session();
+      if (!current) { requireLogin(); return; }
+      const result = await fetch(endpoint, {
+        method: "POST", headers: { Authorization: "Bearer " + current.token, "Content-Type": "application/json" },
+        body: "{}", signal: AbortSignal.timeout(20000), credentials: "omit", cache: "no-store"
+      });
+      const data = await result.json();
+      if (!result.ok) { message(errors[data.error] || "เชื่อมต่อไม่สำเร็จ กรุณาติดต่อผู้ดูแล", true); return; }
+      const target = new URL(data.authorizationUrl);
+      if (target.origin !== "https://accounts.google.com" || target.pathname !== "/o/oauth2/v2/auth"
+        || target.username || target.password) throw new Error("Invalid authorization destination");
+      message("กำลังเปิดหน้า Google…", false);
+      window.location.assign(target.href);
+    } catch { message("เชื่อมต่อไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วลองใหม่ หากยังพบปัญหาให้ติดต่อผู้ดูแล", true); }
+    finally { busy = false; button.disabled = !login.hidden; }
+  });
+  initialize();
+})();
+</script>
+</body>
+</html>
