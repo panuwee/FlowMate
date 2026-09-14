@@ -13,6 +13,7 @@
     #status{min-height:54px}button{font:inherit;border:0;border-radius:9px;background:#165cca;color:white;padding:12px 24px;cursor:pointer}
     button:disabled{background:#dce2ea;color:#52637b;cursor:default}button:focus-visible,a:focus-visible{outline:3px solid #e49b00;outline-offset:4px}
     .note{font-size:14px;color:#52637b;margin-top:24px}#status[data-error="true"]{color:#a32424}[hidden]{display:none!important}
+    .read-check{margin-top:32px;padding-top:24px;border-top:1px solid #dce2ea}.read-check h2{font-size:21px}#read-result{white-space:pre-wrap;overflow-wrap:anywhere}#read-status[data-error="true"]{color:#a32424}
     @media(max-width:660px){main{margin:20px 16px;padding:24px}h1{font-size:24px}button{width:100%}}
   </style>
 </head>
@@ -28,6 +29,13 @@
   <p id="login" hidden><a href="./">เข้าสู่ระบบ Workgrid</a> แล้วกลับมาเปิดหน้านี้อีกครั้ง</p>
   <button id="connect" type="button" disabled>เชื่อม Google</button>
   <p class="note">ขั้นตอนนี้เชื่อมบัญชีเท่านั้น ยังไม่เปิด Automation สร้างงานหรือมอบหมาย GD</p>
+  <section class="read-check" aria-labelledby="read-heading">
+    <h2 id="read-heading">ทดสอบอ่าน Battle Pass (Oct)</h2>
+    <p>เมื่อเชื่อม Google แล้ว กดทดสอบเพื่อค้นหาแคมเปญปี 2026 ใน SSoT โดยยังไม่สร้างงานหรือแก้ไขชีต</p>
+    <button id="inspect" type="button" disabled>ทดสอบอ่าน SSoT</button>
+    <p id="read-status" role="status" aria-live="polite"></p>
+    <p id="read-result" hidden></p>
+  </section>
 </main>
 <script src="../supabase-js-local.js"></script>
 <script src="../supabase-client.js"></script>
@@ -39,6 +47,9 @@
   const status = document.getElementById("status");
   const login = document.getElementById("login");
   const button = document.getElementById("connect");
+  const inspectButton = document.getElementById("inspect");
+  const readStatus = document.getElementById("read-status");
+  const readResult = document.getElementById("read-result");
   const client = window.flowmateSupabase;
   let busy = false;
   function message(text, error) { status.textContent = text; status.dataset.error = error ? "true" : "false"; }
@@ -61,6 +72,7 @@
     login.hidden = false;
     message("กรุณาเข้าสู่ระบบ Workgrid ด้วยบัญชีบริษัทที่ใช้เชื่อม Google", true);
     button.disabled = true;
+    inspectButton.disabled = true;
   }
   async function initialize() {
     if (!client || !client.auth) { account.textContent = "ตรวจบัญชีไม่ได้"; message("โหลดระบบเข้าสู่ระบบไม่สำเร็จ กรุณารีเฟรชหน้า", true); return; }
@@ -70,11 +82,12 @@
       account.textContent = current.user.email || "บัญชีที่เข้าสู่ระบบแล้ว";
       message("พร้อมเปิดหน้า Google เพื่อให้คุณตรวจและอนุญาตสิทธิ์", false);
       button.disabled = false;
+      inspectButton.disabled = false;
     } catch { message("ตรวจบัญชีไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองใหม่", true); }
   }
   button.addEventListener("click", async function () {
     if (busy) return;
-    busy = true; button.disabled = true;
+    busy = true; button.disabled = true; inspectButton.disabled = true;
     message("กำลังเตรียมการเชื่อมต่อ Google…", false);
     try {
       const current = await session();
@@ -91,7 +104,53 @@
       message("กำลังเปิดหน้า Google…", false);
       window.location.assign(target.href);
     } catch { message("เชื่อมต่อไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วลองใหม่ หากยังพบปัญหาให้ติดต่อผู้ดูแล", true); }
-    finally { busy = false; button.disabled = !login.hidden; }
+    finally { busy = false; button.disabled = !login.hidden; inspectButton.disabled = !login.hidden; }
+  });
+  inspectButton.addEventListener("click", async function () {
+    if (busy) return;
+    busy = true; button.disabled = true; inspectButton.disabled = true;
+    readResult.hidden = true; readResult.textContent = "";
+    readStatus.textContent = "กำลังอ่าน SSoT และค้นหาแคมเปญ อาจใช้เวลาประมาณ 1 นาที…";
+    readStatus.dataset.error = "false";
+    try {
+      const current = await session();
+      if (!current) { requireLogin(); readStatus.textContent = "กรุณาเข้าสู่ระบบใหม่ก่อนทดสอบ"; return; }
+      const result = await fetch("https://jbavahimqjalvcfawgqw.supabase.co/functions/v1/battle-pass-google-oauth/inspect", {
+        method: "POST", headers: { Authorization: "Bearer " + current.token, "Content-Type": "application/json" },
+        body: "{}", signal: AbortSignal.timeout(65000), credentials: "omit", cache: "no-store"
+      });
+      const data = await result.json();
+      const states = {
+        source_found: "อ่าน SSoT สำเร็จ และพบ Battle Pass (Oct) ปี 2026",
+        source_not_found: "อ่านชีตได้ แต่ไม่พบ Battle Pass (Oct) ปี 2026",
+        source_ambiguous: "พบแคมเปญชื่อและปีเดียวกันมากกว่าหนึ่งรายการ ต้องตรวจรายการซ้ำ",
+        source_changed: "ข้อมูลเปลี่ยนระหว่างอ่าน กรุณากดทดสอบอีกครั้ง",
+        source_schema_changed: "ชื่อชีต หัวคอลัมน์ หรือโครงสร้างไม่ตรงกับที่ตั้งไว้ ต้องตรวจรูปแบบชีต",
+        source_needs_data: "พบแคมเปญที่วันที่เริ่มต้นยังอ่านไม่ได้ ต้องตรวจ Start Date",
+        source_scan_limit: "ชีตมีขนาดเกินขอบเขตการทดสอบ ต้องปรับการอ่านก่อน",
+        connection_unavailable: "ไม่พบการเชื่อม Google สำหรับบัญชีนี้",
+        google_refresh_failed: "ใช้สิทธิ์ Google ไม่สำเร็จ กรุณาลองเชื่อม Google ใหม่",
+        google_identity_mismatch: "บัญชี Google ไม่ตรงกับการเชื่อมที่บันทึกไว้"
+      };
+      readStatus.textContent = result.ok ? (states[data.state] || "ได้รับผลที่ไม่รองรับ กรุณาแจ้งผู้ดูแล")
+        : (errors[data.error] || "ทดสอบอ่านไม่สำเร็จ กรุณาแจ้งผู้ดูแลเพื่อตรวจสิทธิ์และบริการอ่านชีต");
+      readStatus.dataset.error = result.ok && data.state === "source_found" ? "false" : "true";
+      if (result.ok && data.state === "source_found" && data.source) {
+        const source = data.source;
+        const date = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "ยังไม่ครบ";
+        const time = typeof source.startTime === "string" && /^\d{2}:\d{2}$/.test(source.startTime) ? source.startTime : "ยังไม่ครบ";
+        const lines = ["แคมเปญ: Battle Pass (Oct) · 2026", "แถวที่พบ: " + (Number.isInteger(source.row) ? source.row : "—"),
+          "เริ่ม: " + date(source.startDate) + " เวลา " + time + " (ไทย)", "สิ้นสุด: " + date(source.endDate),
+          "Tier: " + (["S","A","B","C"].includes(source.tier) ? source.tier : "ยังไม่ครบ"),
+          "Working Sheet: " + (source.workingSheetLinked === true ? "พบลิงก์แล้ว" : "ยังไม่พบลิงก์ที่อ่านได้"),
+          "Column P: " + (source.confirmationPresent === true ? "มีค่า แต่ยังไม่ได้กำหนดค่าที่ยืนยันว่าพร้อม" : "ยังว่าง"),
+          "", "ยังไม่เปิด Automation: ต้องกำหนดค่าการยืนยันและแหล่ง Loot ให้ครบก่อน"];
+        readResult.textContent = lines.join("\n"); readResult.hidden = false;
+      }
+    } catch {
+      readStatus.textContent = "ยังอ่านผลไม่ได้ อาจหมดเวลาหรือบริการเชื่อมต่อไม่สำเร็จ กรุณาลองอีกครั้งแล้วแจ้งผล";
+      readStatus.dataset.error = "true";
+    } finally { busy = false; button.disabled = !login.hidden; inspectButton.disabled = !login.hidden; }
   });
   initialize();
 })();
