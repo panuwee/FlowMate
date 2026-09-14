@@ -36,6 +36,13 @@
     <p id="read-status" role="status" aria-live="polite"></p>
     <p id="read-result" hidden></p>
   </section>
+  <section class="read-check" aria-labelledby="months-heading">
+    <h2 id="months-heading">Battle Pass รายเดือน</h2>
+    <p>เทียบ SSoT กับบรีฟที่มีใน Workgrid เพื่อดูเดือนถัดไปที่ต้องทำ ขั้นนี้ตรวจข้อมูลเท่านั้น</p>
+    <button id="months" type="button" disabled>ตรวจ Battle Pass ทุกเดือน</button>
+    <p id="months-status" role="status" aria-live="polite"></p>
+    <p id="months-result" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></p>
+  </section>
 </main>
 <script src="../supabase-js-local.js"></script>
 <script src="../supabase-client.js"></script>
@@ -48,6 +55,9 @@
   const login = document.getElementById("login");
   const button = document.getElementById("connect");
   const inspectButton = document.getElementById("inspect");
+  const monthsButton = document.getElementById("months");
+  const monthsStatus = document.getElementById("months-status");
+  const monthsResult = document.getElementById("months-result");
   const readStatus = document.getElementById("read-status");
   const readResult = document.getElementById("read-result");
   const client = window.flowmateSupabase;
@@ -73,6 +83,7 @@
     message("กรุณาเข้าสู่ระบบ Workgrid ด้วยบัญชีบริษัทที่ใช้เชื่อม Google", true);
     button.disabled = true;
     inspectButton.disabled = true;
+    monthsButton.disabled = true;
   }
   async function initialize() {
     if (!client || !client.auth) { account.textContent = "ตรวจบัญชีไม่ได้"; message("โหลดระบบเข้าสู่ระบบไม่สำเร็จ กรุณารีเฟรชหน้า", true); return; }
@@ -83,6 +94,7 @@
       message("พร้อมเปิดหน้า Google เพื่อให้คุณตรวจและอนุญาตสิทธิ์", false);
       button.disabled = false;
       inspectButton.disabled = false;
+      monthsButton.disabled = false;
     } catch { message("ตรวจบัญชีไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองใหม่", true); }
   }
   button.addEventListener("click", async function () {
@@ -153,6 +165,50 @@
     } finally { busy = false; button.disabled = !login.hidden; inspectButton.disabled = !login.hidden; }
   });
   initialize();
+  monthsButton.addEventListener("click", async function () {
+    if (busy) return;
+    busy = true; monthsButton.disabled = true; button.disabled = true; inspectButton.disabled = true;
+    monthsResult.textContent = ""; monthsResult.hidden = true;
+    monthsStatus.textContent = "กำลังตรวจ SSoT และบรีฟเดิมใน Workgrid…";
+    const labels = {
+      existing: "มีบรีฟแล้ว — ข้ามการสร้างใหม่", historical: "เดือนที่ผ่านมา — ไม่สร้างย้อนหลัง",
+      waiting_confirmation: "รอยืนยัน Loot ใน Column P", needs_data: "ข้อมูลหรือการตั้งค่ายังไม่ครบ",
+      ready: "ข้อมูลแถวพร้อม — ยังไม่ได้สร้างบรีฟ", resume: "มีงานค้าง — ต้องทำต่อจากรายการเดิม",
+      in_progress: "มีรอบงานกำลังดำเนินการ", review_required: "พบรายการซ้ำหรือขัดแย้ง — ต้องตรวจสอบ"
+    };
+    const issues = {
+      incomplete_inventory: "ยังอ่านรายการไม่ครบ", unresolved_existing_brief: "มีบรีฟเดิมที่ระบุเดือนหรือปีไม่ได้ ต้องจับคู่ก่อนเพื่อป้องกันงานซ้ำ",
+      invalid_source_year: "Start Date ของ Battle Pass บางรายการอ่านปีไม่ได้", unrecognized_source_project: "พบชื่อ Battle Pass ในรูปแบบที่ยังไม่รองรับ",
+      confirmation_mapping_required: "ยังไม่ได้กำหนดค่าที่ถือว่า Confirmed ใน Column P", working_sheet_link: "ยังไม่มีลิงก์ Working Sheet ที่อ่านได้",
+      end_date: "วันสิ้นสุดไม่ครบหรือไม่ถูกต้อง", start_time: "เวลาเริ่มไม่ครบ", tier: "Tier ไม่ถูกต้อง",
+      duplicate_source_or_brief_or_run: "พบรายการเดือน–ปีซ้ำ", manual_automation_conflict: "งานที่คนสร้างขัดกับประวัติ Automation",
+      completed_run_missing_brief: "ประวัติระบุว่าเสร็จแต่ไม่มีรหัสบรีฟ", invalid_current_date: "วันที่ของระบบไม่ถูกต้อง"
+    };
+    const explain = list => Array.isArray(list) ? list.map(x => issues[x] || "มีข้อมูลที่ต้องตรวจเพิ่มเติม").join("; ") : "";
+    const period = value => typeof value === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) ? value : "เดือนที่ระบุไม่ได้";
+    try {
+      const current = await session();
+      if (!current) { requireLogin(); monthsStatus.textContent = "กรุณาเข้าสู่ระบบใหม่ก่อนตรวจ"; return; }
+      const response = await fetch("https://jbavahimqjalvcfawgqw.supabase.co/functions/v1/battle-pass-google-oauth/months", {
+        method:"POST",headers:{Authorization:"Bearer "+current.token,"Content-Type":"application/json"},
+        body:"{}",signal:AbortSignal.timeout(65000),credentials:"omit",cache:"no-store"
+      });
+      const data = await response.json();
+      if (!response.ok) { monthsStatus.textContent = errors[data.error] || "ตรวจรายเดือนไม่สำเร็จ กรุณาแจ้งผู้ดูแลเพื่อตรวจบริการ"; return; }
+      if (data.state !== "monthly_plan" || !data.plan) {
+        const failures = {google_refresh_failed:"ใช้สิทธิ์ Google ไม่สำเร็จ กรุณาเชื่อม Google ใหม่",source_schema_changed:"โครงสร้างชีตไม่ตรงกับที่ตั้งไว้",source_changed:"ชีตเปลี่ยนระหว่างอ่าน กรุณาลองอีกครั้ง",inventory_unavailable:"ยังอ่านรายการบรีฟจาก Workgrid ไม่ได้",source_scan_limit:"ขนาดชีตเกินขอบเขตการตรวจ",connection_unavailable:"ไม่พบการเชื่อม Google",google_identity_mismatch:"บัญชี Google ไม่ตรงกับที่บันทึกไว้"};
+        monthsStatus.textContent = failures[data.state] || "ยังตรวจรายเดือนไม่สำเร็จ กรุณาแจ้งผลให้ผู้ดูแล"; return;
+      }
+      const plan = data.plan;
+      if (plan.state === "blocked") { monthsStatus.textContent = "พักการตรวจ: " + explain(plan.issues); return; }
+      if (plan.state !== "planned" || !Array.isArray(plan.decisions)) throw new Error("Invalid plan");
+      monthsStatus.textContent = "ตรวจรายเดือนสำเร็จ — ยังไม่เปิดสร้างงานอัตโนมัติ";
+      const lines = plan.decisions.map(d => period(d.period) + " · " + (labels[d.state] || "ต้องตรวจสอบ") + (explain(d.issues) ? "\n  " + explain(d.issues) : ""));
+      lines.push("", plan.next ? "เดือนถัดไปที่ต้องดำเนินการ: " + period(plan.next.period) + " · " + (labels[plan.next.state] || "ต้องตรวจสอบ") : "ไม่มีเดือนค้างให้ดำเนินการจากรายการที่ตรวจพบ");
+      monthsResult.textContent = lines.join("\n"); monthsResult.hidden = false;
+    } catch { monthsStatus.textContent = "อ่านผลรายเดือนไม่สำเร็จ อาจหมดเวลาหรือการเชื่อมต่อขัดข้อง กรุณาลองใหม่"; }
+    finally { busy = false; monthsButton.disabled = !login.hidden; button.disabled = !login.hidden; inspectButton.disabled = !login.hidden; }
+  });
 })();
 </script>
 </body>
