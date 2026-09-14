@@ -43,6 +43,13 @@
     <p id="months-status" role="status" aria-live="polite"></p>
     <p id="months-result" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></p>
   </section>
+  <section class="read-check" aria-labelledby="jul-heading">
+    <h2 id="jul-heading">ร่างทดสอบ Battle Pass (Jul 2026)</h2>
+    <p>อ่าน Loot Jul หลังยืนยันใน Column P แล้วแสดงร่างให้ตรวจ ขั้นนี้ยังไม่บันทึก Task, Creative Request หรือ Google Slides</p>
+    <button id="jul-preview" type="button" disabled>ดูร่างทดสอบ Jul</button>
+    <p id="jul-status" role="status" aria-live="polite"></p>
+    <p id="jul-result" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></p>
+  </section>
 </main>
 <script src="../supabase-js-local.js"></script>
 <script src="../supabase-client.js"></script>
@@ -58,6 +65,9 @@
   const monthsButton = document.getElementById("months");
   const monthsStatus = document.getElementById("months-status");
   const monthsResult = document.getElementById("months-result");
+  const julButton = document.getElementById("jul-preview");
+  const julStatus = document.getElementById("jul-status");
+  const julResult = document.getElementById("jul-result");
   const readStatus = document.getElementById("read-status");
   const readResult = document.getElementById("read-result");
   const client = window.flowmateSupabase;
@@ -84,6 +94,7 @@
     button.disabled = true;
     inspectButton.disabled = true;
     monthsButton.disabled = true;
+    julButton.disabled = true;
   }
   async function initialize() {
     if (!client || !client.auth) { account.textContent = "ตรวจบัญชีไม่ได้"; message("โหลดระบบเข้าสู่ระบบไม่สำเร็จ กรุณารีเฟรชหน้า", true); return; }
@@ -95,6 +106,7 @@
       button.disabled = false;
       inspectButton.disabled = false;
       monthsButton.disabled = false;
+      julButton.disabled = false;
     } catch { message("ตรวจบัญชีไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองใหม่", true); }
   }
   button.addEventListener("click", async function () {
@@ -163,6 +175,44 @@
       readStatus.textContent = "ยังอ่านผลไม่ได้ อาจหมดเวลาหรือบริการเชื่อมต่อไม่สำเร็จ กรุณาลองอีกครั้งแล้วแจ้งผล";
       readStatus.dataset.error = "true";
     } finally { busy = false; button.disabled = !login.hidden; inspectButton.disabled = !login.hidden; }
+  });
+  julButton.addEventListener("click", async function () {
+    if (busy) return;
+    busy = true; julButton.disabled = true;
+    julResult.textContent = ""; julResult.hidden = true;
+    julStatus.textContent = "กำลังอ่านและตรวจ Loot Jul…";
+    const states = {
+      waiting_confirmation:"รอยืนยัน Loot Jul ใน Column P: ติ๊ก Checkbox หรือใส่ yes",
+      source_not_found:"ไม่พบ Battle Pass (Jul 2026) ใน SSoT",
+      source_ambiguous:"พบ Battle Pass Jul ซ้ำ ต้องตรวจรายการก่อน",
+      source_needs_data:"วันที่ เวลา หรือ Tier ของ Jul ยังไม่ครบ",
+      source_schema_changed:"โครงสร้าง SSoT เปลี่ยน ต้องตรวจการอ่านคอลัมน์",
+      source_scan_limit:"ขนาดชีตเกินขอบเขตการตรวจ",
+      source_changed:"ข้อมูลเปลี่ยนระหว่างอ่าน กรุณาลองอีกครั้ง",
+      loot_source_mismatch:"ลิงก์ Column O ของ Jul ไม่ตรงกับ Working Sheet ที่ใช้ทดสอบ",
+      loot_schema_changed:"โครงสร้าง Rewards ไม่ตรงกับรูปแบบ Jul ที่ตรวจไว้",
+      loot_dates_mismatch:"วันเริ่ม เวลาเริ่ม หรือวันสิ้นสุดใน Loot ไม่ตรงกับ SSoT",
+      loot_needs_data:"ราคา หรือรางวัล Stage 1–30 ยังไม่ครบหรืออ่านไม่ได้",
+      connection_unavailable:"ไม่พบการเชื่อม Google",
+      google_refresh_failed:"ใช้สิทธิ์ Google ไม่สำเร็จ กรุณาเชื่อม Google ใหม่",
+      google_identity_mismatch:"บัญชี Google ไม่ตรงกับที่บันทึกไว้"
+    };
+    try {
+      const current = await session();
+      if (!current) { requireLogin(); julStatus.textContent = "กรุณาเข้าสู่ระบบใหม่ก่อนดูร่าง"; return; }
+      const result = await fetch("https://jbavahimqjalvcfawgqw.supabase.co/functions/v1/battle-pass-google-oauth/jul-preview", {
+        method:"POST",headers:{Authorization:"Bearer "+current.token,"Content-Type":"application/json"},
+        body:"{}",signal:AbortSignal.timeout(65000),credentials:"omit",cache:"no-store"
+      });
+      const data = await result.json();
+      if (!result.ok) { julStatus.textContent = errors[data.error] || "อ่านร่างไม่สำเร็จ กรุณาตรวจว่า Deploy รุ่นรองรับ Jul แล้ว"; return; }
+      if (data.state !== "jul_draft_preview" || data.previewOnly !== true || typeof data.draft !== "string") {
+        julStatus.textContent = states[data.state] || "ยังแสดงร่างไม่ได้ กรุณาแจ้งผลให้ผู้ดูแล"; return;
+      }
+      julStatus.textContent = "อ่านร่างทดสอบสำเร็จ — ยังไม่ได้บันทึกงานหรือสร้าง Google Slides";
+      julResult.textContent = data.draft; julResult.hidden = false;
+    } catch { julStatus.textContent = "อ่านร่างไม่สำเร็จ อาจหมดเวลาหรือการเชื่อมต่อขัดข้อง กรุณาลองใหม่"; }
+    finally { busy = false; julButton.disabled = !login.hidden; }
   });
   initialize();
   monthsButton.addEventListener("click", async function () {
