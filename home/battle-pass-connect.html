@@ -49,6 +49,9 @@
     <button id="jul-preview" type="button" disabled>ดูร่างทดสอบ Jul</button>
     <p id="jul-status" role="status" aria-live="polite"></p>
     <p id="jul-result" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></p>
+    <button id="jul-create" type="button" disabled>สร้างร่าง [TEST] Jul ใน Workgrid</button>
+    <p class="note">กดปุ่มนี้เพื่อสร้างครั้งเดียว: Marketing Plan, Creative Request และเชื่อม Google Slide ที่เตรียมไว้ ระบบจะค้างงานที่ Unassigned เพื่อรอ Aof ตรวจ และไม่ส่ง GD หรือแจ้งเตือน</p>
+    <p id="jul-create-status" role="status" aria-live="polite"></p>
   </section>
 </main>
 <script src="../supabase-js-local.js"></script>
@@ -68,6 +71,8 @@
   const julButton = document.getElementById("jul-preview");
   const julStatus = document.getElementById("jul-status");
   const julResult = document.getElementById("jul-result");
+  const julCreateButton = document.getElementById("jul-create");
+  const julCreateStatus = document.getElementById("jul-create-status");
   const readStatus = document.getElementById("read-status");
   const readResult = document.getElementById("read-result");
   const client = window.flowmateSupabase;
@@ -95,6 +100,7 @@
     inspectButton.disabled = true;
     monthsButton.disabled = true;
     julButton.disabled = true;
+    julCreateButton.disabled = true;
   }
   async function initialize() {
     if (!client || !client.auth) { account.textContent = "ตรวจบัญชีไม่ได้"; message("โหลดระบบเข้าสู่ระบบไม่สำเร็จ กรุณารีเฟรชหน้า", true); return; }
@@ -107,6 +113,7 @@
       inspectButton.disabled = false;
       monthsButton.disabled = false;
       julButton.disabled = false;
+      julCreateButton.disabled = false;
     } catch { message("ตรวจบัญชีไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองใหม่", true); }
   }
   button.addEventListener("click", async function () {
@@ -213,6 +220,33 @@
       julResult.textContent = data.draft; julResult.hidden = false;
     } catch { julStatus.textContent = "อ่านร่างไม่สำเร็จ อาจหมดเวลาหรือการเชื่อมต่อขัดข้อง กรุณาลองใหม่"; }
     finally { busy = false; julButton.disabled = !login.hidden; }
+  });
+  julCreateButton.addEventListener("click", async function () {
+    if (busy) return;
+    busy = true; julCreateButton.disabled = true;
+    julCreateStatus.textContent = "กำลังตรวจ SSoT และสร้างร่างทดสอบ Jul…";
+    try {
+      const current = await session();
+      if (!current) { requireLogin(); julCreateStatus.textContent = "กรุณาเข้าสู่ระบบใหม่ก่อนสร้างร่าง"; return; }
+      const result = await fetch("https://jbavahimqjalvcfawgqw.supabase.co/functions/v1/battle-pass-google-oauth/jul-create", {
+        method:"POST",headers:{Authorization:"Bearer "+current.token,"Content-Type":"application/json"},
+        body:"{}",signal:AbortSignal.timeout(65000),credentials:"omit",cache:"no-store"
+      });
+      const data = await result.json();
+      if (!result.ok) { julCreateStatus.textContent = errors[data.error] || "สร้างร่างไม่สำเร็จ กรุณาตรวจว่า Deploy รุ่นรองรับแล้ว"; return; }
+      if (data.state === "jul_test_created" && data.result && typeof data.result === "object") {
+        const r = data.result;
+        const id = typeof r.displayId === "string" ? r.displayId : "รายการเดิม";
+        julCreateStatus.textContent = r.created === true
+          ? "สร้างร่างทดสอบแล้ว: " + id + " อยู่ใน Unassigned รอ Aof ตรวจ"
+          : "พบร่างทดสอบเดิมแล้ว จึงไม่สร้างซ้ำ";
+        return;
+      }
+      julCreateStatus.textContent = data.state === "jul_test_not_ready"
+        ? "ยังสร้างร่างไม่ได้ เพราะข้อมูล Jul หรือ Column P เปลี่ยนหรือยังไม่พร้อม"
+        : "สร้างร่างไม่สำเร็จ กรุณาลองใหม่";
+    } catch { julCreateStatus.textContent = "สร้างร่างไม่สำเร็จ อาจหมดเวลาหรือการเชื่อมต่อขัดข้อง กรุณาลองใหม่"; }
+    finally { busy = false; julCreateButton.disabled = !login.hidden; }
   });
   initialize();
   monthsButton.addEventListener("click", async function () {
