@@ -57,6 +57,7 @@
   function clear() {
     snapshot = null; el("monitor").hidden = true; el("history").replaceChildren(); el("outputs").replaceChildren();
     for (const id of ["observed", "enabled", "schedule", "latest", "latest-time", "attention", "cron", "cron-time"]) el(id).textContent = "";
+    root.dispatchEvent(new root.CustomEvent("flowmate:bp-monitor-access", { detail: false }));
   }
   async function bounded(promise) {
     let timer;
@@ -104,6 +105,7 @@
       el("outputs").append(item);
     }
     history(); el("monitor").hidden = false;
+    root.dispatchEvent(new root.CustomEvent("flowmate:bp-monitor-access", { detail: true }));
   }
   async function refresh() {
     if (busy) return;

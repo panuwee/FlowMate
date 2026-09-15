@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>สถานะ Automation · FlowMate</title>
-  <link rel="stylesheet" href="../battle-pass-monitor.css">
+  <link rel="stylesheet" href="../battle-pass-monitor.css?v=20260915-bp2b-01">
 </head>
 <body>
   <main>
@@ -23,6 +23,16 @@
         <article class="card"><h2>ระบบอัตโนมัติ</h2><p class="value" id="enabled"></p><p id="schedule" class="muted"></p></article>
         <article class="card"><h2>ผล Worker ล่าสุด</h2><p class="value" id="latest"></p><p id="latest-time" class="muted"></p><p id="attention"></p></article>
         <article class="card"><h2>ตัวตั้งเวลาเรียกงานล่าสุด</h2><p class="value" id="cron"></p><p id="cron-time" class="muted"></p><small>ผลนี้ยืนยันการเรียกงาน ดูผลการสร้าง Brief ที่ Worker และผลลัพธ์รายเดือน</small></article>
+      </section>
+      <section class="card" aria-labelledby="readiness-heading">
+        <div class="section-head"><div><h2 id="readiness-heading">ตรวจความพร้อมจากต้นทาง</h2>
+          <p class="muted">อ่าน Google และ SSoT ล่าสุด ดูว่าข้อมูลพร้อมหรือยังขาดอะไร ขั้นนี้ไม่สร้างงานหรือแก้ชีต</p></div>
+          <button id="readiness-start" type="button" disabled>ตรวจความพร้อมตอนนี้</button></div>
+        <p id="readiness-message" role="status" aria-live="polite"></p>
+        <p id="readiness-meta" class="muted"></p>
+        <ul id="readiness-checks"></ul>
+        <button id="readiness-recover" type="button" hidden>ดูผลคำขอล่าสุด</button>
+        <p class="muted"><small>หากกดซ้ำจะใช้คำขอที่กำลังตรวจอยู่ หรือผลล่าสุดภายใน 60 วินาที · การตรวจสิทธิ์ Google ขั้นนี้ไม่ได้ทดลองเขียนไฟล์</small></p>
       </section>
       <section class="card" aria-labelledby="outputs-heading"><h2 id="outputs-heading">ผลลัพธ์รายเดือน</h2>
         <p class="muted">24 เดือนล่าสุดจากระบบ production · งานทดสอบ July แยกไว้ต่างหาก</p><div id="outputs"></div>
@@ -43,6 +53,7 @@
   </main>
   <script src="../supabase-js-local.js"></script>
   <script src="../supabase-client.js"></script>
-  <script src="../battle-pass-monitor.js"></script>
+  <script src="../battle-pass-monitor.js?v=20260915-bp2b-01"></script>
+  <script src="../battle-pass-readiness.js?v=20260915-bp2b-01"></script>
 </body>
 </html>
