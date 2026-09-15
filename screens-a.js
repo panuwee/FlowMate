@@ -2447,6 +2447,43 @@ function DetailScreen({
   const [activeCreativeMembers, setActiveCreativeMembers] = useState([]);
   const [assigneeTargetMemberId, setAssigneeTargetMemberId] = useState(w && w.assignee || "");
   const [assigneeReason, setAssigneeReason] = useState("");
+  const [battlePassReview, setBattlePassReview] = useState(null);
+  const isBattlePassAttribution = Boolean(w?.isSupabaseRow && w.requesterUserId === "2ef0289c-d1d8-4c3d-a28d-de67ca8f80ee");
+  const currentBattlePassReview = battlePassReview?.workItemId === w?.workItemId ? battlePassReview : null;
+  const battlePassAssignmentHeld = isBattlePassAttribution && (!currentBattlePassReview || currentBattlePassReview.loading || currentBattlePassReview.error || currentBattlePassReview.data?.held);
+  useEffect(() => {
+    let alive = true;
+    if (!isBattlePassAttribution || !w?.workItemId) {
+      setBattlePassReview(null);
+      return () => {
+        alive = false;
+      };
+    }
+    const workItemId = w.workItemId;
+    setBattlePassReview({
+      workItemId,
+      loading: true
+    });
+    Promise.resolve().then(async () => {
+      if (!window.flowmateSupabase) throw new Error("Connection unavailable");
+      const result = await window.flowmateSupabase.rpc("battle_pass_review_status", {
+        p_work_item_id: workItemId
+      });
+      if (result.error) throw result.error;
+      if (alive) setBattlePassReview({
+        workItemId,
+        data: result.data
+      });
+    }).catch(() => {
+      if (alive) setBattlePassReview({
+        workItemId,
+        error: true
+      });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [isBattlePassAttribution, w?.workItemId, detailRefreshTick]);
   useEffect(() => {
     if (!w) return;
     setDetailLinks(w.links || []);
@@ -2609,11 +2646,11 @@ function DetailScreen({
   const isRequesterUser = currentUserId === w.requesterUserId;
   const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
   const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
-  const canManageAssignee = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
-  const canSelfAssignUnassigned = Boolean(!isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
+  const canManageAssignee = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
+  const canSelfAssignUnassigned = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : w.assignmentWarnings || [];
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
-  const canTransitionTo = nextStatus => Boolean(!isArchivedDetail && window.canFlowMateTransitionWorkItem?.(w, nextStatus, window.FLOWMATE_CURRENT_USER || {}, window.MEMBERS_BY_ID || {}));
+  const canTransitionTo = nextStatus => Boolean(!isArchivedDetail && !battlePassAssignmentHeld && window.canFlowMateTransitionWorkItem?.(w, nextStatus, window.FLOWMATE_CURRENT_USER || {}, window.MEMBERS_BY_ID || {}));
   const canStatusTransition = ["in_progress", "review", "delivered", "blocked", "assigned", "cancelled"].some(canTransitionTo);
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
@@ -3358,7 +3395,50 @@ function DetailScreen({
     style: {
       marginBottom: 12
     }
-  }, actionMsg.text), detailAttentionCodes.length > 0 && React.createElement("section", {
+  }, actionMsg.text), isBattlePassAttribution && (battlePassAssignmentHeld || currentBattlePassReview?.data) && React.createElement("section", {
+    className: "card",
+    "aria-label": "Battle Pass review",
+    style: {
+      marginBottom: 16
+    }
+  }, React.createElement("div", {
+    className: "card__head"
+  }, React.createElement("span", {
+    className: "card__title"
+  }, "Battle Pass review")), React.createElement("div", {
+    className: "card__body"
+  }, React.createElement("div", {
+    className: "reason-box",
+    role: "status"
+  }, currentBattlePassReview?.error ? "Review status could not be loaded. Refresh before assigning this work." : !currentBattlePassReview || currentBattlePassReview.loading ? "Checking Aof review status..." : currentBattlePassReview.data?.state === "source_review" ? "Source data changed. This work is paused until the source and brief have been checked." : currentBattlePassReview.data?.held ? "Waiting for Aof to check the brief and Slides before GD assignment." : "Aof completed the brief review. This work can now be assigned."), currentBattlePassReview?.data?.held && currentBattlePassReview.data.can_release && !isArchivedDetail && React.createElement("button", {
+    className: "btn btn--primary",
+    style: {
+      marginTop: 12
+    },
+    disabled: pending,
+    onClick: async () => {
+      setPending(true);
+      try {
+        const result = await window.flowmateSupabase.rpc("battle_pass_release_review", {
+          p_work_item_id: w.workItemId
+        });
+        if (result.error) throw result.error;
+        await refreshDetailItem();
+        setDetailRefreshTick(tick => tick + 1);
+        setActionMsg({
+          tone: "ok",
+          text: "Brief review completed. Ready for GD assignment."
+        });
+      } catch (error) {
+        setActionMsg({
+          tone: "bad",
+          text: error?.message || "Could not complete the review. Please retry."
+        });
+      } finally {
+        setPending(false);
+      }
+    }
+  }, "Brief checked — allow GD assignment"))), detailAttentionCodes.length > 0 && React.createElement("section", {
     className: "card",
     "aria-labelledby": "detail-assignment-attention",
     style: {
@@ -3381,7 +3461,7 @@ function DetailScreen({
   }), detailAssignmentWarnings.map(warning => React.createElement("div", {
     className: "reason-box reason-box--queued",
     key: warning.code
-  }, React.createElement("strong", null, FLOWMATE_WARNING_LABEL[warning.code] || flowmatePrettifyToken(warning.code), ":"), " ", warning.message)), w.status === "unassigned" && React.createElement("div", {
+  }, React.createElement("strong", null, FLOWMATE_WARNING_LABEL[warning.code] || flowmatePrettifyToken(warning.code), ":"), " ", warning.message)), w.status === "unassigned" && !battlePassAssignmentHeld && React.createElement("div", {
     className: "reason-box reason-box--need"
   }, "Task is ready but needs manual assignment."), w.status === "blocked" && React.createElement("div", {
     className: "reason-box reason-box--need"
