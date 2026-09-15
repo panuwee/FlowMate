@@ -18,7 +18,7 @@ test('same-day Bangkok deadline, null denominator and late assignment context',(
 });
 test('AI counts distinct tasks, preserves titles and status, never tags as work count',()=>{
  const a=row('a',{title:'Same title',ai_tags:['AI','AI','Image']}), b=row('b',{title:'Same title',status:'review',delivered_at:null,ai_tags:['AI']});
- const r=build([a,b,a]);assert.equal(r.annual.aiN,2);assert.equal(r.annual.aiDeliveredN,1);assert.equal(r.aiTasks.length,2);
+ const r=build([a,b,a]);assert.equal(r.annual.aiN,2);assert.equal(r.annual.aiDeliveredN,1);assert.equal(r.aiTasks.length,1);
  assert.equal(r.aiTasks[0].title,'Same title');
 });
 test('partial, future and no-data months stay distinct',()=>{
@@ -37,13 +37,13 @@ test('short timestamps, missing values and cancellation are separate',()=>{
 });
 test('workbook and screen share the exact report summary and task scope',()=>{
  const r=build([row('a',{ai_tags:['AI']})]);const sheets=kpi.buildWorkbook(r);
- assert.deepEqual(sheets.map(s=>s.name),['Read me','Annual summary','Monthly detail','Task evidence','AI tasks','Quality & context','Lead evaluation']);
+ assert.deepEqual(sheets.map(s=>s.name),['Read me','Annual summary','Monthly detail','Task evidence','AI tasks','Selected summary','Timing context','Quality & context','Lead evaluation']);
  assert.equal(sheets[1].rows[1][4],r.people[0].annual.deliveredN);
  assert.equal(sheets[4].rows.length,2);assert.equal(sheets[3].rows.length,2);
 });
 test('unrecorded current month is blank even while the period is partial',()=>{
  const sheets=kpi.buildWorkbook(build([row('a')]));
  const september=sheets[2].rows.find(r=>r[0]==='Ploy'&&r[2]==='2026-09');
- assert.equal(september[3],'Partial month');assert.equal(september[4],null);assert.equal(september[32],null);
+ assert.equal(september[3],'Partial month');assert.equal(september[4],null);assert.equal(september[5],null);
  assert.equal(kpi.formatFlags(['assigned_after_due']),'Received after due date');
 });

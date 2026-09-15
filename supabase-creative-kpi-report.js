@@ -7,8 +7,8 @@
     let expectedCount = null;
     for (let offset = 0; ; offset += pageSize) {
       if (signal?.aborted) throw new Error('Report load cancelled.');
-      let query = root.flowmateSupabase.from('flowmate_creative_kpi_report_v').select('*', { count: 'exact' })
-        .or(`created_year.eq.${year},review_year.eq.${year},delivery_year.eq.${year},and(is_open.eq.true,created_year.lte.${year})`)
+      let query = root.flowmateSupabase.from('flowmate_creative_kpi_progression_v').select('*', { count: 'exact' })
+        .or(`created_year.eq.${year},review_year.eq.${year},first_delivery_year.eq.${year},started_year.eq.${year},and(is_open.eq.true,created_year.lte.${year})`)
         .order('work_item_id', { ascending: true }).range(offset, offset + pageSize - 1);
       if (signal && query.abortSignal) query = query.abortSignal(signal);
       const { data, error, count } = await query;

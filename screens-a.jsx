@@ -2179,6 +2179,8 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     const when = formatFlowMateActivityAt(event.created_at);
     const suffix = when ? ` at ${when}` : "";
     const action = metadata.action || "";
+    if (action === "brief_submitted" || action === "brief_accepted") return `${actor} ${action === "brief_submitted" ? "submitted a brief version" : "confirmed the brief is complete"}${metadata.on_behalf ? " on behalf of the owner" : ""} — ${metadata.reason || "Reason not recorded"}${suffix}`;
+    if (action === "kpi_dates_changed") return `${actor} changed First Draft Due ${metadata.due_from || "—"} → ${metadata.due_to || "—"}, Launch ${metadata.launch_from || "—"} → ${metadata.launch_to || "—"}${suffix}`;
     if (action === "assignee_changed") {
       const memberName = (id, code) => {
         if (id === null) return "Unassigned";
@@ -2749,6 +2751,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           )}
 
+          {hasCreativeDetails && w.isSupabaseRow && window.FlowMateCreativeBriefEvidence && <FlowMateCreativeBriefEvidence key={w.workItemId} workItemId={w.workItemId} onChanged={refreshDetailItem} />}
           {hasCreativeDetails && (
             <div className="card">
               <div className="card__head"><span className="card__title">Creative details</span></div>

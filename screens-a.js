@@ -2720,6 +2720,8 @@ function DetailScreen({
     const when = formatFlowMateActivityAt(event.created_at);
     const suffix = when ? ` at ${when}` : "";
     const action = metadata.action || "";
+    if (action === "brief_submitted" || action === "brief_accepted") return `${actor} ${action === "brief_submitted" ? "submitted a brief version" : "confirmed the brief is complete"}${metadata.on_behalf ? " on behalf of the owner" : ""} — ${metadata.reason || "Reason not recorded"}${suffix}`;
+    if (action === "kpi_dates_changed") return `${actor} changed First Draft Due ${metadata.due_from || "—"} → ${metadata.due_to || "—"}, Launch ${metadata.launch_from || "—"} → ${metadata.launch_to || "—"}${suffix}`;
     if (action === "assignee_changed") {
       const memberName = (id, code) => {
         if (id === null) return "Unassigned";
@@ -3530,7 +3532,11 @@ function DetailScreen({
     className: "meta-row__val"
   }, React.createElement(PriorityBadge, {
     level: w.priority
-  }))))), hasCreativeDetails && React.createElement("div", {
+  }))))), hasCreativeDetails && w.isSupabaseRow && window.FlowMateCreativeBriefEvidence && React.createElement(FlowMateCreativeBriefEvidence, {
+    key: w.workItemId,
+    workItemId: w.workItemId,
+    onChanged: refreshDetailItem
+  }), hasCreativeDetails && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"
