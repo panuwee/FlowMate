@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>สถานะ Automation · FlowMate</title>
-  <link rel="stylesheet" href="../battle-pass-monitor.css?v=20260915-bp2b-01">
+  <link rel="stylesheet" href="../battle-pass-monitor.css?v=20260915-bp2b-02">
 </head>
 <body>
   <main>
@@ -34,6 +34,35 @@
         <button id="readiness-recover" type="button" hidden>ดูผลคำขอล่าสุด</button>
         <p class="muted"><small>หากกดซ้ำจะใช้คำขอที่กำลังตรวจอยู่ หรือผลล่าสุดภายใน 60 วินาที · การตรวจสิทธิ์ Google ขั้นนี้ไม่ได้ทดลองเขียนไฟล์</small></p>
       </section>
+      <section class="card" aria-labelledby="operator-heading">
+        <div class="section-head"><div><h2 id="operator-heading">ควบคุมด้วยตนเอง</h2>
+          <p class="muted">สั่งให้ Worker ทำงานทันทีแทนการรอรอบ 30 นาที หรือพัก/เปิดระบบอัตโนมัติ · การสั่งลองใหม่ไม่แก้ข้อมูลใด ๆ เอง และจะถูกปฏิเสธถ้ารอบนั้นถูกพักไว้ให้คนตรวจ</p></div>
+          <button id="op-run" type="button" disabled>สั่งรันตอนนี้</button></div>
+        <p id="op-message" role="status" aria-live="polite"></p>
+        <p id="op-meta" class="muted"></p>
+        <div class="control-row">
+          <label for="op-period">ลองใหม่เดือน</label>
+          <select id="op-period" disabled></select>
+          <button id="op-retry" type="button" disabled>ลองใหม่</button>
+          <button id="op-toggle" type="button" disabled>พัก / เปิดการทำงาน</button>
+        </div>
+        <h3>ประวัติการสั่งงาน 20 รายการล่าสุด</h3>
+        <ul id="op-audit" class="log"></ul>
+        <p class="muted"><small>กดซ้ำภายใน 60 วินาทีจะใช้คำขอเดิม · การพักมีผลกับรอบถัดไป รอบที่กำลังทำงานจะทำต่อจนจบ · ทุกการสั่งงานถูกบันทึกพร้อมชื่อผู้สั่ง</small></p>
+      </section>
+      <section class="card" aria-labelledby="diagnosis-heading">
+        <div class="section-head"><div><h2 id="diagnosis-heading">วินิจฉัยด้วย AI</h2>
+          <p class="muted">เลือกรอบที่ล้มเหลวเพื่อให้ AI ช่วยวิเคราะห์สาเหตุ · ระบบส่งเฉพาะข้อมูลที่กรองแล้ว ไม่ส่งชื่อผู้ใช้ ไฟล์ Google หรือข้อมูล Loot · AI ให้คำแนะนำเป็นข้อความเท่านั้น ไม่สามารถสั่งงานใด ๆ ได้</p></div>
+          <button id="diag-ask" type="button" disabled>ให้ AI วินิจฉัย</button></div>
+        <div class="control-row">
+          <label for="diag-run">รอบที่ล้มเหลว</label>
+          <select id="diag-run" disabled></select>
+        </div>
+        <p id="diag-message" role="status" aria-live="polite"></p>
+        <p id="diag-meta" class="muted"></p>
+        <div id="diag-result"></div>
+        <p class="muted"><small>ปัญหาที่รู้จักแล้วจะตอบจากคู่มือโดยไม่เรียก AI เพื่อคุมค่าใช้จ่าย · ผลวินิจฉัยเดิมจะถูกนำมาใช้ซ้ำ ไม่เรียก AI ใหม่</small></p>
+      </section>
       <section class="card" aria-labelledby="outputs-heading"><h2 id="outputs-heading">ผลลัพธ์รายเดือน</h2>
         <p class="muted">24 เดือนล่าสุดจากระบบ production · งานทดสอบ July แยกไว้ต่างหาก</p><div id="outputs"></div>
       </section>
@@ -53,7 +82,9 @@
   </main>
   <script src="../supabase-js-local.js"></script>
   <script src="../supabase-client.js"></script>
-  <script src="../battle-pass-monitor.js?v=20260915-bp2b-01"></script>
-  <script src="../battle-pass-readiness.js?v=20260915-bp2b-01"></script>
+  <script src="../battle-pass-monitor.js?v=20260915-bp2b-02"></script>
+  <script src="../battle-pass-readiness.js?v=20260915-bp2b-02"></script>
+  <script src="../battle-pass-operator.js?v=20260915-bp2b-02"></script>
+  <script src="../battle-pass-diagnosis.js?v=20260915-bp2b-02"></script>
 </body>
 </html>
