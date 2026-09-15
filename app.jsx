@@ -1093,7 +1093,11 @@ function App() {
     }), React.createElement("span", null, it.label), itemCount != null && React.createElement("span", {
       className: "nav-item__count"
     }, itemCount));
-  }))), React.createElement(LiveStatus, {
+  }))), ["6e274581-5905-4146-a3eb-871f9c847bc6", "5abad25d-3e8c-4a0d-baa6-0a0615ba00fc"].includes(authState.user?.id) && React.createElement("a", {
+    className: "nav-item",
+    href: new URL("home/battle-pass-status.html", document.baseURI).href,
+    style: { textDecoration: "none" }
+  }, "Battle Pass Automation"), React.createElement(LiveStatus, {
     realtimeState: realtimeState
   })), React.createElement("main", {
     className: "app__main",

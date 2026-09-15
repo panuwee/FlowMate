@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>สถานะ Automation · FlowMate</title>
+  <link rel="stylesheet" href="../battle-pass-monitor.css">
+</head>
+<body>
+  <main>
+    <nav aria-label="ทางกลับ"><a href="./">← กลับ FlowMate</a></nav>
+    <header>
+      <div><p class="eyebrow">BATTLE PASS AUTOMATION</p><h1>สถานะและประวัติรัน</h1>
+        <p class="muted">ติดตามการสร้างงานรายเดือน ตั้งแต่ตรวจข้อมูลจนถึงรอ Aof ตรวจ</p></div>
+      <button id="refresh" type="button" disabled>รีเฟรชสถานะ</button>
+    </header>
+    <p id="message" role="status" aria-live="polite">กำลังตรวจสิทธิ์…</p>
+    <p id="login" hidden><a href="./">เข้าสู่ระบบ FlowMate</a> แล้วกลับมาเปิดหน้านี้อีกครั้ง</p>
+    <div id="monitor" hidden>
+      <p id="observed" class="muted"></p>
+      <section class="summary" aria-label="สถานะล่าสุด">
+        <article class="card"><h2>ระบบอัตโนมัติ</h2><p class="value" id="enabled"></p><p id="schedule" class="muted"></p></article>
+        <article class="card"><h2>ผล Worker ล่าสุด</h2><p class="value" id="latest"></p><p id="latest-time" class="muted"></p><p id="attention"></p></article>
+        <article class="card"><h2>ตัวตั้งเวลาเรียกงานล่าสุด</h2><p class="value" id="cron"></p><p id="cron-time" class="muted"></p><small>ผลนี้ยืนยันการเรียกงาน ดูผลการสร้าง Brief ที่ Worker และผลลัพธ์รายเดือน</small></article>
+      </section>
+      <section class="card" aria-labelledby="outputs-heading"><h2 id="outputs-heading">ผลลัพธ์รายเดือน</h2>
+        <p class="muted">24 เดือนล่าสุดจากระบบ production · งานทดสอบ July แยกไว้ต่างหาก</p><div id="outputs"></div>
+      </section>
+      <section class="card" aria-labelledby="history-heading">
+        <div class="section-head"><h2 id="history-heading">ประวัติ 50 รอบล่าสุด</h2>
+          <label>แสดง <select id="filter"><option value="all">ทุกรอบ</option><option value="production">รอบทำงาน</option><option value="checks">รอบตรวจความพร้อม</option></select></label></div>
+        <div class="table-wrap" tabindex="0" role="region" aria-label="ประวัติรัน เลื่อนแนวนอนได้">
+          <table><caption class="muted">เวลาประเทศไทย (Asia/Bangkok) · เปิดรายละเอียดเพื่อดู Run ID</caption>
+            <thead><tr><th scope="col">เวลาบันทึกผล</th><th scope="col">ประเภท</th><th scope="col">เดือน</th><th scope="col">ผลการทำงาน</th><th scope="col">รายละเอียด</th></tr></thead>
+            <tbody id="history"></tbody>
+          </table>
+        </div>
+        <p id="history-empty" hidden>ยังไม่มีประวัติในรายการที่เลือก</p>
+      </section>
+      <footer class="muted">หน้านี้อ่านผลที่บันทึกไว้ ปุ่มรีเฟรชไม่สั่งให้ Worker รันและไม่แก้ข้อมูลต้นทาง · ระบบทำงานต่อได้เมื่อปิดหน้านี้</footer>
+    </div>
+  </main>
+  <script src="../supabase-js-local.js"></script>
+  <script src="../supabase-client.js"></script>
+  <script src="../battle-pass-monitor.js"></script>
+</body>
+</html>
