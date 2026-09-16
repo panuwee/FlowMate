@@ -8,40 +8,66 @@
 -- This is safe because battle_pass_production_claim already re-claims a `failed` run whose
 -- source fingerprint still matches and which carries no hold. Clearing a hold from here
 -- would risk producing output from a stale loot snapshot, which the runbook forbids.
+--
+-- ---------------------------------------------------------------------------------------
+-- REFACTORED 2026-09-16 for Phase 2B.4 step 2. BEHAVIOUR-PRESERVING BY CONSTRUCTION.
+--
+-- What changed: the inline guard block is replaced by calls to the shared rule set in
+-- battle_pass_recovery_core.sql, so that 2B.4's read-only preview and this control can never
+-- disagree about whether a period is retryable. Previously the preview mirrored these guards,
+-- i.e. two copies of one rule free to drift, with the preview able to show "approvable" while
+-- this function raises.
+--
+-- What did NOT change, and is asserted by battle_pass_recovery_retry_verify.sql:
+--   * evaluation ORDER of the guards
+--   * the exception MESSAGE for each reason, character for character
+--   * the SQLSTATE for each reason (42501 paused/held, 55006 in-flight, P0001 otherwise)
+--   * require_operator() runs first, before anything is read
+--   * the cheap guards (period, enabled) still run BEFORE the production advisory lock is
+--     taken. This is why the rules are split into precheck/state phases rather than
+--     evaluated in one call after loading the run: evaluating them after the lock would mean
+--     an invalid-period call could BLOCK on the worker for up to a 10-minute lease instead of
+--     failing instantly. Same exception, very different experience.
+--   * the 60s/180s dedup window, the ledger insert, before_state, and the return shape
+-- ---------------------------------------------------------------------------------------
 begin;
 
 create or replace function public.battle_pass_retry(p_period text) returns jsonb
 language plpgsql security definer set search_path='' as $$
 declare r battle_pass_private.monthly_runs%rowtype; a battle_pass_private.operator_actions%rowtype;
-  rid bigint; stamp timestamptz; hold text;
+  rid bigint; stamp timestamptz; hold text; reason text; run_found boolean;
 begin
   perform battle_pass_private.require_operator();
-  if p_period !~ '^20[0-9]{2}-(0[1-9]|1[0-2])$' or p_period<'2026-10' then
-    raise exception 'Invalid production period';
-  end if;
-  if not (select enabled from battle_pass_private.monthly_settings where singleton) then
-    raise exception 'Automation is paused' using errcode='42501';
+
+  -- Phase 1: cheap guards, deliberately before the production lock (see header).
+  reason := battle_pass_private.retry_reason_precheck(
+    p_period, (select enabled from battle_pass_private.monthly_settings where singleton));
+  if reason is not null then
+    raise exception '%', battle_pass_private.retry_reason_message(reason)
+      using errcode = battle_pass_private.retry_reason_errcode(reason);
   end if;
 
   -- Same lock the worker takes, so a retry can never race a run in flight.
   perform pg_advisory_xact_lock(hashtext('battle-pass:production'));
   select * into r from battle_pass_private.monthly_runs
     where mode='production' and period=p_period for share;
-  if not found then raise exception 'No production run for this period'; end if;
-  if r.state='complete' then raise exception 'Completed month cannot be retried'; end if;
-  if r.lease_until is not null and r.lease_until>clock_timestamp() then
-    raise exception 'Run already in flight' using errcode='55006';
-  end if;
-
+  -- Captured immediately. FOUND survives a plain assignment per the plpgsql spec, but
+  -- depending on that across intervening statements is too fragile for a live control:
+  -- inserting any PERFORM, SELECT INTO or loop above the check would silently change the
+  -- guard. The original checked `if not found` on the very next line; this keeps that
+  -- guarantee explicit instead of positional.
+  run_found := found;
   hold := r.checkpoint->>'hold';
-  if hold is not null then
-    raise exception 'Held for review (%): retry blocked, reconcile the source first',
-      case when hold ~ '^[a-z0-9_]{1,50}$' then hold else 'review_required' end
-      using errcode='42501';
-  end if;
-  if r.state<>'failed' then
-    raise exception 'Only a failed run can be retried (current state is %)',
-      case when r.state ~ '^[a-z_]{1,40}$' then r.state else 'unknown' end;
+
+  -- Phase 2: state guards. The RAW state is passed to the rules; the message function
+  -- applies the display filters the original applied inline at the raise site.
+  reason := battle_pass_private.retry_reason_state(
+    run_found, r.state,
+    r.lease_until is not null and r.lease_until > clock_timestamp(),
+    hold);
+  if reason is not null then
+    raise exception '%', battle_pass_private.retry_reason_message(reason, hold, r.state)
+      using errcode = battle_pass_private.retry_reason_errcode(reason);
   end if;
 
   perform pg_advisory_xact_lock(hashtext('battle-pass-operator-retry'));

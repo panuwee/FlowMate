@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>สถานะ Automation · FlowMate</title>
-  <link rel="stylesheet" href="../battle-pass-monitor.css?v=20260915-bp2b-02">
+  <link rel="stylesheet" href="../battle-pass-monitor.css?v=20260916-bp2b4-07">
 </head>
 <body>
   <main>
@@ -63,6 +63,17 @@
         <div id="diag-result"></div>
         <p class="muted"><small>ปัญหาที่รู้จักแล้วจะตอบจากคู่มือโดยไม่เรียก AI เพื่อคุมค่าใช้จ่าย · ผลวินิจฉัยเดิมจะถูกนำมาใช้ซ้ำ ไม่เรียก AI ใหม่</small></p>
       </section>
+      <section class="card" aria-labelledby="recovery-heading">
+        <div class="section-head"><div><h2 id="recovery-heading">คำแนะนำจาก AI ที่รออนุมัติ</h2>
+          <p class="muted">AI เสนอ คุณเป็นผู้ตัดสินใจ · การกดอนุมัติจะกดปุ่ม "ลองใหม่" แบบเดียวกับควบคุมด้วยตนเองด้านบน ไม่มีคำสั่งอื่นใดที่ AI ทำเองได้</p></div>
+          <button id="rec-refresh" type="button" disabled>รีเฟรชคำแนะนำ</button></div>
+        <p id="rec-message" role="status" aria-live="polite"></p>
+        <p id="rec-meta" class="muted"></p>
+        <div id="rec-list"></div>
+        <h3>ประวัติการอนุมัติ/ปฏิเสธ 20 รายการล่าสุด</h3>
+        <ul id="rec-history" class="log"></ul>
+        <p class="muted"><small>คำแนะนำที่เก่าเกิน 60 นาที หรือสถานะรอบทำงานเปลี่ยนไปหลังวิเคราะห์ จะถูกบล็อกอัตโนมัติ · การปฏิเสธถาวร ไม่สามารถกลับมาอนุมัติภายหลังได้</small></p>
+      </section>
       <section class="card" aria-labelledby="outputs-heading"><h2 id="outputs-heading">ผลลัพธ์รายเดือน</h2>
         <p class="muted">24 เดือนล่าสุดจากระบบ production · งานทดสอบ July แยกไว้ต่างหาก</p><div id="outputs"></div>
       </section>
@@ -86,5 +97,6 @@
   <script src="../battle-pass-readiness.js?v=20260915-bp2b-02"></script>
   <script src="../battle-pass-operator.js?v=20260915-bp2b-02"></script>
   <script src="../battle-pass-diagnosis.js?v=20260915-bp2b-02"></script>
+  <script src="../battle-pass-recovery.js?v=20260916-bp2b4-07"></script>
 </body>
 </html>
