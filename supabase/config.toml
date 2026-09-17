@@ -1,0 +1,7 @@
+[functions.seatalk-ot-callback]
+verify_jwt = false
+
+# Server-triggered only: validates x-battle-pass-token through the existing
+# production context before it may claim or send any notification.
+[functions.battle-pass-seatalk]
+verify_jwt = false
