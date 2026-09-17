@@ -57,6 +57,7 @@ describe("Trello + Asana hybrid backend SQL delta", () => {
     expect(engine).toContain("count(*) filter (where leave_fraction >= 1)::integer as full_leave_bucket_count");
     expect(engine).toContain("where c.availability_fraction > 0");
     expect(engine).toContain("v_leave_bucket_count > 0 and v_full_leave_bucket_count = 0");
+    expect(engine).toContain("and (\n        (v_context = 'esport' and lower(tm.member_code) in ('ploy','vee'))\n        or (v_context = 'ops_marketing' and lower(tm.member_code) in ('pond','jo','tong','eye'))\n      )");
 
     const rankingClause = block(engine, "row_number() over (", ") as winner_rank");
     expect(rankingClause).toMatch(/order by\s+c\.skill_rank asc,\s+c\.adjusted_load asc,\s+c\.in_progress_count asc,\s+c\.assigned_count asc,\s+c\.overdue_count asc,\s+c\.last_auto_assigned_at asc,\s+c\.context_rank asc,\s+lower\(c\.member_code\) asc\s*$/);

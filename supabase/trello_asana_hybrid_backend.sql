@@ -480,6 +480,10 @@ begin
     ) metrics
     where tm.active = true
       and public.flowmate_is_gdve_member_code(tm.member_code)
+      and (
+        (v_context = 'esport' and lower(tm.member_code) in ('ploy','vee'))
+        or (v_context = 'ops_marketing' and lower(tm.member_code) in ('pond','jo','tong','eye'))
+      )
   ), candidate_state as (
     select
       c.*,
