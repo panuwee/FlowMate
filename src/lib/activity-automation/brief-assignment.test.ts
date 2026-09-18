@@ -16,7 +16,7 @@ beforeAll(async()=>{
  create table team_members(id uuid primary key,user_id uuid,member_code text,display_name text,discipline text,discipline_short text,active boolean default true,skills text[],backup_skills text[] default '{}',availability text default 'available',wip_limit integer default 5,capacity_per_day numeric default 8,capacity_override_per_day numeric);
  create table creative_request_details(work_item_id uuid primary key,brief_link text default 'https://example.org/brief',asset_type text default 'static-graphic',asset_subtype text default 'banner',asset_count integer default 1,asset_type_2 text,asset_subtype_2 text,asset_count_2 integer,brief_completeness_status text,brief_missing_reason text,updated_at timestamptz);
  create table creative_kpi_brief_evidence(id bigint generated always as identity primary key,work_item_id uuid,action text,submission_id bigint unique,actor_user_id uuid,reason text,brief_link text default 'https://example.org/brief');
- create table work_item_events(work_item_id uuid,actor_user_id uuid,event_type text,from_status work_status,to_status work_status,metadata jsonb);
+ create table work_item_events(created_at timestamptz default now(),work_item_id uuid,actor_user_id uuid,event_type text,from_status work_status,to_status work_status,metadata jsonb);
  create table assignment_runs(work_item_id uuid,triggered_by assignment_trigger,result text,reason text,effort_point integer,raw_range_min int,raw_range_max int,was_capped boolean,capacity_snapshot jsonb,suggested_owner_member_id uuid,final_owner_member_id uuid,ran_at timestamptz default now());
  create table flowmate_capacity_allocations(work_item_id uuid,team_member_id uuid,bucket_date date,bucket_half text,capacity_point numeric);
  create table activity_automation_private.runs(id uuid primary key,activity text);
@@ -31,10 +31,11 @@ beforeAll(async()=>{
  create function flowmate_leave_fraction_for_bucket(uuid,date,text) returns numeric language sql as $$select 0::numeric$$;
  create function flowmate_is_gdve_member_code(text) returns boolean language sql as $$select $1 in ('eye','tong','jo','pond','ploy','vee')$$;
  create function flowmate_subtract_th_business_days(date,integer) returns date language sql as $$select $1-$2$$;
- create view flowmate_team_schedule_v as select id work_item_id,title from work_items;
+ create view flowmate_team_schedule_v as select id work_item_id,title from work_items;create function is_active_app_user() returns boolean language sql as $$select true$$;create function flowmate_normalize_team_code(text) returns text language sql as $$select 'gdve'::text$$;
  `);
  await db.exec(read('src/lib/activity-automation/fixtures/assignment-engine-20260918.sql'));
  await db.exec(read('src/lib/activity-automation/fixtures/allocation-20260918.sql'));
+ await db.exec(read('src/lib/activity-automation/fixtures/gantt-rpc-20260918.sql'));
  await db.exec(read('src/lib/activity-automation/fixtures/brief-rpc-20260918.sql'));
  await db.exec(read('supabase/activity_automation_brief_assignment.sql'));
  await db.exec(`create trigger activity_test_guard before update on work_items for each row execute function activity_automation_private.guard_test_work();
@@ -138,4 +139,12 @@ it('release bundle installs atomically and never accepts or assigns existing wor
  await db.exec(read('supabase/activity_automation_acceptance_release.sql'));
  expect(await q("select (select count(*) from assignment_runs) assignments,(select count(*) from creative_kpi_brief_evidence where action='accepted') accepted")).toEqual(before);
  expect((await q("select has_function_privilege('anon','public.flowmate_can_review_ops_brief(uuid)','execute') allowed"))[0].allowed).toBe(false);
+});
+it('excludes assigned TESTs in the actual Gantt RPC, not just its fallback view',async()=>{
+
+ await db.exec(read('src/lib/activity-automation/fixtures/gantt-rpc-20260918.sql'));
+ expect((await q("select count(*)::int n from flowmate_list_team_schedule() where title like '[TEST]%'"))[0].n).toBeGreaterThan(0);
+ await db.exec(read('supabase/activity_automation_gantt_isolation.sql'));
+ expect((await q("select count(*)::int n from flowmate_list_team_schedule() where title like '[TEST]%'"))[0].n).toBe(0);
+ expect((await q('select count(*)::int n from flowmate_list_team_schedule() where work_item_id=$1',[uid(62)]))[0].n).toBe(1);
 });

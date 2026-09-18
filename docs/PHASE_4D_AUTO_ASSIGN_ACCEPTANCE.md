@@ -14,8 +14,8 @@
 
 ## ผลตรวจ
 
-- Local ชุดที่เกี่ยวข้อง 102 tests ผ่าน และ release-bundle test เพิ่มอีก 1 ข้อผ่าน
-- ชุดเผยแพร่แยกจาก GitHub HEAD c25b776: 25 assignment/reviewer SQL tests + 13 monitor tests ผ่าน
+- Local ชุดที่เกี่ยวข้อง 102 tests ผ่าน และ release-bundle/Gantt RPC tests เพิ่มอีก 2 ข้อผ่าน
+- ชุดเผยแพร่แยกจาก GitHub HEAD c25b776: 26 assignment/reviewer SQL tests + 13 monitor tests ผ่าน
 - build:github สำเร็จ เปลี่ยน generated screens-a.js เฉพาะข้อความที่เกี่ยวข้อง
 - Security advisor หลัง apply ที่ระดับ error: ไม่พบปัญหา
 - อ่านฐานข้อมูลหลัง apply: TEST CR-1243, CR-1264, CR-1265, CR-1266, CR-1267 มี submitted อย่างละ 1, accepted 0, owner ว่าง, status Unassigned; KPI, Creative KPI, Gantt และ allocation อย่างละ 0
@@ -36,7 +36,7 @@
 
 ## ไฟล์และการติดตั้ง
 
-- `supabase/activity_automation_acceptance_release.sql`: รวม 4 delta ใน transaction เดียว; apply สำเร็จแล้ว
+- `supabase/activity_automation_acceptance_release.sql`: รวม 5 delta ใน transaction เดียว; apply สำเร็จแล้ว
 - `activity_automation_brief_assignment.sql`: acceptance trigger, gate, durable TEST registry, report exclusions, cancellation/archive guard
 - `activity_automation_ops_brief_reviewers.sql`: สิทธิ์ Operation/Admin และ read policies; ไม่เปิด direct INSERT evidence ให้ authenticated
 - `activity_automation_battle_pass_brief_evidence.sql`: ลงทะเบียน Brief Link เดิมและที่สร้างใหม่เป็น submitted โดยไม่ accepted
@@ -47,3 +47,7 @@
 Installer ตรวจ anchor ของ deployed function และยกเลิก transaction หากไม่ตรง แก้เฉพาะ gate/การไม่นับ TEST ไม่เปลี่ยนสูตรเลือกคน ต้อง apply delta นี้อีกครั้งหาก installer เก่าเขียนทับ assignment/brief RPC หรือ isolation functions
 
 Evidence local: `output/phase4d/acceptance-live-verify.json`, `reviewer-live-verify.json`, `reviewer-aof-verify.json` ไม่รวม credentials
+
+## ตรวจเส้นทางหน้าเว็บจริงเพิ่มเติม
+
+Creative Gantt ใช้ flowmate_list_team_schedule RPC เป็นหลัก และ view เป็น fallback จึงเพิ่ม activity_automation_gantt_isolation.sql ให้กรองทั้งสองเส้นทาง ทดสอบ assigned TEST ด้วย RPC จริงใน PGlite แล้ว TEST ไม่แสดง แต่งานจริงยังแสดงตามเดิม ตรวจ GitHub Pages HTTP 200 และ cache version 20260918-brief-assign แล้ว
