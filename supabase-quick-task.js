@@ -1153,6 +1153,19 @@ window.loadFlowMateWhitelistUsers = loadFlowMateWhitelistUsers;
 window.upsertFlowMateWhitelistUser = upsertFlowMateWhitelistUser;
 window.deleteFlowMateWhitelistUser = deleteFlowMateWhitelistUser;
 
+window.loadFlowMateTeamMembers = async function () {
+  assertFlowMateAdminAccess();
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_members");
+  if (error) throw error;
+  return data || [];
+};
+window.saveFlowMateTeamMember = async function (input) {
+  assertFlowMateAdminAccess();
+  const { error } = await window.flowmateSupabase.rpc("flowmate_admin_save_member", { p_input: input });
+  if (error) throw error;
+  window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "team_member_updated" } }));
+};
+
 async function flowmateSignInWithGoogle() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");

@@ -1,0 +1,15 @@
+# Team Members
+
+Design opening brief: Act as a senior product designer for FlowMate, an internal work management application. Create one minimal Team Members destination for administrators who need to manage access and creative production capacity without learning database concepts. Follow the supplied reference: a quiet page header, compact summary counts, search and filters, and a readable member table. Reuse FlowMate typography, neutral surfaces, subtle borders, spacing and existing buttons. Keep the sidebar stable. Use status color only to convey meaning and always pair it with text. Avoid decorative metrics, contact details, large explanatory banners and repeated page titles.
+
+Use two tabs: Members and Creative Capacity. Members includes every allowed or previously registered user; Creative Capacity shows GD/VE production profiles only. The primary action is Add member. Show name with secondary email, role, access, assignment eligibility, final working date, and an unobtrusive Manage action. Put skills, capacity, WIP and lifecycle dates inside a right-hand dialog. Provide clear labels, keyboard focus containment, Escape and a close button. On narrow screens allow the table to scroll without overflowing the page and make the dialog full width.
+
+Access and assignment are independent. A member may stop receiving new work while retaining access to finish handover. Label all date/time fields as Bangkok time. Selecting the final working day suggests deactivation at midnight on the next day. Do not prefill real member dates or silently save an example. Deactivation preserves completed work and historical ownership. Show open work in the dialog for handover through existing task controls. Reactivation is an explicit action. Editing a profile must not reactivate it. Keep errors near the action and retain unsaved values on failure. Missing backend support is a visible error, never a successful-looking local save. Include loading, empty, filtered-empty, error and saving states. Show a short confirmation for immediate deactivation that states the open-work impact.
+
+## Deployment order
+
+Apply `supabase/team_members_lifecycle.sql` **after** the existing assignment and automation SQL. It patches the installed assignment function without replacing routing or automation rules. Reapply it after any older assignment installer. Then publish the generated frontend assets. Neither step is authorized by local implementation alone.
+
+The API pre-request hook is installed separately by `supabase/team_members_access_hook.sql`; it refuses to overwrite an existing hook. This is required to deny already signed-in expired users across legacy security-definer RPCs. Auth identity is retained; application access is denied. No cron is required. Storage/Realtime and other services require their own access verification before claiming account-wide revocation.
+
+No individual member's dates are seeded by either migration. For example, a final working day of 2026-09-30 suggests 2026-10-01 00:00 Bangkok deactivation. Choose the stop-assignment time explicitly. Existing work is not automatically reassigned.

@@ -4790,3 +4790,52 @@ html[data-theme="dark"] .product-book-cms__message--error {
   .ot-access__actions { width: 100%; justify-content: stretch; }
   .ot-access__actions .btn { flex: 1 1 150px; }
 }
+
+/* Team Members: reference-led, compact directory and progressive-detail drawer. */
+.team-members-page { max-width: 1440px; }
+.tm-summary { display:flex; gap:32px; padding:4px 0 24px; color:var(--muted,#737373); font-size:13px; }
+.tm-summary strong { font-size:20px; color:var(--text,#252525); margin-right:7px; font-weight:600; }
+.tm-card { overflow:hidden; }
+.tm-toolbar { display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:space-between; padding:18px 20px; }
+.tm-tabs { display:flex; gap:4px; }
+.tm-tabs button { border:0; border-radius:6px; padding:9px 13px; background:transparent; color:inherit; cursor:pointer; font:inherit; font-size:13px; }
+.tm-tabs button.is-active { background:var(--surface-hover,#f2f3f5); font-weight:600; }
+.tm-filters { display:flex; gap:8px; }
+.tm-filters .input { width:220px; }
+.tm-table-wrap { overflow-x:auto; }
+.tm-table { min-width:760px; }
+.tm-table th { font-size:11px; font-weight:500; text-transform:none; letter-spacing:0; }
+.tm-table td { padding-top:18px; padding-bottom:18px; }
+.tm-person { display:flex; gap:12px; align-items:center; }
+.tm-person strong { font-weight:500; font-size:13px; }
+.tm-person small { display:block; font-size:11px; opacity:.6; margin-top:3px; }
+.tm-avatar { display:grid; place-items:center; width:34px; height:34px; border-radius:50%; background:#eef1f5; color:#576376; font-size:11px; flex-shrink:0; }
+.tm-status { display:inline-flex; gap:6px; align-items:center; border-radius:20px; padding:4px 9px; background:#f0f0f0; color:#676767; font-size:11px; white-space:nowrap; }
+.tm-status::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+.tm-status.is-active { color:#39785a; background:#edf6f0; }
+.tm-skills { display:flex; gap:4px; flex-wrap:wrap; max-width:260px; }
+.tm-skills span { font-size:11px; background:var(--surface-hover,#f3f4f6); padding:3px 6px; border-radius:4px; }
+.tm-footer { padding:15px 20px; font-size:12px; opacity:.6; border-top:1px solid var(--border,#ececec); }
+.tm-empty { text-align:center; padding:50px!important; color:var(--muted,#777); }
+.tm-backdrop { justify-content:flex-end; padding:0; z-index:1200; }
+.tm-drawer { height:100dvh; width:min(520px,100vw); background:var(--card,#fff); color:var(--text,#252525); display:flex; flex-direction:column; box-shadow:-12px 0 48px #0001; }
+.tm-drawer-head,.tm-drawer-footer { padding:24px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border,#eee); }
+.tm-drawer-head h2 { margin:0 0 5px; font-size:20px; }
+.tm-drawer-head .muted { font-size:12px; }
+.tm-drawer-body { padding:24px; overflow-y:auto; flex:1; }
+.tm-drawer-body fieldset { border:0; padding:0; margin:0; min-width:0; display:grid; gap:18px; }
+.tm-drawer-body .field { min-width:0; font-size:12px; }
+.tm-drawer-body .input,.tm-drawer-body .select { width:100%; min-width:0; }
+.tm-section-title { font-size:13px; font-weight:600; border-top:1px solid var(--border,#eee); padding-top:22px; display:flex; justify-content:space-between; }
+.tm-section-title small { font-weight:400; opacity:.55; }
+.tm-preview { font-size:12px; color:var(--muted,#777); line-height:1.7; }
+.tm-handover { font-size:12px; }
+.tm-handover summary { cursor:pointer; padding:10px 0; }
+.tm-handover a { display:block; padding:8px 0; color:inherit; }
+.tm-drawer-footer { border-top:1px solid var(--border,#eee); border-bottom:0; margin-top:auto; }
+.tm-drawer-footer .btn--primary { margin-left:auto; }
+[data-theme="dark"] .tm-drawer { background:#1c2026; color:#e8e9ec; }
+[data-theme="dark"] .tm-tabs button.is-active,[data-theme="dark"] .tm-skills span { background:#2b3037; }
+@media(max-width:640px) { .tm-summary { gap:14px; flex-wrap:wrap; }.tm-toolbar { padding:14px; }.tm-filters { width:100%; }.tm-filters .input { width:100%; }.tm-drawer-body .form-grid { grid-template-columns:1fr; }.tm-summary strong { font-size:17px; } }
+.tm-schedule-label { display:flex; justify-content:space-between; align-items:center; }
+.tm-now { border:0; background:none; color:var(--fg-primary); font:inherit; text-decoration:underline; cursor:pointer; padding:0 3px; }

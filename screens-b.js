@@ -2163,3 +2163,388 @@ Object.assign(window, {
   QueueScreen,
   AdminWhitelistScreen
 });
+function TeamMembersScreen() {
+  const [rows, setRows] = useStateB([]);
+  const [tab, setTab] = useStateB("members");
+  const [query, setQuery] = useStateB("");
+  const [status, setStatus] = useStateB("all");
+  const [loading, setLoading] = useStateB(true);
+  const [error, setError] = useStateB("");
+  const [saving, setSaving] = useStateB(false);
+  const [edit, setEdit] = useStateB(null);
+  const admin = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const date = value => value ? new Date(value).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Bangkok"
+  }) : "—";
+  const localTime = value => value ? new Date(new Date(value).getTime() + 7 * 3600000).toISOString().slice(0, 16) : "";
+  const utc = value => value ? new Date(value + ":00+07:00").toISOString() : null;
+  async function refresh() {
+    setLoading(true);
+    setError("");
+    try {
+      setRows(await window.loadFlowMateTeamMembers());
+    } catch (e) {
+      setError(window.flowmateUserError?.(e, "Unable to load members. Team Members setup may be required.") || e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffectB(() => {
+    if (admin) refresh();
+  }, [admin]);
+  useEffectB(() => {
+    if (!edit) return;
+    const previous = document.activeElement;
+    const dialog = document.getElementById("team-member-dialog");
+    const focusables = () => [...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href]')];
+    focusables()[0]?.focus();
+    function key(e) {
+      if (e.key === "Escape" && !saving) setEdit(null);
+      if (e.key === "Tab") {
+        const items = focusables(),
+          first = items[0],
+          last = items[items.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    }
+    dialog.addEventListener("keydown", key);
+    return () => {
+      dialog.removeEventListener("keydown", key);
+      previous?.focus();
+    };
+  }, [Boolean(edit), saving]);
+  if (!admin) return React.createElement("div", {
+    className: "page"
+  }, "Admin access required.");
+  const visible = rows.filter(r => (tab !== "creative" || r.creative) && `${r.display_name} ${r.email}`.toLowerCase().includes(query.toLowerCase()) && (status === "all" || (status === "active" ? r.access_active : !r.access_active)));
+  const blank = {
+    email: "",
+    display_name: "",
+    role: "member",
+    team_member_code: "",
+    stop_assign_at: "",
+    last_working_day: "",
+    deactivate_at: "",
+    skills: [],
+    open_work: []
+  };
+  const profiles = [...new Set([...(window.MEMBERS || []).map(m => m.code || m.member_code), ...rows.map(r => r.team_member_code)].filter(Boolean))];
+  function open(row) {
+    setError("");
+    setEdit(row ? {
+      ...row,
+      existing: true,
+      stop_assign_at: localTime(row.stop_assign_at),
+      deactivate_at: localTime(row.deactivate_at),
+      last_working_day: row.last_working_day || "",
+      skills: window.getFlowMateTeamSettingsEditableSkills ? window.getFlowMateTeamSettingsEditableSkills({
+        ...row,
+        skills: [...(row.skills || []), ...(row.backup_skills || [])]
+      }) : [...(row.skills || []), ...(row.backup_skills || [])]
+    } : {
+      ...blank
+    });
+  }
+  const change = (key, value) => setEdit(prev => ({
+    ...prev,
+    [key]: value
+  }));
+  function finalDay(value) {
+    const next = value ? new Date(new Date(value + "T00:00:00Z").getTime() + 86400000).toISOString().slice(0, 10) + "T00:00" : "";
+    setEdit(prev => ({
+      ...prev,
+      last_working_day: value,
+      deactivate_at: next
+    }));
+  }
+  async function save(event, action = "save") {
+    event?.preventDefault();
+    if (saving) return;
+    if (action === "deactivate" && !window.confirm(`Deactivate ${edit.display_name}? ${edit.open_work?.length || 0} open tasks will remain for handover.`)) return;
+    setSaving(true);
+    setError("");
+    try {
+      if (tab === "creative") {
+        await window.adminUpdateFlowMateTeamMember(edit.member_id, {
+          capacityPerDay: Number(edit.capacity_per_day),
+          wipLimit: Number(edit.wip_limit),
+          skills: edit.skills
+        });
+      } else {
+        await window.saveFlowMateTeamMember({
+          email: edit.email,
+          display_name: edit.display_name,
+          role: edit.role,
+          team_member_code: edit.team_member_code || null,
+          last_working_day: edit.last_working_day || null,
+          stop_assign_at: utc(edit.stop_assign_at),
+          deactivate_at: utc(edit.deactivate_at),
+          action
+        });
+      }
+      setEdit(null);
+      await refresh();
+    } catch (e) {
+      setError(window.flowmateUserError?.(e, "Unable to save member.") || e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return React.createElement("div", {
+    className: "page team-members-page"
+  }, React.createElement("div", {
+    className: "page__header"
+  }, React.createElement("div", null, React.createElement("h1", {
+    className: "page__title"
+  }, "Team Members"), React.createElement("div", {
+    className: "page__sub"
+  }, "People, access & creative capacity")), React.createElement("div", {
+    className: "page__actions"
+  }, React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: refresh,
+    disabled: loading
+  }, "Refresh"), React.createElement("button", {
+    className: "btn btn--primary",
+    disabled: loading || Boolean(error),
+    onClick: () => {
+      setTab("members");
+      open(null);
+    }
+  }, React.createElement(Icon, {
+    name: "plus"
+  }), " Add member"))), React.createElement("div", {
+    className: "tm-summary"
+  }, React.createElement("span", null, React.createElement("strong", null, rows.length), " Members"), React.createElement("span", null, React.createElement("strong", null, rows.filter(r => r.access_active).length), " Active"), React.createElement("span", null, React.createElement("strong", null, rows.filter(r => r.access_active && r.deactivate_at).length), " Scheduled to leave")), React.createElement("div", {
+    className: "card tm-card"
+  }, React.createElement("div", {
+    className: "tm-toolbar"
+  }, React.createElement("div", {
+    className: "tm-tabs",
+    role: "tablist",
+    "aria-label": "Member settings"
+  }, [['members', 'Members'], ['creative', 'Creative Capacity']].map(([key, label]) => React.createElement("button", {
+    key: key,
+    role: "tab",
+    "aria-selected": tab === key,
+    className: tab === key ? 'is-active' : '',
+    onClick: () => setTab(key)
+  }, label))), React.createElement("div", {
+    className: "tm-filters"
+  }, React.createElement("input", {
+    className: "input",
+    "aria-label": "Search members",
+    placeholder: "Search members…",
+    value: query,
+    onChange: e => setQuery(e.target.value)
+  }), React.createElement("select", {
+    className: "select",
+    "aria-label": "Access status",
+    value: status,
+    onChange: e => setStatus(e.target.value)
+  }, React.createElement("option", {
+    value: "all"
+  }, "All status"), React.createElement("option", {
+    value: "active"
+  }, "Active"), React.createElement("option", {
+    value: "inactive"
+  }, "Inactive")))), error && !edit && React.createElement("div", {
+    role: "alert",
+    className: "reason-box reason-box--need"
+  }, error), React.createElement("div", {
+    className: "tm-table-wrap"
+  }, React.createElement("table", {
+    className: "tbl tm-table"
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), tab === 'creative' ? React.createElement(React.Fragment, null, React.createElement("th", null, "Skills"), React.createElement("th", null, "Capacity / day"), React.createElement("th", null, "WIP limit")) : React.createElement(React.Fragment, null, React.createElement("th", null, "Role"), React.createElement("th", null, "Access"), React.createElement("th", null, "Assignment"), React.createElement("th", null, "Last day")), React.createElement("th", null, React.createElement("span", {
+    className: "muted"
+  }, "Manage")))), React.createElement("tbody", null, !loading && visible.map(r => React.createElement("tr", {
+    key: r.email
+  }, React.createElement("td", null, React.createElement("div", {
+    className: "tm-person"
+  }, React.createElement("span", {
+    className: "tm-avatar"
+  }, (r.display_name || r.email).slice(0, 2).toUpperCase()), React.createElement("div", null, React.createElement("strong", null, r.display_name), React.createElement("small", null, r.email)))), tab === 'creative' ? React.createElement(React.Fragment, null, React.createElement("td", null, React.createElement("div", {
+    className: "tm-skills"
+  }, (r.skills || []).slice(0, 2).map(s => React.createElement("span", {
+    key: s
+  }, s)), r.skills?.length > 2 && React.createElement("span", null, "+", r.skills.length - 2))), React.createElement("td", null, r.capacity_per_day, " pt"), React.createElement("td", null, r.wip_limit)) : React.createElement(React.Fragment, null, React.createElement("td", null, r.role === 'admin' ? 'Admin' : 'Member'), React.createElement("td", null, React.createElement("span", {
+    className: `tm-status ${r.access_active ? 'is-active' : ''}`
+  }, r.access_active ? 'Active' : 'Inactive')), React.createElement("td", null, !r.creative ? '—' : React.createElement("span", {
+    className: `tm-status ${r.assignment_active ? 'is-active' : ''}`
+  }, r.assignment_active ? 'Accepting' : 'Paused')), React.createElement("td", null, r.last_working_day ? date(r.last_working_day + 'T12:00:00+07:00') : '—')), React.createElement("td", null, React.createElement("button", {
+    className: "btn btn--xs btn--secondary",
+    "aria-label": `Manage ${r.display_name}`,
+    onClick: () => open(r)
+  }, "Manage")))), (loading || !visible.length) && React.createElement("tr", null, React.createElement("td", {
+    colSpan: tab === 'creative' ? 5 : 6,
+    className: "tm-empty"
+  }, loading ? 'Loading members…' : error ? 'Members unavailable' : 'No members found'))))), React.createElement("div", {
+    className: "tm-footer"
+  }, visible.length, " members", tab === 'creative' ? ' · GD/VE' : '')), edit && React.createElement("div", {
+    className: "modal-backdrop tm-backdrop"
+  }, React.createElement("form", {
+    id: "team-member-dialog",
+    className: "tm-drawer",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "tm-dialog-title",
+    onSubmit: save
+  }, React.createElement("div", {
+    className: "tm-drawer-head"
+  }, React.createElement("div", null, React.createElement("h2", {
+    id: "tm-dialog-title"
+  }, edit.existing ? edit.display_name : 'Add member'), React.createElement("span", {
+    className: "muted"
+  }, tab === 'creative' ? 'Creative Capacity' : 'Member details')), React.createElement("button", {
+    type: "button",
+    className: "iconbtn",
+    "aria-label": "Close member details",
+    disabled: saving,
+    onClick: () => setEdit(null)
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), React.createElement("div", {
+    className: "tm-drawer-body"
+  }, React.createElement("fieldset", {
+    disabled: saving
+  }, tab === 'creative' ? React.createElement(React.Fragment, null, React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Capacity / day"), React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: "0",
+    max: "24",
+    step: "0.25",
+    required: true,
+    value: edit.capacity_per_day,
+    onChange: e => change('capacity_per_day', e.target.value)
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "WIP limit"), React.createElement("input", {
+    className: "input",
+    type: "number",
+    min: "0",
+    max: "20",
+    step: "1",
+    required: true,
+    value: edit.wip_limit,
+    onChange: e => change('wip_limit', e.target.value)
+  })), React.createElement("div", {
+    className: "field"
+  }, React.createElement("span", null, "Skills"), React.createElement("div", {
+    className: "skill-edit-grid"
+  }, (window.FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS || []).map(s => React.createElement("label", {
+    key: s.key,
+    className: "skill-check"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: edit.skills.includes(s.key),
+    onChange: e => change('skills', e.target.checked ? [...edit.skills, s.key] : edit.skills.filter(k => k !== s.key))
+  }), s.label))))) : React.createElement(React.Fragment, null, React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Name"), React.createElement("input", {
+    className: "input",
+    required: true,
+    value: edit.display_name,
+    onChange: e => change('display_name', e.target.value)
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Email"), React.createElement("input", {
+    className: "input",
+    required: true,
+    type: "email",
+    disabled: edit.existing,
+    placeholder: "name@garena.com",
+    value: edit.email,
+    onChange: e => change('email', e.target.value)
+  })), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Role"), React.createElement("select", {
+    className: "select",
+    value: edit.role,
+    onChange: e => change('role', e.target.value)
+  }, React.createElement("option", {
+    value: "member"
+  }, "Member"), React.createElement("option", {
+    value: "admin"
+  }, "Admin"))), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Team profile"), React.createElement("select", {
+    className: "select",
+    value: edit.team_member_code || '',
+    onChange: e => change('team_member_code', e.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "None"), profiles.map(code => React.createElement("option", {
+    key: code,
+    value: code
+  }, code))))), React.createElement("div", {
+    className: "tm-section-title"
+  }, "Schedule ", React.createElement("small", null, "Bangkok time")), React.createElement("div", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "tm-schedule-label"
+  }, React.createElement("label", {
+    htmlFor: "tm-stop-assign"
+  }, "Stop new assignments"), " ", React.createElement("button", {
+    type: "button",
+    className: "tm-now",
+    onClick: () => change("stop_assign_at", localTime(new Date().toISOString()))
+  }, "Now")), React.createElement("input", {
+    id: "tm-stop-assign",
+    className: "input",
+    type: "datetime-local",
+    value: edit.stop_assign_at,
+    onChange: e => change('stop_assign_at', e.target.value)
+  })), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Last working day"), React.createElement("input", {
+    className: "input",
+    type: "date",
+    value: edit.last_working_day,
+    onChange: e => finalDay(e.target.value)
+  })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Deactivate at"), React.createElement("input", {
+    className: "input",
+    type: "datetime-local",
+    value: edit.deactivate_at,
+    onChange: e => change('deactivate_at', e.target.value)
+  }))), edit.deactivate_at && React.createElement("div", {
+    className: "tm-preview"
+  }, "Access ends ", date(edit.deactivate_at + ':00+07:00'), " · ", edit.deactivate_at.slice(11), ". Work history is retained."), Boolean(edit.open_work?.length) && React.createElement("details", {
+    className: "tm-handover"
+  }, React.createElement("summary", null, edit.open_work.length, " open tasks to hand over"), edit.open_work.map(w => React.createElement("a", {
+    key: w.id,
+    href: `#detail/${w.id}`,
+    onClick: () => setEdit(null)
+  }, w.id, " · ", w.title))))), error && React.createElement("div", {
+    role: "alert",
+    className: "reason-box reason-box--need"
+  }, error)), React.createElement("div", {
+    className: "tm-drawer-footer"
+  }, tab === 'members' && edit.existing && edit.email !== window.FLOWMATE_CURRENT_USER?.email && React.createElement("button", {
+    type: "button",
+    disabled: saving,
+    className: "btn btn--danger",
+    onClick: e => save(e, edit.access_active ? 'deactivate' : 'reactivate')
+  }, edit.access_active ? 'Deactivate' : 'Reactivate'), React.createElement("button", {
+    type: "submit",
+    disabled: saving,
+    className: "btn btn--primary"
+  }, saving ? 'Saving…' : 'Save changes')))));
+}
+window.TeamMembersScreen = TeamMembersScreen;

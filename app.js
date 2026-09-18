@@ -134,19 +134,11 @@ const NAV = [{
     label: "Creative KPI",
     icon: "chart"
   }, {
-    key: "settings",
-    label: "Team settings",
-    icon: "settings"
-  }]
-}];
-const ADMIN_NAV_GROUP = {
-  group: "Admin",
-  items: [{
-    key: "admin-whitelist",
-    label: "Whitelist",
+    key: "team-members",
+    label: "Team Members",
     icon: "users"
   }]
-};
+}];
 const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));
 const TASK_ASSIGN_NAV = [{
   group: "Task Assign",
@@ -189,8 +181,9 @@ const TITLE_MAP = {
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
   "kpi": "Creative KPI",
-  "settings": "Team settings",
-  "admin-whitelist": "Whitelist"
+  "team-members": "Team Members",
+  "settings": "Team Members",
+  "admin-whitelist": "Team Members"
 };
 const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat(["detail"]));
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-planner", "campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
@@ -211,6 +204,7 @@ const VALID_PRODUCT_KEYS = new Set([TASK_ASSIGN_PRODUCT_KEY, "flowmate", "market
 function getFlowMateHashRouteKey(hashValue) {
   const routeKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
   if (TASK_ASSIGN_HASH_TO_ROUTE[routeKey]) return TASK_ASSIGN_HASH_TO_ROUTE[routeKey];
+  if (["settings", "admin-whitelist"].includes(routeKey)) return "team-members";
   return routeKey === "queue" ? "attention" : routeKey;
 }
 function getProductHashRoute(productKey, routeKey, id = "") {
@@ -242,7 +236,7 @@ function showProductChoicePathInAddressBar() {
   } catch (e) {}
 }
 function getVisibleNavGroups(role) {
-  return role === "admin" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;
+  return role === "admin" ? NAV : MEMBER_NAV_GROUPS;
 }
 function isFlowMateRouteAllowedForRole(role, routeKey) {
   if (role === "admin") return Boolean(TITLE_MAP[routeKey]);
@@ -1144,7 +1138,7 @@ function App() {
     onOpen: open
   }), allowedRoute && route === "planning-calendar" && React.createElement(PlanningContentCalendarScreen, {
     onOpen: open
-  }), allowedRoute && route === "kpi" && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "settings" && React.createElement(SettingsScreen, null), allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
+  }), allowedRoute && route === "kpi" && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "team-members" && isAdminUser && React.createElement(TeamMembersScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
     onNav: nav
   })), isGlobalLeaveModalOpen && React.createElement(GlobalLeaveRequestModal, {
     onClose: () => setIsGlobalLeaveModalOpen(false)

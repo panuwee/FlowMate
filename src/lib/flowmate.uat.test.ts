@@ -3772,7 +3772,7 @@ describe("MVP 1.3 Planning Channel View frontend", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const navSource = appJsx.slice(
       appJsx.indexOf("const NAV = ["),
-      appJsx.indexOf("const ADMIN_NAV_GROUP"),
+      appJsx.indexOf("const MEMBER_NAV_GROUPS"),
     );
 
     expect(navSource).not.toContain('group: "Planning"');
@@ -3940,7 +3940,7 @@ describe("Marketing Plan product split shell", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const navSource = appJsx.slice(
       appJsx.indexOf("const NAV = ["),
-      appJsx.indexOf("const ADMIN_NAV_GROUP"),
+      appJsx.indexOf("const MEMBER_NAV_GROUPS"),
     );
 
     expect(appJsx).toContain('const [activeProduct, setActiveProduct]');
@@ -5638,7 +5638,7 @@ describe("MVP 1.2 List filters and refresh controls", () => {
 describe("MVP 1.2 Team Calendar frontend", () => {
   it("adds a Calendar route to team navigation and renders CalendarScreen", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
-    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
+    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const MEMBER_NAV_GROUPS"));
 
     expect(navSource).toContain('key: "calendar"');
     expect(navSource).toContain('label: "Calendar"');
@@ -5653,7 +5653,7 @@ describe("MVP 1.2 Team Calendar frontend", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const appCss = readFileSync(join(process.cwd(), "app.css"), "utf8");
-    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
+    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const MEMBER_NAV_GROUPS"));
     const teamGroupSource = navSource.slice(navSource.indexOf('group: "Team"'), navSource.indexOf('group: "Creative"'));
     const creativeGroupSource = navSource.slice(navSource.indexOf('group: "Creative"'));
     const calendarIndex = teamGroupSource.indexOf('key: "calendar"');
@@ -6426,7 +6426,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
     expect(quickTaskJs).toContain("role: profile.role || \"member\"");
   });
 
-  it("shows whitelist entry points only for admin users", () => {
+  it("shows Team Members only for admin users", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
 
     expect(appJsx).toContain("const isAdminUser = user.role === \"admin\"");
@@ -6434,7 +6434,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
     expect(appJsx).toContain("function isFlowMateRouteAllowedForRole(role, routeKey)");
     expect(appJsx).toContain("const allowedRoute = isTaskAssignProduct");
     expect(appJsx).toContain(": isFlowMateRouteAllowedForRole(user.role, route);");
-    expect(appJsx).toContain('allowedRoute && route === "admin-whitelist" && isAdminUser && React.createElement(AdminWhitelistScreen, null)');
+    expect(appJsx).toContain('allowedRoute && route === "team-members" && isAdminUser && React.createElement(TeamMembersScreen, null)');
     expect(appJsx).toContain("!allowedRoute && React.createElement(AccessDeniedScreen");
     expect(appJsx).toContain("onNav: nav");
   });
@@ -6444,7 +6444,7 @@ describe("MVP 1.1 admin whitelist frontend UI", () => {
 
     expect(appJsx).toContain('const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));');
     expect(appJsx).toContain("function getVisibleNavGroups(role)");
-    expect(appJsx).toContain("return role === \"admin\" ? [...NAV, ADMIN_NAV_GROUP] : MEMBER_NAV_GROUPS;");
+    expect(appJsx).toContain("return role === \"admin\" ? NAV : MEMBER_NAV_GROUPS;");
     expect(appJsx).toContain("const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items.map(item => item.key)).concat([\"detail\"]));");
     expect(appJsx).toContain("if (role === \"admin\") return Boolean(TITLE_MAP[routeKey]);");
     expect(appJsx).toContain("return MEMBER_ROUTE_KEYS.has(routeKey);");
@@ -7229,7 +7229,7 @@ describe("Workload reporting access", () => {
     const appJsx = readFileSync(join(process.cwd(), "app.jsx"), "utf8");
     const screensC = readFileSync(join(process.cwd(), "screens-c.jsx"), "utf8");
     const workloadLoader = readFileSync(join(process.cwd(), "supabase-workload-data.js"), "utf8");
-    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const ADMIN_NAV_GROUP"));
+    const navSource = appJsx.slice(appJsx.indexOf("const NAV = ["), appJsx.indexOf("const MEMBER_NAV_GROUPS"));
     const titleMapSource = appJsx.slice(appJsx.indexOf("const TITLE_MAP = {"), appJsx.indexOf("const MEMBER_ROUTE_KEYS"));
     const routeSource = appJsx.slice(appJsx.indexOf("const allowedRoute ="), appJsx.indexOf("function ProductSwitch"));
 

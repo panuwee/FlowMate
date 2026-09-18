@@ -13,6 +13,8 @@ const ROOT = path.resolve(__dirname, "..");
 const ENTRY_PAGES = ["index.html", "home/index.html", "product-book/index.html"];
 const VERSIONED_ASSETS = [
   "screens-a.js",
+  "screens-b.js",
+  "supabase-quick-task.js",
   "data.js",
   "creative-kpi-report.css",
   "creative-kpi-report.js",

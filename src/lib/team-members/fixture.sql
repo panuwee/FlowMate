@@ -1,0 +1,26 @@
+
+ create role anon;create role authenticated;create role service_role;
+ create schema activity_automation_private;create schema battle_pass_private;create schema auth;create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+ create type assignment_trigger as enum('create','recheck','rerun');
+ create type work_status as enum('unassigned','need_brief','assigned','in_progress','review','blocked','delivered','cancelled');
+ create table users(id uuid primary key,is_active boolean,role text default 'member');create table user_team_memberships(user_id uuid,team_code text);create function flowmate_kpi_can_view() returns boolean language sql as $$select exists(select 1 from public.users where id=auth.uid() and role='admin')$$;create function flowmate_can_read_work_item(uuid,uuid) returns boolean language sql as $$select false$$;
+ create table work_items(id uuid primary key,display_id text,title text,work_type text default 'creative_request',requester_team text default 'Operations',owning_team_code text default 'ops',requester_user_id uuid,status work_status default 'unassigned',priority text default 'normal',due_date date default current_date,final_approved_due_date date,launch_date date,archived_at timestamptz,final_owner_member_id uuid,assignee_user_id uuid,effort_point integer default 1,needs_split boolean default false,wip_counted boolean default false,assignment_reason text,urgent_reason text,updated_at timestamptz);
+ create table team_members(id uuid primary key,user_id uuid,member_code text,display_name text,discipline text,discipline_short text,active boolean default true,skills text[],backup_skills text[] default '{}',availability text default 'available',wip_limit integer default 5,capacity_per_day numeric default 8,capacity_override_per_day numeric);
+ create table creative_request_details(work_item_id uuid primary key,brief_link text default 'https://example.org/brief',asset_type text default 'static-graphic',asset_subtype text default 'banner',asset_count integer default 1,asset_type_2 text,asset_subtype_2 text,asset_count_2 integer,brief_completeness_status text,brief_missing_reason text,updated_at timestamptz);
+ create table creative_kpi_brief_evidence(id bigint generated always as identity primary key,work_item_id uuid,action text,submission_id bigint unique,actor_user_id uuid,reason text,brief_link text default 'https://example.org/brief');
+ create table work_item_events(created_at timestamptz default now(),work_item_id uuid,actor_user_id uuid,event_type text,from_status work_status,to_status work_status,metadata jsonb);
+ create table assignment_runs(work_item_id uuid,triggered_by assignment_trigger,result text,reason text,effort_point integer,raw_range_min int,raw_range_max int,was_capped boolean,capacity_snapshot jsonb,suggested_owner_member_id uuid,final_owner_member_id uuid,ran_at timestamptz default now());
+ create table flowmate_capacity_allocations(work_item_id uuid,team_member_id uuid,bucket_date date,bucket_half text,capacity_point numeric);
+ create table activity_automation_private.runs(id uuid primary key,activity text);
+ create table activity_automation_private.output_bindings(work_item_id uuid,run_id uuid);
+ create table battle_pass_private.monthly_runs(brief_id uuid,mode text,state text default 'complete',checkpoint jsonb default '{}',period text default '2026-10',review_released_at timestamptz,review_released_by uuid);
+ create table battle_pass_private.brief_bindings(brief_id uuid,mode text);
+ create function flowmate_brief_missing_reason(uuid) returns text language sql as $$select null::text$$;
+ create function flowmate_effort_for_subtype(text,text,integer) returns integer language sql as $$select $3$$;
+ create function flowmate_normalize_creative_skill(text,text) returns text language sql as $$select $2$$;
+ create function flowmate_next_working_day(date) returns date language sql as $$select $1$$;
+ create function flowmate_is_th_business_day(date) returns boolean language sql as $$select true$$;
+ create function flowmate_leave_fraction_for_bucket(uuid,date,text) returns numeric language sql as $$select 0::numeric$$;
+ create function flowmate_is_gdve_member_code(text) returns boolean language sql as $$select $1 in ('eye','tong','jo','pond','ploy','vee')$$;
+ create function flowmate_subtract_th_business_days(date,integer) returns date language sql as $$select $1-$2$$;
+ create view flowmate_team_schedule_v as select id work_item_id,title from work_items;create function is_active_app_user() returns boolean language sql as $$select true$$;create function flowmate_normalize_team_code(text) returns text language sql as $$select 'gdve'::text$$;

@@ -1562,3 +1562,108 @@ function AdminWhitelistScreen() {
 }
 
 Object.assign(window, { ListScreen, BoardScreen, QueueScreen, AdminWhitelistScreen });
+
+/* Team Members: a single admin destination for access and creative capacity. */
+function TeamMembersScreen() {
+  const [rows, setRows] = useStateB([]);
+  const [tab, setTab] = useStateB("members");
+  const [query, setQuery] = useStateB("");
+  const [status, setStatus] = useStateB("all");
+  const [loading, setLoading] = useStateB(true);
+  const [error, setError] = useStateB("");
+  const [saving, setSaving] = useStateB(false);
+  const [edit, setEdit] = useStateB(null);
+  const admin = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const date = value => value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Bangkok" }) : "—";
+  const localTime = value => value ? new Date(new Date(value).getTime() + 7 * 3600000).toISOString().slice(0,16) : "";
+  const utc = value => value ? new Date(value + ":00+07:00").toISOString() : null;
+  async function refresh() {
+    setLoading(true); setError("");
+    try { setRows(await window.loadFlowMateTeamMembers()); }
+    catch (e) { setError(window.flowmateUserError?.(e, "Unable to load members. Team Members setup may be required.") || e.message); }
+    finally { setLoading(false); }
+  }
+  useEffectB(() => { if (admin) refresh(); }, [admin]);
+  useEffectB(() => {
+    if (!edit) return;
+    const previous = document.activeElement;
+    const dialog = document.getElementById("team-member-dialog");
+    const focusables = () => [...dialog.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),a[href]')];
+    focusables()[0]?.focus();
+    function key(e) {
+      if(e.key === "Escape" && !saving) setEdit(null);
+      if(e.key === "Tab") {
+        const items = focusables(), first = items[0], last = items[items.length-1];
+        if(e.shiftKey && document.activeElement===first) { e.preventDefault(); last?.focus(); }
+        else if(!e.shiftKey && document.activeElement===last) { e.preventDefault(); first?.focus(); }
+      }
+    }
+    dialog.addEventListener("keydown",key);
+    return () => { dialog.removeEventListener("keydown",key); previous?.focus(); };
+  }, [Boolean(edit), saving]);
+  if (!admin) return <div className="page">Admin access required.</div>;
+  const visible = rows.filter(r => (tab !== "creative" || r.creative) &&
+    `${r.display_name} ${r.email}`.toLowerCase().includes(query.toLowerCase()) &&
+    (status === "all" || (status === "active" ? r.access_active : !r.access_active)));
+  const blank = { email:"",display_name:"",role:"member",team_member_code:"",stop_assign_at:"",last_working_day:"",deactivate_at:"",skills:[],open_work:[] };
+  const profiles = [...new Set([...(window.MEMBERS || []).map(m=>m.code || m.member_code), ...rows.map(r=>r.team_member_code)].filter(Boolean))];
+  function open(row) {
+    setError("");
+    setEdit(row ? {...row, existing:true, stop_assign_at:localTime(row.stop_assign_at),deactivate_at:localTime(row.deactivate_at),last_working_day:row.last_working_day || "",
+      skills:window.getFlowMateTeamSettingsEditableSkills ? window.getFlowMateTeamSettingsEditableSkills({...row, skills:[...(row.skills || []), ...(row.backup_skills || [])]}) : [...(row.skills || []), ...(row.backup_skills || [])]} : {...blank});
+  }
+  const change = (key,value) => setEdit(prev=>({...prev,[key]:value}));
+  function finalDay(value) {
+    const next = value ? new Date(new Date(value+"T00:00:00Z").getTime()+86400000).toISOString().slice(0,10)+"T00:00" : "";
+    setEdit(prev=>({...prev,last_working_day:value,deactivate_at:next}));
+  }
+  async function save(event, action="save") {
+    event?.preventDefault();
+    if(saving) return;
+    if(action === "deactivate" && !window.confirm(`Deactivate ${edit.display_name}? ${edit.open_work?.length || 0} open tasks will remain for handover.`)) return;
+    setSaving(true); setError("");
+    try {
+      if(tab === "creative") {
+        await window.adminUpdateFlowMateTeamMember(edit.member_id,{capacityPerDay:Number(edit.capacity_per_day),wipLimit:Number(edit.wip_limit),skills:edit.skills});
+      } else {
+        await window.saveFlowMateTeamMember({email:edit.email,display_name:edit.display_name,role:edit.role,team_member_code:edit.team_member_code || null,
+          last_working_day:edit.last_working_day || null, stop_assign_at:utc(edit.stop_assign_at),deactivate_at:utc(edit.deactivate_at),action});
+      }
+      setEdit(null); await refresh();
+    } catch(e) { setError(window.flowmateUserError?.(e,"Unable to save member.") || e.message); }
+    finally { setSaving(false); }
+  }
+  return <div className="page team-members-page">
+    <div className="page__header"><div><h1 className="page__title">Team Members</h1><div className="page__sub">People, access & creative capacity</div></div>
+      <div className="page__actions"><button className="btn btn--secondary" onClick={refresh} disabled={loading}>Refresh</button>
+        <button className="btn btn--primary" disabled={loading || Boolean(error)} onClick={()=>{setTab("members");open(null);}}><Icon name="plus"/> Add member</button></div></div>
+    <div className="tm-summary"><span><strong>{rows.length}</strong> Members</span><span><strong>{rows.filter(r=>r.access_active).length}</strong> Active</span><span><strong>{rows.filter(r=>r.access_active && r.deactivate_at).length}</strong> Scheduled to leave</span></div>
+    <div className="card tm-card"><div className="tm-toolbar"><div className="tm-tabs" role="tablist" aria-label="Member settings">
+      {[['members','Members'],['creative','Creative Capacity']].map(([key,label])=><button key={key} role="tab" aria-selected={tab===key} className={tab===key?'is-active':''} onClick={()=>setTab(key)}>{label}</button>)}</div>
+      <div className="tm-filters"><input className="input" aria-label="Search members" placeholder="Search members…" value={query} onChange={e=>setQuery(e.target.value)}/><select className="select" aria-label="Access status" value={status} onChange={e=>setStatus(e.target.value)}><option value="all">All status</option><option value="active">Active</option><option value="inactive">Inactive</option></select></div></div>
+      {error && !edit && <div role="alert" className="reason-box reason-box--need">{error}</div>}
+      <div className="tm-table-wrap"><table className="tbl tm-table"><thead><tr><th>Member</th>{tab==='creative'?<><th>Skills</th><th>Capacity / day</th><th>WIP limit</th></>:<><th>Role</th><th>Access</th><th>Assignment</th><th>Last day</th></>}<th><span className="muted">Manage</span></th></tr></thead>
+      <tbody>{!loading && visible.map(r=><tr key={r.email}><td><div className="tm-person"><span className="tm-avatar">{(r.display_name || r.email).slice(0,2).toUpperCase()}</span><div><strong>{r.display_name}</strong><small>{r.email}</small></div></div></td>
+        {tab==='creative'?<><td><div className="tm-skills">{(r.skills||[]).slice(0,2).map(s=><span key={s}>{s}</span>)}{r.skills?.length>2 && <span>+{r.skills.length-2}</span>}</div></td><td>{r.capacity_per_day} pt</td><td>{r.wip_limit}</td></>:<><td>{r.role==='admin'?'Admin':'Member'}</td><td><span className={`tm-status ${r.access_active?'is-active':''}`}>{r.access_active?'Active':'Inactive'}</span></td><td>{!r.creative?'—':<span className={`tm-status ${r.assignment_active?'is-active':''}`}>{r.assignment_active?'Accepting':'Paused'}</span>}</td><td>{r.last_working_day?date(r.last_working_day+'T12:00:00+07:00'):'—'}</td></>}
+        <td><button className="btn btn--xs btn--secondary" aria-label={`Manage ${r.display_name}`} onClick={()=>open(r)}>Manage</button></td></tr>)}
+        {(loading || !visible.length) && <tr><td colSpan={tab==='creative'?5:6} className="tm-empty">{loading?'Loading members…':error?'Members unavailable':'No members found'}</td></tr>}</tbody></table></div>
+      <div className="tm-footer">{visible.length} members{tab==='creative'?' · GD/VE':''}</div></div>
+    {edit && <div className="modal-backdrop tm-backdrop"><form id="team-member-dialog" className="tm-drawer" role="dialog" aria-modal="true" aria-labelledby="tm-dialog-title" onSubmit={save}>
+      <div className="tm-drawer-head"><div><h2 id="tm-dialog-title">{edit.existing?edit.display_name:'Add member'}</h2><span className="muted">{tab==='creative'?'Creative Capacity':'Member details'}</span></div><button type="button" className="iconbtn" aria-label="Close member details" disabled={saving} onClick={()=>setEdit(null)}><Icon name="x"/></button></div>
+      <div className="tm-drawer-body"><fieldset disabled={saving}>
+      {tab==='creative'?<><label className="field"><span>Capacity / day</span><input className="input" type="number" min="0" max="24" step="0.25" required value={edit.capacity_per_day} onChange={e=>change('capacity_per_day',e.target.value)}/></label><label className="field"><span>WIP limit</span><input className="input" type="number" min="0" max="20" step="1" required value={edit.wip_limit} onChange={e=>change('wip_limit',e.target.value)}/></label><div className="field"><span>Skills</span><div className="skill-edit-grid">{(window.FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS||[]).map(s=><label key={s.key} className="skill-check"><input type="checkbox" checked={edit.skills.includes(s.key)} onChange={e=>change('skills',e.target.checked?[...edit.skills,s.key]:edit.skills.filter(k=>k!==s.key))}/>{s.label}</label>)}</div></div></>:<>
+        <label className="field"><span>Name</span><input className="input" required value={edit.display_name} onChange={e=>change('display_name',e.target.value)}/></label>
+        <label className="field"><span>Email</span><input className="input" required type="email" disabled={edit.existing} placeholder="name@garena.com" value={edit.email} onChange={e=>change('email',e.target.value)}/></label>
+        <div className="form-grid"><label className="field"><span>Role</span><select className="select" value={edit.role} onChange={e=>change('role',e.target.value)}><option value="member">Member</option><option value="admin">Admin</option></select></label><label className="field"><span>Team profile</span><select className="select" value={edit.team_member_code || ''} onChange={e=>change('team_member_code',e.target.value)}><option value="">None</option>{profiles.map(code=><option key={code} value={code}>{code}</option>)}</select></label></div>
+        <div className="tm-section-title">Schedule <small>Bangkok time</small></div>
+        <div className="field"><span className="tm-schedule-label"><label htmlFor="tm-stop-assign">Stop new assignments</label> <button type="button" className="tm-now" onClick={()=>change("stop_assign_at",localTime(new Date().toISOString()))}>Now</button></span><input id="tm-stop-assign" className="input" type="datetime-local" value={edit.stop_assign_at} onChange={e=>change('stop_assign_at',e.target.value)}/></div>
+        <div className="form-grid"><label className="field"><span>Last working day</span><input className="input" type="date" value={edit.last_working_day} onChange={e=>finalDay(e.target.value)}/></label><label className="field"><span>Deactivate at</span><input className="input" type="datetime-local" value={edit.deactivate_at} onChange={e=>change('deactivate_at',e.target.value)}/></label></div>
+        {edit.deactivate_at && <div className="tm-preview">Access ends {date(edit.deactivate_at+':00+07:00')} · {edit.deactivate_at.slice(11)}. Work history is retained.</div>}
+        {Boolean(edit.open_work?.length) && <details className="tm-handover"><summary>{edit.open_work.length} open tasks to hand over</summary>{edit.open_work.map(w=><a key={w.id} href={`#detail/${w.id}`} onClick={()=>setEdit(null)}>{w.id} · {w.title}</a>)}</details>}
+      </>}
+      </fieldset>{error && <div role="alert" className="reason-box reason-box--need">{error}</div>}</div>
+      <div className="tm-drawer-footer">{tab==='members' && edit.existing && edit.email!==window.FLOWMATE_CURRENT_USER?.email && <button type="button" disabled={saving} className="btn btn--danger" onClick={e=>save(e,edit.access_active?'deactivate':'reactivate')}>{edit.access_active?'Deactivate':'Reactivate'}</button>}<button type="submit" disabled={saving} className="btn btn--primary">{saving?'Saving…':'Save changes'}</button></div>
+    </form></div>}
+  </div>;
+}
+window.TeamMembersScreen = TeamMembersScreen;
