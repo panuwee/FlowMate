@@ -1115,7 +1115,7 @@ function App() {
     }, itemCount));
   }))), automationAccess.userId === authState.user?.id && ["allowed", "unavailable"].includes(automationAccess.state) && React.createElement("a", {
     className: "nav-item",
-    href: new URL("home/battle-pass-status.html", document.baseURI).href,
+    href: new URL("home/Activity-Automation.html", document.baseURI).href,
     style: { textDecoration: "none" },
     title: automationAccess.state === "unavailable" ? "ยังตรวจสิทธิ์ไม่ได้ เปิดหน้าเพื่อลองตรวจอีกครั้ง" : "ติดตามระบบอัตโนมัติกิจกรรม"
   }, "Activity Automation"), React.createElement(LiveStatus, {
