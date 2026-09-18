@@ -291,6 +291,57 @@ function App() {
     user: null
   });
   const [isSigningIn, setIsSigningIn] = useStateApp(false);
+  const [automationAccess, setAutomationAccess] = useStateApp({
+    userId: null,
+    state: "loading"
+  });
+  useEffectApp(() => {
+    let cancelled = false;
+    const userId = authState.status === "signed-in" ? authState.user?.id : null;
+    setAutomationAccess({
+      userId,
+      state: "loading"
+    });
+    if (!userId) return () => {
+      cancelled = true;
+    };
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("timeout")), 15000);
+    });
+    const request = Promise.resolve().then(() => window.flowmateSupabase.rpc("activity_automation_monitor_access"));
+    Promise.race([request, timeout]).then(result => {
+      if (cancelled) return;
+      if (result.error) {
+        setAutomationAccess({
+          userId,
+          state: result.error.code === "42501" ? "denied" : "unavailable"
+        });
+        return;
+      }
+      const capabilities = result.data?.data?.capabilities || result.data?.data;
+      if (typeof capabilities?.sharedRead !== "boolean" || typeof capabilities?.battlePassRead !== "boolean") {
+        setAutomationAccess({
+          userId,
+          state: "unavailable"
+        });
+        return;
+      }
+      setAutomationAccess({
+        userId,
+        state: capabilities.sharedRead || capabilities.battlePassRead ? "allowed" : "denied"
+      });
+    }).catch(() => {
+      if (!cancelled) setAutomationAccess({
+        userId,
+        state: "unavailable"
+      });
+    }).finally(() => clearTimeout(timer));
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [authState.status, authState.user?.id]);
   const [realtimeState, setRealtimeState] = useStateApp(() => window.FLOWMATE_REALTIME_STATE || {
     status: "idle",
     message: "Realtime not started"
@@ -1093,13 +1144,14 @@ function App() {
     }), React.createElement("span", null, it.label), itemCount != null && React.createElement("span", {
       className: "nav-item__count"
     }, itemCount));
-  }))), ["6e274581-5905-4146-a3eb-871f9c847bc6", "5abad25d-3e8c-4a0d-baa6-0a0615ba00fc"].includes(authState.user?.id) && React.createElement("a", {
+  }))), automationAccess.userId === authState.user?.id && ["allowed", "unavailable"].includes(automationAccess.state) && React.createElement("a", {
     className: "nav-item",
     href: new URL("home/battle-pass-status.html", document.baseURI).href,
     style: {
       textDecoration: "none"
-    }
-  }, "Battle Pass Automation"), React.createElement(LiveStatus, {
+    },
+    title: automationAccess.state === "unavailable" ? "ยังตรวจสิทธิ์ไม่ได้ เปิดหน้าเพื่อลองตรวจอีกครั้ง" : "ติดตามระบบอัตโนมัติกิจกรรม"
+  }, "Activity Automation"), React.createElement(LiveStatus, {
     realtimeState: realtimeState
   })), React.createElement("main", {
     className: "app__main",
