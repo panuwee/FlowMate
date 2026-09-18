@@ -100,7 +100,7 @@
     for (const row of data.outputs) {
       const item = node("div"); item.className = "output"; item.append(node("strong", row.period));
       item.append(node("span", row.held ? "พักงานเพื่อตรวจข้อมูลที่เปลี่ยน" : row.state === "complete"
-        ? row.reviewReleasedAt ? "Aof ปล่อยงานแล้ว" : "สร้างชุดงานแล้ว · รอ Aof ตรวจ" : status(row.state)));
+        ? row.reviewReleasedAt ? "ยืนยันบรีฟครบแล้ว" : "สร้างชุดงานแล้ว · รอยืนยันบรีฟครบ" : status(row.state)));
       for (const link of outputLinks(row)) { const a = node("a", link.label); a.href = link.href; a.target = "_blank"; a.rel = "noopener noreferrer"; item.append(a); }
       el("outputs").append(item);
     }

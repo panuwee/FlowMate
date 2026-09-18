@@ -2690,10 +2690,10 @@ function DetailScreen({ onNav, onOpen, focusId }) {
           <div className="card__body">
             <div className="reason-box" role="status">
               {currentBattlePassReview?.error ? "Review status could not be loaded. Refresh before assigning this work."
-                : !currentBattlePassReview || currentBattlePassReview.loading ? "Checking Aof review status..."
+                : !currentBattlePassReview || currentBattlePassReview.loading ? "Checking brief acceptance status..."
                 : currentBattlePassReview.data?.state === "source_review" ? "Source data changed. This work is paused until the source and brief have been checked."
-                : currentBattlePassReview.data?.held ? "Waiting for Aof to check the brief and Slides before GD assignment."
-                : "Aof completed the brief review. This work can now be assigned."}
+                : currentBattlePassReview.data?.held ? "ตรวจบรีฟและ Slides แล้วกด ยืนยันบรีฟครบ เพื่อให้ระบบ Auto Assign."
+                : "บรีฟผ่านการยืนยันแล้ว ตรวจผล Auto Assign ได้จากผู้รับงานและ Activity Log."}
             </div>
             {currentBattlePassReview?.data?.held && currentBattlePassReview.data.can_release && !isArchivedDetail && (
               <button className="btn btn--primary" style={{ marginTop: 12 }} disabled={pending} onClick={async () => {

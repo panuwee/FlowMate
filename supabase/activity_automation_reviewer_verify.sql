@@ -1,0 +1,10 @@
+begin;
+select set_config('request.jwt.claim.sub','5abad25d-3e8c-4a0d-baa6-0a0615ba00fc',true);
+set local role authenticated;
+select 'Aof / Operations' reviewer,w.display_id,public.flowmate_can_review_ops_brief(w.id) reviewer_allowed,public.flowmate_creative_brief(w.id)->>'can_accept' can_accept from public.work_items w where display_id in ('CR-1243','CR-1264','CR-1265','CR-1266','CR-1267');
+reset role;
+select set_config('request.jwt.claim.sub','6e274581-5905-4146-a3eb-871f9c847bc6',true);
+set local role authenticated;
+select 'Panu / Admin' reviewer,w.display_id,public.flowmate_creative_brief(w.id)->>'can_accept' can_accept from public.work_items w where display_id='CR-1267';
+reset role;
+rollback;
