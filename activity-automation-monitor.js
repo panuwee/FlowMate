@@ -50,6 +50,29 @@
   function renderSummary(data){const area=$('am-content');if(state.view==='overview'){const cards=n('div',null,'am-cards');const defs=[['กิจกรรมที่รองรับ','supportedActivities'],['สร้างชุดงานสำเร็จ','outputs'],['บรีฟรอยืนยัน','pendingBriefs'],['ต้องตรวจสอบ','attention']];for(const [title,key]of defs){const card=n('article',null,'am-card');card.append(n('h2',title),n('strong',data.cards?.[key]??'—'));card.append(n('small',data.cards?.complete===false?'ข้อมูลไม่ครบ · จำนวนที่อ่านได้':key==='supportedActivities'?'ตามสิทธิ์เข้าถึง':'ตามตัวกรองที่เลือก'));cards.append(card);}area.append(cards);const attention=panel('รายการที่ต้องตรวจสอบ');const list=n('ul',null,'am-list');for(const a of data.attention||[]){const item=n('li');item.append(n('strong',labels[a.activity]||a.activity||'ระบบ'),n('p',a.message||a.code||status(a.status)));if(a.id&&a.source)item.append(button('ดูหลักฐาน',()=>detail(a)));list.append(item);}if(!list.children.length)empty(attention,'ไม่พบรายการที่ต้องตรวจสอบในข้อมูลที่อ่านได้');else attention.append(list);area.append(attention);}const ap=panel('กิจกรรมที่รองรับ');activities(ap,data.activities||[]);area.append(ap);const op=panel('ผลลัพธ์ล่าสุด');outputs(op,data.outputs);area.append(op);area.append(n('p','Integration health: แสดงผลจากหลักฐานที่บันทึกไว้ การติดตั้ง Function ไม่ได้ยืนยันว่าเชื่อมต่อครบเส้นทาง','am-integration'));}
   function renderRows(data){const area=$('am-content'),p=panel(views[state.view]);if(state.view==='runs')table(p,['เวลาบันทึก','กิจกรรม / รอบ','ประเภท / ขั้นตอน','ผล','รายละเอียด'],data.rows,r=>[time(r.eventAt),labels[r.activity]+' · '+(r.projectCode||r.displayId||r.period||'—'),(r.kind||r.entityType||'—')+' / '+(r.stage||'—'),badge(r.status),button('ดูรายละเอียด',()=>detail(r))]);else table(p,['เวลา','กิจกรรม / CR','ประเภท / ผู้รับ','สถานะ','ครั้ง / ครั้งถัดไป','รายละเอียด'],data.rows,r=>[time(r.eventAt),(labels[r.activity]||r.activity||'—')+' · '+(r.displayId||r.projectCode||'—'),(r.kind||r.notificationType||'—')+' / '+(r.recipientLabel||'ไม่แสดงข้อมูลผู้รับ'),badge(r.status),(r.attempts??'—')+' / '+time(r.nextAttemptAt),button('ดูรายละเอียด',()=>notificationDetail(r))]);area.append(p);nextCursor=data.nextCursor;$('am-pagination').hidden=false;$('am-prev').disabled=!cursors.length;$('am-next').disabled=!data.hasMore||!nextCursor;$('am-page').textContent='หน้า '+(cursors.length+1);}
   function notificationDetail(r){openDrawer('รายละเอียดการแจ้งเตือน');dl($('am-detail'),[['กิจกรรม',labels[r.activity]],['สถานะ',status(r.status)],['ผู้รับ',r.recipientLabel],['ประเภท',r.kind||r.eventKind],['จำนวนครั้ง',r.attempts??r.attemptCount],['ครั้งถัดไป',time(r.nextAttemptAt)],['หลักฐาน API รับ',r.providerAccepted===true?'มีหลักฐาน':r.providerAccepted===false?'ยังไม่มีหลักฐาน':'ไม่มีข้อมูล'],['Code',r.code]]);$('am-detail').append(n('p','API รับข้อความแล้วไม่ได้หมายถึงผู้รับอ่านแล้ว หากยังยืนยันผลไม่ได้ ต้องตรวจสอบก่อนส่งซ้ำ'));}
+  async function diagnosisPanel(run,token){
+    if(run.source!=='shared'||!['membership','conqueror_crate','golden_spin','topup_promotion'].includes(run.activity)||!['test','production'].includes(run.mode)||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(run.id||''))return;
+    const box=panel('วิเคราะห์สาเหตุ · Activity Diagnosis');box.setAttribute('aria-live','polite');$('am-detail').append(box);
+    const args={p_activity:run.activity,p_mode:run.mode,p_run_id:run.id};let busy=false,sequence=0;
+    async function read(request=false){
+      if(busy||token!==detailGeneration)return;busy=true;const seq=++sequence;box.querySelectorAll('button').forEach(b=>b.disabled=true);let timer;
+      try{
+        const result=await Promise.race([client.rpc('activity_automation_diagnosis_'+(request?'request':'get'),args),new Promise((_,reject)=>{timer=root.setTimeout(()=>reject(new Error('timeout')),15000);})]);
+        if(token!==detailGeneration||seq!==sequence)return;
+        const d=result.data;if(result.error||!d||typeof d.available!=='boolean'||d.error)throw new Error('unavailable');
+        box.replaceChildren(n('h2','วิเคราะห์สาเหตุ · Activity Diagnosis'));
+        const states={unavailable:'ยังไม่เปิดใช้',deterministic:'คำแนะนำจากกฎที่ตรวจสอบแล้ว',pending:'รอวิเคราะห์',processing:'กำลังวิเคราะห์',cached:'ผลวิเคราะห์ที่บันทึกไว้',failed:'วิเคราะห์ไม่สำเร็จ',stale:'หลักฐานเปลี่ยนแล้ว',rate_limited:'ครบขีดจำกัดการวิเคราะห์'};
+        box.append(n('p',states[d.status]||'ยังไม่มีผลวิเคราะห์'),n('small','ข้อมูล ณ '+time(d.asOf)));
+        if(d.diagnosis){const v=d.diagnosis;dl(box,[['สาเหตุ',v.diagnosis],['หลักฐาน',v.evidence],['ผลกระทบ',v.impact],['คำแนะนำ',v.recommendedAction?.raw||v.recommendedAction?.code],['ความเสี่ยง',v.risk],['ความมั่นใจ',v.confidence==null?'ไม่มีข้อมูล':v.confidence+' / 100']]);}
+        if(d.versions)box.append(n('small','Agent: '+(d.versions.agent||'—')+' · Knowledge: '+(d.versions.knowledge||'—')+' · Tools: '+(d.versions.tools||'—')));
+        box.append(n('p','Agent ให้คำแนะนำเท่านั้น ไม่รันงาน แก้ไข หรือส่งข้อความแทนคุณ','am-muted'));
+        if(d.available===true&&d.canRequest===true){box.append(n('p','การขอวิเคราะห์อาจมีค่าใช้จ่าย AI; การรีเฟรชจะอ่านผลเดิมเท่านั้น','am-muted'),button('ขอวิเคราะห์',()=>read(true)));}
+        if(d.available===true)box.append(button('รีเฟรชผลวิเคราะห์',()=>read(false)));
+      }catch{if(token===detailGeneration){box.replaceChildren(n('h2','วิเคราะห์สาเหตุ · Activity Diagnosis'),n('p',request?'ยังยืนยันผลคำขอไม่ได้ ให้รีเฟรชผลก่อนขอซ้ำ':'ยังอ่านระบบวิเคราะห์ไม่ได้ หรือยังไม่ได้เปิดใช้'));box.append(button('รีเฟรชผลวิเคราะห์',()=>read(false)));}}
+      finally{root.clearTimeout(timer);busy=false;}
+    }
+    await read();
+  }
   async function detail(row,push=true){
     if(row.entityType==='notification'){notificationDetail(row);return;}
     if(['incident','health'].includes(row.entityType)){
@@ -64,6 +87,7 @@
       const d=result.data,r=d.run||{};$('am-detail').replaceChildren();
       dl($('am-detail'),[['กิจกรรม',labels[r.activity]||r.activity],['Run ID',r.id],['ผล',status(r.status)],['ขั้นตอน',r.stage],['เวลา',time(r.eventAt)],['Project Code',r.projectCode],['Code',r.code]]);outputs($('am-detail'),d.outputs);
       const timeline=panel('หลักฐานแต่ละขั้นตอน');for(const e of d.timeline||[])timeline.append(n('p',(e.label||e.stage||e.kind||'ขั้นตอน')+' · '+status(e.status)+' · '+time(e.at||e.eventAt||e.checkedAt)));if(!d.timeline?.length)empty(timeline,'ยังไม่มี timeline ที่บันทึกไว้');$('am-detail').append(timeline);
+      diagnosisPanel(r,token);
     }catch{if(token===detailGeneration)$('am-detail').replaceChildren(n('p','อ่านรายละเอียดไม่ได้ หรือไม่มีสิทธิ์เข้าถึงรายการนี้'));}
   }
   function closeDrawer(updateUrl=true){++detailGeneration;if($('am-drawer').open)$('am-drawer').close();if(state.run){state.run='';state.source='';if(updateUrl)url(true);}opener?.focus?.();}
