@@ -2,7 +2,7 @@
   'use strict';
   const labels={battle_pass:'Battle Pass',membership:'Membership',conqueror_crate:'Conqueror Crate',golden_spin:'Golden Spin',topup_promotion:'Topup Promotion'};
   const views={overview:'ภาพรวมระบบอัตโนมัติกิจกรรม',activities:'กิจกรรม',runs:'ประวัติรัน',notifications:'การแจ้งเตือน'};
-  const statuses={complete:'สร้างสำเร็จ',succeeded:'สำเร็จ',assigned:'มอบหมายแล้ว',accepted:'ยืนยันแล้ว',pending:'รอดำเนินการ',submitted:'รอยืนยัน',pending_acceptance:'รอยืนยัน',failed:'ล้มเหลว',uncertain:'ยังยืนยันผลไม่ได้',cancelled:'ยกเลิก',processing:'กำลังดำเนินการ',retryable:'รอลองใหม่',delivered:'API รับข้อความแล้ว',blocked:'ติดเงื่อนไข',review_required:'ต้องตรวจสอบ',running:'กำลังทำงาน',disabled:'ปิดอยู่',enabled:'เปิดอยู่',unavailable:'อ่านสถานะไม่ได้',unknown:'ยังไม่มีข้อมูล',waiting_confirmation:'รอยืนยันต้นทาง',source_ready:'ผ่านการตรวจ SSoT',working_sheet_invalid:'Working Sheet ยังไม่พร้อม',source_dates_invalid:'วันกิจกรรมยังไม่พร้อม',project_code_missing:'ยังไม่มี Project Code',source_ambiguous:'พบข้อมูลต้นทางซ้ำ'};
+  const statuses={existing:'Done — สร้างแล้ว',done:'Done — สร้างแล้ว',existing_output_complete:'Done — สร้างแล้ว',complete:'สร้างสำเร็จ',succeeded:'สำเร็จ',assigned:'มอบหมายแล้ว',accepted:'ยืนยันแล้ว',pending:'รอดำเนินการ',submitted:'รอยืนยัน',pending_acceptance:'รอยืนยัน',failed:'ล้มเหลว',uncertain:'ยังยืนยันผลไม่ได้',cancelled:'ยกเลิก',processing:'กำลังดำเนินการ',retryable:'รอลองใหม่',delivered:'API รับข้อความแล้ว',blocked:'ติดเงื่อนไข',review_required:'ต้องตรวจสอบ',running:'กำลังทำงาน',disabled:'ปิดอยู่',enabled:'เปิดอยู่',unavailable:'อ่านสถานะไม่ได้',unknown:'ยังไม่มีข้อมูล',waiting_confirmation:'รอยืนยันต้นทาง',source_ready:'ผ่านการตรวจ SSoT',working_sheet_invalid:'Working Sheet ยังไม่พร้อม',source_dates_invalid:'วันกิจกรรมยังไม่พร้อม',project_code_missing:'ยังไม่มี Project Code',source_ambiguous:'พบข้อมูลต้นทางซ้ำ',item_name_missing:'ข้อมูลชื่อไอเทมใน Loot ไม่ครบ',loot_dates_mismatch:'วันที่ Loot ไม่ตรงกับ SSoT'};
   Object.assign(statuses,{not_submitted:'ยังไม่ส่งบรีฟ',ready_for_review:'สร้างบรีฟแล้ว',generating:'กำลังสร้างบรีฟ',discovered:'พบกิจกรรมแล้ว',dispatching:'กำลังส่งงาน',resolution_unknown:'ยังไม่ทราบว่าแก้ไขแล้วหรือยัง',pending_acceptance:'รอยืนยันบรีฟ',stale:'ข้อมูลรันเกินช่วงที่คาด',held:'พักไว้ให้คนตรวจ',readiness_checked:'ตรวจต้นทางแล้ว',no_pending_month:'ไม่มีรอบที่รอดำเนินการ'});
   Object.assign(statuses,{claimed:'รับงานแล้ว',source_validated:'ตรวจต้นทางผ่านแล้ว',generation_pending:'อยู่ในขั้นสร้าง Slides',unassigned:'ยังไม่มอบหมาย',ready:'ผ่าน ณ เวลาตรวจ',not_ready:'ไม่ผ่าน ณ เวลาตรวจ',ambiguous:'พบตารางเวลาซ้ำ'});
   Object.assign(statuses,{source_identity_invalid:'ชื่อกิจกรรมต้นทางไม่ตรงรูปแบบที่รองรับ',source_period_invalid:'เดือนต้นทางไม่ตรงกับกิจกรรม',waiting:'รอข้อมูลต้นทาง',rejected:'ต้นทางไม่ผ่านการตรวจ'});
@@ -37,11 +37,11 @@
     const wrap=n('div'),check=a.lastSourceCheck,run=a.lastRun?.status!=='complete'&&check&&new Date(check.checkedAt)>new Date(a.lastRun?.eventAt)?null:a.lastRun;
     if(run){
       const identity=run.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(run.period)?' ('+periodLabel(run.period)+')':''));
-      wrap.append(n('span','Current Status: '+identity+' — '+status(run.status)));
+      wrap.append(n('span','Current Status: '+identity+' — '+(run.status==='complete'?'Done — ':'')+status(run.status)));
       if(run.eventAt)wrap.append(n('small',time(run.eventAt)));
     }else if(check){
       const identity=check.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(check.period)?' ('+periodLabel(check.period)+')':''));
-      wrap.append(n('span','Current Status: '+identity+' — '+status(check.code||check.status)));
+      wrap.append(n('span','Current Status: '+identity+' — '+(check.code==='existing_output_complete'?'Done — สร้างแล้ว':status(check.code||check.status))));
     }
     else wrap.append(n('span','Current Status: รอผลตรวจต้นทางครั้งแรก'));
     return wrap;
@@ -49,6 +49,10 @@
   function sourceStatus(a){
     if(a.projects?.length){const list=n('div');for(const project of a.projects){const item=n('div');item.append(n('strong',project.projectCode),sourceStatus({...a,projects:null,lastSourceCheck:project.lastSourceCheck}));list.append(item);}return list;}
     const source=n('div'),check=a.lastSourceCheck;
+    if(check?.code==='existing_output_complete'){
+      source.append(n('span','Done — มี Working Sheet, CR และ Brief Link แล้ว'),n('small','ข้ามรายการนี้และตรวจรอบถัดไป'),n('small',time(check.checkedAt)));
+      return source;
+    }
     source.append(n('span',check?.sourceReady===true?'ต้นทางพร้อม ณ เวลาตรวจ':check?.sourceReady===false?'ต้นทางยังไม่พร้อม':'ยังไม่มีผลตรวจต้นทาง'));
     if(check&&Object.hasOwn(check,'workingSheetLinked'))source.append(n('small','SSoT Working Sheet: '+(check.workingSheetLinked===true?'Filled':check.workingSheetLinked===false?'Empty':'ยังไม่ยืนยัน')));
     if(check&&Object.hasOwn(check,'confirmed'))source.append(n('small','Loot Confirmed?: '+(check.confirmed===true?'Yes':check.confirmed===false?'No':'ยังไม่ยืนยัน')));
