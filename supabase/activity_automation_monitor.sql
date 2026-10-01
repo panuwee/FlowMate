@@ -302,6 +302,13 @@ begin
  activity_rows:=activity_rows||jsonb_build_array(config||jsonb_build_object('key',a,'label',label,'sourceSystem',src,'configurationScope',case when src='shared' then 'shared_4_activities' else 'battle_pass' end,
  'pendingBriefs',npend,'notificationAttention',natt,'availability','ok',
  'lastRun',latest,'lastSourceCheck',checked,'capabilities',jsonb_build_object('controls',src='battle_pass','diagnosis',src='battle_pass'),
+ 'projects',case when src='shared' and p_mode='production' then (select coalesce(jsonb_agg(jsonb_build_object(
+ 'projectCode',o.project_code,'lastRun',(select r.record from activity_automation_private.monitor_rows('shared','production',null,'runs') r where r.activity=a and r.project_code=o.project_code order by r.event_at desc limit 1),
+ 'lastSourceCheck',jsonb_build_object('projectCode',o.project_code,'period',o.period,'code',activity_automation_private.monitor_code(o.code),'sourceReady',o.state='ready',
+ 'confirmed',case when o.code='source_ready' then true when o.code='waiting_confirmation' then false end,
+ 'workingSheetLinked',case when o.code='source_ready' then true when o.code='working_sheet_invalid' then false end,
+ 'checkedAt',o.observed_at,'sourceCheckedAt',o.observed_at)) order by o.project_code,o.source_row),'[]'::jsonb)
+ from activity_automation_private.production_observations o where o.activity=a and coalesce(o.period,case when o.project_code ~ '^[0-9]{6}_' then '20'||substring(o.project_code,1,2)||'-'||substring(o.project_code,3,2) end)=p_month) else '[]'::jsonb end,
  'healthState',case when src='shared' and p_mode='production' then coalesce(config->>'healthState','unknown')
  when src='battle_pass' and p_mode='production' and config->>'schedulerState'='active' and (config->>'runnerEnabled')::boolean then case when latest is null or (latest->>'eventAt')::timestamptz<current_timestamp-interval '65 minutes' then 'stale' else 'current' end else 'unknown' end));
  end loop;

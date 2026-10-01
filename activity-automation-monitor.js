@@ -33,7 +33,8 @@
     return new Intl.DateTimeFormat('en-US',{month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(value+'-01T12:00:00Z'));
   }
   function currentStatus(a){
-    const wrap=n('div'),check=a.lastSourceCheck,run=check&&new Date(check.checkedAt)>new Date(a.lastRun?.eventAt)?null:a.lastRun;
+    if(a.projects?.length){const list=n('div');for(const project of a.projects)list.append(currentStatus({...a,projects:null,lastRun:project.lastRun,lastSourceCheck:project.lastSourceCheck}));return list;}
+    const wrap=n('div'),check=a.lastSourceCheck,run=a.lastRun?.status!=='complete'&&check&&new Date(check.checkedAt)>new Date(a.lastRun?.eventAt)?null:a.lastRun;
     if(run){
       const identity=run.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(run.period)?' ('+periodLabel(run.period)+')':''));
       wrap.append(n('span','Current Status: '+identity+' — '+status(run.status)));
@@ -46,6 +47,7 @@
     return wrap;
   }
   function sourceStatus(a){
+    if(a.projects?.length){const list=n('div');for(const project of a.projects){const item=n('div');item.append(n('strong',project.projectCode),sourceStatus({...a,projects:null,lastSourceCheck:project.lastSourceCheck}));list.append(item);}return list;}
     const source=n('div'),check=a.lastSourceCheck;
     source.append(n('span',check?.sourceReady===true?'ต้นทางพร้อม ณ เวลาตรวจ':check?.sourceReady===false?'ต้นทางยังไม่พร้อม':'ยังไม่มีผลตรวจต้นทาง'));
     if(check&&Object.hasOwn(check,'workingSheetLinked'))source.append(n('small','SSoT Working Sheet: '+(check.workingSheetLinked===true?'Filled':check.workingSheetLinked===false?'Empty':'ยังไม่ยืนยัน')));
