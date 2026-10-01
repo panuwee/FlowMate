@@ -3090,9 +3090,15 @@ function filterMarketingPlanRows(rows, selectedMonth, selectedChannel = "all", a
     return selectedChannel === "all" || row.channel === selectedChannel;
   }).sort((a, b) => String(a.publishDate || "").localeCompare(String(b.publishDate || "")) || String(a.publishTime || "").localeCompare(String(b.publishTime || "")) || String(a.channel || "").localeCompare(String(b.channel || "")) || String(a.campaignName || "").localeCompare(String(b.campaignName || "")) || String(a.contentTitle || "").localeCompare(String(b.contentTitle || "")));
 }
+function normalizeMarketingPlanWorkingSheetMonths(rows) {
+  return (rows || []).map(row => ({
+    ...row,
+    monthKey: row.publishDate ? row.publishDate.slice(0, 7) : row.monthKey || ""
+  }));
+}
 function groupMarketingPlanWorkingSheetRows(rows, selectedMonth, selectedChannel = "all") {
   const groups = new Map();
-  filterMarketingPlanRows(rows, selectedMonth, selectedChannel, "", true).forEach(row => {
+  filterMarketingPlanRows(normalizeMarketingPlanWorkingSheetMonths(rows), selectedMonth, selectedChannel, "", true).forEach(row => {
     const key = row.contentItemId || `${row.campaignName}-${row.contentTitle}`;
     if (!groups.has(key)) {
       groups.set(key, {
@@ -3492,7 +3498,7 @@ async function loadMarketingPlanTimelineRows(orderBy = "publish_date", monthKey 
   }
   const targetMonthKey = /^\d{4}-\d{2}$/.test(String(monthKey || "")) ? monthKey : getMarketingPlanCurrentMonthKey();
   const windowMonths = getMarketingPlanTimelineWindow(targetMonthKey).monthKeys;
-  const cacheKey = getMarketingPlanTimelineCacheKey(targetMonthKey);
+  const cacheKey = getMarketingPlanTimelineCacheKey(targetMonthKey) + (options.useLaunchMonth ? ":launch" : "");
   const cached = marketingPlanTimelineCache.get(cacheKey);
   const force = options.force === true;
   const cacheAge = cached ? Date.now() - cached.loadedAt : Number.POSITIVE_INFINITY;
@@ -3503,7 +3509,14 @@ async function loadMarketingPlanTimelineRows(orderBy = "publish_date", monthKey 
     const rows = await marketingPlanTimelineRequests.get(cacheKey);
     return sortMarketingPlanTimelineRows(rows, orderBy);
   }
-  let query = window.flowmateSupabase.from("marketing_plan_timeline_v").select(MARKETING_PLAN_TIMELINE_SELECT_COLUMNS).in("month_key", windowMonths).order("month_key", {
+  let query = window.flowmateSupabase.from("marketing_plan_timeline_v").select(MARKETING_PLAN_TIMELINE_SELECT_COLUMNS);
+  if (options.useLaunchMonth) {
+    const endMonthKey = getNextMarketingPlanMonthKey(windowMonths[windowMonths.length - 1]);
+    query = query.or(`and(publish_date.gte.${targetMonthKey}-01,publish_date.lt.${endMonthKey}-01),and(publish_date.is.null,month_key.in.(${windowMonths.join(",")}))`);
+  } else {
+    query = query.in("month_key", windowMonths);
+  }
+  query = query.order("month_key", {
     ascending: true
   }).order("publish_date", {
     ascending: true
@@ -5950,7 +5963,7 @@ function MarketingPlanWorkingSheetScreen() {
   const [duplicateInFlightContentItemId, setDuplicateInFlightContentItemId] = useStateApp("");
   async function loadWorkingSheetRows(aliveRef, options = {}) {
     try {
-      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, options);
+      const normalizedRows = await loadMarketingPlanTimelineRows("publish_date", selectedMonth, { ...options, useLaunchMonth: true });
       if (aliveRef && !aliveRef.alive) return;
       setRows(normalizedRows);
       setLoadState({

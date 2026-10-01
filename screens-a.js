@@ -3532,11 +3532,7 @@ function DetailScreen({
     className: "meta-row__val"
   }, React.createElement(PriorityBadge, {
     level: w.priority
-  }))))), hasCreativeDetails && w.isSupabaseRow && window.FlowMateCreativeBriefEvidence && React.createElement(FlowMateCreativeBriefEvidence, {
-    key: w.workItemId,
-    workItemId: w.workItemId,
-    onChanged: refreshDetailItem
-  }), hasCreativeDetails && React.createElement("div", {
+  }))))), hasCreativeDetails && React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__head"

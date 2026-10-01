@@ -2751,7 +2751,6 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
           )}
 
-          {hasCreativeDetails && w.isSupabaseRow && window.FlowMateCreativeBriefEvidence && <FlowMateCreativeBriefEvidence key={w.workItemId} workItemId={w.workItemId} onChanged={refreshDetailItem} />}
           {hasCreativeDetails && (
             <div className="card">
               <div className="card__head"><span className="card__title">Creative details</span></div>
