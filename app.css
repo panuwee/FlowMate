@@ -4839,3 +4839,10 @@ html[data-theme="dark"] .product-book-cms__message--error {
 @media(max-width:640px) { .tm-summary { gap:14px; flex-wrap:wrap; }.tm-toolbar { padding:14px; }.tm-filters { width:100%; }.tm-filters .input { width:100%; }.tm-drawer-body .form-grid { grid-template-columns:1fr; }.tm-summary strong { font-size:17px; } }
 .tm-schedule-label { display:flex; justify-content:space-between; align-items:center; }
 .tm-now { border:0; background:none; color:var(--fg-primary); font:inherit; text-decoration:underline; cursor:pointer; padding:0 3px; }
+
+
+/* Task Assign forms stack on narrow screens. */
+@media (max-width: 760px) {
+  [data-testid="task-assign-create-form"],
+  [data-testid="task-assign-detail"] .form-grid { grid-template-columns: minmax(0, 1fr); }
+}

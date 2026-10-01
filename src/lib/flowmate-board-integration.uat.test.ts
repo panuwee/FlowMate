@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { assertEntryCacheContract } from "./test-support/entry-cache-contract";
 
 const repoRoot = join(__dirname, "..", "..");
 const readRepo = (path: string) => readFileSync(join(repoRoot, path), "utf8");
@@ -61,46 +62,6 @@ describe("FlowMate Board integration contracts", () => {
   });
 
   it("keeps cache tokens synchronized across all deployed entry pages", () => {
-    const entries = [
-      readRepo("index.html"),
-      readRepo("home/index.html"),
-      readRepo("product-book/index.html"),
-    ];
-    const assetNames = [
-      "app.css",
-      "supabase-list-data.js",
-      "supabase-workload-data.js",
-      "supabase-quick-task.js",
-      "search-utils.js",
-      "screens-a.js",
-      "screens-b.js",
-      "screens-c.js",
-      "app.js",
-    ];
-    const currentReleaseAssets = new Set([
-      "search-utils.js",
-      "screens-b.js",
-    ]);
-    const automatedReleaseAssets = new Set([
-      "app.css",
-      "supabase-list-data.js",
-      "supabase-workload-data.js",
-      "screens-c.js",
-      "app.js",
-    ]);
-
-    for (const assetName of assetNames) {
-      const versions = entries.map((entry) => {
-        const match = entry.match(new RegExp(`${assetName.replace(".", "\\.")}\\?v=([0-9a-f-]+)`));
-        return match?.[1] || "";
-      });
-      expect(versions[0], `${assetName} must have a cache token`).not.toBe("");
-      expect(new Set(versions).size, `${assetName} cache tokens must match`).toBe(1);
-      if (automatedReleaseAssets.has(assetName)) {
-        expect(versions[0], `${assetName} must use the automated release token`).toMatch(/^[0-9]{8}-[a-f0-9]{6}$/);
-      } else if (currentReleaseAssets.has(assetName)) {
-        expect(versions[0], `${assetName} must use the current release token`).toBe("20260806-01");
-      }
-    }
+    assertEntryCacheContract();
   });
 });

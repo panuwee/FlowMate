@@ -69,7 +69,7 @@ describe("Task Assign module separation", () => {
     expect(app).toContain("React.createElement(TeamGanttScreen");
     expect(app).toContain('product: isTaskAssignProduct ? "task-assign" : "flowmate"');
     expect(schedule).toContain('function TeamGanttScreen({ onOpen, product = "flowmate" })');
-    expect(schedule).toContain("Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline");
+    expect(schedule).toContain("Quick Task delivery timeline: optional review and committed deadline");
   });
 
   it("refreshes Board when switching between Task Assign and FlowMate", () => {

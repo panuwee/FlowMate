@@ -1158,7 +1158,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
                         <div className="kcard__row"><DueBadge delta={row.dueDelta} label={row.dueLabel} status={row.status} /></div>
                         {row.blockReason && <div className="kcard__row kcard__row--meta board-card__blocked"><Icon name="alert" size={11} /> Blocked: {row.blockReason}</div>}
                         <div className="board-card__actions" onClick={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()}>
-                          {row.type === "quick" && canTransitionBoardWork(row) && <button type="button" className="btn btn--xs btn--secondary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Mark done"}</button>}
+                          {row.type === "quick" && <button type="button" className="btn btn--xs btn--secondary" disabled={pending} onClick={() => onOpen(row.id)}>Manage task</button>}
                           {row.type === "creative" && row.status === "review" && canTransitionBoardTarget(row, "delivered") && <button type="button" className="btn btn--xs btn--primary" disabled={pending} onClick={() => completeWork(row)}>{pending ? "Working..." : "Approve delivered"}</button>}
                           <details className="board-card-menu">
                             <summary aria-label={`Actions for ${row.id}`}>Actions</summary>

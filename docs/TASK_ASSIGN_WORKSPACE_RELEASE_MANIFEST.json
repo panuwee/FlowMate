@@ -1,0 +1,144 @@
+{
+  "baseCommit": "cdab673c7fa5784639ac6c5be0f5789c2ee28f74",
+  "checkout": "C:\\SeaTH\\Projects\\flowmate\\.worktrees\\task-assign-workspace-release",
+  "state": "commit-ready; authorized GitHub version2.1.1 push; no production SQL or deploy action",
+  "files": [
+    {
+      "path": "app.css",
+      "sha256": "6BAD23C4AEEFB49A4ECEAB7E0964DB25C6F5D9156826CFA2992BA6205256888C"
+    },
+    {
+      "path": "app.js",
+      "sha256": "306005CF6749431F870CAB0ADF2B268EEDA10D1DD52E2FF0DAA83DA617FB3316"
+    },
+    {
+      "path": "app.jsx",
+      "sha256": "55B8956B8EAE189C513E7F61D468CE962F60D207291A9D3ABAC6AB970341189E"
+    },
+    {
+      "path": "build-github.cjs",
+      "sha256": "49D903EFC15530B6A0C2105502052E69B27CE2DEFB6A53AAC8992CB831D094CD"
+    },
+    {
+      "path": "docs/TASK_ASSIGN_WORKSPACE_DESIGN.md",
+      "sha256": "479BDB9F23640303AF78EC9AAF46D568746991D23668E01063F801A52E9FD6F5"
+    },
+    {
+      "path": "docs/TASK_ASSIGN_WORKSPACE_HANDOFF.md",
+      "sha256": "FAAC09F41324636F5ED1320F84582CD2BBED4EF270E2324EBF4B647168822823"
+    },
+    {
+      "path": "docs/TASK_ASSIGN_WORKSPACE_INTEGRATION.md",
+      "sha256": "2D900AE990F76EA19FEEF83D3B2F0F2C9FC1AFE050DB08E563AF36F2777B7480"
+    },
+    {
+      "path": "docs/TASK_ASSIGN_WORKSPACE_PREFLIGHT.md",
+      "sha256": "EC28538D74A23EEFA6BBC91EC81023995538638F81C015B72EA7E1722D7AA75E"
+    },
+    {
+      "path": "home/index.html",
+      "sha256": "8C1F6180886249BE1C48E38D23AEB619AC9F877105042EB57A02C71BA3CEBE34"
+    },
+    {
+      "path": "index.html",
+      "sha256": "137F4D1C8E3FD918BAF3D904BC86875C89D1CB780F424BEEFB8CB5EB3DDACBF2"
+    },
+    {
+      "path": "product-book/index.html",
+      "sha256": "B2A134D823953377A1CFBD2756A5551372ABE2A0DA1AF08BD10C712320A64034"
+    },
+    {
+      "path": "screens-a.js",
+      "sha256": "F20E9EB28AEF95B4D208B70925D275B69B8EB8ACB3CBF17778AE34D9BD3A918E"
+    },
+    {
+      "path": "screens-a.jsx",
+      "sha256": "C0B33C8ED5EA8EDE8EF54260046D5AEDA35AD764E00D6A69BFCF6D65176FA08D"
+    },
+    {
+      "path": "screens-b.js",
+      "sha256": "28FEEDDF3FCB6FA9C19C786BF2D972AD4AA77CEA441118BDC1C2BDCF318C9DF6"
+    },
+    {
+      "path": "screens-b.jsx",
+      "sha256": "16F3A8E4C99254A6A3A607E4CFC4CFA93E26B69B6B37D5BFEC2AD51C1B14723D"
+    },
+    {
+      "path": "screens-c.js",
+      "sha256": "D628CB03C0C6BB763B6E71617C7A09A0C988D7A84AB9F18CC26A1420C93869AD"
+    },
+    {
+      "path": "screens-c.jsx",
+      "sha256": "30C54F84526C6CB88453CDF5622B12D8DF4A551FE830B8FCDE8F18530E84B503"
+    },
+    {
+      "path": "screens-task-assign.js",
+      "sha256": "2521D2107B70D5E3D5A9661362ACC40E76A59F552FF585ED145EA8EEFD727DF4"
+    },
+    {
+      "path": "screens-task-assign.jsx",
+      "sha256": "DE9BA4E3A2BD6A31C729EE10A9F75A7BBDD3A8ECDBF040DD98D8D0CAFE177EA9"
+    },
+    {
+      "path": "scripts/release-stamp.cjs",
+      "sha256": "EDA329B253D301F60DB5AC5C8FDA65A7631EBDCF79ECFE08876271D8924EE1BB"
+    },
+    {
+      "path": "src/lib/entry-cache-contract.test.ts",
+      "sha256": "2AE748DCEFA4A15E6C89351AE95290EE0E28E36FA3E0D08B338DEABFF0936586"
+    },
+    {
+      "path": "src/lib/flowmate-board-frontend.uat.test.ts",
+      "sha256": "6559ADBE059FFD435C39DE0D113F226E678F1A4B36F4FE0A6F90A2957B3B5D17"
+    },
+    {
+      "path": "src/lib/flowmate-board-integration.uat.test.ts",
+      "sha256": "B30A800A5D72C38ADAB108A4D4D5406660C6459E49A76E1AE2A889715763DEA5"
+    },
+    {
+      "path": "src/lib/flowmate.uat.test.ts",
+      "sha256": "27676168523FBD6F10321C1BE14A19899A8BD5DC1D4FDC4F93C12FAAEDE24006"
+    },
+    {
+      "path": "src/lib/task-assign-module.uat.test.ts",
+      "sha256": "C6A6E33539132540AC7990DE28D444572078BF6A2DEE6D42A7A839F506B8AFD8"
+    },
+    {
+      "path": "src/lib/task-assign-workspaces-ui.test.ts",
+      "sha256": "33C12EC72394DCED0DF312E94F0C5ACE86DE2A17DDF5D915695537633161055C"
+    },
+    {
+      "path": "src/lib/task-assign-workspaces.test.ts",
+      "sha256": "C04ED53112F493C4538E4D716F6E73E1CB162CF67ABDCFBC59FD31CE21A13012"
+    },
+    {
+      "path": "src/lib/test-support/entry-cache-contract.ts",
+      "sha256": "0892ED4726BDECAEA9D1915EBDF1DBB75FB208BE30F26EE86384A2F5FAC2C4DC"
+    },
+    {
+      "path": "src/lib/workflow-mvp.uat.test.ts",
+      "sha256": "5B3A00C470440A4AF5991389B4F23C0C4F0407ED9B56D94B0D1282531488017B"
+    },
+    {
+      "path": "supabase-list-data.js",
+      "sha256": "D713F7C3531894958D71CAABD27920EA313E93729FAA19F3C543BEC9142571A1"
+    },
+    {
+      "path": "supabase-quick-task.js",
+      "sha256": "1F9A0B7065F972CDC75E0C8AFF3C35B5B80DBA00845B317425597EA0AAA692A3"
+    },
+    {
+      "path": "supabase/task_assign_workspaces_preflight.sql",
+      "sha256": "B6D550FADEE5F8510D1011ED9E3B1841BF4ABEB06F6B0A0A7CBBDDC2976F10A1"
+    },
+    {
+      "path": "supabase/task_assign_workspaces.sql",
+      "sha256": "B5928C80009961C01042DD4471B16925D5328485AB07BAB708502FCF71673D9B"
+    }
+  ],
+  "excluded": "output/ fixtures, logs, schema snapshots and browser harness",
+  "releaseStamp": "20261001-4aa655",
+  "validation": "531 Vitest + 9 Node tests passed; former 8 failures repaired",
+  "branch": "codex/task-assign-workspaces-20261001",
+  "hashBasis": "SHA256 of staged Git blob bytes (Git normalized line endings); manifest itself excluded"
+}

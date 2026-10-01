@@ -947,7 +947,7 @@ describe("FlowMate Board and Delivered frontend", () => {
     expect(board).toContain('window.sessionStorage?.removeItem("flowmate:board:archiveSearch")');
     expect(board).toContain("Load more");
     expect(board).toContain("View all in List");
-    expect(board).toContain("Mark done");
+    expect(board).toContain("Manage task");
     expect(board).toContain("Approve delivered");
     expect(board).toContain('aria-live="polite"');
     expect(board).not.toContain("window.loadFlowMateListRows");

@@ -2930,7 +2930,7 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
       <div className="page__header team-schedule__header">
         <div>
           <h1 className="page__title">{scheduleName}</h1>
-          <div className="page__sub">{isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline" : "All teams can see active GD/VE workload, milestones, and leave"} - {loadState.message}</div>
+          <div className="page__sub">{isTaskAssignProduct ? "Quick Task delivery timeline: optional review and committed deadline" : "All teams can see active GD/VE workload, milestones, and leave"} - {loadState.message}</div>
         </div>
         <select className="select" value={monthKey} onChange={event => setMonthKey(event.target.value)} data-testid="flowmate-gantt-month" aria-label="Schedule month">
           {monthOptions.map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
@@ -2967,7 +2967,7 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
 
       <>
         <div className="team-schedule__legend" aria-label="Timeline legend">
-          <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>{isTaskAssignProduct ? "1st Review / Draft" : "Asset First Draft"}</span>{!isTaskAssignProduct && <span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span>}<span><i className="gantt__legend-diamond"></i>Launch Date / Deadline</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
+          <span><i className="schedule-legend is-assigned"></i>Assigned</span><span><i className="schedule-legend is-progress"></i>In Progress</span><span><i className="schedule-legend is-review"></i>Review</span><span><i className="schedule-legend is-blocked"></i>Blocked</span><span><i className="team-schedule__legend-draft-marker"></i>{isTaskAssignProduct ? "Review / Deadline" : "Asset First Draft"}</span>{!isTaskAssignProduct && <span><i className="team-schedule__legend-final-approved-marker"></i>Final/Approved</span>}<span><i className="gantt__legend-diamond"></i>Launch Date / Deadline</span><span><i className="gantt__legend-line"></i>Today</span><span>⚑ Urgent</span>
         </div>
         <div className="gantt team-schedule__timeline" data-testid="flowmate-team-gantt-chart">
           <div className="gantt__header">
@@ -3750,7 +3750,7 @@ function TaskAssignScheduleScreen({ onOpen }) {
       <div className="page__header">
         <div>
           <h1 className="page__title">Team Schedule</h1>
-          <div className="page__sub">Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline - {loadState.message}</div>
+          <div className="page__sub">Quick Task delivery timeline: optional review and committed deadline - {loadState.message}</div>
         </div>
       </div>
       <div className="card">

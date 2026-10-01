@@ -361,6 +361,7 @@ async function loadFlowMateWorkItemsForList(options = {}) {
   if (!isTaskAssignProduct && !isGdveCreativeWorkspace && activeTeam) {
     query = query.eq("owning_team_code", activeTeam);
   }
+  if (isTaskAssignProduct && activeTeam && !options.allTaskTeams && options.profile !== "my-work") query = query.eq("owning_team_code", activeTeam);
   if (ownerFilters.length) query = query.or(ownerFilters.join(","));
   let result = await query;
 
@@ -761,6 +762,10 @@ function loadFlowMateNavigationRows(options = {}) {
 }
 
 function loadFlowMateSearchRows(options = {}) {
+  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") return loadFlowMateWorkItemsForList({ ...options, allTaskTeams: true }).then(result => {
+    if (result.error) throw result.error;
+    return (result.data || []).map(item => ({ id: item.display_id, title: item.title, type: "quick", campaign: item.project_name, note: item.description, requesterTeam: item.requester_team }));
+  });
   return loadFlowMateListRows({ ...options, profile: "summary" });
 }
 
@@ -808,7 +813,10 @@ function flowMateClampPageSize(value, fallback = 50) {
 }
 
 function flowMateApplyWorkspaceScope(query) {
-  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") return query.eq("work_type", "quick_task");
+  if (window.FLOWMATE_ACTIVE_PRODUCT === "task-assign") {
+    const team = window.getFlowMateActiveTeam?.();
+    return team ? query.eq("work_type", "quick_task").eq("owning_team_code", team) : query.eq("work_type", "quick_task").eq("owning_team_code", "no-workspace");
+  }
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
   if (activeTeam === "gdve") return query.eq("work_type", "creative_request");
   const creativeQuery = query.eq("work_type", "creative_request");
@@ -1218,10 +1226,10 @@ function taskAssignDeliveredFilterOptions(rows) {
 }
 
 async function loadTaskAssignDeliveredHistory({ scope, search, deliveredMonth, campaign, ownerId, cursor, limit }) {
-  const { data, error } = await window.flowmateSupabase
+  const { data, error } = await flowMateApplyWorkspaceScope(window.flowmateSupabase
     .from("work_items")
     .select(FLOWMATE_BOARD_WORK_ITEM_COLUMNS)
-    .eq("work_type", "quick_task")
+    .eq("work_type", "quick_task"))
     .eq("status", "delivered")
     .order("delivered_at", { ascending: false, nullsFirst: false })
     .order("id", { ascending: false })
@@ -1547,7 +1555,9 @@ async function loadFlowMateCalendarRows() {
     loadFlowMateOperationalRows(),
     loadFlowMateLeaveRows(),
   ]);
-  return [...workRows, ...leaveRows];
+  return [...workRows.map(row => row.type === "quick"
+    ? { ...row, calendarDate: row.dueDate || row.launchDate }
+    : row), ...leaveRows];
 }
 
 async function loadFlowMateTeamScheduleRows() {
@@ -1559,6 +1569,10 @@ async function loadFlowMateTeamScheduleRows() {
       .map((row) => ({
         ...row,
         type: "quick",
+        // A task without an optional review still needs a deadline marker.
+        reviewDate: row.dueDate || null,
+        dueDate: row.dueDate || row.launchDate,
+        calendarDate: row.dueDate || row.launchDate,
         assignee: row.assignee || row.assigneeUserId || "unassigned",
         assigneeOtherName: row.ownerName || row.assigneeOtherName || "Unassigned",
         assetType: "",

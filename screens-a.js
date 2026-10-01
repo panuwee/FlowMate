@@ -1108,7 +1108,7 @@ function normalizeFlowMateQuickDraft(draft) {
   };
   return {
     ...nextDraft,
-    dueDate: clampFlowMateDateToToday(nextDraft.dueDate),
+    dueDate: nextDraft.dueDate ? clampFlowMateDateToToday(nextDraft.dueDate) : "",
     launchDate: clampFlowMateDateToToday(nextDraft.launchDate)
   };
 }
@@ -1169,7 +1169,7 @@ function isFlowMateValidHttpUrl(value) {
   }
 }
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
-  quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority"],
+  quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority", "responsibleTeam", "urgentReason", "referenceLinks", "confidential", "collaboratorIds", "parentId", "requestKey"],
   creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "assetType2", "assetSubtype2", "assetCount2", "platforms", "sizeFormats", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishTime", "marketingPlanContentItemId", "marketingPlanOriginalBriefLink", "marketingPlanProductEvent", "marketingPlanCampaignName"]
 };
 function getDefaultQuickDraft() {
@@ -1180,11 +1180,18 @@ function getDefaultQuickDraft() {
     note: "",
     requesterTeam,
     projectName: "",
-    assigneeUserId: getDefaultQuickAssignee().userId,
+    assigneeUserId: "",
     assigneeOtherName: "",
-    dueDate: todayDate,
+    dueDate: "",
     launchDate: todayDate,
-    priority: "normal"
+    priority: "normal",
+    responsibleTeam: window.TaskAssign?.sourceTeam() || "",
+    urgentReason: "",
+    referenceLinks: "",
+    confidential: false,
+    collaboratorIds: [],
+    parentId: "",
+    requestKey: window.crypto.randomUUID()
   };
 }
 function getDefaultCreativeDraft() {
@@ -1226,7 +1233,7 @@ function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {
   const fields = FLOWMATE_CREATE_DRAFT_FIELDS[kind] || [];
   return fields.reduce((payload, field) => {
     const value = Object.prototype.hasOwnProperty.call(draft || {}, field) ? draft[field] : fallback[field];
-    payload[field] = Array.isArray(value) ? value.slice() : typeof value === "string" ? value : "";
+    payload[field] = Array.isArray(value) ? value.slice() : typeof value === "boolean" ? value : typeof value === "string" ? value : "";
     return payload;
   }, {});
 }
@@ -1262,6 +1269,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
     }
   }
   if (mode === "quick") {
+    if (row.responsibleTeam) return window.TaskAssign.validate(row);
     requireField("requesterTeam", "Requester team is required.");
     requireField("projectName", "Project / campaign is required.");
     requireField("dueDate", "1st Review / Draft is required.");
@@ -1307,7 +1315,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
 function readFlowMateCreateDraft(kind, fallback) {
   if (!window.localStorage) return fallback;
   try {
-    const raw = window.localStorage.getItem(FLOWMATE_CREATE_DRAFT_KEYS[kind]);
+    const raw = window.localStorage.getItem(getFlowMateCreateDraftStorageKey(kind));
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fallback;
@@ -1320,7 +1328,7 @@ function readFlowMateCreateDraft(kind, fallback) {
 function saveFlowMateCreateDraft(kind, draft) {
   if (!window.localStorage) return;
   try {
-    window.localStorage.setItem(FLOWMATE_CREATE_DRAFT_KEYS[kind], JSON.stringify(getFlowMateCreateDraftPayload(kind, draft)));
+    window.localStorage.setItem(getFlowMateCreateDraftStorageKey(kind), JSON.stringify(getFlowMateCreateDraftPayload(kind, draft)));
   } catch (error) {
     console.warn("[FlowMate Create] draft save failed:", error);
   }
@@ -1328,10 +1336,14 @@ function saveFlowMateCreateDraft(kind, draft) {
 function clearFlowMateCreateDraft(kind) {
   if (!window.localStorage) return;
   try {
-    window.localStorage.removeItem(FLOWMATE_CREATE_DRAFT_KEYS[kind]);
+    window.localStorage.removeItem(getFlowMateCreateDraftStorageKey(kind));
   } catch (error) {
     console.warn("[FlowMate Create] draft clear failed:", error);
   }
+}
+function getFlowMateCreateDraftStorageKey(kind) {
+  const base = FLOWMATE_CREATE_DRAFT_KEYS[kind];
+  return kind === "quick" ? `${base}:${window.FLOWMATE_CURRENT_USER?.id || "signed-out"}:${window.TaskAssign?.sourceTeam() || "no-workspace"}` : base;
 }
 function getDefaultQuickAssignee(options = FLOWMATE_ASSIGNEE_FALLBACK) {
   const currentUserId = window.FLOWMATE_CURRENT_USER && window.FLOWMATE_CURRENT_USER.id;
@@ -1379,14 +1391,7 @@ function CreateScreen({
   }
   const [quickDraft, setQuickDraft] = useState(() => {
     const draft = normalizeFlowMateQuickDraft(readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
-    return {
-      ...draft,
-      title: window.buildFlowMateTemplateTitle({
-        launchDate: draft.launchDate,
-        requesterTeam: draft.requesterTeam,
-        projectName: draft.projectName
-      })
-    };
+    return draft;
   });
   const [creativeDraft, setCreativeDraft] = useState(() => {
     return withCreativeDraftTitle(readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
@@ -1394,14 +1399,7 @@ function CreateScreen({
   function resetSubmittedDraft() {
     if (mode === "quick") {
       const draft = normalizeFlowMateQuickDraft(getDefaultQuickDraft());
-      setQuickDraft({
-        ...draft,
-        title: window.buildFlowMateTemplateTitle({
-          launchDate: draft.launchDate,
-          requesterTeam: draft.requesterTeam,
-          projectName: draft.projectName
-        })
-      });
+      setQuickDraft(draft);
       return;
     }
     setCreativeDraft(withCreativeDraftTitle(getDefaultCreativeDraft()));
@@ -1424,6 +1422,7 @@ function CreateScreen({
   }, []);
   useEffect(() => {
     let alive = true;
+    if (isTaskAssignProduct) return () => {};
     if (!window.loadFlowMateAssignees) return () => {};
     window.loadFlowMateAssignees().then(options => {
       if (!alive || !options.length) return;
@@ -1455,11 +1454,15 @@ function CreateScreen({
     if (!detailId) {
       throw new Error("Create succeeded, but the response did not include a work item ID.");
     }
-    if (!window.loadFlowMateWorkItemById) {
-      throw new Error(`Create succeeded for ${detailId}, but the detail loader is not ready.`);
-    }
     if (typeof onOpen !== "function") {
       throw new Error(`Create succeeded for ${detailId}, but detail navigation is not ready.`);
+    }
+    if (isTaskAssignProduct) {
+      onOpen(detailId);
+      return;
+    }
+    if (!window.loadFlowMateWorkItemById) {
+      throw new Error(`Create succeeded for ${detailId}, but the detail loader is not ready.`);
     }
     const createdRow = await window.loadFlowMateWorkItemById(detailId, {
       includeArchived: false
@@ -1591,14 +1594,8 @@ function CreateScreen({
   function updateQuickDraft(nextDraft) {
     setValidationErrors({});
     setCreateAlert("");
-    const title = window.buildFlowMateTemplateTitle({
-      launchDate: nextDraft.launchDate,
-      requesterTeam: nextDraft.requesterTeam,
-      projectName: nextDraft.projectName
-    });
     const nextQuickDraft = {
-      ...nextDraft,
-      title
+      ...nextDraft
     };
     setQuickDraft(nextQuickDraft);
     saveFlowMateCreateDraft("quick", nextQuickDraft);
@@ -1619,10 +1616,10 @@ function CreateScreen({
     className: "page__title"
   }, "Create"), React.createElement("div", {
     className: "page__sub"
-  }, isTaskAssignProduct ? "Create an operational Quick Task. Function is set automatically from your signed-in account." : "Create a Creative Request for the assignment engine."))), React.createElement("div", {
+  }, isTaskAssignProduct ? "Create work for your team or send a request to another team. Requester workspace is recorded automatically." : "Create a Creative Request for the assignment engine."))), React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: isTaskAssignProduct ? "minmax(0, 1fr)" : "1fr 1fr",
       gap: 16,
       marginBottom: 24
     }
@@ -1635,9 +1632,9 @@ function CreateScreen({
     name: "zap"
   }), " Quick task"), React.createElement("div", {
     className: "choice-card__sub"
-  }, "Small internal task, follow-up, or reminder. Stays in your team's quick-task list."), React.createElement("ul", {
+  }, "Non-creative work with one responsible team and one shared task record."), React.createElement("ul", {
     className: "choice-card__list"
-  }, React.createElement("li", null, "No brief or routing review required"), React.createElement("li", null, "Self-assign or pick a teammate"), React.createElement("li", null, "Tracked separately from creative requests"))), !isTaskAssignProduct && React.createElement("button", {
+  }, React.createElement("li", null, "Describe the expected deliverable"), React.createElement("li", null, "Assign a teammate or send to another team’s queue"), React.createElement("li", null, "Tracked separately from creative requests"))), !isTaskAssignProduct && React.createElement("button", {
     className: `choice-card ${mode === "creative" ? "is-active" : ""}`,
     onClick: () => switchCreateMode("creative")
   }, React.createElement("div", {
@@ -1689,184 +1686,279 @@ function CreateScreen({
     disabled: isSubmitting
   }, React.createElement(Icon, {
     name: "send"
-  }), " ", isSubmitting ? "Saving..." : mode === "quick" ? "Create quick task" : "Submit request")));
+  }), " ", isSubmitting ? "Saving..." : mode === "quick" ? quickDraft.responsibleTeam !== window.TaskAssign.sourceTeam() ? "Send request" : "Create task" : "Submit request")));
 }
 function QuickTaskForm({
   value,
   onChange,
-  assigneeOptions,
-  product = "task-assign",
   errors = {}
 }) {
-  const options = assigneeOptions || FLOWMATE_ASSIGNEE_FALLBACK;
-  const selectedAssignee = options.find(option => option.userId === value.assigneeUserId) || null;
-  const [assigneeQuery, setAssigneeQuery] = useState(selectedAssignee ? selectedAssignee.name : "");
-  const [assigneeFocused, setAssigneeFocused] = useState(false);
-  const assigneeMatches = window.filterFlowMateAssigneeOptions ? window.filterFlowMateAssigneeOptions(options, assigneeQuery) : options.filter(option => option.name.toLowerCase().startsWith((assigneeQuery || "").trim().toLowerCase()));
-  const exactAssignee = selectedAssignee && assigneeQuery.trim().toLowerCase() === selectedAssignee.name.toLowerCase();
-  const todayDate = getFlowMateTodayDateKey();
+  const [assigneeQuery, setAssigneeQuery] = useState("");
+  const sourceTeam = window.TaskAssign.sourceTeam();
+  const crossTeam = value.responsibleTeam !== sourceTeam;
+  const [members, setMembers] = useState([]);
+  const [parents, setParents] = useState([]);
+  const [memberError, setMemberError] = useState("");
   useEffect(() => {
-    setAssigneeQuery(selectedAssignee ? selectedAssignee.name : "");
-  }, [selectedAssignee && selectedAssignee.userId]);
+    let alive = true;
+    setMembers([]);
+    setMemberError("");
+    window.TaskAssign.members(sourceTeam).then(rows => {
+      if (alive) setMembers(rows);
+    }).catch(error => {
+      if (alive) setMemberError(window.flowmateUserError(error));
+    });
+    window.TaskAssign.list(null, "created").then(rows => {
+      if (alive) setParents(rows);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [sourceTeam]);
+  useEffect(() => {
+    if (!value.responsibleTeam) onChange({
+      ...value,
+      responsibleTeam: sourceTeam,
+      assigneeUserId: ""
+    });
+  }, [sourceTeam]);
   function update(field, nextValue) {
-    const normalizedValue = field === "dueDate" || field === "launchDate" ? clampFlowMateDateToToday(nextValue) : nextValue;
     const next = {
       ...value,
-      [field]: normalizedValue
+      [field]: nextValue
     };
-    if (field === "assigneeUserId") next.assigneeOtherName = "";
+    if (field === "responsibleTeam") {
+      next.assigneeUserId = "";
+      next.collaboratorIds = [];
+    }
     onChange(next);
   }
-  function updateAssigneeQuery(nextQuery) {
-    setAssigneeQuery(nextQuery);
-    const exactMatch = options.find(option => option.name.toLowerCase() === nextQuery.trim().toLowerCase());
-    update("assigneeUserId", exactMatch ? exactMatch.userId : "");
+  function fieldError(key) {
+    return errors[key] ? React.createElement("div", {
+      className: "field__error",
+      role: "alert"
+    }, errors[key]) : null;
   }
-  function selectAssignee(option) {
-    setAssigneeQuery(option.name);
-    setAssigneeFocused(false);
-    update("assigneeUserId", option.userId);
-  }
+  const matchingAssignees = window.filterFlowMateAssigneeOptions ? window.filterFlowMateAssigneeOptions(members, assigneeQuery) : members.filter(member => member.name.toLowerCase().startsWith(assigneeQuery.trim().toLowerCase()));
+  const visibleAssignees = members.filter(member => member.userId === value.assigneeUserId || matchingAssignees.includes(member));
   return React.createElement("div", {
-    className: "form-grid"
+    className: "form-grid",
+    "data-testid": "task-assign-create-form"
   }, React.createElement("div", {
     className: "field field--full"
+  }, React.createElement("div", {
+    className: "reason-box"
+  }, "Requester workspace: ", React.createElement("strong", null, window.TaskAssign.teamLabel(sourceTeam)), ". ", crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team.")), React.createElement("div", {
+    className: "field field--full " + (errors.title ? "field--error" : "")
   }, React.createElement("label", {
-    className: "field__label"
-  }, "Title ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("input", {
+    className: "field__label",
+    htmlFor: "task-title"
+  }, "Title *"), React.createElement("input", {
+    id: "task-title",
     className: "input",
     value: value.title,
-    readOnly: true,
-    placeholder: "[3 Jul 2026][Function][Project Name]",
-    title: "Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign."
-  }), React.createElement("div", {
-    className: "muted",
-    style: {
-      fontSize: 12,
-      marginTop: 6
-    }
-  }, "Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign.")), React.createElement("div", {
-    className: "field field--full"
+    onChange: e => update("title", e.target.value),
+    placeholder: "e.g. Prepare the event venue"
+  }), fieldError("title")), React.createElement("div", {
+    className: "field field--full " + (errors.note ? "field--error" : "")
   }, React.createElement("label", {
-    className: "field__label"
-  }, "Note"), React.createElement("textarea", {
+    className: "field__label",
+    htmlFor: "task-note"
+  }, "Note / Expected deliverable *"), React.createElement("textarea", {
+    id: "task-note",
     className: "textarea",
     value: value.note,
     onChange: e => update("note", e.target.value),
-    placeholder: "Short description - what needs doing, any context, link to the doc."
-  })), product !== "task-assign" && React.createElement("div", {
-    className: `field ${errors.requesterTeam ? "field--error" : ""}`
+    placeholder: "What needs doing:\nExpected deliverable:\nImportant conditions:\nReference information:"
+  }), fieldError("note")), React.createElement("div", {
+    className: "field"
   }, React.createElement("label", {
-    className: "field__label"
-  }, "Requester Team / Function ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("select", {
-    className: "select",
-    value: value.requesterTeam,
-    onChange: e => update("requesterTeam", e.target.value)
-  }, TEAMS.map(team => React.createElement("option", {
-    key: team,
-    value: team
-  }, team))), errors.requesterTeam && React.createElement("div", {
-    className: "field__error"
-  }, errors.requesterTeam)), React.createElement("div", {
-    className: `field ${errors.projectName ? "field--error" : ""}`
-  }, React.createElement("label", {
-    className: "field__label"
-  }, "Project / campaign ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("input", {
+    className: "field__label",
+    htmlFor: "task-project"
+  }, "Project / Campaign (optional)"), React.createElement("input", {
+    id: "task-project",
     className: "input",
     value: value.projectName,
     onChange: e => update("projectName", e.target.value),
-    placeholder: "e.g. FCO S24 Launch"
-  }), errors.projectName && React.createElement("div", {
-    className: "field__error"
-  }, errors.projectName)), React.createElement("div", {
-    className: "field"
+    placeholder: "General work, or campaign name"
+  })), React.createElement("div", {
+    className: "field " + (errors.responsibleTeam ? "field--error" : "")
   }, React.createElement("label", {
-    className: "field__label"
-  }, "Assignee"), React.createElement("div", {
-    style: {
-      position: "relative"
-    }
-  }, React.createElement("input", {
+    className: "field__label",
+    htmlFor: "task-team"
+  }, "Responsible team *"), React.createElement("select", {
+    id: "task-team",
+    className: "select",
+    value: value.responsibleTeam,
+    onChange: e => update("responsibleTeam", e.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "Choose a team"), window.TaskAssign.teams.map(team => React.createElement("option", {
+    key: team.key,
+    value: team.key
+  }, team.label))), fieldError("responsibleTeam")), React.createElement("div", {
+    className: "field " + (errors.assigneeUserId ? "field--error" : "")
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-assignee"
+  }, "Assignee ", crossTeam ? "" : "*"), crossTeam ? React.createElement("div", {
+    className: "input"
+  }, "Receiving team will assign a person") : React.createElement(React.Fragment, null, React.createElement("input", {
     className: "input",
+    type: "search",
+    "aria-label": "Search team assignees",
+    placeholder: "Search team members",
     value: assigneeQuery,
-    onChange: e => updateAssigneeQuery(e.target.value),
-    onFocus: () => setAssigneeFocused(true),
-    onBlur: () => window.setTimeout(() => setAssigneeFocused(false), 120),
-    placeholder: "Type a name, e.g. P",
-    autoComplete: "off"
-  }), assigneeFocused && assigneeMatches.length > 0 && !exactAssignee && React.createElement("div", {
-    className: "card",
-    style: {
-      position: "absolute",
-      zIndex: 20,
-      top: "calc(100% + 4px)",
-      left: 0,
-      right: 0,
-      maxHeight: 220,
-      overflowY: "auto",
-      padding: 4
-    }
-  }, assigneeMatches.map(option => React.createElement("button", {
-    key: option.userId,
-    className: "btn btn--ghost",
-    type: "button",
-    onMouseDown: e => {
-      e.preventDefault();
-      selectAssignee(option);
-    },
-    style: {
-      width: "100%",
-      justifyContent: "flex-start"
-    }
-  }, option.name))))), React.createElement("div", {
-    className: `field ${errors.dueDate ? "field--error" : ""}`
-  }, React.createElement("label", {
-    className: "field__label"
-  }, "1st Review / Draft ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("input", {
-    className: "input",
-    value: value.dueDate,
-    onChange: e => update("dueDate", e.target.value),
-    type: "date",
-    min: todayDate
-  }), errors.dueDate && React.createElement("div", {
-    className: "field__error"
-  }, errors.dueDate)), React.createElement("div", {
-    className: `field ${errors.launchDate ? "field--error" : ""}`
-  }, React.createElement("label", {
-    className: "field__label"
-  }, "Launch Date / Deadline ", React.createElement("span", {
-    className: "req"
-  }, "*")), React.createElement("input", {
-    className: "input",
-    value: value.launchDate,
-    onChange: e => update("launchDate", e.target.value),
-    type: "date",
-    min: todayDate
-  }), errors.launchDate && React.createElement("div", {
-    className: "field__error"
-  }, errors.launchDate)), React.createElement("div", {
+    onChange: e => setAssigneeQuery(e.target.value)
+  }), React.createElement("select", {
+    id: "task-assignee",
+    className: "select",
+    value: value.assigneeUserId,
+    onChange: e => update("assigneeUserId", e.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "Choose a team member"), visibleAssignees.map(member => React.createElement("option", {
+    key: member.userId,
+    value: member.userId
+  }, member.name)))), fieldError("assigneeUserId"), memberError && React.createElement("div", {
+    className: "field__error",
+    role: "alert"
+  }, memberError)), React.createElement("div", {
     className: "field"
   }, React.createElement("label", {
-    className: "field__label"
+    className: "field__label",
+    htmlFor: "task-review"
+  }, "1st Review Date (optional)"), React.createElement("input", {
+    id: "task-review",
+    className: "input",
+    type: "date",
+    min: getFlowMateTodayDateKey(),
+    max: value.launchDate || undefined,
+    value: value.dueDate,
+    onChange: e => update("dueDate", e.target.value)
+  }), fieldError("dueDate")), React.createElement("div", {
+    className: "field"
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-deadline"
+  }, "Deadline / Requested delivery *"), React.createElement("input", {
+    id: "task-deadline",
+    className: "input",
+    type: "date",
+    min: getFlowMateTodayDateKey(),
+    value: value.launchDate,
+    onChange: e => update("launchDate", e.target.value)
+  }), fieldError("launchDate")), React.createElement("div", {
+    className: "field"
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-priority"
   }, "Priority"), React.createElement("select", {
+    id: "task-priority",
     className: "select",
     value: value.priority,
     onChange: e => update("priority", e.target.value)
+  }, ["low", "normal", "high", "urgent"].map(priority => React.createElement("option", {
+    key: priority,
+    value: priority
+  }, priority[0].toUpperCase() + priority.slice(1))))), value.priority === "urgent" && React.createElement("div", {
+    className: "field field--full"
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-urgent"
+  }, "Urgent reason *"), React.createElement("textarea", {
+    id: "task-urgent",
+    className: "textarea",
+    value: value.urgentReason,
+    onChange: e => update("urgentReason", e.target.value)
+  }), fieldError("urgentReason"), React.createElement("div", {
+    className: "muted"
+  }, "Urgent requests still require the receiving team to accept the commitment.")), React.createElement("div", {
+    className: "field field--full"
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-references"
+  }, "Reference / File links (optional)"), React.createElement("textarea", {
+    id: "task-references",
+    className: "textarea",
+    value: value.referenceLinks,
+    onChange: e => update("referenceLinks", e.target.value),
+    placeholder: "One complete HTTP(S) link per line"
+  }), fieldError("referenceLinks"), React.createElement("div", {
+    className: "muted"
+  }, "Link to files in your approved storage. Check their sharing permissions separately.")), React.createElement("div", {
+    className: "field"
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-parent"
+  }, "Parent task (optional)"), React.createElement("select", {
+    id: "task-parent",
+    className: "select",
+    value: value.parentId,
+    onChange: e => update("parentId", e.target.value)
   }, React.createElement("option", {
-    value: "low"
-  }, "Low"), React.createElement("option", {
-    value: "normal"
-  }, "Normal"), React.createElement("option", {
-    value: "high"
-  }, "High"))));
+    value: ""
+  }, "Standalone task"), parents.map(parent => React.createElement("option", {
+    key: parent.id,
+    value: parent.id
+  }, parent.display_id, " — ", parent.title)))), React.createElement("div", {
+    className: "field"
+  }, React.createElement("label", {
+    className: "field__label"
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: Boolean(value.confidential),
+    onChange: e => update("confidential", e.target.checked)
+  }), " Confidential task"), React.createElement("div", {
+    className: "muted"
+  }, "Visible only to requester, assignee, selected collaborators, and administrators.")), value.confidential && React.createElement("div", {
+    className: "field field--full"
+  }, React.createElement("label", {
+    className: "field__label"
+  }, "Selected collaborators"), React.createElement("div", {
+    className: "muted"
+  }, "Select collaborators below. Cross-team confidential requests must include a dispatcher from the receiving team."), React.createElement(TaskAssignCollaborators, {
+    team: value.responsibleTeam,
+    sourceMembers: members,
+    selected: value.collaboratorIds || [],
+    onChange: ids => update("collaboratorIds", ids)
+  })));
+}
+function TaskAssignCollaborators({
+  team,
+  sourceMembers,
+  selected,
+  onChange
+}) {
+  const [members, setMembers] = useState([]);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    setMembers([]);
+    setError("");
+    window.TaskAssign.members(team).then(rows => {
+      if (alive) setMembers(rows);
+    }).catch(err => {
+      if (alive) setError(window.flowmateUserError(err));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [team]);
+  const all = [...new Map([...sourceMembers, ...members].map(member => [member.userId, member])).values()];
+  return React.createElement("div", null, error && React.createElement("div", {
+    className: "field__error"
+  }, error), all.map(member => React.createElement("label", {
+    key: member.userId,
+    style: {
+      display: "block",
+      padding: "4px 0"
+    }
+  }, React.createElement("input", {
+    type: "checkbox",
+    checked: selected.includes(member.userId),
+    onChange: e => onChange(e.target.checked ? [...selected, member.userId] : selected.filter(id => id !== member.userId))
+  }), " ", member.name, " (", window.TaskAssign.teamLabel(member.teamKey), ") ", member.dispatcher ? "— dispatcher" : "")));
 }
 function CreativeRequestForm({
   value,

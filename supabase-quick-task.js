@@ -144,6 +144,7 @@ function flowmateUserError(error, fallback) {
 window.flowmateUserError = flowmateUserError;
 
 async function createFlowMateQuickTask(input) {
+  if (input.responsibleTeam) return window.TaskAssign.create(input);
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
@@ -180,6 +181,74 @@ async function createFlowMateQuickTask(input) {
 }
 
 window.createFlowMateQuickTask = createFlowMateQuickTask;
+
+// Task Assign workspace contract. Never fall back to the old creation RPC:
+// that would silently discard receiving-team and visibility rules.
+window.TaskAssign = {
+  teams: [{ key: "mkt", label: "Marketing" }, { key: "ops", label: "Operations" }, { key: "esport", label: "eSports" }],
+  teamLabel(key) { return this.teams.find(team => team.key === key)?.label || key || "No team"; },
+  sourceTeam() { return getFlowMateActiveTeam(); },
+  references(text) { return [...new Set(String(text || "").split(/\r?\n/).map(value => value.trim()).filter(Boolean))]; },
+  validate(input) {
+    const errors = {};
+    if (!String(input.title || "").trim()) errors.title = "Title is required.";
+    if (!String(input.note || "").trim()) errors.note = "Describe the work and expected deliverable.";
+    if (!this.teams.some(team => team.key === input.responsibleTeam)) errors.responsibleTeam = "Choose a responsible team.";
+    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || "") && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+    if (!validDate(input.launchDate) || input.launchDate < today) errors.launchDate = "Deadline must be today or later.";
+    if (input.dueDate && (!validDate(input.dueDate) || input.dueDate < today || input.dueDate > input.launchDate)) errors.dueDate = "Review must be between today and the deadline.";
+    if (input.responsibleTeam === this.sourceTeam() && !input.assigneeUserId) errors.assigneeUserId = "Choose a team member.";
+    if (input.priority === "urgent" && !String(input.urgentReason || "").trim()) errors.urgentReason = "Explain why this work is urgent.";
+    if (this.references(input.referenceLinks).some(value => { try { return !["http:", "https:"].includes(new URL(value).protocol); } catch { return true; } })) errors.referenceLinks = "Use a complete HTTP(S) link on each line.";
+    return errors;
+  },
+  async rpc(name, args) {
+    if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+    const { data, error } = await window.flowmateSupabase.rpc(name, args);
+    if (error) {
+      if (error.code === "PGRST202" || /function.*does not exist|schema cache/i.test(error.message || "")) {
+        throw new Error("Task Assign workspace upgrade is not installed yet. Please contact your administrator.");
+      }
+      throw error;
+    }
+    return data;
+  },
+  async create(input) {
+    const errors = this.validate(input);
+    if (Object.keys(errors).length) throw new Error(Object.values(errors)[0]);
+    const source = this.sourceTeam();
+    const result = await this.rpc("task_assign_create", {
+      p_source_team: source, p_responsible_team: input.responsibleTeam, p_title: input.title.trim(), p_note: input.note.trim(),
+      p_deadline: input.launchDate, p_request_key: input.requestKey, p_review_date: input.dueDate || null,
+      p_project: input.projectName || null, p_assignee: input.responsibleTeam === source ? input.assigneeUserId : null,
+      p_priority: input.priority || "normal", p_urgent_reason: input.priority === "urgent" ? input.urgentReason : null,
+      p_references: this.references(input.referenceLinks), p_confidential: Boolean(input.confidential),
+      p_collaborators: input.collaboratorIds || [], p_parent: input.parentId || null,
+    });
+    this.refresh();
+    return result;
+  },
+  list(team, view, displayId = null) { return this.rpc("task_assign_list", { p_team: team || null, p_view: view, p_display_id: displayId }); },
+  members(team) { return this.rpc("task_assign_members", { p_team: team }); },
+  async action(work, action, values = {}) {
+    const result = await this.rpc("task_assign_action", { p_display_id: work.display_id, p_action: action,
+      p_assignee: values.assignee || null, p_committed_deadline: values.deadline || null, p_reason: values.reason || null,
+      p_target_team: values.team || null, p_expected_updated_at: work.updated_at });
+    this.refresh(); return result;
+  },
+  async edit(work, values) {
+    await this.rpc("task_assign_edit_brief", { p_display_id: work.display_id, p_title: values.title, p_note: values.note,
+      p_project: values.project || null, p_expected_updated_at: work.updated_at });
+    this.refresh();
+  },
+  refresh() {
+    window.invalidateFlowMateListRowsCache?.();
+    window.clearFlowMateBoardSnapshots?.();
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "task_assign_changed" } }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts"));
+  },
+};
 
 async function completeFlowMateQuickTask(displayId) {
   if (!window.flowmateSupabase) {

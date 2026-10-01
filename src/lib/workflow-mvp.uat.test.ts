@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import vm from "node:vm";
+import { assertEntryCacheContract } from "./test-support/entry-cache-contract";
 
 const root = process.cwd();
 const read = (...parts: string[]) => readFileSync(join(root, ...parts), "utf8");
@@ -14,6 +16,93 @@ const teamSql = () => read("supabase", "workflow_team_workspaces.sql");
 const gdveVisibilitySql = () => read("supabase", "workflow_gdve_creative_visibility.sql");
 const gdveAssigneeStartSql = () => read("supabase", "workflow_gdve_assignee_cross_workspace_start.sql");
 const quickTaskSql = () => read("supabase", "rpc_quick_task.sql");
+
+const section = (source: string, start: string, end: string) => {
+  const from = source.indexOf(start);
+  const to = source.indexOf(end, from);
+  expect(from, start).toBeGreaterThanOrEqual(0);
+  expect(to, end).toBeGreaterThan(from);
+  return source.slice(from, to);
+};
+
+async function verifyTimelineQueryBehavior(source: string) {
+  const calls: unknown[][] = [];
+  let backendError: Error | null = null;
+  const query = {
+    select(columns: string) { calls.push(["select", columns]); return this; },
+    in(column: string, months: string[]) { calls.push(["in", column, months]); return this; },
+    or(value: string) { calls.push(["or", value]); return this; },
+    order() { return this; },
+    then(resolve: (result: unknown) => unknown) { return Promise.resolve({ data: [], error: backendError }).then(resolve); },
+  };
+  const context = vm.createContext({
+    window: { flowmateSupabase: { from: (table: string) => { calls.push(["from", table]); return query; } } },
+    getMarketingPlanTimelineWindow: () => ({ monthKeys: ["2026-11", "2026-12", "2027-01"] }),
+    getNextMarketingPlanMonthKey: () => "2027-02",
+    getMarketingPlanTimelineCacheKey: (month: string) => month,
+    marketingPlanTimelineCache: new Map(), marketingPlanTimelineRequests: new Map(),
+    MARKETING_PLAN_TIMELINE_CACHE_TTL_MS: 60000, MARKETING_PLAN_TIMELINE_SELECT_COLUMNS: "month_key,publish_date",
+    normalizeMarketingPlanTimelineRow: (row: unknown) => row, sortMarketingPlanTimelineRows: (rows: unknown[]) => rows,
+  });
+  vm.runInContext(section(source, "async function loadMarketingPlanTimelineRows(", "async function findOrCreateMarketingPlan("), context);
+  await context.loadMarketingPlanTimelineRows("publish_date", "2026-11");
+  expect(calls).toContainEqual(["from", "marketing_plan_timeline_v"]);
+  expect(calls).toContainEqual(["select", "month_key,publish_date"]);
+  expect(calls).toContainEqual(["in", "month_key", ["2026-11", "2026-12", "2027-01"]]);
+  expect(calls.some(call => call[0] === "or")).toBe(false);
+  const normalCallCount = calls.length;
+  await context.loadMarketingPlanTimelineRows("publish_date", "2026-11");
+  expect(calls).toHaveLength(normalCallCount);
+  await context.loadMarketingPlanTimelineRows("publish_date", "2026-11", { useLaunchMonth: true });
+  expect(calls).toContainEqual(["or", "and(publish_date.gte.2026-11-01,publish_date.lt.2027-02-01),and(publish_date.is.null,month_key.in.(2026-11,2026-12,2027-01))"]);
+  expect(context.marketingPlanTimelineCache.size).toBe(2);
+  const launchCallCount = calls.length;
+  await context.loadMarketingPlanTimelineRows("publish_date", "2026-11", { useLaunchMonth: true });
+  expect(calls).toHaveLength(launchCallCount);
+  backendError = new Error("timeline unavailable");
+  await expect(context.loadMarketingPlanTimelineRows("publish_date", "2026-11", { force: true, useLaunchMonth: true })).rejects.toThrow("timeline unavailable");
+  expect(context.marketingPlanTimelineRequests.size).toBe(0);
+}
+
+function verifyCampaignSearchBehavior(source: string) {
+  const filtering = section(source, "  const filtered = campaigns.filter(", "  const scheduled = filtered.filter(");
+  const filter = new Function("campaigns", "search", "functionFilter", "includeArchived", filtering + ";return filtered;");
+  const campaigns = [
+    { name: "Summer Cup", tagline: "Champion Finals", function_code: "esport", is_archived: false },
+    { name: "Champion Sale", tagline: "Discount", function_code: "mkt", is_archived: false },
+    { name: "Old Cup", tagline: "Champion Finals", function_code: "esport", is_archived: true },
+  ];
+  expect(filter(campaigns, "  CHAMPION  ", "esport", false)).toEqual([campaigns[0]]);
+  expect(filter(campaigns, "summer", "all", false)).toEqual([campaigns[0]]);
+  expect(filter(campaigns, "champion", "esport", true)).toEqual([campaigns[0], campaigns[2]]);
+  expect(filter(campaigns, "unknown", "all", true)).toEqual([]);
+}
+
+function verifyWorkingSheetFilterBehavior(source: string) {
+  const context = vm.createContext({
+    getMarketingPlanTimelineWindow: () => ({ monthKeys: ["2026-11", "2026-12", "2027-01"] }),
+    MARKETING_PLAN_CHANNELS: [{ key: "facebook" }, { key: "facebook_esport" }],
+    normalizeMarketingPlanWorkingStatus: (status: string) => status || "planned",
+    MARKETING_PLAN_FUNCTION_FILTER_OPTIONS: ["mkt", "esport", "ops"],
+    getMarketingPlanCampaignKey: (name: string) => name.toLowerCase(),
+  });
+  vm.runInContext(section(source, "function filterMarketingPlanRows(", "function getMarketingPlanWorkingRowTeam("), context);
+  vm.runInContext(section(source, "function filterMarketingPlanRowsByFunctions(", "function filterMarketingPlanRowsByVisibleCampaignTags("), context);
+  const rows = [
+    { contentItemId: "cross-month", campaignName: "Cup", monthKey: "2026-10", publishDate: "2026-11-02", channel: "facebook_esport" },
+    { contentItemId: "year-boundary", campaignName: "Cup", monthKey: "2026-12", publishDate: "2027-01-02", channel: "facebook_esport" },
+    { contentItemId: "outside", campaignName: "Cup", monthKey: "2026-11", publishDate: "2027-02-01", channel: "facebook_esport" },
+    { contentItemId: "mkt", campaignName: "Sale", monthKey: "2026-11", publishDate: "2026-11-03", channel: "facebook" },
+    { contentItemId: "undated", campaignName: "Cup", monthKey: "2026-12", publishDate: "", channel: "facebook_esport" },
+  ];
+  const filtered = context.filterMarketingPlanRowsByFunctions(rows, ["esport"], [{ name: "Cup", functionCode: "esport" }, { name: "Sale", functionCode: "mkt" }]);
+  const grouped = context.groupMarketingPlanWorkingSheetRows(filtered, "2026-11", "facebook_esport");
+  expect(Array.from(grouped, (row: any) => row.contentItemId)).toEqual(["undated", "cross-month", "year-boundary"]);
+  expect(grouped.find((row: any) => row.contentItemId === "cross-month").monthKey).toBe("2026-11");
+  expect(rows[0].monthKey).toBe("2026-10");
+  expect(context.groupMarketingPlanWorkingSheetRows(filtered, "2026-11", "facebook")).toHaveLength(0);
+  expect(context.filterMarketingPlanRowsByFunctions(rows, [], [])).toHaveLength(0);
+}
 
 describe("Workflow Management MVP R1-R9 integration", () => {
   it("R1 keeps channel-specific structured formats and invalid-selection validation", () => {
@@ -42,7 +131,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(source).toContain('"Showing ", visibleRows.length, " rows"');
   });
 
-  it("loads Marketing Plan rows by a cached three-month window without dropping month navigation", () => {
+  it("loads Marketing Plan rows by a cached three-month window without dropping month navigation", async () => {
     const source = app();
     const loaderSource = source.slice(
       source.indexOf("const MARKETING_PLAN_TIMELINE_SELECT_COLUMNS"),
@@ -58,7 +147,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(loaderSource).toContain("const marketingPlanTimelineRequests = new Map()");
     expect(loaderSource).toContain('.from("marketing_plans").select("month_key")');
     expect(loaderSource).toContain("getMarketingPlanTimelineWindow(targetMonthKey).monthKeys");
-    expect(loaderSource).toContain('.select(MARKETING_PLAN_TIMELINE_SELECT_COLUMNS).in("month_key", windowMonths)');
+    await verifyTimelineQueryBehavior(source);
     expect(loaderSource).not.toContain('.from("marketing_plan_timeline_v").select("*")');
     expect(loaderSource).toContain("marketingPlanTimelineRequests.has(cacheKey)");
     expect(loaderSource).toContain("sortMarketingPlanTimelineRows(cached.rows, orderBy)");
@@ -282,7 +371,8 @@ describe("Workflow Management MVP R1-R9 integration", () => {
   it("R7 searches, sorts, archives, restores, and preserves historical tags", () => {
     const source = app();
     const sql = catalogSql();
-    expect(source).toContain("Search campaign tags");
+    expect(source).toContain('aria-label="ค้นหาแคมเปญ"');
+    verifyCampaignSearchBehavior(source);
     expect(source).toContain("Most recently used");
     expect(source).toContain("Include archived");
     expect(source).toContain("archiveFlowMateMarketingCampaignTag");
@@ -307,6 +397,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect(source).toContain("function MarketingPlanShell({");
     expect(source).toContain("onSwitchProductBook");
     expect(source).toContain('data-testid": "global-home"');
+    assertEntryCacheContract();
     for (const entry of [
       ["index.html"],
       ["home", "index.html"],
@@ -314,7 +405,6 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     ]) {
       const html = read(...entry);
       expect(html).toContain("workflow-mvp.js");
-      expect(html).toMatch(/app\.js\?v=[0-9]{8}-[a-f0-9]{6}/);
     }
   });
 
@@ -333,7 +423,7 @@ describe("Workflow Management MVP R1-R9 integration", () => {
     expect((source.match(/React\.createElement\(MarketingPlanFunctionFilter/g) || []).length).toBe(3);
     expect(source).toContain("[monthKey, nextMonthKey, getNextMarketingPlanMonthKey(nextMonthKey)]");
     expect(source).toContain("filterMarketingPlanRows(publishableRows, selectedMonth, selectedChannel, \"\", true)");
-    expect(source).toContain('filterMarketingPlanRows(rows, selectedMonth, selectedChannel, "", true).forEach');
+    verifyWorkingSheetFilterBehavior(source);
   });
 
   it("stores No Tag exclusively and excludes it from every publishing view", () => {

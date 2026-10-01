@@ -3580,7 +3580,7 @@ function TeamGanttScreen({
     className: "page__title"
   }, scheduleName), React.createElement("div", {
     className: "page__sub"
-  }, isTaskAssignProduct ? "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline" : "All teams can see active GD/VE workload, milestones, and leave", " - ", loadState.message)), React.createElement("select", {
+  }, isTaskAssignProduct ? "Quick Task delivery timeline: optional review and committed deadline" : "All teams can see active GD/VE workload, milestones, and leave", " - ", loadState.message)), React.createElement("select", {
     className: "select",
     value: monthKey,
     onChange: event => setMonthKey(event.target.value),
@@ -3681,7 +3681,7 @@ function TeamGanttScreen({
     className: "schedule-legend is-blocked"
   }), "Blocked"), React.createElement("span", null, React.createElement("i", {
     className: "team-schedule__legend-draft-marker"
-  }), isTaskAssignProduct ? "1st Review / Draft" : "Asset First Draft"), !isTaskAssignProduct && React.createElement("span", null, React.createElement("i", {
+  }), isTaskAssignProduct ? "Review / Deadline" : "Asset First Draft"), !isTaskAssignProduct && React.createElement("span", null, React.createElement("i", {
     className: "team-schedule__legend-final-approved-marker"
   }), "Final/Approved"), React.createElement("span", null, React.createElement("i", {
     className: "gantt__legend-diamond"
@@ -4873,7 +4873,7 @@ function TaskAssignScheduleScreen({
     className: "page__title"
   }, "Team Schedule"), React.createElement("div", {
     className: "page__sub"
-  }, "Quick Task delivery timeline: 1st Review / Draft to Launch Date / Deadline - ", loadState.message))), React.createElement("div", {
+  }, "Quick Task delivery timeline: optional review and committed deadline - ", loadState.message))), React.createElement("div", {
     className: "card"
   }, React.createElement("div", {
     className: "card__body",

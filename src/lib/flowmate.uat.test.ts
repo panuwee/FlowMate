@@ -1,6 +1,7 @@
 import { existsSync, readFileSync as nodeReadFileSync } from "node:fs";
 import { join } from "node:path";
 import vm from "node:vm";
+import { assertEntryCacheContract, entryAssetVersion } from "./test-support/entry-cache-contract";
 import { describe, expect, it } from "vitest";
 import {
   calculateWorkloadSummary,
@@ -1953,7 +1954,7 @@ describe("Marketing Plan Current Working approved contracts", () => {
     const form = findRenderedElement(tree, (element) => element.type === "form" && element.props.role === "dialog");
     await (form?.props.onSubmit as (event: { preventDefault: () => void }) => Promise<void>)({ preventDefault: () => undefined });
 
-    expect(loadOptions).toEqual([{ force: true, throwOnError: true }]);
+    expect(loadOptions).toEqual([{ force: true, throwOnError: true, useLaunchMonth: true }]);
     expect(stateChanges.filter((change) => change.index === 11).at(-1)).toEqual({
       index: 11,
       value: "The duplicate row was created, but the Working Sheet could not refresh. Refresh the Working Sheet before using Create Brief.",
@@ -2269,8 +2270,8 @@ describe("MVP 1.1 create form draft saving", () => {
     expect(createScreenJsx).not.toContain('dueDate: "2026-05-18"');
     expect(createScreenJsx).not.toContain('launchDate: "2026-05-25"');
     expect(createScreenJsx).not.toContain('subtractFlowMateWorkingDays("2026-05-25", 5)');
-    expect(quickFormSource).toContain("const todayDate = getFlowMateTodayDateKey()");
-    expect(quickFormSource).toContain("min={todayDate}");
+    expect(quickFormSource).toContain("getFlowMateTodayDateKey()");
+    expect(quickFormSource).toContain("min={getFlowMateTodayDateKey()}");
     expect(creativeFormSource).toContain("const todayDate = getFlowMateTodayDateKey()");
     expect(creativeFormSource).toContain("min={todayDate}");
     expect(creativeFormSource).toContain("dueDate: getFlowMateAutoCreativeDraftDate(nextValue)");
@@ -2300,7 +2301,14 @@ describe("quick task Other assignee SQL support", () => {
     expect(appCss).toContain(".app__brand-version");
     expect(appCss.replace(/\r\n/g, "\n")).toContain(".app__main--product-book {\n  padding: 0 var(--s-6) var(--s-7);");
     expect(appCss).not.toContain("box-shadow: 0 -28px");
-    expect(activeEntryHtml).toMatch(/app\.js\?v=[0-9]{8}-[a-f0-9]{6}/);
+    assertEntryCacheContract();
+    const versionSource = appJsx.slice(appJsx.indexOf("function getFlowMateAppVersion()"), appJsx.indexOf("const FLOWMATE_APP_VERSION"));
+    for (const html of [indexHtml, homeIndexHtml, productBookIndexHtml]) {
+      const token = entryAssetVersion(html, "app.js");
+      const context = vm.createContext({ URL, document: { scripts: [{ getAttribute: () => "app.js?v=" + token }] }, window: { location: { href: "https://flowmate.test/" } } });
+      vm.runInContext(versionSource, context);
+      expect(context.getFlowMateAppVersion()).toBe("v" + token);
+    }
     expect(activeEntryHtml).not.toContain("v20260709-6");
   });
 
@@ -2313,7 +2321,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(productBookIndexHtml).toContain('<base href="../" />');
     expect(productBookIndexHtml).toContain('window.location.hash = "product-book-latest"');
-    expect(productBookIndexHtml).toMatch(/app\.js\?v=[0-9]{8}-[a-f0-9]{6}/);
+    entryAssetVersion(productBookIndexHtml, "app.js");
   });
 
   it("serves a GitHub Pages 404 fallback for direct deep links", () => {
@@ -2357,18 +2365,15 @@ describe("quick task Other assignee SQL support", () => {
     expect(quickTaskSql).toContain("p_launch_date");
   });
 
-  it("quick task form uses the creative title template fields", () => {
-    const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
-    const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
-
-    expect(createScreenJsx).toContain('All fields with * are required');
-    expect(createScreenJsx).not.toContain("Only title and due date are required.");
-    expect(createScreenJsx).toContain("function updateQuickDraft");
-    expect(quickTaskFormSource).toContain("Requester Team / Function");
-    expect(quickTaskFormSource).toContain("Launch Date / Deadline");
-    expect(quickTaskFormSource).toContain("1st Review / Draft");
-    expect(quickTaskFormSource).toContain("Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign.");
-    expect(quickTaskFormSource).toContain("readOnly");
+  it("quick task form accepts an action title and an explicit responsible team", () => {
+    const source = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
+    const form = source.slice(source.indexOf("function QuickTaskForm"), source.indexOf("function CreativeRequestForm"));
+    expect(form).toContain('id="task-title"');
+    expect(form).toContain('update("title", e.target.value)');
+    expect(form).not.toContain("readOnly");
+    expect(form).toContain("Responsible team *");
+    expect(form).toContain("Project / Campaign (optional)");
+    expect(form).toContain("1st Review Date (optional)");
   });
 
   it("creative request form explains its auto-filled title template", () => {
@@ -2417,7 +2422,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(createScreenJsx).toContain("requesterTeam: getDefaultRequesterTeam()");
     expect(createScreenJsx).not.toContain('requireField("requesterTeam", "Requester team is required.");\n  requireField("campaignName"');
-    expect(quickTaskFormSource).toContain("{TEAMS.map((team) =>");
+    expect(quickTaskFormSource).toContain("window.TaskAssign.teams.map(team =>");
     expect(creativeFormSource).not.toContain("requesterTeamOptions");
     expect(creativeFormSource).not.toContain("errors.requesterTeam");
   });
@@ -2441,7 +2446,7 @@ describe("quick task Other assignee SQL support", () => {
     expect(creativeFormSource).toContain("First Draft: T-4 Thai working days before Launch Date / Deadline.");
     expect(creativeFormSource).toContain("Final/Approved: T-2 Thai working days before Launch Date / Deadline.");
     expect(creativeFormSource).not.toContain("Due date");
-    expect(quickTaskFormSource).toContain("1st Review / Draft");
+    expect(quickTaskFormSource).toContain("1st Review Date (optional)");
     expect(quickTaskJs).toContain("p_due_date:         input.dueDate || null");
     expect(assignmentSql).toContain("create or replace function public.flowmate_earliest_capacity_date(");
     expect(assignmentSql).toContain("v_due_date := public.flowmate_subtract_th_business_days(v_launch_date, 4)");
@@ -3198,12 +3203,13 @@ describe("full assignee roster", () => {
     ]);
   });
 
-  it("quick task assignee picker uses a searchable text input instead of a select", () => {
+  it("quick task assignee picker searches active team members before selecting a person", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
     expect(quickTaskFormSource).toContain("assigneeQuery");
     expect(quickTaskFormSource).toContain("filterFlowMateAssigneeOptions");
-    expect(quickTaskFormSource).not.toContain("<select className=\"select\" value={value.assigneeUserId}");
+    expect(quickTaskFormSource).toContain('aria-label="Search team assignees"');
+    expect(quickTaskFormSource).toContain('id="task-assignee"');
   });
 
   it("list assignee filter includes all synced team members", () => {
@@ -3315,8 +3321,8 @@ describe("requester function sync", () => {
     expect(listDataJs).not.toContain("return Array.from(new Set([...fallback, ...liveTeams]))");
     expect(screensA).toContain("function getDefaultRequesterTeam()");
     expect(screensA).toContain("window.normalizeFlowMateRequesterTeam?.(window.FLOWMATE_CURRENT_USER?.requester_team)");
-    expect(screensA).toContain('product !== "task-assign"');
-    expect(screensA).toContain("{TEAMS.map((team) =>");
+    expect(screensA).toContain("window.TaskAssign.sourceTeam()");
+    expect(screensA).toContain("window.TaskAssign.teams.map(team =>");
     expect(screensA).not.toContain("CreativeRequestForm value={creativeDraft} onChange={updateCreativeDraft} requesterTeamOptions={requesterTeamOptions}");
     expect(screensB).toContain("const [requesterTeamOptions, setRequesterTeamOptions] = useStateB(TEAMS)");
     expect(screensB).toContain("window.loadFlowMateRequesterTeams()");

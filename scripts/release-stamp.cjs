@@ -27,6 +27,7 @@ const VERSIONED_ASSETS = [
   "supabase-workload-data.js",
   "screens-c.js",
   "screens-ot.js",
+  "screens-task-assign.js",
   "app.js",
 ];
 const EXCLUDED_FROM_FINGERPRINT = ENTRY_PAGES.map(file => `:(exclude)${file}`);

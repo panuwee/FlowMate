@@ -141,7 +141,7 @@ const NAV = [{
 const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));
 const TASK_ASSIGN_NAV = [{
   group: "Task Assign",
-  items: [{
+  items: [{ key: "my-work", label: "My work", icon: "inbox" }, { key: "workspace", label: "Workspace", icon: "users" }, {
     key: "create",
     label: "Create",
     icon: "plus"
@@ -168,6 +168,7 @@ const TASK_ASSIGN_NAV = [{
   }]
 }];
 const TITLE_MAP = {
+  "workspace": "Workspace",
   "my-work": "My work",
   "create": "Create",
   "detail": "Work item",
@@ -188,8 +189,10 @@ const MEMBER_ROUTE_KEYS = new Set(MEMBER_NAV_GROUPS.flatMap(group => group.items
 const MARKETING_PLAN_HASH_KEYS = new Set(["campaign-planner", "campaign-timeline", "facebook-esport-timeline", "channel-plan", "marketing-calendar", "working-sheet", "supervisor"]);
 const PRODUCT_BOOK_HASH_KEYS = new Set([PRODUCT_BOOK_PRODUCT_KEY, "product-book-latest"]);
 const OT_REQUEST_HASH_KEYS = new Set([OT_REQUEST_PRODUCT_KEY]);
-const TASK_ASSIGN_HASH_KEYS = new Set(["task-assign-create", "task-assign-board", "task-assign-list", "task-assign-calendar", "task-assign-schedule", "task-assign-attention", "task-assign-detail"]);
+const TASK_ASSIGN_HASH_KEYS = new Set(["task-assign-my-work", "task-assign-workspace", "task-assign-create", "task-assign-board", "task-assign-list", "task-assign-calendar", "task-assign-schedule", "task-assign-attention", "task-assign-detail"]);
 const TASK_ASSIGN_HASH_TO_ROUTE = {
+  "task-assign-my-work": "my-work",
+  "task-assign-workspace": "workspace",
   "task-assign-create": "create",
   "task-assign-board": "board",
   "task-assign-list": "list",
@@ -271,7 +274,7 @@ function App() {
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
       const hashKey = getFlowMateHashRouteKey();
-      const hashProduct = getProductFromHashRouteKey(hashKey);
+      const hashProduct = getProductFromHashRouteKey();
       if (isProductChoicePath()) return hashProduct || null;
       if (hashProduct) return hashProduct;
       const savedProduct = sessionStorage.getItem("flowmate:activeProduct");
@@ -647,7 +650,7 @@ function App() {
       sessionStorage.setItem("flowmate:activeProduct", TASK_ASSIGN_PRODUCT_KEY);
     } catch (e) {}
     if (getProductFromHashRouteKey() !== TASK_ASSIGN_PRODUCT_KEY) {
-      window.location.hash = "task-assign-board";
+      window.location.hash = "task-assign-my-work";
     }
   }
   function chooseMarketingPlanProduct() {
@@ -702,7 +705,7 @@ function App() {
   }, []);
   useEffectApp(() => {
     if (authState.status !== "signed-in") return;
-    const accessibleTeams = getFlowMateAccessibleTeams(authState.user);
+    const accessibleTeams = getFlowMateAccessibleTeams(authState.user).filter(team => activeProduct !== TASK_ASSIGN_PRODUCT_KEY || team.key !== "gdve");
     if (accessibleTeams.length === 0) return;
     const accessibleKeys = new Set(accessibleTeams.map(team => team.key));
     const nextTeamKey = accessibleKeys.has(activeTeamKey) ? activeTeamKey : accessibleTeams[0].key;
@@ -723,7 +726,7 @@ function App() {
         console.warn("[FlowMate Team] Active workspace update failed:", error && error.message);
       });
     }
-  }, [authState.status, authState.user && authState.user.id, activeTeamKey]);
+  }, [authState.status, authState.user && authState.user.id, activeTeamKey, activeProduct]);
   useEffectApp(() => {
     if (authState.status !== "signed-in") {
       if (window.invalidateFlowMateListRowsCache) window.invalidateFlowMateListRowsCache();
@@ -856,7 +859,7 @@ function App() {
     : isFlowMateRouteAllowedForRole(user.role, route);
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
-  const accessibleTeams = getFlowMateAccessibleTeams(user);
+  const accessibleTeams = getFlowMateAccessibleTeams(user).filter(team => !isTaskAssignProduct || team.key !== "gdve");
   function handleActiveTeamChange(teamKey) {
     const normalizedTeamKey = normalizeFlowMateTeamKey(teamKey);
     if (!accessibleTeams.some(team => team.key === normalizedTeamKey)) return;
@@ -973,10 +976,7 @@ function App() {
     onSwitchMarketingPlan: chooseMarketingPlanProduct,
     onSwitchProductBook: chooseProductBookProduct,
     onSwitchOtRequest: chooseOtRequestProduct
-  }), isTaskAssignProduct ? React.createElement("div", {
-    className: "muted",
-    style: { fontSize: 12, marginRight: 10 }
-  }, "All functions · cross-function view is read-only") : null, React.createElement("div", {
+  }), React.createElement("div", {
     className: "searchbar-wrap",
     ref: searchWrapRef
   }, React.createElement("div", {
@@ -1095,7 +1095,7 @@ function App() {
     className: "app__sidebar"
   }, visibleNavGroups.map(group => React.createElement("div", {
     key: group.group
-  }, group.group === "Team" && !isTaskAssignProduct ? React.createElement(SidebarTeamSectionHeader, {
+  }, ((group.group === "Team" && !isTaskAssignProduct) || (group.group === "Task Assign" && isTaskAssignProduct)) ? React.createElement(SidebarTeamSectionHeader, {
     teams: accessibleTeams,
     activeTeamKey: activeTeamKey,
     onChange: handleActiveTeamChange
@@ -1122,17 +1122,18 @@ function App() {
     realtimeState: realtimeState
   })), React.createElement("main", {
     className: "app__main",
-    key: route + (focusId || "")
-  }, allowedRoute && route === "my-work" && React.createElement(MyWorkScreen, {
+    key: route + (focusId || "") + activeProduct + (route === "detail" ? "" : activeTeamKey)
+  }, allowedRoute && route === "my-work" && React.createElement(isTaskAssignProduct ? TaskAssignWorkspaceScreen : MyWorkScreen, {
     onOpen: open,
     onNav: nav,
-    searchQuery: searchQuery
-  }), allowedRoute && route === "create" && React.createElement(CreateScreen, {
+    searchQuery: searchQuery,
+    personal: true
+  }), allowedRoute && isTaskAssignProduct && route === "workspace" && React.createElement(TaskAssignWorkspaceScreen, { onOpen: open, onNav: nav, searchQuery: searchQuery }), allowedRoute && route === "create" && React.createElement(CreateScreen, {
     onNav: nav,
     onOpen: open,
     initialMode: isTaskAssignProduct ? "quick" : "creative",
     product: isTaskAssignProduct ? "task-assign" : "flowmate"
-  }), allowedRoute && route === "detail" && React.createElement(DetailScreen, {
+  }), allowedRoute && route === "detail" && React.createElement(isTaskAssignProduct ? TaskAssignDetailScreen : DetailScreen, {
     onNav: nav,
     onOpen: open,
     focusId: focusId

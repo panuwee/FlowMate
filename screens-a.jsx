@@ -821,7 +821,7 @@ function normalizeFlowMateQuickDraft(draft) {
   const nextDraft = { ...getDefaultQuickDraft(), ...(draft || {}) };
   return {
     ...nextDraft,
-    dueDate: clampFlowMateDateToToday(nextDraft.dueDate),
+    dueDate: nextDraft.dueDate ? clampFlowMateDateToToday(nextDraft.dueDate) : "",
     launchDate: clampFlowMateDateToToday(nextDraft.launchDate),
   };
 }
@@ -896,6 +896,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "dueDate",
     "launchDate",
     "priority",
+    "responsibleTeam", "urgentReason", "referenceLinks", "confidential", "collaboratorIds", "parentId", "requestKey",
   ],
   creative: [
     "title",
@@ -934,11 +935,18 @@ function getDefaultQuickDraft() {
     note: "",
     requesterTeam,
     projectName: "",
-    assigneeUserId: getDefaultQuickAssignee().userId,
+    assigneeUserId: "",
     assigneeOtherName: "",
-    dueDate: todayDate,
+    dueDate: "",
     launchDate: todayDate,
     priority: "normal",
+    responsibleTeam: window.TaskAssign?.sourceTeam() || "",
+    urgentReason: "",
+    referenceLinks: "",
+    confidential: false,
+    collaboratorIds: [],
+    parentId: "",
+    requestKey: window.crypto.randomUUID(),
   };
 }
 
@@ -983,7 +991,7 @@ function getFlowMateCreateDraftPayload(kind, draft, fallback = {}) {
   const fields = FLOWMATE_CREATE_DRAFT_FIELDS[kind] || [];
   return fields.reduce((payload, field) => {
     const value = Object.prototype.hasOwnProperty.call(draft || {}, field) ? draft[field] : fallback[field];
-    payload[field] = Array.isArray(value) ? value.slice() : typeof value === "string" ? value : "";
+    payload[field] = Array.isArray(value) ? value.slice() : typeof value === "boolean" ? value : typeof value === "string" ? value : "";
     return payload;
   }, {});
 }
@@ -1022,6 +1030,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
   }
 
   if (mode === "quick") {
+    if (row.responsibleTeam) return window.TaskAssign.validate(row);
     requireField("requesterTeam", "Requester team is required.");
     requireField("projectName", "Project / campaign is required.");
     requireField("dueDate", "1st Review / Draft is required.");
@@ -1073,7 +1082,7 @@ function getFlowMateCreateValidationErrors(mode, draft) {
 function readFlowMateCreateDraft(kind, fallback) {
   if (!window.localStorage) return fallback;
   try {
-    const raw = window.localStorage.getItem(FLOWMATE_CREATE_DRAFT_KEYS[kind]);
+    const raw = window.localStorage.getItem(getFlowMateCreateDraftStorageKey(kind));
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return fallback;
@@ -1088,7 +1097,7 @@ function saveFlowMateCreateDraft(kind, draft) {
   if (!window.localStorage) return;
   try {
     window.localStorage.setItem(
-      FLOWMATE_CREATE_DRAFT_KEYS[kind],
+      getFlowMateCreateDraftStorageKey(kind),
       JSON.stringify(getFlowMateCreateDraftPayload(kind, draft)),
     );
   } catch (error) {
@@ -1099,10 +1108,15 @@ function saveFlowMateCreateDraft(kind, draft) {
 function clearFlowMateCreateDraft(kind) {
   if (!window.localStorage) return;
   try {
-    window.localStorage.removeItem(FLOWMATE_CREATE_DRAFT_KEYS[kind]);
+    window.localStorage.removeItem(getFlowMateCreateDraftStorageKey(kind));
   } catch (error) {
     console.warn("[FlowMate Create] draft clear failed:", error);
   }
+}
+
+function getFlowMateCreateDraftStorageKey(kind) {
+  const base = FLOWMATE_CREATE_DRAFT_KEYS[kind];
+  return kind === "quick" ? `${base}:${window.FLOWMATE_CURRENT_USER?.id || "signed-out"}:${window.TaskAssign?.sourceTeam() || "no-workspace"}` : base;
 }
 
 function getDefaultQuickAssignee(options = FLOWMATE_ASSIGNEE_FALLBACK) {
@@ -1157,14 +1171,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
   }
   const [quickDraft, setQuickDraft] = useState(() => {
     const draft = normalizeFlowMateQuickDraft(readFlowMateCreateDraft("quick", getDefaultQuickDraft()));
-    return {
-      ...draft,
-      title: window.buildFlowMateTemplateTitle({
-        launchDate: draft.launchDate,
-        requesterTeam: draft.requesterTeam,
-        projectName: draft.projectName,
-      }),
-    };
+    return draft;
   });
   const [creativeDraft, setCreativeDraft] = useState(() => {
     return withCreativeDraftTitle(readFlowMateCreateDraft("creative", getDefaultCreativeDraft()));
@@ -1173,14 +1180,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
   function resetSubmittedDraft() {
     if (mode === "quick") {
       const draft = normalizeFlowMateQuickDraft(getDefaultQuickDraft());
-      setQuickDraft({
-        ...draft,
-        title: window.buildFlowMateTemplateTitle({
-          launchDate: draft.launchDate,
-          requesterTeam: draft.requesterTeam,
-          projectName: draft.projectName,
-        }),
-      });
+      setQuickDraft(draft);
       return;
     }
     setCreativeDraft(withCreativeDraftTitle(getDefaultCreativeDraft()));
@@ -1205,6 +1205,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
 
   useEffect(() => {
     let alive = true;
+    if (isTaskAssignProduct) return () => {};
     if (!window.loadFlowMateAssignees) return () => {};
 
     window.loadFlowMateAssignees()
@@ -1236,13 +1237,14 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
     if (!detailId) {
       throw new Error("Create succeeded, but the response did not include a work item ID.");
     }
-    if (!window.loadFlowMateWorkItemById) {
-      throw new Error(`Create succeeded for ${detailId}, but the detail loader is not ready.`);
-    }
     if (typeof onOpen !== "function") {
       throw new Error(`Create succeeded for ${detailId}, but detail navigation is not ready.`);
     }
 
+    if (isTaskAssignProduct) { onOpen(detailId); return; }
+    if (!window.loadFlowMateWorkItemById) {
+      throw new Error(`Create succeeded for ${detailId}, but the detail loader is not ready.`);
+    }
     const createdRow = await window.loadFlowMateWorkItemById(detailId, { includeArchived: false });
     if (!createdRow) {
       throw new Error(`Create succeeded for ${detailId}, but the detail row could not be loaded.`);
@@ -1362,12 +1364,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
   function updateQuickDraft(nextDraft) {
     setValidationErrors({});
     setCreateAlert("");
-    const title = window.buildFlowMateTemplateTitle({
-      launchDate: nextDraft.launchDate,
-      requesterTeam: nextDraft.requesterTeam,
-      projectName: nextDraft.projectName,
-    });
-    const nextQuickDraft = { ...nextDraft, title };
+    const nextQuickDraft = { ...nextDraft };
     setQuickDraft(nextQuickDraft);
     saveFlowMateCreateDraft("quick", nextQuickDraft);
   }
@@ -1383,17 +1380,17 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
       <div className="page__header">
         <div>
           <h1 className="page__title">Create</h1>
-          <div className="page__sub">{isTaskAssignProduct ? "Create an operational Quick Task. Function is set automatically from your signed-in account." : "Create a Creative Request for the assignment engine."}</div>
+          <div className="page__sub">{isTaskAssignProduct ? "Create work for your team or send a request to another team. Requester workspace is recorded automatically." : "Create a Creative Request for the assignment engine."}</div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isTaskAssignProduct ? "minmax(0, 1fr)" : "1fr 1fr", gap: 16, marginBottom: 24 }}>
         {isTaskAssignProduct && <button className={`choice-card ${mode === "quick" ? "is-active" : ""}`} onClick={() => switchCreateMode("quick")}>
           <div className="choice-card__title"><Icon name="zap" /> Quick task</div>
-          <div className="choice-card__sub">Small internal task, follow-up, or reminder. Stays in your team's quick-task list.</div>
+          <div className="choice-card__sub">Non-creative work with one responsible team and one shared task record.</div>
           <ul className="choice-card__list">
-            <li>No brief or routing review required</li>
-            <li>Self-assign or pick a teammate</li>
+            <li>Describe the expected deliverable</li>
+            <li>Assign a teammate or send to another team’s queue</li>
             <li>Tracked separately from creative requests</li>
           </ul>
         </button>}
@@ -1427,137 +1424,66 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <button className="btn btn--ghost" onClick={() => onNav("my-work")}>Cancel</button>
         <button className="btn btn--primary" onClick={handleSubmit} disabled={isSubmitting}>
-          <Icon name="send" /> {isSubmitting ? "Saving..." : mode === "quick" ? "Create quick task" : "Submit request"}
+          <Icon name="send" /> {isSubmitting ? "Saving..." : mode === "quick" ? (quickDraft.responsibleTeam !== window.TaskAssign.sourceTeam() ? "Send request" : "Create task") : "Submit request"}
         </button>
       </div>
     </div>
   );
 }
 
-function QuickTaskForm({ value, onChange, assigneeOptions, product = "task-assign", errors = {} }) {
-  const options = assigneeOptions || FLOWMATE_ASSIGNEE_FALLBACK;
-  const selectedAssignee = options.find((option) => option.userId === value.assigneeUserId) || null;
-  const [assigneeQuery, setAssigneeQuery] = useState(selectedAssignee ? selectedAssignee.name : "");
-  const [assigneeFocused, setAssigneeFocused] = useState(false);
-  const assigneeMatches = window.filterFlowMateAssigneeOptions
-    ? window.filterFlowMateAssigneeOptions(options, assigneeQuery)
-    : options.filter((option) => option.name.toLowerCase().startsWith((assigneeQuery || "").trim().toLowerCase()));
-  const exactAssignee = selectedAssignee && assigneeQuery.trim().toLowerCase() === selectedAssignee.name.toLowerCase();
-  const todayDate = getFlowMateTodayDateKey();
-
+function QuickTaskForm({ value, onChange, errors = {} }) {
+  const [assigneeQuery, setAssigneeQuery] = useState("");
+  const sourceTeam = window.TaskAssign.sourceTeam();
+  const crossTeam = value.responsibleTeam !== sourceTeam;
+  const [members, setMembers] = useState([]);
+  const [parents, setParents] = useState([]);
+  const [memberError, setMemberError] = useState("");
   useEffect(() => {
-    setAssigneeQuery(selectedAssignee ? selectedAssignee.name : "");
-  }, [selectedAssignee && selectedAssignee.userId]);
-
+    let alive = true;
+    setMembers([]); setMemberError("");
+    window.TaskAssign.members(sourceTeam).then(rows => { if (alive) setMembers(rows); }).catch(error => { if (alive) setMemberError(window.flowmateUserError(error)); });
+    window.TaskAssign.list(null, "created").then(rows => { if (alive) setParents(rows); }).catch(() => {});
+    return () => { alive = false; };
+  }, [sourceTeam]);
+  useEffect(() => {
+    if (!value.responsibleTeam) onChange({ ...value, responsibleTeam: sourceTeam, assigneeUserId: "" });
+  }, [sourceTeam]);
   function update(field, nextValue) {
-    const normalizedValue = field === "dueDate" || field === "launchDate"
-      ? clampFlowMateDateToToday(nextValue)
-      : nextValue;
-    const next = { ...value, [field]: normalizedValue };
-    if (field === "assigneeUserId") next.assigneeOtherName = "";
+    const next = { ...value, [field]: nextValue };
+    if (field === "responsibleTeam") { next.assigneeUserId = ""; next.collaboratorIds = []; }
     onChange(next);
   }
-
-  function updateAssigneeQuery(nextQuery) {
-    setAssigneeQuery(nextQuery);
-    const exactMatch = options.find((option) => option.name.toLowerCase() === nextQuery.trim().toLowerCase());
-    update("assigneeUserId", exactMatch ? exactMatch.userId : "");
-  }
-
-  function selectAssignee(option) {
-    setAssigneeQuery(option.name);
-    setAssigneeFocused(false);
-    update("assigneeUserId", option.userId);
-  }
-
-  return (
-    <div className="form-grid">
-      <div className="field field--full">
-        <label className="field__label">Title <span className="req">*</span></label>
-        <input className="input" value={value.title} readOnly placeholder="[3 Jul 2026][Function][Project Name]" title="Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign." />
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Auto-filled from Launch Date / Deadline, Requester Team / Function, and Project / campaign.</div>
-      </div>
-      <div className="field field--full">
-        <label className="field__label">Note</label>
-        <textarea className="textarea" value={value.note} onChange={(e) => update("note", e.target.value)} placeholder="Short description - what needs doing, any context, link to the doc."></textarea>
-      </div>
-      {product !== "task-assign" && <div className={`field ${errors.requesterTeam ? "field--error" : ""}`}>
-        <label className="field__label">Requester Team / Function <span className="req">*</span></label>
-        <select className="select" value={value.requesterTeam} onChange={(e) => update("requesterTeam", e.target.value)}>
-          {TEAMS.map((team) => <option key={team} value={team}>{team}</option>)}
-        </select>
-        {errors.requesterTeam && <div className="field__error">{errors.requesterTeam}</div>}
-      </div>}
-      <div className={`field ${errors.projectName ? "field--error" : ""}`}>
-        <label className="field__label">Project / campaign <span className="req">*</span></label>
-        <input className="input" value={value.projectName} onChange={(e) => update("projectName", e.target.value)} placeholder="e.g. FCO S24 Launch" />
-        {errors.projectName && <div className="field__error">{errors.projectName}</div>}
-      </div>
-      <div className="field">
-        <label className="field__label">Assignee</label>
-        <div style={{ position: "relative" }}>
-          <input
-            className="input"
-            value={assigneeQuery}
-            onChange={(e) => updateAssigneeQuery(e.target.value)}
-            onFocus={() => setAssigneeFocused(true)}
-            onBlur={() => window.setTimeout(() => setAssigneeFocused(false), 120)}
-            placeholder="Type a name, e.g. P"
-            autoComplete="off"
-          />
-          {assigneeFocused && assigneeMatches.length > 0 && !exactAssignee && (
-            <div
-              className="card"
-              style={{
-                position: "absolute",
-                zIndex: 20,
-                top: "calc(100% + 4px)",
-                left: 0,
-                right: 0,
-                maxHeight: 220,
-                overflowY: "auto",
-                padding: 4,
-              }}
-            >
-              {assigneeMatches.map((option) => (
-                <button
-                  key={option.userId}
-                  className="btn btn--ghost"
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    selectAssignee(option);
-                  }}
-                  style={{ width: "100%", justifyContent: "flex-start" }}
-                >
-                  {option.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      <div className={`field ${errors.dueDate ? "field--error" : ""}`}>
-        <label className="field__label">1st Review / Draft <span className="req">*</span></label>
-        <input className="input" value={value.dueDate} onChange={(e) => update("dueDate", e.target.value)} type="date" min={todayDate} />
-        {errors.dueDate && <div className="field__error">{errors.dueDate}</div>}
-      </div>
-      <div className={`field ${errors.launchDate ? "field--error" : ""}`}>
-        <label className="field__label">Launch Date / Deadline <span className="req">*</span></label>
-        <input className="input" value={value.launchDate} onChange={(e) => update("launchDate", e.target.value)} type="date" min={todayDate} />
-        {errors.launchDate && <div className="field__error">{errors.launchDate}</div>}
-      </div>
-      <div className="field">
-        <label className="field__label">Priority</label>
-        <select className="select" value={value.priority} onChange={(e) => update("priority", e.target.value)}>
-          <option value="low">Low</option>
-          <option value="normal">Normal</option>
-          <option value="high">High</option>
-        </select>
-      </div>
-    </div>
-  );
+  function fieldError(key) { return errors[key] ? <div className="field__error" role="alert">{errors[key]}</div> : null; }
+  const matchingAssignees = window.filterFlowMateAssigneeOptions
+    ? window.filterFlowMateAssigneeOptions(members, assigneeQuery)
+    : members.filter(member => member.name.toLowerCase().startsWith(assigneeQuery.trim().toLowerCase()));
+  const visibleAssignees = members.filter(member => member.userId === value.assigneeUserId || matchingAssignees.includes(member));
+  return <div className="form-grid" data-testid="task-assign-create-form">
+    <div className="field field--full"><div className="reason-box">Requester workspace: <strong>{window.TaskAssign.teamLabel(sourceTeam)}</strong>. {crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team."}</div></div>
+    <div className={"field field--full " + (errors.title ? "field--error" : "")}><label className="field__label" htmlFor="task-title">Title *</label><input id="task-title" className="input" value={value.title} onChange={e => update("title", e.target.value)} placeholder="e.g. Prepare the event venue" />{fieldError("title")}</div>
+    <div className={"field field--full " + (errors.note ? "field--error" : "")}><label className="field__label" htmlFor="task-note">Note / Expected deliverable *</label><textarea id="task-note" className="textarea" value={value.note} onChange={e => update("note", e.target.value)} placeholder={"What needs doing:\nExpected deliverable:\nImportant conditions:\nReference information:"} />{fieldError("note")}</div>
+    <div className="field"><label className="field__label" htmlFor="task-project">Project / Campaign (optional)</label><input id="task-project" className="input" value={value.projectName} onChange={e => update("projectName", e.target.value)} placeholder="General work, or campaign name" /></div>
+    <div className={"field " + (errors.responsibleTeam ? "field--error" : "")}><label className="field__label" htmlFor="task-team">Responsible team *</label><select id="task-team" className="select" value={value.responsibleTeam} onChange={e => update("responsibleTeam", e.target.value)}><option value="">Choose a team</option>{window.TaskAssign.teams.map(team => <option key={team.key} value={team.key}>{team.label}</option>)}</select>{fieldError("responsibleTeam")}</div>
+    <div className={"field " + (errors.assigneeUserId ? "field--error" : "")}><label className="field__label" htmlFor="task-assignee">Assignee {crossTeam ? "" : "*"}</label>{crossTeam ? <div className="input">Receiving team will assign a person</div> : <><input className="input" type="search" aria-label="Search team assignees" placeholder="Search team members" value={assigneeQuery} onChange={e => setAssigneeQuery(e.target.value)} /><select id="task-assignee" className="select" value={value.assigneeUserId} onChange={e => update("assigneeUserId", e.target.value)}><option value="">Choose a team member</option>{visibleAssignees.map(member => <option key={member.userId} value={member.userId}>{member.name}</option>)}</select></>}{fieldError("assigneeUserId")}{memberError && <div className="field__error" role="alert">{memberError}</div>}</div>
+    <div className="field"><label className="field__label" htmlFor="task-review">1st Review Date (optional)</label><input id="task-review" className="input" type="date" min={getFlowMateTodayDateKey()} max={value.launchDate || undefined} value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />{fieldError("dueDate")}</div>
+    <div className="field"><label className="field__label" htmlFor="task-deadline">Deadline / Requested delivery *</label><input id="task-deadline" className="input" type="date" min={getFlowMateTodayDateKey()} value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />{fieldError("launchDate")}</div>
+    <div className="field"><label className="field__label" htmlFor="task-priority">Priority</label><select id="task-priority" className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>{["low", "normal", "high", "urgent"].map(priority => <option key={priority} value={priority}>{priority[0].toUpperCase() + priority.slice(1)}</option>)}</select></div>
+    {value.priority === "urgent" && <div className="field field--full"><label className="field__label" htmlFor="task-urgent">Urgent reason *</label><textarea id="task-urgent" className="textarea" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} />{fieldError("urgentReason")}<div className="muted">Urgent requests still require the receiving team to accept the commitment.</div></div>}
+    <div className="field field--full"><label className="field__label" htmlFor="task-references">Reference / File links (optional)</label><textarea id="task-references" className="textarea" value={value.referenceLinks} onChange={e => update("referenceLinks", e.target.value)} placeholder="One complete HTTP(S) link per line" />{fieldError("referenceLinks")}<div className="muted">Link to files in your approved storage. Check their sharing permissions separately.</div></div>
+    <div className="field"><label className="field__label" htmlFor="task-parent">Parent task (optional)</label><select id="task-parent" className="select" value={value.parentId} onChange={e => update("parentId", e.target.value)}><option value="">Standalone task</option>{parents.map(parent => <option key={parent.id} value={parent.id}>{parent.display_id} — {parent.title}</option>)}</select></div>
+    <div className="field"><label className="field__label"><input type="checkbox" checked={Boolean(value.confidential)} onChange={e => update("confidential", e.target.checked)} /> Confidential task</label><div className="muted">Visible only to requester, assignee, selected collaborators, and administrators.</div></div>
+    {value.confidential && <div className="field field--full"><label className="field__label" >Selected collaborators</label><div className="muted">Select collaborators below. Cross-team confidential requests must include a dispatcher from the receiving team.</div><TaskAssignCollaborators team={value.responsibleTeam} sourceMembers={members} selected={value.collaboratorIds || []} onChange={ids => update("collaboratorIds", ids)} /></div>}
+  </div>;
 }
+
+function TaskAssignCollaborators({ team, sourceMembers, selected, onChange }) {
+  const [members, setMembers] = useState([]);
+  const [error, setError] = useState("");
+  useEffect(() => { let alive = true; setMembers([]); setError(""); window.TaskAssign.members(team).then(rows => { if (alive) setMembers(rows); }).catch(err => { if (alive) setError(window.flowmateUserError(err)); }); return () => { alive = false; }; }, [team]);
+  const all = [...new Map([...sourceMembers, ...members].map(member => [member.userId, member])).values()];
+  return <div>{error && <div className="field__error">{error}</div>}{all.map(member => <label key={member.userId} style={{ display: "block", padding: "4px 0" }}><input type="checkbox" checked={selected.includes(member.userId)} onChange={e => onChange(e.target.checked ? [...selected, member.userId] : selected.filter(id => id !== member.userId))} /> {member.name} ({window.TaskAssign.teamLabel(member.teamKey)}) {member.dispatcher ? "— dispatcher" : ""}</label>)}</div>;
+}
+
 function CreativeRequestForm({ value, onChange, errors = {} }) {
   const selectedCreativeType = getFlowMateCreativeTypeOption(value.assetSubtype);
   const selectedCreativeType2Key = String(value.assetSubtype2 || "").trim();

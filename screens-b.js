@@ -1518,12 +1518,12 @@ function BoardScreen({
         className: "board-card__actions",
         onClick: event => event.stopPropagation(),
         onKeyDown: event => event.stopPropagation()
-      }, row.type === "quick" && canTransitionBoardWork(row) && React.createElement("button", {
+      }, row.type === "quick" && React.createElement("button", {
         type: "button",
         className: "btn btn--xs btn--secondary",
         disabled: pending,
-        onClick: () => completeWork(row)
-      }, pending ? "Working..." : "Mark done"), row.type === "creative" && row.status === "review" && canTransitionBoardTarget(row, "delivered") && React.createElement("button", {
+        onClick: () => onOpen(row.id)
+      }, "Manage task"), row.type === "creative" && row.status === "review" && canTransitionBoardTarget(row, "delivered") && React.createElement("button", {
         type: "button",
         className: "btn btn--xs btn--primary",
         disabled: pending,
