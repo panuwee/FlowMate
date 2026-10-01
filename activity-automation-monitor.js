@@ -2,8 +2,10 @@
   'use strict';
   const labels={battle_pass:'Battle Pass',membership:'Membership',conqueror_crate:'Conqueror Crate',golden_spin:'Golden Spin',topup_promotion:'Topup Promotion'};
   const views={overview:'ภาพรวมระบบอัตโนมัติกิจกรรม',activities:'กิจกรรม',runs:'ประวัติรัน',notifications:'การแจ้งเตือน'};
-  const statuses={complete:'สร้างสำเร็จ',succeeded:'สำเร็จ',assigned:'มอบหมายแล้ว',accepted:'ยืนยันแล้ว',pending:'รอดำเนินการ',submitted:'รอยืนยัน',pending_acceptance:'รอยืนยัน',failed:'ล้มเหลว',uncertain:'ยังยืนยันผลไม่ได้',cancelled:'ยกเลิก',processing:'กำลังดำเนินการ',retryable:'รอลองใหม่',delivered:'API รับข้อความแล้ว',blocked:'ติดเงื่อนไข',review_required:'ต้องตรวจสอบ',running:'กำลังทำงาน',disabled:'ปิดอยู่',enabled:'เปิดอยู่',unavailable:'อ่านสถานะไม่ได้',unknown:'ยังไม่มีข้อมูล',waiting_confirmation:'รอยืนยันต้นทาง'};
+  const statuses={complete:'สร้างสำเร็จ',succeeded:'สำเร็จ',assigned:'มอบหมายแล้ว',accepted:'ยืนยันแล้ว',pending:'รอดำเนินการ',submitted:'รอยืนยัน',pending_acceptance:'รอยืนยัน',failed:'ล้มเหลว',uncertain:'ยังยืนยันผลไม่ได้',cancelled:'ยกเลิก',processing:'กำลังดำเนินการ',retryable:'รอลองใหม่',delivered:'API รับข้อความแล้ว',blocked:'ติดเงื่อนไข',review_required:'ต้องตรวจสอบ',running:'กำลังทำงาน',disabled:'ปิดอยู่',enabled:'เปิดอยู่',unavailable:'อ่านสถานะไม่ได้',unknown:'ยังไม่มีข้อมูล',waiting_confirmation:'รอยืนยันต้นทาง',source_ready:'ผ่านการตรวจ SSoT',working_sheet_invalid:'Working Sheet ยังไม่พร้อม',source_dates_invalid:'วันกิจกรรมยังไม่พร้อม',project_code_missing:'ยังไม่มี Project Code',source_ambiguous:'พบข้อมูลต้นทางซ้ำ'};
   Object.assign(statuses,{not_submitted:'ยังไม่ส่งบรีฟ',ready_for_review:'สร้างบรีฟแล้ว',generating:'กำลังสร้างบรีฟ',discovered:'พบกิจกรรมแล้ว',dispatching:'กำลังส่งงาน',resolution_unknown:'ยังไม่ทราบว่าแก้ไขแล้วหรือยัง',pending_acceptance:'รอยืนยันบรีฟ',stale:'ข้อมูลรันเกินช่วงที่คาด',held:'พักไว้ให้คนตรวจ',readiness_checked:'ตรวจต้นทางแล้ว',no_pending_month:'ไม่มีรอบที่รอดำเนินการ'});
+  Object.assign(statuses,{claimed:'รับงานแล้ว',source_validated:'ตรวจต้นทางผ่านแล้ว',generation_pending:'อยู่ในขั้นสร้าง Slides',unassigned:'ยังไม่มอบหมาย',ready:'ผ่าน ณ เวลาตรวจ',not_ready:'ไม่ผ่าน ณ เวลาตรวจ',ambiguous:'พบตารางเวลาซ้ำ'});
+  const recoveryLabels={in_progress:'ยังอยู่ในช่วงเวลารัน',lease_expired:'หมดช่วงเวลารันก่อนสร้าง Slides',generation_not_started:'ยังไม่มีหลักฐานเริ่มสร้าง Slides',copy_result_unknown:'ยังยืนยันผลคัดลอก Slides ไม่ได้',copied_pending_population:'มีสำเนา Slides แล้ว ยังไม่ยืนยันการเขียนเนื้อหา',populate_result_unknown:'ยังยืนยันผลเขียน Slides ไม่ได้',verified_pending_finalize:'ตรวจ Slides ผ่านแล้ว รอจบงานใน FlowMate',held:'พักงานไว้ให้ตรวจสอบ',complete:'จบงานแล้ว'};
   function month(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit'}).formatToParts(new Date());return parts.find(p=>p.type==='year').value+'-'+parts.find(p=>p.type==='month').value;}
   function filters(search){const p=new URLSearchParams(search);return {view:views[p.get('view')]?p.get('view'):'overview',mode:p.get('mode')==='test'?'test':'production',activity:labels[p.get('activity')]?p.get('activity'):'all',month:/^20\d{2}-(0[1-9]|1[0-2])$/.test(p.get('month')||'')?p.get('month'):month(),search:(p.get('search')||'').slice(0,120),status:/^[a-z_]{1,80}$/.test(p.get('status')||'')?p.get('status'):'',run:p.get('run')||'',source:p.get('source')||'',entityType:p.get('entity')||'run'};}
   function time(value){const d=new Date(value);return value&&Number.isFinite(d.getTime())?new Intl.DateTimeFormat('th-TH',{timeZone:'Asia/Bangkok',dateStyle:'medium',timeStyle:'short'}).format(d):'ไม่มีข้อมูล';}
@@ -14,44 +16,115 @@
   let state=filters(root.location.search),generation=0,detailGeneration=0,capabilities={},cursor=null,nextCursor=null,cursors=[],snapshot=false,opener=null,authUser=null,searchTimer,legacyAllowed=$('monitor')?.hidden===false;
   const n=(tag,text,cls)=>{const el=doc.createElement(tag);if(text!=null)el.textContent=String(text);if(cls)el.className=cls;return el;};
   function status(value){return statuses[value]|| (value?'สถานะใหม่ที่ยังไม่รองรับ ('+String(value)+')':'ไม่มีข้อมูล');}
+  function scheduleText(a){const names={not_configured:'ยังไม่ตั้งเวลา',unknown:'อ่านตารางเวลาไม่ได้',unavailable:'อ่านตารางเวลาไม่ได้',active:'เปิดอยู่',paused:'พักอยู่',ambiguous:'พบตารางเวลาซ้ำ ต้องตรวจสอบ'};return (a.availability==='unavailable'?'อ่านตารางเวลาไม่ได้':names[a.schedulerState]||'ยังไม่มีข้อมูล')+(a.schedule?' · '+a.schedule:'');}
   function badge(value){const b=n('span',status(value),'am-badge');b.dataset.tone=['complete','succeeded','accepted','assigned','delivered'].includes(value)?'good':['failed','blocked'].includes(value)?'bad':['pending','submitted','pending_acceptance','uncertain','review_required'].includes(value)?'warn':'';return b;}
+  function automationBadge(a){
+    const b=n('span',null,'am-badge');
+    if(a.runnerEnabled===true&&a.schedulerState==='active'&&a.schedulerEnabled!==false){b.textContent='Automation Activated';b.dataset.tone='good';}
+    else if(a.runnerEnabled===false){b.textContent='Automation Disabled';b.dataset.tone='bad';}
+    else if(a.schedulerState==='paused'||a.schedulerEnabled===false){b.textContent='Automation Paused';b.dataset.tone='warn';}
+    else if(a.schedulerState==='not_configured'){b.textContent='Automation ยังไม่ตั้งเวลา';b.dataset.tone='warn';}
+    else {b.textContent='Automation ยังยืนยันสถานะไม่ได้';}
+    return b;
+  }
+  function periodLabel(value){
+    if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(value||''))return null;
+    return new Intl.DateTimeFormat('en-US',{month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(value+'-01T12:00:00Z'));
+  }
+  function currentStatus(a){
+    const wrap=n('div'),check=a.lastSourceCheck,run=check&&new Date(check.checkedAt)>new Date(a.lastRun?.eventAt)?null:a.lastRun;
+    if(run){
+      const identity=run.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(run.period)?' ('+periodLabel(run.period)+')':''));
+      wrap.append(n('span','Current Status: '+identity+' — '+status(run.status)));
+      if(run.eventAt)wrap.append(n('small',time(run.eventAt)));
+    }else if(check){
+      const identity=check.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(check.period)?' ('+periodLabel(check.period)+')':''));
+      wrap.append(n('span','Current Status: '+identity+' — '+status(check.code||check.status)));
+    }
+    else wrap.append(n('span','Current Status: รอผลตรวจต้นทางครั้งแรก'));
+    return wrap;
+  }
+  function sourceStatus(a){
+    const source=n('div'),check=a.lastSourceCheck;
+    source.append(n('span',check?.sourceReady===true?'ต้นทางพร้อม ณ เวลาตรวจ':check?.sourceReady===false?'ต้นทางยังไม่พร้อม':'ยังไม่มีผลตรวจต้นทาง'));
+    if(check&&Object.hasOwn(check,'workingSheetLinked'))source.append(n('small','SSoT Working Sheet: '+(check.workingSheetLinked===true?'Filled':check.workingSheetLinked===false?'Empty':'ยังไม่ยืนยัน')));
+    if(check&&Object.hasOwn(check,'confirmed'))source.append(n('small','Loot Confirmed?: '+(check.confirmed===true?'Yes':check.confirmed===false?'No':'ยังไม่ยืนยัน')));
+    source.append(n('small',time(check?.checkedAt)));
+    return source;
+  }
   function note(text,error=false){$('am-message').textContent=text;$('am-message').dataset.error=String(error);}
   function link(text,url){const href=safeUrl(url);if(!href)return n('span',text+' — ไม่มีลิงก์ที่ตรวจสอบได้');const a=n('a',text);a.href=href;a.target='_blank';a.rel='noopener noreferrer';return a;}
   function button(text,fn){const b=n('button',text);b.type='button';b.addEventListener('click',fn);return b;}
   function panel(title){const p=n('section',null,'am-panel');p.append(n('h2',title));return p;}
   function empty(parent,text='ยังไม่มีข้อมูลในช่วงที่เลือก'){parent.append(n('p',text,'am-empty'));}
   function table(parent,heads,rows,render){if(!rows?.length){empty(parent);return;}const wrap=n('div',null,'am-table-wrap'),t=n('table',null,'am-table'),thead=n('thead'),tr=n('tr');heads.forEach(h=>{const th=n('th',h);th.scope='col';tr.append(th);});thead.append(tr);t.append(thead);const body=n('tbody');for(const row of rows){const r=n('tr');render(row).forEach((value,i)=>{const td=n('td');td.dataset.label=heads[i];td.append(value?.nodeType?value:doc.createTextNode(String(value??'—')));r.append(td);});body.append(r);}t.append(body);wrap.append(t);parent.append(wrap);}
-  function sync(){const options=state.view==='notifications'?['pending','dispatching','processing','retryable','delivered','failed','uncertain','cancelled']:['discovered','generating','ready_for_review','complete','failed','blocked','review_required','waiting_confirmation'];$('am-status').replaceChildren(n('option','ทุกสถานะ'));$('am-status').firstChild.value='';if(state.status&&!options.includes(state.status))options.push(state.status);for(const value of options){const option=n('option',status(value));option.value=value;$('am-status').append(option);}for(const [key,id]of [['mode','am-mode'],['activity','am-activity'],['month','am-month'],['search','am-search'],['status','am-status']])$(id).value=state[key];$('am-title').textContent=views[state.view];doc.querySelectorAll('[data-am-view]').forEach(a=>{if(a.dataset.amView===state.view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('am-test').hidden=state.mode!=='test';$('am-search-label').hidden=state.view!=='runs';$('am-status-label').hidden=!['runs','notifications'].includes(state.view);$('am-month-note').textContent=['runs','notifications'].includes(state.view)?'เดือนที่เกิดเหตุการณ์ · เวลาประเทศไทย (Asia/Bangkok)':'เดือนเริ่มกิจกรรม · ผลตรวจต้นทางเป็นผลที่บันทึกไว้ล่าสุด';$('am-legacy').hidden=!((capabilities.battlePassRead||legacyAllowed)&&state.mode==='production'&&state.view==='activities'&&['all','battle_pass'].includes(state.activity));}
+  function sync(){const options=state.view==='notifications'?['pending','dispatching','processing','retryable','delivered','failed','uncertain','cancelled']:['discovered','generating','ready_for_review','claimed','source_validated','generation_pending','held','complete','failed','blocked','review_required','waiting_confirmation'];$('am-status').replaceChildren(n('option','ทุกสถานะ'));$('am-status').firstChild.value='';if(state.status&&!options.includes(state.status))options.push(state.status);for(const value of options){const option=n('option',status(value));option.value=value;$('am-status').append(option);}for(const [key,id]of [['mode','am-mode'],['activity','am-activity'],['month','am-month'],['search','am-search'],['status','am-status']])$(id).value=state[key];$('am-title').textContent=views[state.view];doc.querySelectorAll('[data-am-view]').forEach(a=>{if(a.dataset.amView===state.view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('am-test').hidden=state.mode!=='test';$('am-search-label').hidden=state.view!=='runs';$('am-status-label').hidden=!['runs','notifications'].includes(state.view);$('am-month-note').textContent=['runs','notifications'].includes(state.view)?'เดือนที่เกิดเหตุการณ์ · เวลาประเทศไทย (Asia/Bangkok)':'เดือนเริ่มกิจกรรม · ผลตรวจต้นทางเป็นผลที่บันทึกไว้ล่าสุด';$('am-legacy').hidden=!((capabilities.battlePassRead||legacyAllowed)&&state.mode==='production'&&state.view==='activities'&&['all','battle_pass'].includes(state.activity));}
   function url(replace=false){const p=new URLSearchParams();for(const key of ['view','mode','activity','month'])p.set(key,state[key]);if(state.search)p.set('search',state.search);if(state.status)p.set('status',state.status);if(state.run){p.set('run',state.run);p.set('source',state.source);p.set('entity',state.entityType);}root.history[replace?'replaceState':'pushState']({},'',root.location.pathname+'?'+p);}
-  function normalize(data){for(const a of data.activities||[]){if(a.configurationScope==='shared_4_activities')a.configurationScope='shared';if(a.lastSourceCheck)a.lastSourceCheck.checkedAt=a.lastSourceCheck.sourceCheckedAt??null;}for(const r of [...(data.rows||[]),...(data.attention||[])]){r.attempts=r.attemptCount;r.kind=r.eventKind||r.kind;}for(const t of data.timeline||[])t.label=t.step==='generation'?'การสร้าง (เวลาอัปเดตล่าสุด)':t.step;return data;}
+  function normalize(data){for(const a of data.activities||[]){if(a.configurationScope==='shared_4_activities')a.configurationScope='shared';if(a.lastSourceCheck)a.lastSourceCheck.checkedAt=a.lastSourceCheck.sourceCheckedAt??null;}for(const r of [...(data.rows||[]),...(data.attention||[])]){r.attempts=r.attemptCount;r.kind=r.eventKind||r.kind;if(r.entityType==='production_run'&&r.recoveryState)r.message=recoveryLabels[r.recoveryState]||r.code;}for(const t of data.timeline||[])t.label=t.step==='generation'?'การสร้าง (เวลาอัปเดตล่าสุด)':t.step;return data;}
   async function rpc(name,args){let timer;try{const result=await Promise.race([client.rpc(name,args),new Promise((_,reject)=>{timer=root.setTimeout(()=>reject({code:'TIMEOUT'}),15000);})]);if(result.error)throw result.error;if(result.data?.version!==1||!result.data?.data)throw {code:'CONTRACT'};result.data.data=normalize(result.data.data);return result.data;}finally{root.clearTimeout(timer);}}
   function clear(){++generation;++detailGeneration;capabilities={};legacyAllowed=false;snapshot=false;cursor=null;cursors=[];$('am-content').replaceChildren();$('am-detail').replaceChildren();$('am-observed').textContent='';$('am-pagination').hidden=true;$('am-account').textContent='ยังไม่ได้เข้าสู่ระบบ';$('am-legacy').hidden=true;if($('am-drawer').open)$('am-drawer').close();}
-  function outputs(parent,rows){if(!rows?.length){empty(parent,'ยังไม่มีชุดงานในช่วงที่เลือก');return;}const list=n('ul',null,'am-list');for(const o of rows){const li=n('li');li.append(n('strong',o.projectCode||o.displayId||labels[o.activity]||'ชุดงาน'));li.append(n('p',(o.campaignStart||'ไม่ทราบวันเริ่ม')+' — '+(o.campaignEnd||'ไม่ทราบวันสิ้นสุด'),'am-muted'));const states=n('p');states.append('การสร้าง: ',badge(o.generationState),' · บรีฟ: ',badge(o.briefState==='pending'?'pending_acceptance':o.briefState),' · มอบหมาย: ',badge(o.assignmentState));li.append(states);if(o.briefUrl)li.append(link('เปิด Brief',o.briefUrl));if(o.workingSheetUrl)li.append(link('Working Sheet',o.workingSheetUrl));const cr=o.workItemUrl||o.crUrl;if(cr)li.append(link('เปิด '+(o.displayId||'CR')+' เพื่อตรวจบรีฟ',cr));list.append(li);}parent.append(list);}
+  function outputs(parent,rows){if(!rows?.length){empty(parent,'ยังไม่มีชุดงานในช่วงที่เลือก');return;}const list=n('ul',null,'am-list');for(const o of rows){const li=n('li');li.append(n('strong',o.projectCode||o.displayId||labels[o.activity]||'ชุดงาน'));li.append(n('p',(o.campaignStart||'ไม่ทราบวันเริ่ม')+' — '+(o.campaignEnd||'ไม่ทราบวันสิ้นสุด'),'am-muted'));const states=n('p');states.append('การสร้าง: ',badge(o.generationState),' · บรีฟ: ',badge(o.briefState==='pending'?'pending_acceptance':o.briefState),' · มอบหมาย: ',badge(o.assignmentState));li.append(states);if(o.marketingWorkingSheetLinked!=null)li.append(n('p','Working Sheet ใน Marketing Plan: '+(o.marketingWorkingSheetLinked?'เชื่อมกับ CR แล้ว':'ยังยืนยันการเชื่อมไม่ได้')));if(o.briefUrl)li.append(link('เปิด Brief',o.briefUrl));if(o.workingSheetUrl)li.append(link(o.mode==='production'&&o.source==='shared'?'ต้นทาง Working Sheet':'Working Sheet',o.workingSheetUrl));const cr=o.workItemUrl||o.crUrl;if(cr)li.append(link('เปิด '+(o.displayId||'CR')+' เพื่อตรวจบรีฟ',cr));list.append(li);}parent.append(list);}
   function activities(parent,rows){
-    table(parent,['กิจกรรม','ระบบสร้างบรีฟ / ตารางเวลา','ผลรันล่าสุด','ผลตรวจต้นทางล่าสุด','บรีฟรอยืนยัน','แจ้งเตือนต้องตรวจ','รายละเอียด'],rows,a=>{
+    table(parent,['กิจกรรม','สถานะอัตโนมัติ / ตารางเวลา','สถานะปัจจุบัน','ผลตรวจต้นทางล่าสุด','บรีฟรอยืนยัน','แจ้งเตือนต้องตรวจ','รายละเอียด'],rows,a=>{
       const name=n('div');name.append(n('strong',a.label||labels[a.key||a.activity]||a.key));if(a.configurationScope==='shared')name.append(n('small','ใช้การตั้งค่าร่วมกับ 4 กิจกรรม'));
-      const config=n('div');config.append(n('span',a.sourceSystem==='shared'?'Activity Runner':a.sourceSystem==='battle_pass'?'Battle Pass':a.sourceSystem||'ไม่มีข้อมูล'));
-      config.append(n('small',a.schedule||(['unavailable','unknown'].includes(a.schedulerState)||a.availability==='unavailable'?'อ่านตารางเวลาไม่ได้':'ยังไม่ตั้งเวลา')));
-      const source=n('div'),check=a.lastSourceCheck;
-      source.append(n('span',check?.sourceReady===true?'ต้นทางพร้อม ณ เวลาตรวจ':check?.sourceReady===false?'ต้นทางยังไม่พร้อม':'ยังไม่มีผลตรวจต้นทาง'));
-      source.append(n('small',time(check?.checkedAt)));return [name,config,badge(a.lastRun?.status),source,a.pendingBriefs??'—',a.notificationAttention??'—',button('ดูรายละเอียด',()=>activityDetail(a))];
+      const config=n('div');config.append(automationBadge(a),n('small',a.sourceSystem==='shared'?'Activity Runner':a.sourceSystem==='battle_pass'?'Battle Pass':a.sourceSystem||'ไม่มีข้อมูล'));
+      config.append(n('small',scheduleText(a)));
+      config.append(n('small','SeaTalk notifier: '+(a.notifierEnabled===true?'เปิด':a.notifierEnabled===false?'ปิด':'อ่านสถานะไม่ได้')));
+      return [name,config,currentStatus(a),sourceStatus(a),a.pendingBriefs??'—',a.notificationAttention??'—',button('ดูรายละเอียด',()=>activityDetail(a))];
     });
   }
   function dl(parent,items){const list=n('dl');for(const [label,value]of items){list.append(n('dt',label),n('dd',value??'ไม่มีข้อมูล'));}parent.append(list);}
   function openDrawer(title){++detailGeneration;opener=doc.activeElement;$('am-drawer-title').textContent=title;$('am-detail').replaceChildren();if(!$('am-drawer').open)$('am-drawer').showModal();$('am-close').focus();}
   function activityDetail(a){
     openDrawer(a.label||labels[a.key||a.activity]||'กิจกรรม');
-    const schedulerLabels={not_configured:'ยังไม่ตั้งเวลา',unknown:'ยังไม่มีข้อมูล',unavailable:'อ่านสถานะไม่ได้',active:'เปิดอยู่',paused:'พักอยู่'};
-    dl($('am-detail'),[['ระบบ',a.sourceSystem||a.source],['Runner',a.runnerEnabled==null?'อ่านสถานะไม่ได้':a.runnerEnabled?'เปิด':'ปิด'],['Scheduler',a.schedule||schedulerLabels[a.schedulerState]||'ยังไม่มีข้อมูล'],['Notifier',a.notifierEnabled==null?'อ่านสถานะไม่ได้':a.notifierEnabled?'เปิด':'ปิด'],['ขอบเขตตั้งค่า',a.configurationScope==='shared'?'ใช้การตั้งค่าร่วมกับ 4 กิจกรรม':'เฉพาะ Battle Pass']]);
+    dl($('am-detail'),[['ระบบ',a.sourceSystem||a.source],['Runner',a.runnerEnabled==null?'อ่านสถานะไม่ได้':a.runnerEnabled?'เปิด':'ปิด'],['Scheduler',scheduleText(a)],['Notifier',a.notifierEnabled==null?'อ่านสถานะไม่ได้':a.notifierEnabled?'เปิด':'ปิด'],['ขอบเขตตั้งค่า',a.configurationScope==='shared'?'ใช้การตั้งค่าร่วมกับ 4 กิจกรรม':'เฉพาะ Battle Pass']]);
     const check=a.lastSourceCheck;if(check){const yesno=v=>v===true?'ผ่าน':v===false?'ยังไม่ผ่าน':'ไม่มีข้อมูล';dl($('am-detail'),[['ตรวจต้นทางเมื่อ',time(check.checkedAt)],['ต้นทาง',yesno(check.sourceReady)],['Google',yesno(check.googleReady)],['ฐานข้อมูล',yesno(check.databaseReady)],['ยืนยันต้นทาง',yesno(check.confirmed)],['Working Sheet',yesno(check.workingSheetLinked)]]);for(const issue of check.issues||[])$('am-detail').append(n('p','เงื่อนไขที่พบ: '+issue));}
-    $('am-detail').append(n('p','สถานะ Alpha / MCP / SeaTalk: ยังไม่มีหลักฐานตรวจการเชื่อมต่อครบเส้นทาง','am-integration'));
+    if(['membership','conqueror_crate','golden_spin','topup_promotion'].includes(a.key||a.activity))integrationPanel(a.key||a.activity,state.mode,detailGeneration);
+    if(a.lastRun?.entityType==='production_run')$('am-detail').append(button('ดูรัน production ล่าสุด',()=>detail(a.lastRun)));
     if((a.key||a.activity)==='battle_pass'&&capabilities.battlePassRead&&state.mode==='production')$('am-detail').append(button('เปิดส่วน Battle Pass',()=>{closeDrawer();state.view='activities';state.activity='battle_pass';url();sync();load();}));
+  }
+  async function integrationPanel(activity,mode,token){
+    const box=panel('หลักฐานการเชื่อมต่อที่บันทึกไว้');box.setAttribute('aria-live','polite');box.append(n('p','กำลังอ่านหลักฐาน…'));$('am-detail').append(box);
+    const names={alpha:'Alpha',mcp:'MCP',seatalk:'SeaTalk'};
+    const successes={alpha:'มีผลวิเคราะห์ Alpha ที่บันทึกแล้ว',mcp:'มีบันทึกการอ่าน MCP ที่ได้รับอนุญาต',seatalk:'SeaTalk API รับข้อความแล้ว'};
+    const latestLabels={cached:'มีผลในแคช',allowed:'บันทึกการอ่านที่ได้รับอนุญาต',unverified:'ยังยืนยันหลักฐานไม่ได้',unauthorized:'ไม่ผ่านการยืนยันสิทธิ์',forbidden:'ไม่มีสิทธิ์',rate_limited:'เกินขีดจำกัด',not_found:'ไม่พบรายการ',invalid_args:'ข้อมูลคำขอไม่ถูกต้อง'};
+    const timeLabels={request_created:'เวลาสร้างคำขอ',call_recorded:'เวลาบันทึกการเรียก',record_updated:'เวลาอัปเดตหลักฐาน'};
+    function valid(d,expectedMode){return d?.activity===activity&&d.mode===expectedMode&&d.scope==='recorded_evidence'&&Array.isArray(d.components)&&Object.keys(names).every(key=>d.components.filter(c=>c.component===key).length===1);}
+    function render(d){
+      const section=n('section');section.dataset.integrationMode=d.mode;
+      section.append(n('h3',d.mode==='test'?'หลักฐาน TEST เดิม':'หลักฐาน Production'));
+      for(const key of Object.keys(names)){
+        const c=d.components.find(item=>item.component===key),row=n('div',null,'am-integration');
+        row.append(n('strong',names[key]));
+        if(c.availability!=='available')row.append(n('p',c.availability==='not_instrumented'?'Monitor ยังไม่รองรับหลักฐานระบบนี้ในโหมดนี้':'อ่านแหล่งหลักฐานไม่ได้'));
+        else{
+          row.append(n('p',c.lastSuccessAt?successes[key]:'ยังไม่มีหลักฐานในโหมดนี้'));
+          if(c.latestStatus)row.append(n('p','ล่าสุด: '+(latestLabels[c.latestStatus]||status(c.latestStatus))));
+          if(c.latestAt)row.append(n('small',(timeLabels[c.timeMeaning]||'เวลาบันทึก')+': '+time(c.latestAt)));
+          if(c.lastSuccessAt)row.append(n('p','หลักฐานสำเร็จล่าสุด ('+(timeLabels[c.timeMeaning]||'เวลาบันทึก')+'): '+time(c.lastSuccessAt)));
+        }
+        section.append(row);
+      }
+      box.append(section);
+    }
+    try{
+      const result=await rpc('activity_automation_monitor_integrations',{p_activity:activity,p_mode:mode});
+      if(token!==detailGeneration)return;
+      const d=result.data;if(!valid(d,mode)||(mode==='production'&&!valid(d.testEvidence,'test')))throw {code:'CONTRACT'};
+      box.replaceChildren(n('h2','หลักฐานการเชื่อมต่อที่บันทึกไว้'));
+      box.append(n('p','ข้อมูลย้อนหลังทุกเดือน ไม่ใช่การตรวจการเชื่อมต่อสด และไม่ยืนยันว่า Production เปิดรันแล้ว','am-muted'));
+      render(d);if(mode==='production')render(d.testEvidence);
+      box.append(n('p','Alpha / MCP เป็นระบบวิเคราะห์แยกจากการสร้างบรีฟ · SeaTalk API รับแล้วไม่ได้หมายถึงผู้รับอ่านแล้ว','am-muted'),n('small','อ่านข้อมูล ณ '+time(result.observedAt)));
+    }catch(e){
+      if(token!==detailGeneration)return;
+      box.replaceChildren(n('h2','หลักฐานการเชื่อมต่อที่บันทึกไว้'),n('p',e.code==='PGRST202'?'ยังไม่ได้ติดตั้ง API อ่านหลักฐาน · ไม่ได้หมายความว่าการทดสอบเดิมล้มเหลว':'Monitor ยังอ่านหลักฐานไม่ได้ · ยังสรุปผลการเชื่อมต่อไม่ได้'));
+    }
   }
   function renderSummary(data){const area=$('am-content');if(state.view==='overview'){const cards=n('div',null,'am-cards');const defs=[['กิจกรรมที่รองรับ','supportedActivities'],['สร้างชุดงานสำเร็จ','outputs'],['บรีฟรอยืนยัน','pendingBriefs'],['ต้องตรวจสอบ','attention']];for(const [title,key]of defs){const card=n('article',null,'am-card');card.append(n('h2',title),n('strong',data.cards?.[key]??'—'));card.append(n('small',data.cards?.complete===false?'ข้อมูลไม่ครบ · จำนวนที่อ่านได้':key==='supportedActivities'?'ตามสิทธิ์เข้าถึง':'ตามตัวกรองที่เลือก'));cards.append(card);}area.append(cards);const attention=panel('รายการที่ต้องตรวจสอบ');const list=n('ul',null,'am-list');for(const a of data.attention||[]){const item=n('li');item.append(n('strong',labels[a.activity]||a.activity||'ระบบ'),n('p',a.message||a.code||status(a.status)));if(a.id&&a.source)item.append(button('ดูหลักฐาน',()=>detail(a)));list.append(item);}if(!list.children.length)empty(attention,'ไม่พบรายการที่ต้องตรวจสอบในข้อมูลที่อ่านได้');else attention.append(list);area.append(attention);}const ap=panel('กิจกรรมที่รองรับ');activities(ap,data.activities||[]);area.append(ap);const op=panel('ผลลัพธ์ล่าสุด');outputs(op,data.outputs);area.append(op);area.append(n('p','Integration health: แสดงผลจากหลักฐานที่บันทึกไว้ การติดตั้ง Function ไม่ได้ยืนยันว่าเชื่อมต่อครบเส้นทาง','am-integration'));}
   function renderRows(data){const area=$('am-content'),p=panel(views[state.view]);if(state.view==='runs')table(p,['เวลาบันทึก','กิจกรรม / รอบ','ประเภท / ขั้นตอน','ผล','รายละเอียด'],data.rows,r=>[time(r.eventAt),labels[r.activity]+' · '+(r.projectCode||r.displayId||r.period||'—'),(r.kind||r.entityType||'—')+' / '+(r.stage||'—'),badge(r.status),button('ดูรายละเอียด',()=>detail(r))]);else table(p,['เวลา','กิจกรรม / CR','ประเภท / ผู้รับ','สถานะ','ครั้ง / ครั้งถัดไป','รายละเอียด'],data.rows,r=>[time(r.eventAt),(labels[r.activity]||r.activity||'—')+' · '+(r.displayId||r.projectCode||'—'),(r.kind||r.notificationType||'—')+' / '+(r.recipientLabel||'ไม่แสดงข้อมูลผู้รับ'),badge(r.status),(r.attempts??'—')+' / '+time(r.nextAttemptAt),button('ดูรายละเอียด',()=>notificationDetail(r))]);area.append(p);nextCursor=data.nextCursor;$('am-pagination').hidden=false;$('am-prev').disabled=!cursors.length;$('am-next').disabled=!data.hasMore||!nextCursor;$('am-page').textContent='หน้า '+(cursors.length+1);}
   function notificationDetail(r){openDrawer('รายละเอียดการแจ้งเตือน');dl($('am-detail'),[['กิจกรรม',labels[r.activity]],['สถานะ',status(r.status)],['ผู้รับ',r.recipientLabel],['ประเภท',r.kind||r.eventKind],['จำนวนครั้ง',r.attempts??r.attemptCount],['ครั้งถัดไป',time(r.nextAttemptAt)],['หลักฐาน API รับ',r.providerAccepted===true?'มีหลักฐาน':r.providerAccepted===false?'ยังไม่มีหลักฐาน':'ไม่มีข้อมูล'],['Code',r.code]]);$('am-detail').append(n('p','API รับข้อความแล้วไม่ได้หมายถึงผู้รับอ่านแล้ว หากยังยืนยันผลไม่ได้ ต้องตรวจสอบก่อนส่งซ้ำ'));}
   async function diagnosisPanel(run,token){
-    if(run.source!=='shared'||!['membership','conqueror_crate','golden_spin','topup_promotion'].includes(run.activity)||!['test','production'].includes(run.mode)||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(run.id||''))return;
+    if(run.source!=='shared'||!['membership','conqueror_crate','golden_spin','topup_promotion'].includes(run.activity)||run.mode!=='test'||!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(run.id||''))return;
     const box=panel('วิเคราะห์สาเหตุ · Activity Diagnosis');box.setAttribute('aria-live','polite');$('am-detail').append(box);
     const args={p_activity:run.activity,p_mode:run.mode,p_run_id:run.id};let busy=false,sequence=0;
     async function read(request=false){
@@ -85,7 +158,16 @@
     try{
       const result=await rpc('activity_automation_monitor_run',{p_source:row.source,p_run_id:row.id,p_entity_type:row.entityType||'run'});if(token!==detailGeneration)return;
       const d=result.data,r=d.run||{};$('am-detail').replaceChildren();
-      dl($('am-detail'),[['กิจกรรม',labels[r.activity]||r.activity],['Run ID',r.id],['ผล',status(r.status)],['ขั้นตอน',r.stage],['เวลา',time(r.eventAt)],['Project Code',r.projectCode],['Code',r.code]]);outputs($('am-detail'),d.outputs);
+      dl($('am-detail'),[['กิจกรรม',labels[r.activity]||r.activity],['Run ID',r.id],['ผล',status(r.status)],['ขั้นตอน',r.stage],['เวลา',time(r.eventAt)],['Project Code',r.projectCode],['Code',r.code]]);
+      if(r.entityType==='production_run'){
+        const recovery=panel('สถานะงาน production');
+        dl(recovery,[['การกู้คืน',recoveryLabels[r.recoveryState]||'ยังไม่มีหลักฐาน'],['ช่วงเวลารัน',r.leaseState==='active'?'ยังไม่หมด':r.leaseState==='expired'?'หมดแล้ว':'ไม่เกี่ยวข้อง'],['ต้นทางผ่านล่าสุด',time(r.sourceCheckedAt)],['Slides ผ่านล่าสุด',time(r.googleVerifiedAt)],['จบงานเมื่อ',time(r.completedAt)]]);
+        if(r.needsAttention)recovery.append(n('p','ต้องตรวจหลักฐานก่อนดำเนินการต่อ ผล Google ที่ยังไม่แน่ชัดไม่ใช่หลักฐานว่าต้องสร้างไฟล์ใหม่'));
+        recovery.append(n('small','ผลตรวจต้นทางเป็นหลักฐาน ณ เวลาที่บันทึก ไม่ใช่การตรวจ Confirmed Loot สด','am-muted'));
+        $('am-detail').append(recovery);
+      }
+      outputs($('am-detail'),d.outputs);
+      if(r.entityType==='production_run'&&d.latestNotification){const notification=panel('การแจ้งเตือนล่าสุด');notification.append(badge(d.latestNotification.status),n('p',d.latestNotification.providerAccepted?'SeaTalk API รับข้อความแล้ว ไม่ใช่หลักฐานว่าผู้รับอ่านแล้ว':'ยังไม่มีหลักฐานว่า SeaTalk API รับข้อความ'));$('am-detail').append(notification);}
       const timeline=panel('หลักฐานแต่ละขั้นตอน');for(const e of d.timeline||[])timeline.append(n('p',(e.label||e.stage||e.kind||'ขั้นตอน')+' · '+status(e.status)+' · '+time(e.at||e.eventAt||e.checkedAt)));if(!d.timeline?.length)empty(timeline,'ยังไม่มี timeline ที่บันทึกไว้');$('am-detail').append(timeline);
       diagnosisPanel(r,token);
     }catch{if(token===detailGeneration)$('am-detail').replaceChildren(n('p','อ่านรายละเอียดไม่ได้ หรือไม่มีสิทธิ์เข้าถึงรายการนี้'));}

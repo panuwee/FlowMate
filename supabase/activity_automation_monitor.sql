@@ -71,7 +71,9 @@ language plpgsql stable security definer set search_path='' as $$
 declare lo timestamptz; hi timestamptz;
 begin
  if p_month is not null then lo:=(p_month||'-01')::timestamp at time zone 'Asia/Bangkok';hi:=((p_month||'-01')::date+interval '1 month')::timestamp at time zone 'Asia/Bangkok';end if;
- if p_source='shared' and p_kind in ('runs','outputs') then
+ if p_source='shared' and p_mode='production' then
+ return query select * from activity_automation_private.monitor_production_rows(p_month,p_kind,p_id);
+ elsif p_source='shared' and p_kind in ('runs','outputs') then
  return query select r.updated_at,r.id::text,'run'::text,r.activity,r.state,r.project_code,
  jsonb_build_object('source','shared','entityType','run','id',r.id,'activity',r.activity,'mode',r.mode,'eventAt',r.updated_at,
  'createdAt',r.created_at,'status',r.state,'stage',activity_automation_private.monitor_code(r.stage),'code',activity_automation_private.monitor_code(r.code),'projectCode',r.project_code,
@@ -163,7 +165,7 @@ begin
  begin
  if length(p_cursor)>2000 then raise exception 'bad cursor';end if;
  cursor_data:=convert_from(decode(p_cursor,'base64'),'UTF8')::jsonb;
- if jsonb_typeof(cursor_data) is distinct from 'object' or cursor_data->>'filter' is distinct from fingerprint or coalesce(cursor_data->>'source','') not in ('shared','battle_pass') or coalesce(cursor_data->>'id','')='' or coalesce(cursor_data->>'entityType','') not in ('tick','monthly','run','notification') or cursor_data->>'eventAt' is null then raise exception 'bad cursor';end if;
+ if jsonb_typeof(cursor_data) is distinct from 'object' or cursor_data->>'filter' is distinct from fingerprint or coalesce(cursor_data->>'source','') not in ('shared','battle_pass') or coalesce(cursor_data->>'id','')='' or coalesce(cursor_data->>'entityType','') not in ('tick','monthly','run','production_run','notification') or cursor_data->>'eventAt' is null then raise exception 'bad cursor';end if;
  perform (cursor_data->>'eventAt')::timestamptz;
  exception when others then raise exception 'Invalid monitor cursor' using errcode='22023';end;
  end if;
@@ -203,18 +205,22 @@ language plpgsql stable security definer set search_path='' as $$
 declare caps jsonb; rec jsonb; kind text; mode text; outputs jsonb:='[]'; notification jsonb; notification_id text;
 begin
  caps:=activity_automation_private.monitor_access();
- if p_source not in ('shared','battle_pass') or p_entity_type not in ('run','tick','monthly') or p_run_id is null or length(p_run_id)>100 then raise exception 'Invalid detail identity' using errcode='22023';end if;
+ if p_source not in ('shared','battle_pass') or p_entity_type not in ('run','production_run','tick','monthly') or p_run_id is null or length(p_run_id)>100 then raise exception 'Invalid detail identity' using errcode='22023';end if;
  if not coalesce((caps->>case when p_source='shared' then 'sharedRead' else 'battlePassRead' end)::boolean,false) then raise exception 'Monitor access denied' using errcode='42501';end if;
- if (p_source='shared' and p_entity_type<>'run') or (p_source='battle_pass' and p_entity_type='run') then raise exception 'Run not found' using errcode='P0002';end if;
- if (p_entity_type in ('run','tick') and p_run_id!~'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+ if (p_source='shared' and p_entity_type not in ('run','production_run')) or (p_source='battle_pass' and p_entity_type in ('run','production_run')) then raise exception 'Run not found' using errcode='P0002';end if;
+ if (p_entity_type in ('run','production_run','tick') and p_run_id!~'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
  or (p_entity_type='monthly' and p_run_id!~'^(test|production):20[0-9]{2}-(0[1-9]|1[0-2])$') then raise exception 'Run not found' using errcode='P0002';end if;
  kind:=case when p_entity_type='monthly' then 'monthly' else 'runs' end;
- mode:=case when p_source='shared' then 'test' when p_entity_type='monthly' then split_part(p_run_id,':',1) else 'production' end;
+ mode:=case when p_entity_type='production_run' then 'production' when p_source='shared' then 'test' when p_entity_type='monthly' then split_part(p_run_id,':',1) else 'production' end;
  select r.record into rec from activity_automation_private.monitor_rows(p_source,mode,null,kind,p_run_id) r where r.entity_type=p_entity_type;
  if rec is null then raise exception 'Run not found' using errcode='P0002';end if;
  if rec->'output' is not null and rec->'output'<>'null'::jsonb then outputs:=jsonb_build_array(rec->'output');end if;
  if p_source='shared' then
+ if mode='production' then
+ select n.id::text into notification_id from activity_automation_private.production_notification_outbox n where n.run_id=p_run_id::uuid order by n.updated_at desc,n.id desc limit 1;
+ else
  select n.id::text into notification_id from activity_automation_private.notification_outbox n where n.run_id=p_run_id::uuid order by n.updated_at desc,n.id desc limit 1;
+ end if;
  if notification_id is not null then select n.record into notification from activity_automation_private.monitor_rows(p_source,mode,null,'notifications',notification_id) n;end if;
  end if;
  return jsonb_build_object('version',1,'observedAt',current_timestamp,'sources',jsonb_build_array(jsonb_build_object('source',p_source,'status','ok','checkedAt',current_timestamp,'code',null)),
@@ -228,7 +234,7 @@ end $$;
 
 create or replace function public.activity_automation_monitor_summary(p_mode text,p_month text,p_activity text default null) returns jsonb
 language plpgsql stable security definer set search_path='' as $$
-declare caps jsonb; src text; allowed boolean; sources jsonb:='[]'; activities jsonb:='[]'; attention jsonb:='[]'; outputs jsonb:='[]'; config jsonb; a text; label text; latest jsonb; latest_id text; checked jsonb; part jsonb; count_outputs bigint:=0; count_pending bigint:=0; count_attention bigint:=0; nout bigint; npend bigint; natt bigint; supported integer:=0; complete boolean:=true; j record; activity_rows jsonb; out_rows jsonb; att_rows jsonb;
+ declare caps jsonb; src text; allowed boolean; sources jsonb:='[]'; activities jsonb:='[]'; attention jsonb:='[]'; outputs jsonb:='[]'; config jsonb; a text; label text; latest jsonb; latest_id text; checked jsonb; part jsonb; count_outputs bigint:=0; count_pending bigint:=0; count_attention bigint:=0; nout bigint; npend bigint; natt bigint; supported integer:=0; complete boolean:=true; j record; activity_rows jsonb; out_rows jsonb; att_rows jsonb;
 begin
  caps:=activity_automation_private.monitor_access();perform activity_automation_private.monitor_validate(p_mode,p_month,p_activity);
  foreach src in array array['battle_pass','shared'] loop
@@ -239,7 +245,10 @@ begin
  begin
  activity_rows:='[]';out_rows:='[]';att_rows:='[]';
  if src='shared' then
- select jsonb_build_object('runnerEnabled',case when p_mode='test' then test_enabled else production_enabled end,'notifierEnabled',notifier_enabled,'schedulerState','not_configured','schedule',null) into config from activity_automation_private.settings where singleton;
+ if p_mode='production' then config:=activity_automation_private.monitor_production_config();
+ else
+ select jsonb_build_object('runnerEnabled',test_enabled,'notifierEnabled',notifier_enabled,'schedulerState','not_configured','schedule',null) into config from activity_automation_private.settings where singleton;
+ end if;
  else
  select jsonb_build_object('runnerEnabled',case when p_mode='production' then enabled end,'notifierEnabled',case when p_mode='production' then seatalk_enabled end,'schedulerState',case when p_mode='test' then 'not_configured' else 'unknown' end,'schedule',null) into config from battle_pass_private.monthly_settings where singleton;
  if p_mode='production' then
@@ -254,13 +263,36 @@ begin
  label:=case a when 'battle_pass' then 'Battle Pass' when 'membership' then 'Membership' when 'conqueror_crate' then 'Conqueror Crate' when 'golden_spin' then 'Golden Spin' else 'Topup Promotion' end;
  latest:=null;latest_id:=null;checked:=null;
  if src='shared' then
+ if p_mode='production' then
+ select r.id::text into latest_id from activity_automation_private.production_runs r where r.activity=a order by r.updated_at desc,r.id desc limit 1;
+ else
  select r.id::text into latest_id from activity_automation_private.runs r where r.activity=a and r.mode=p_mode order by r.updated_at desc,r.id desc limit 1;
+ end if;
  elsif p_mode='test' then
  select r.mode||':'||r.period into latest_id from battle_pass_private.monthly_runs r where r.mode='test' order by r.updated_at desc,r.period desc limit 1;
  else
  select t.run_id::text into latest_id from battle_pass_private.production_ticks t where t.status not in ('readiness_checked','google_write_checked') and coalesce(t.detail->>'action','') not in ('readiness','google-write-check') order by t.checked_at desc,t.run_id desc limit 1;
  end if;
  if latest_id is not null then select r.record into latest from activity_automation_private.monitor_rows(src,p_mode,null,'runs',latest_id) r;end if;
+  if src='shared' and p_mode='production' then
+  select jsonb_build_object(
+   'sourceReady',o.state='ready',
+   'confirmed',case when o.code='source_ready' then true when o.code='waiting_confirmation' then false end,
+   'workingSheetLinked',case when o.code='source_ready' then true when o.code='working_sheet_invalid' then false end,
+   'sourceCheckedAt',o.observed_at,'checkedAt',o.observed_at,'projectCode',o.project_code,'period',o.period,
+   'status',o.state,'code',activity_automation_private.monitor_code(o.code),'evidenceScope','scheduler_observation',
+   'googleReady',null,'databaseReady',null)
+  into checked
+  from activity_automation_private.production_observations o
+  where o.activity=a and coalesce(o.period,case when o.project_code ~ '^[0-9]{6}_' then '20'||substring(o.project_code,1,2)||'-'||substring(o.project_code,3,2) end)=p_month
+  order by o.observed_at desc,o.source_row desc limit 1;
+  if checked is null and latest->>'sourceCheckedAt' is not null then
+   checked:=jsonb_build_object('sourceReady',latest->'sourceReady','confirmed',latest->'confirmed',
+    'sourceCheckedAt',latest->'sourceCheckedAt','checkedAt',latest->'sourceCheckedAt',
+    'projectCode',latest->'projectCode','period',latest->'period',
+    'evidenceScope','last_validated_snapshot','googleReady',null,'databaseReady',null);
+  end if;
+  end if;
  if src='battle_pass' and p_mode='production' then
  select t.run_id::text into latest_id from battle_pass_private.production_ticks t where t.status='readiness_checked' or t.detail->>'action'='readiness' order by t.checked_at desc,t.run_id desc limit 1;
  if latest_id is not null then select r.record into checked from activity_automation_private.monitor_rows(src,p_mode,null,'runs',latest_id) r;end if;
@@ -270,7 +302,8 @@ begin
  activity_rows:=activity_rows||jsonb_build_array(config||jsonb_build_object('key',a,'label',label,'sourceSystem',src,'configurationScope',case when src='shared' then 'shared_4_activities' else 'battle_pass' end,
  'pendingBriefs',npend,'notificationAttention',natt,'availability','ok',
  'lastRun',latest,'lastSourceCheck',checked,'capabilities',jsonb_build_object('controls',src='battle_pass','diagnosis',src='battle_pass'),
- 'healthState',case when src='battle_pass' and p_mode='production' and config->>'schedulerState'='active' and (config->>'runnerEnabled')::boolean then case when latest is null or (latest->>'eventAt')::timestamptz<current_timestamp-interval '65 minutes' then 'stale' else 'current' end else 'unknown' end));
+ 'healthState',case when src='shared' and p_mode='production' then coalesce(config->>'healthState','unknown')
+ when src='battle_pass' and p_mode='production' and config->>'schedulerState'='active' and (config->>'runnerEnabled')::boolean then case when latest is null or (latest->>'eventAt')::timestamptz<current_timestamp-interval '65 minutes' then 'stale' else 'current' end else 'unknown' end));
  end loop;
  select count(*) filter(where (r.record#>>'{output,complete}')::boolean),count(*) filter(where r.record#>>'{output,briefState}'='pending') into nout,npend
  from activity_automation_private.monitor_rows(src,p_mode,p_month,'outputs') r where p_activity is null or r.activity=p_activity;
