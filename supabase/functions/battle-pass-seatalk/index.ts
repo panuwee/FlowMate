@@ -174,12 +174,14 @@ async function employeeCode(recipientEmail: string,deps: Dependencies): Promise<
   throw new ProviderError("recipient_unavailable");
 }
 
-function thaiMonth(period: string | null): string {
-  if (!period) return "ไม่ทราบงวด";
-  const names=["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน",
-    "กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
-  const [year,month]=period.split("-").map(Number);
-  return month>=1 && month<=12 ? `${names[month-1]} ${year}` : period;
+function projectName(claim: Claim): string {
+  const explicit=text(claim.payload.projectName);
+  if (explicit) return safeText(explicit);
+  const code=text(claim.payload.projectCode);
+  if (code) return safeText(code.replace(/^\d{6}_/, ""));
+  const names=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const match=/^(20\d{2})-(0[1-9]|1[0-2])$/.exec(claim.period ?? "");
+  return match ? `Battle Pass (${names[Number(match[2])-1]} ${match[1]})` : "Battle Pass (ไม่ทราบรอบกิจกรรม)";
 }
 
 function bangkok(value: unknown): string {
@@ -201,11 +203,11 @@ export function buildCard(claim: Claim, allowedHost: string): Record<string, unk
     `ปลายทาง: ${claim.recipientKind==="group" ? "SeaTalk Group" : "Operator DM"}`,
     "ไม่ใช่เหตุการณ์จริง",
   ] : ready ? [
-    `งวด: ${thaiMonth(claim.period)}`,
+    `Project Name = ${projectName(claim)}`,
     "สร้างรายการใน Working Sheet และเชื่อม Creative Request เรียบร้อย",
     "สถานะ: Unassigned",
   ] : [
-    `งวด: ${thaiMonth(claim.period)}`,
+    `Project Name = ${projectName(claim)}`,
     `ขั้นตอน: ${safeText(claim.payload.stage,"unknown_stage")}`,
     `รหัสปัญหา: ${safeCode(claim.payload.code)}`,
     `เวลา: ${bangkok(claim.payload.occurredAt)}`,

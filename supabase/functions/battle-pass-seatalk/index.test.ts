@@ -93,3 +93,15 @@ describe("delivery state",()=>{
     expect(h.fetchCalls.filter(x=>x.url.endsWith("/auth/app_access_token"))).toHaveLength(1);
     expect(h.fetchCalls.filter(x=>x.url.endsWith("/messaging/v2/group_chat"))).toHaveLength(2);});
 });
+
+it('uses Project Name for Battle Pass success and failure cards',()=>{
+ for(const eventKind of ['brief_ready','run_failed','run_held']) {
+  const card=JSON.stringify(buildCard(claim({eventKind}) as any,'panuwee.github.io'));
+  expect(card).toContain('Project Name = Battle Pass (Oct 2026)');
+  expect(card).not.toContain('งวด:');
+ }
+ const card=JSON.stringify(buildCard(claim({period:'2026-11'}) as any,'panuwee.github.io'));
+ expect(card).toContain('Project Name = Battle Pass (Nov 2026)');
+ const named=JSON.stringify(buildCard(claim({payload:{url:'https://panuwee.github.io/FlowMate/home/#detail/CR-1200',projectCode:'261012_Battle Pass (Oct 2026)'}}) as any,'panuwee.github.io'));
+ expect(named).toContain('Project Name = Battle Pass (Oct 2026)');
+});

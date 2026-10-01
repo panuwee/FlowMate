@@ -32,6 +32,15 @@
     if(!/^20\d{2}-(0[1-9]|1[0-2])$/.test(value||''))return null;
     return new Intl.DateTimeFormat('en-US',{month:'short',year:'numeric',timeZone:'Asia/Bangkok'}).format(new Date(value+'-01T12:00:00Z'));
   }
+  function battlePassProject(row){
+    if(row.projectCode)return row.projectCode;
+    const period=row.period||row.outputId?.match(/(?:^|:)(20\d{2}-\d{2})$/)?.[1]||row.campaignStart?.slice(0,7);
+    const label=periodLabel(period);
+    if(!label)return null;
+    const name='Battle Pass ('+label+')';
+    const start=row.campaignStart;
+    return /^20\d{2}-\d{2}-\d{2}$/.test(start||'')?start.slice(2).replaceAll('-','')+'_'+name:name;
+  }
   function currentStatus(a){
     if(a.projects?.length){const list=n('div');for(const project of a.projects)list.append(currentStatus({...a,projects:null,lastRun:project.lastRun,lastSourceCheck:project.lastSourceCheck}));return list;}
     const wrap=n('div'),check=a.lastSourceCheck,run=a.lastRun?.status!=='complete'&&check&&new Date(check.checkedAt)>new Date(a.lastRun?.eventAt)?null:a.lastRun;
@@ -49,6 +58,7 @@
   function sourceStatus(a){
     if(a.projects?.length){const list=n('div');for(const project of a.projects){const item=n('div');item.append(n('strong',project.projectCode),sourceStatus({...a,projects:null,lastSourceCheck:project.lastSourceCheck}));list.append(item);}return list;}
     const source=n('div'),check=a.lastSourceCheck;
+    if((a.key||a.activity)==='battle_pass'&&check){const identity=battlePassProject(check);if(identity)source.append(n('strong',identity));}
     if(check?.code==='existing_output_complete'){
       source.append(n('span','Done — มี Working Sheet, CR และ Brief Link แล้ว'),n('small','ข้ามรายการนี้และตรวจรอบถัดไป'),n('small',time(check.checkedAt)));
       return source;
@@ -70,7 +80,7 @@
   function normalize(data){for(const a of data.activities||[]){if(a.configurationScope==='shared_4_activities')a.configurationScope='shared';if(a.lastSourceCheck)a.lastSourceCheck.checkedAt=a.lastSourceCheck.sourceCheckedAt??null;}for(const r of [...(data.rows||[]),...(data.attention||[])]){r.attempts=r.attemptCount;r.kind=r.eventKind||r.kind;if(r.entityType==='production_run'&&r.recoveryState)r.message=recoveryLabels[r.recoveryState]||r.code;}for(const t of data.timeline||[])t.label=t.step==='generation'?'การสร้าง (เวลาอัปเดตล่าสุด)':t.step;return data;}
   async function rpc(name,args){let timer;try{const result=await Promise.race([client.rpc(name,args),new Promise((_,reject)=>{timer=root.setTimeout(()=>reject({code:'TIMEOUT'}),15000);})]);if(result.error)throw result.error;if(result.data?.version!==1||!result.data?.data)throw {code:'CONTRACT'};result.data.data=normalize(result.data.data);return result.data;}finally{root.clearTimeout(timer);}}
   function clear(){++generation;++detailGeneration;capabilities={};legacyAllowed=false;snapshot=false;cursor=null;cursors=[];$('am-content').replaceChildren();$('am-detail').replaceChildren();$('am-observed').textContent='';$('am-pagination').hidden=true;$('am-account').textContent='ยังไม่ได้เข้าสู่ระบบ';$('am-legacy').hidden=true;if($('am-drawer').open)$('am-drawer').close();}
-  function outputs(parent,rows){if(!rows?.length){empty(parent,'ยังไม่มีชุดงานในช่วงที่เลือก');return;}const list=n('ul',null,'am-list');for(const o of rows){const li=n('li');li.append(n('strong',o.projectCode||o.displayId||labels[o.activity]||'ชุดงาน'));li.append(n('p',(o.campaignStart||'ไม่ทราบวันเริ่ม')+' — '+(o.campaignEnd||'ไม่ทราบวันสิ้นสุด'),'am-muted'));const states=n('p');states.append('การสร้าง: ',badge(o.generationState),' · บรีฟ: ',badge(o.briefState==='pending'?'pending_acceptance':o.briefState),' · มอบหมาย: ',badge(o.assignmentState));li.append(states);if(o.marketingWorkingSheetLinked!=null)li.append(n('p','Working Sheet ใน Marketing Plan: '+(o.marketingWorkingSheetLinked?'เชื่อมกับ CR แล้ว':'ยังยืนยันการเชื่อมไม่ได้')));if(o.briefUrl)li.append(link('เปิด Brief',o.briefUrl));if(o.workingSheetUrl)li.append(link(o.mode==='production'&&o.source==='shared'?'ต้นทาง Working Sheet':'Working Sheet',o.workingSheetUrl));const cr=o.workItemUrl||o.crUrl;if(cr)li.append(link('เปิด '+(o.displayId||'CR')+' เพื่อตรวจบรีฟ',cr));list.append(li);}parent.append(list);}
+  function outputs(parent,rows){if(!rows?.length){empty(parent,'ยังไม่มีชุดงานในช่วงที่เลือก');return;}const list=n('ul',null,'am-list');for(const o of rows){const li=n('li');li.append(n('strong',o.projectCode||(o.activity==='battle_pass'?battlePassProject(o):null)||o.displayId||labels[o.activity]||'ชุดงาน'));li.append(n('p',(o.campaignStart||'ไม่ทราบวันเริ่ม')+' — '+(o.campaignEnd||'ไม่ทราบวันสิ้นสุด'),'am-muted'));const states=n('p');states.append('การสร้าง: ',badge(o.generationState),' · บรีฟ: ',badge(o.briefState==='pending'?'pending_acceptance':o.briefState),' · มอบหมาย: ',badge(o.assignmentState));li.append(states);if(o.marketingWorkingSheetLinked!=null)li.append(n('p','Working Sheet ใน Marketing Plan: '+(o.marketingWorkingSheetLinked?'เชื่อมกับ CR แล้ว':'ยังยืนยันการเชื่อมไม่ได้')));if(o.briefUrl)li.append(link('เปิด Brief',o.briefUrl));if(o.workingSheetUrl)li.append(link(o.mode==='production'&&o.source==='shared'?'ต้นทาง Working Sheet':'Working Sheet',o.workingSheetUrl));const cr=o.workItemUrl||o.crUrl;if(cr)li.append(link('เปิด '+(o.displayId||'CR')+' เพื่อตรวจบรีฟ',cr));list.append(li);}parent.append(list);}
   function activities(parent,rows){
     table(parent,['กิจกรรม','สถานะอัตโนมัติ / ตารางเวลา','สถานะปัจจุบัน','ผลตรวจต้นทางล่าสุด','บรีฟรอยืนยัน','แจ้งเตือนต้องตรวจ','รายละเอียด'],rows,a=>{
       const name=n('div');name.append(n('strong',a.label||labels[a.key||a.activity]||a.key));if(a.configurationScope==='shared')name.append(n('small','ใช้การตั้งค่าร่วมกับ 4 กิจกรรม'));
