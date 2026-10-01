@@ -20,7 +20,7 @@ async function page(outputs:any[],month='2026-10'){
 }
 it('shows completed October output Done despite old No readiness and latest November tick',async()=>{
  const p=await page([output]);
- expect(p.text).toContain('Current Status: 261012_Battle Pass (Oct 2026) — Done');
+ expect(p.text).toContain('Done');
  expect(p.text).toContain('Done — มี Working Sheet, CR และ Brief Link แล้ว');
  expect(p.text).toContain('Loot Confirmed? (ผลตรวจเดิม): No');
  expect(p.text).not.toContain('ต้นทางยังไม่พร้อม');

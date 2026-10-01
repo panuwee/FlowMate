@@ -8,3 +8,12 @@
 .am-layout .am-legacy .proposal button[data-action=reject]{background:#fff;color:#a32424;border-color:#e3b6b6}
 .am-layout .am-legacy .proposal button:disabled{background:#dce2ea;border-color:#dce2ea;color:#52637b}
 @media(max-width:767px){#am-menu{display:block;align-self:flex-start}.am-layout .am-nav{display:none}.am-layout .am-nav.am-nav-open{display:flex;flex-direction:column}}
+.am-statline{display:flex;flex-wrap:wrap;gap:12px 28px;font-size:14px;font-variant-numeric:tabular-nums;padding:12px 0}
+.am-scan-row{display:grid;grid-template-columns:minmax(220px,1fr) minmax(160px,1fr);gap:5px 24px;padding:14px 0;border-bottom:1px solid var(--am-line)}
+.am-scan-row small{color:var(--am-muted);font-size:12px}.am-scan-row:last-of-type{border:0}
+.am-task-row{padding:16px 0;border-bottom:1px solid var(--am-line)}.am-task-row:last-child{border:0}.am-task-row p{margin:6px 0}.am-task-row small{display:block;color:var(--am-muted);margin:6px 0}.am-task-row button{margin-top:8px}
+.am-technical{border-top:1px solid var(--am-line);padding:14px 0;margin:16px 0}.am-technical summary{cursor:pointer;font-weight:600;font-size:14px;padding:4px 0}.am-technical[open]>div{padding-top:12px}.am-technical .am-panel{border:0;padding:0}
+#am-detail label{display:grid;gap:8px;font-size:14px;margin:16px 0}#am-detail textarea{font:inherit;min-height:92px;width:100%;padding:10px;border:1px solid #b8bec7;border-radius:8px;resize:vertical}#am-detail button{font:inherit;max-width:100%;padding:9px 12px;border:1px solid #c7cdd5;border-radius:8px;background:#fff;color:var(--am-ink);cursor:pointer;margin:5px 8px 5px 0}#am-detail button:disabled{opacity:.55;cursor:default}
+.am-drawer-head{position:sticky;top:-24px;z-index:1;background:white;padding-top:16px}.am-main button:hover:not(:disabled),#am-detail button:hover:not(:disabled){background:#eef1f4}.am-main #am-refresh:hover{background:#39414b}.am-layout a[hidden]{display:none!important}
+::selection{background:#cbdced;color:#20252b}input,textarea{caret-color:#20252b}a{text-underline-offset:3px}.am-table{font-variant-numeric:tabular-nums}
+@media(max-width:767px){.am-scan-row{grid-template-columns:1fr;gap:6px}.am-drawer-head{top:-18px}.am-statline{gap:8px 16px}.am-task-row a{display:inline-block;padding:6px 0}}
