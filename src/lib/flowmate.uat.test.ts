@@ -2587,7 +2587,7 @@ describe("quick task Other assignee SQL support", () => {
 
     expect(createScreenJsx).toContain("function getFlowMateCreateValidationErrors(mode, draft)");
     expect(createScreenSource).toContain("const [validationErrors, setValidationErrors]");
-    expect(createScreenSource).toContain("const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);");
+    expect(createScreenSource).toContain("const nextValidationErrors = getFlowMateCreateValidationErrors(mode, submissionDraft);");
     expect(createScreenSource).toContain("if (Object.keys(nextValidationErrors).length > 0)");
     expect(createScreenSource).toContain("Please correct the highlighted fields.");
     expect(handleSubmitSource.indexOf("setCreateAlert(")).toBeLessThan(handleSubmitSource.indexOf("window.createFlowMateQuickTask"));
@@ -3207,7 +3207,8 @@ describe("full assignee roster", () => {
     const createScreenJsx = readFileSync(join(process.cwd(), "screens-a.jsx"), "utf8");
     const quickTaskFormSource = createScreenJsx.slice(createScreenJsx.indexOf("function QuickTaskForm"));
     expect(quickTaskFormSource).toContain("assigneeQuery");
-    expect(quickTaskFormSource).toContain("filterFlowMateAssigneeOptions");
+    expect(quickTaskFormSource).toContain('role="combobox"');
+    expect(quickTaskFormSource).toContain('.includes(assigneeQuery.trim().toLowerCase())');
     expect(quickTaskFormSource).toContain('aria-label="Search team assignees"');
     expect(quickTaskFormSource).toContain('id="task-assignee"');
   });

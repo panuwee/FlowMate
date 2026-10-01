@@ -1,0 +1,54 @@
+{
+  "baseCommit": "469df345ac77450f2a1cac12c42b200a80875e91",
+  "target": "https://github.com/panuwee/FlowMate.git / version2.1.1",
+  "releaseStamp": "20261001-5a8495",
+  "state": "commit/push authorized; no production SQL or deploy action",
+  "hashBasis": "SHA256 of staged Git blob bytes; manifest itself excluded",
+  "validation": "535/535 local tests; build and rendered mock UI verified",
+  "files": [
+    {
+      "path": "app.css",
+      "sha256": "3F2F6DCF9816F085C5D0112C7AB6F7D96E5873223DD898344F5567406EC26FEE"
+    },
+    {
+      "path": "docs/TASK_ASSIGN_CREATE_REFINEMENT.md",
+      "sha256": "D5DE98B1179838FB81AD5E5A4093434F5DF7F2334D63976CBA5929ED1C187B4E"
+    },
+    {
+      "path": "home/index.html",
+      "sha256": "0F8E66310BD3D76CD79BAF023D96646DCE7D4964429FAE40F676B319687D42FB"
+    },
+    {
+      "path": "index.html",
+      "sha256": "F28BF609280668073C740C49D16631967B09542E98BF5C4670DA38FF7A4244BA"
+    },
+    {
+      "path": "product-book/index.html",
+      "sha256": "FE86FC1340B984E33C14A3EC7A0C33C79D8C5C7ACDF5689420D650D1DACD5CC2"
+    },
+    {
+      "path": "screens-a.js",
+      "sha256": "C3C829F8FC36533F3FB2FBFFE4A5A198B2515F31A62F346C05EAFB670067DEDE"
+    },
+    {
+      "path": "screens-a.jsx",
+      "sha256": "EEA24AC99D6ADDBC9C0D345F8253DAABF542CD347D44ABED8D716065D339C0CF"
+    },
+    {
+      "path": "src/lib/flowmate.uat.test.ts",
+      "sha256": "3E5F1FEA180E1953DA2DF2FF383EFF82EE4F9A4DEDD3F2A2EF82CBC1740DEBC2"
+    },
+    {
+      "path": "src/lib/task-assign-workspaces-ui.test.ts",
+      "sha256": "0C8468D8EA0941B2939F90520DA15A88B4F5CBBBFE7ED4B7BB7DB9486F63AA41"
+    },
+    {
+      "path": "src/lib/task-assign-workspaces.test.ts",
+      "sha256": "C06229E00D950E03CDCD8F910438826ECC03207096A068CDAA988FF99D802F8B"
+    },
+    {
+      "path": "supabase/task_assign_workspaces.sql",
+      "sha256": "223027CA003A16FDAB9E4B939AAAEAE0710A7FE6B06F144DCB31149813764E28"
+    }
+  ]
+}

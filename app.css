@@ -4842,6 +4842,13 @@ html[data-theme="dark"] .product-book-cms__message--error {
 
 
 /* Task Assign forms stack on narrow screens. */
+.task-assignee-picker { position: relative; min-width: 0; }
+.task-assignee-options { position: absolute; top: 42px; left: 0; right: 0; z-index: 20; max-height: 240px; overflow-y: auto; background: var(--surface-card, #fff); color: var(--fg-primary); border: var(--border-hairline); border-radius: 8px; box-shadow: 0 8px 20px #0002; padding: 4px; }
+.task-assignee-option { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.task-assignee-option:hover, .task-assignee-option[aria-selected="true"] { background: var(--bg-hover, #f3f4f6); }
+.task-assignee-options > .muted { padding: 10px 12px; }
+[data-theme="dark"] .task-assignee-options { background: #1c2026; }
+[data-theme="dark"] .task-assignee-option:hover, [data-theme="dark"] .task-assignee-option[aria-selected="true"] { background: #2b3037; }
 @media (max-width: 760px) {
   [data-testid="task-assign-create-form"],
   [data-testid="task-assign-detail"] .form-grid { grid-template-columns: minmax(0, 1fr); }

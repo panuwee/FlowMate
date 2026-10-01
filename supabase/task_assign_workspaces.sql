@@ -244,9 +244,11 @@ declare actor uuid:=public.task_assign_actor_user_id(); begin
   -- needs to select a confidential dispatcher before a request exists.
   if p_team is null or p_team not in ('mkt','ops','esport') or not exists(select 1 from public.teams where code=p_team and is_active)
     or not exists(select 1 from public.teams where code in ('mkt','ops','esport') and public.flowmate_user_can_access_team(actor,code)) then raise exception 'Team directory is unavailable'; end if;
-  return coalesce((select jsonb_agg(jsonb_build_object('userId',u.id,'name',u.display_name,'teamKey',m.team_code,
-    'dispatcher',exists(select 1 from public.task_assign_dispatchers d where d.user_id=u.id and d.team_code=p_team)) order by u.display_name)
-    from public.users u join public.user_team_memberships m on m.user_id=u.id where public.task_assign_member_access_allowed(u.id) and m.team_code=p_team),'[]'::jsonb);
+  return coalesce((select jsonb_agg(jsonb_build_object('userId',u.id,'name',tm.display_name,'teamKey',m.team_code,
+    'dispatcher',exists(select 1 from public.task_assign_dispatchers d where d.user_id=u.id and d.team_code=p_team)) order by tm.display_name)
+    from public.users u join public.user_team_memberships m on m.user_id=u.id
+    join public.team_members tm on tm.user_id=u.id and tm.active
+    where public.task_assign_member_access_allowed(u.id) and m.team_code=p_team),'[]'::jsonb);
 end $$;
 create or replace function public.task_assign_comment(p_display_id text,p_body text,p_comment_id uuid default null,p_delete boolean default false)
 returns void language plpgsql security definer set search_path='' as $$

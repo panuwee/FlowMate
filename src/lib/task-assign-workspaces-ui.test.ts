@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import { transformSync } from "@babel/core";
 import React from "react";
 import { createRoot, Root } from "react-dom/client";
-import { act } from "react-dom/test-utils";
+import { act, Simulate } from "react-dom/test-utils";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
@@ -24,7 +24,51 @@ beforeEach(() => {
 });
 afterEach(async () => { if (root) await act(async () => root?.unmount()); root = undefined; host.remove(); vi.restoreAllMocks(); });
 
+async function renderPicker(parents: any[] | Error = []) {
+  const source = read("screens-a.jsx");
+  const code = transformSync(source.slice(source.indexOf("function QuickTaskForm("), source.indexOf("function CreativeRequestForm(")), { configFile: false, babelrc: false, presets: [["@babel/preset-react", { runtime: "classic" }]] })!.code!;
+  const scope = { TaskAssign: { ...api, members: async () => [{ userId: "aof", name: "Aof" }, { userId: "jane", name: "Jane" }, { userId: "bob", name: "Bob" }], list: async () => { if (parents instanceof Error) throw parents; return parents; } }, flowmateUserError: (error: Error) => error.message };
+  const Form = new Function("React", "window", "useState", "useEffect", "getFlowMateTodayDateKey", code + ";return QuickTaskForm;")(React, scope, React.useState, React.useEffect, () => "2026-10-01");
+  let current: any;
+  function Harness() { const [draft, setDraft] = React.useState({ responsibleTeam: "mkt", assigneeUserId: "", title: "Venue", note: "Plan", projectName: "", dueDate: "", launchDate: "2099-10-01", priority: "normal", referenceLinks: "", parentId: "", confidential: true, collaboratorIds: ["old-private-member"] }); current = draft; return React.createElement(Form, { value: draft, onChange: setDraft }); }
+  root = createRoot(host);
+  await act(async () => root!.render(React.createElement(Harness)));
+  return () => current;
+}
+
 describe("Task Assign client and rendered form", () => {
+  it("shows typed matching names, commits only a clicked member and clears a changed selection", async () => {
+    const draft = await renderPicker([{ id: "parent", display_id: "QT-100", title: "Event" }]);
+    const input = host.querySelector("#task-assignee") as HTMLInputElement;
+    expect(host.querySelector('[role="listbox"]')).toBeNull();
+    await act(async () => Simulate.change(input, { target: { value: "A" } } as any));
+    expect(Array.from(host.querySelectorAll('[role="option"]'), node => node.textContent)).toEqual(["Aof", "Jane"]);
+    expect(draft().assigneeUserId).toBe("");
+    await act(async () => Simulate.click(host.querySelector('[role="option"]')!));
+    expect(draft().assigneeUserId).toBe("aof"); expect(input.value).toBe("Aof");
+    expect(host.querySelector('[role="listbox"]')).toBeNull();
+    await act(async () => Simulate.change(input, { target: { value: "nobody" } } as any));
+    expect(draft().assigneeUserId).toBe(""); expect(host.textContent).toContain("No matching active members.");
+    expect(host.textContent).not.toContain("Confidential task"); expect(host.textContent).not.toContain("Selected collaborators");
+    expect((host.querySelector('#task-parent option[value="parent"]') as HTMLOptionElement).text).toBe("QT-100 — Event");
+    await act(async () => Simulate.change(host.querySelector("#task-parent")!, { target: { value: "parent" } } as any));
+    expect(draft().parentId).toBe("parent");
+  });
+  it("supports keyboard selection and explains an empty parent list", async () => {
+    const draft = await renderPicker(); const input = host.querySelector("#task-assignee")!;
+    await act(async () => Simulate.change(input, { target: { value: "aof" } } as any));
+    await act(async () => Simulate.keyDown(input, { key: "ArrowDown" }));
+    await act(async () => Simulate.keyDown(input, { key: "Enter" }));
+    expect(draft().assigneeUserId).toBe("aof");
+    expect(host.textContent).toContain("No existing tasks you created are available.");
+    expect(host.querySelectorAll("#task-parent option")).toHaveLength(1);
+  });
+  it("reports a failed parent lookup instead of presenting it as an empty list", async () => {
+    await renderPicker(new Error("Parent RPC unavailable"));
+    expect(host.textContent).toContain("Parent tasks could not load.");
+    expect(host.textContent).toContain("Parent RPC unavailable");
+    expect(host.textContent).not.toContain("No existing tasks you created");
+  });
   it("opens a created task using its own detail route without the Creative loader", async () => {
     const source = read("screens-a.jsx");
     const body = source.slice(source.indexOf("  async function openCreatedDetail("), source.indexOf("  async function handleSubmit()", source.indexOf("  async function openCreatedDetail(")));

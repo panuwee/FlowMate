@@ -134,6 +134,15 @@ describe("Task Assign workspace database integration (in-memory PostgreSQL only)
     expect((await db.query("select * from public.work_item_events where work_item_id=$1", [taskId])).rows).toHaveLength(0);
     await expect(db.query("select public.task_assign_list('mkt','team')")).rejects.toThrow(/Workspace/);
   });
+  it("lists only Activated Team Members using their directory display name", async () => {
+    await db.exec("reset role");
+    await db.query("insert into public.team_members(member_code,user_id,display_name,initials,discipline,discipline_short,skills,active) values('fixture-aof',$1,'Aof','AO','Operations','OP',array['Operations'],true),('fixture-disabled',$2,'Inactive member','IN','Operations','OP',array['Operations'],false)", [ids.opsMember, ids.ops]);
+    await actor(ids.mkt);
+    const directory = await db.query<any>("select public.task_assign_members('ops') members");
+    expect(directory.rows[0].members).toEqual([expect.objectContaining({ userId: ids.opsMember, name: "Aof" })]);
+    await db.exec("reset role");
+    await db.exec("delete from public.team_members where member_code in ('fixture-aof','fixture-disabled')");
+  });
   it("only dispatchers accept and only active receiving-team members can be assigned", async () => {
     await actor(ids.opsMember);
     await expect(act("accept", { assignee: ids.opsMember, deadline })).rejects.toThrow(/dispatcher/);

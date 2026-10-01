@@ -1476,8 +1476,12 @@ function CreateScreen({
   async function handleSubmit() {
     if (isSubmitting) return;
     const activeDraft = mode === "quick" ? quickDraft : creativeDraft;
-    const submissionDraft = activeDraft;
-    const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);
+    const submissionDraft = isTaskAssignProduct ? {
+      ...activeDraft,
+      confidential: false,
+      collaboratorIds: []
+    } : activeDraft;
+    const nextValidationErrors = getFlowMateCreateValidationErrors(mode, submissionDraft);
     if (Object.keys(nextValidationErrors).length > 0) {
       const hasInvalidBriefLink = nextValidationErrors.briefLink === FLOWMATE_INVALID_BRIEF_LINK_MESSAGE;
       if (hasInvalidBriefLink && window.flowmatePrompt) {
@@ -1694,6 +1698,11 @@ function QuickTaskForm({
   errors = {}
 }) {
   const [assigneeQuery, setAssigneeQuery] = useState("");
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [assigneeIndex, setAssigneeIndex] = useState(-1);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [parentError, setParentError] = useState("");
+  const [parentsLoading, setParentsLoading] = useState(true);
   const sourceTeam = window.TaskAssign.sourceTeam();
   const crossTeam = value.responsibleTeam !== sourceTeam;
   const [members, setMembers] = useState([]);
@@ -1703,18 +1712,32 @@ function QuickTaskForm({
     let alive = true;
     setMembers([]);
     setMemberError("");
+    setMembersLoading(true);
+    setParents([]);
+    setParentError("");
+    setParentsLoading(true);
     window.TaskAssign.members(sourceTeam).then(rows => {
       if (alive) setMembers(rows);
     }).catch(error => {
       if (alive) setMemberError(window.flowmateUserError(error));
+    }).finally(() => {
+      if (alive) setMembersLoading(false);
     });
     window.TaskAssign.list(null, "created").then(rows => {
       if (alive) setParents(rows);
-    }).catch(() => {});
+    }).catch(error => {
+      if (alive) setParentError(window.flowmateUserError(error));
+    }).finally(() => {
+      if (alive) setParentsLoading(false);
+    });
     return () => {
       alive = false;
     };
   }, [sourceTeam]);
+  useEffect(() => {
+    const selected = members.find(member => member.userId === value.assigneeUserId);
+    if (selected) setAssigneeQuery(selected.name);
+  }, [members, value.assigneeUserId]);
   useEffect(() => {
     if (!value.responsibleTeam) onChange({
       ...value,
@@ -1730,6 +1753,8 @@ function QuickTaskForm({
     if (field === "responsibleTeam") {
       next.assigneeUserId = "";
       next.collaboratorIds = [];
+      setAssigneeQuery("");
+      setAssigneeOpen(false);
     }
     onChange(next);
   }
@@ -1739,8 +1764,28 @@ function QuickTaskForm({
       role: "alert"
     }, errors[key]) : null;
   }
-  const matchingAssignees = window.filterFlowMateAssigneeOptions ? window.filterFlowMateAssigneeOptions(members, assigneeQuery) : members.filter(member => member.name.toLowerCase().startsWith(assigneeQuery.trim().toLowerCase()));
-  const visibleAssignees = members.filter(member => member.userId === value.assigneeUserId || matchingAssignees.includes(member));
+  const matchingAssignees = members.filter(member => String(member.name || "").toLowerCase().includes(assigneeQuery.trim().toLowerCase()));
+  const showAssignees = assigneeOpen && Boolean(assigneeQuery.trim()) && !membersLoading && !memberError;
+  function chooseAssignee(member) {
+    setAssigneeQuery(member.name);
+    setAssigneeOpen(false);
+    setAssigneeIndex(-1);
+    update("assigneeUserId", member.userId);
+  }
+  function assigneeKeyDown(event) {
+    if (event.key === "Escape") {
+      setAssigneeOpen(false);
+      return;
+    }
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && assigneeQuery.trim() && matchingAssignees.length) {
+      event.preventDefault();
+      setAssigneeOpen(true);
+      setAssigneeIndex(index => event.key === "ArrowDown" ? (index + 1) % matchingAssignees.length : index <= 0 ? matchingAssignees.length - 1 : index - 1);
+    } else if (event.key === "Enter" && showAssignees) {
+      event.preventDefault();
+      if (assigneeIndex >= 0) chooseAssignee(matchingAssignees[assigneeIndex]);
+    }
+  }
   return React.createElement("div", {
     className: "form-grid",
     "data-testid": "task-assign-create-form"
@@ -1803,24 +1848,50 @@ function QuickTaskForm({
     htmlFor: "task-assignee"
   }, "Assignee ", crossTeam ? "" : "*"), crossTeam ? React.createElement("div", {
     className: "input"
-  }, "Receiving team will assign a person") : React.createElement(React.Fragment, null, React.createElement("input", {
-    className: "input",
-    type: "search",
-    "aria-label": "Search team assignees",
-    placeholder: "Search team members",
-    value: assigneeQuery,
-    onChange: e => setAssigneeQuery(e.target.value)
-  }), React.createElement("select", {
+  }, "Receiving team will assign a person") : React.createElement("div", {
+    className: "task-assignee-picker",
+    onBlur: e => {
+      if (!e.currentTarget.contains(e.relatedTarget)) setAssigneeOpen(false);
+    }
+  }, React.createElement("input", {
     id: "task-assignee",
-    className: "select",
-    value: value.assigneeUserId,
-    onChange: e => update("assigneeUserId", e.target.value)
-  }, React.createElement("option", {
-    value: ""
-  }, "Choose a team member"), visibleAssignees.map(member => React.createElement("option", {
+    className: "input",
+    role: "combobox",
+    "aria-label": "Search team assignees",
+    "aria-autocomplete": "list",
+    "aria-expanded": showAssignees,
+    "aria-controls": "task-assignee-options",
+    "aria-activedescendant": showAssignees && assigneeIndex >= 0 ? `task-assignee-option-${assigneeIndex}` : undefined,
+    placeholder: "Type a name, e.g. Aof",
+    value: assigneeQuery,
+    onFocus: () => setAssigneeOpen(true),
+    onKeyDown: assigneeKeyDown,
+    onChange: e => {
+      setAssigneeQuery(e.target.value);
+      setAssigneeOpen(true);
+      setAssigneeIndex(-1);
+      if (value.assigneeUserId) update("assigneeUserId", "");
+    }
+  }), showAssignees && React.createElement("div", {
+    id: "task-assignee-options",
+    role: "listbox",
+    "aria-label": "Matching active team members",
+    className: "task-assignee-options"
+  }, matchingAssignees.map((member, index) => React.createElement("button", {
+    type: "button",
+    role: "option",
+    id: `task-assignee-option-${index}`,
     key: member.userId,
-    value: member.userId
-  }, member.name)))), fieldError("assigneeUserId"), memberError && React.createElement("div", {
+    "aria-selected": index === assigneeIndex,
+    className: "task-assignee-option",
+    onMouseDown: e => e.preventDefault(),
+    onClick: () => chooseAssignee(member)
+  }, member.name)), !matchingAssignees.length && React.createElement("div", {
+    className: "muted",
+    role: "status"
+  }, "No matching active members.")), React.createElement("div", {
+    className: "muted"
+  }, membersLoading ? "Loading active team members…" : value.assigneeUserId ? "Team member selected." : "Type to search, then choose an active team member.")), fieldError("assigneeUserId"), memberError && React.createElement("div", {
     className: "field__error",
     role: "alert"
   }, memberError)), React.createElement("div", {
@@ -1895,34 +1966,19 @@ function QuickTaskForm({
     id: "task-parent",
     className: "select",
     value: value.parentId,
+    disabled: parentsLoading || Boolean(parentError),
     onChange: e => update("parentId", e.target.value)
   }, React.createElement("option", {
     value: ""
   }, "Standalone task"), parents.map(parent => React.createElement("option", {
     key: parent.id,
     value: parent.id
-  }, parent.display_id, " — ", parent.title)))), React.createElement("div", {
-    className: "field"
-  }, React.createElement("label", {
-    className: "field__label"
-  }, React.createElement("input", {
-    type: "checkbox",
-    checked: Boolean(value.confidential),
-    onChange: e => update("confidential", e.target.checked)
-  }), " Confidential task"), React.createElement("div", {
+  }, parent.display_id, " — ", parent.title))), React.createElement("div", {
     className: "muted"
-  }, "Visible only to requester, assignee, selected collaborators, and administrators.")), value.confidential && React.createElement("div", {
-    className: "field field--full"
-  }, React.createElement("label", {
-    className: "field__label"
-  }, "Selected collaborators"), React.createElement("div", {
-    className: "muted"
-  }, "Select collaborators below. Cross-team confidential requests must include a dispatcher from the receiving team."), React.createElement(TaskAssignCollaborators, {
-    team: value.responsibleTeam,
-    sourceMembers: members,
-    selected: value.collaboratorIds || [],
-    onChange: ids => update("collaboratorIds", ids)
-  })));
+  }, parentsLoading ? "Loading parent tasks…" : parentError ? "Parent tasks could not load. You can still create a standalone task." : parents.length ? "Choose an existing task you created to make this a subtask." : "No existing tasks you created are available. Keep Standalone task."), parentError && React.createElement("div", {
+    className: "field__error",
+    role: "alert"
+  }, parentError)));
 }
 function TaskAssignCollaborators({
   team,

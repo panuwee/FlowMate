@@ -1257,8 +1257,8 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
   async function handleSubmit() {
     if (isSubmitting) return;
     const activeDraft = mode === "quick" ? quickDraft : creativeDraft;
-    const submissionDraft = activeDraft;
-    const nextValidationErrors = getFlowMateCreateValidationErrors(mode, activeDraft);
+    const submissionDraft = isTaskAssignProduct ? { ...activeDraft, confidential: false, collaboratorIds: [] } : activeDraft;
+    const nextValidationErrors = getFlowMateCreateValidationErrors(mode, submissionDraft);
     if (Object.keys(nextValidationErrors).length > 0) {
       const hasInvalidBriefLink = nextValidationErrors.briefLink === FLOWMATE_INVALID_BRIEF_LINK_MESSAGE;
       if (hasInvalidBriefLink && window.flowmatePrompt) {
@@ -1433,6 +1433,11 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
 
 function QuickTaskForm({ value, onChange, errors = {} }) {
   const [assigneeQuery, setAssigneeQuery] = useState("");
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [assigneeIndex, setAssigneeIndex] = useState(-1);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [parentError, setParentError] = useState("");
+  const [parentsLoading, setParentsLoading] = useState(true);
   const sourceTeam = window.TaskAssign.sourceTeam();
   const crossTeam = value.responsibleTeam !== sourceTeam;
   const [members, setMembers] = useState([]);
@@ -1440,39 +1445,54 @@ function QuickTaskForm({ value, onChange, errors = {} }) {
   const [memberError, setMemberError] = useState("");
   useEffect(() => {
     let alive = true;
-    setMembers([]); setMemberError("");
-    window.TaskAssign.members(sourceTeam).then(rows => { if (alive) setMembers(rows); }).catch(error => { if (alive) setMemberError(window.flowmateUserError(error)); });
-    window.TaskAssign.list(null, "created").then(rows => { if (alive) setParents(rows); }).catch(() => {});
+    setMembers([]); setMemberError(""); setMembersLoading(true);
+    setParents([]); setParentError(""); setParentsLoading(true);
+    window.TaskAssign.members(sourceTeam).then(rows => { if (alive) setMembers(rows); }).catch(error => { if (alive) setMemberError(window.flowmateUserError(error)); }).finally(() => { if (alive) setMembersLoading(false); });
+    window.TaskAssign.list(null, "created").then(rows => { if (alive) setParents(rows); }).catch(error => { if (alive) setParentError(window.flowmateUserError(error)); }).finally(() => { if (alive) setParentsLoading(false); });
     return () => { alive = false; };
   }, [sourceTeam]);
+  useEffect(() => {
+    const selected = members.find(member => member.userId === value.assigneeUserId);
+    if (selected) setAssigneeQuery(selected.name);
+  }, [members, value.assigneeUserId]);
   useEffect(() => {
     if (!value.responsibleTeam) onChange({ ...value, responsibleTeam: sourceTeam, assigneeUserId: "" });
   }, [sourceTeam]);
   function update(field, nextValue) {
     const next = { ...value, [field]: nextValue };
-    if (field === "responsibleTeam") { next.assigneeUserId = ""; next.collaboratorIds = []; }
+    if (field === "responsibleTeam") { next.assigneeUserId = ""; next.collaboratorIds = []; setAssigneeQuery(""); setAssigneeOpen(false); }
     onChange(next);
   }
   function fieldError(key) { return errors[key] ? <div className="field__error" role="alert">{errors[key]}</div> : null; }
-  const matchingAssignees = window.filterFlowMateAssigneeOptions
-    ? window.filterFlowMateAssigneeOptions(members, assigneeQuery)
-    : members.filter(member => member.name.toLowerCase().startsWith(assigneeQuery.trim().toLowerCase()));
-  const visibleAssignees = members.filter(member => member.userId === value.assigneeUserId || matchingAssignees.includes(member));
+  const matchingAssignees = members.filter(member => String(member.name || "").toLowerCase().includes(assigneeQuery.trim().toLowerCase()));
+  const showAssignees = assigneeOpen && Boolean(assigneeQuery.trim()) && !membersLoading && !memberError;
+  function chooseAssignee(member) { setAssigneeQuery(member.name); setAssigneeOpen(false); setAssigneeIndex(-1); update("assigneeUserId", member.userId); }
+  function assigneeKeyDown(event) {
+    if (event.key === "Escape") { setAssigneeOpen(false); return; }
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && assigneeQuery.trim() && matchingAssignees.length) {
+      event.preventDefault(); setAssigneeOpen(true);
+      setAssigneeIndex(index => event.key === "ArrowDown" ? (index + 1) % matchingAssignees.length : (index <= 0 ? matchingAssignees.length - 1 : index - 1));
+    } else if (event.key === "Enter" && showAssignees) {
+      event.preventDefault(); if (assigneeIndex >= 0) chooseAssignee(matchingAssignees[assigneeIndex]);
+    }
+  }
   return <div className="form-grid" data-testid="task-assign-create-form">
     <div className="field field--full"><div className="reason-box">Requester workspace: <strong>{window.TaskAssign.teamLabel(sourceTeam)}</strong>. {crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team."}</div></div>
     <div className={"field field--full " + (errors.title ? "field--error" : "")}><label className="field__label" htmlFor="task-title">Title *</label><input id="task-title" className="input" value={value.title} onChange={e => update("title", e.target.value)} placeholder="e.g. Prepare the event venue" />{fieldError("title")}</div>
     <div className={"field field--full " + (errors.note ? "field--error" : "")}><label className="field__label" htmlFor="task-note">Note / Expected deliverable *</label><textarea id="task-note" className="textarea" value={value.note} onChange={e => update("note", e.target.value)} placeholder={"What needs doing:\nExpected deliverable:\nImportant conditions:\nReference information:"} />{fieldError("note")}</div>
     <div className="field"><label className="field__label" htmlFor="task-project">Project / Campaign (optional)</label><input id="task-project" className="input" value={value.projectName} onChange={e => update("projectName", e.target.value)} placeholder="General work, or campaign name" /></div>
     <div className={"field " + (errors.responsibleTeam ? "field--error" : "")}><label className="field__label" htmlFor="task-team">Responsible team *</label><select id="task-team" className="select" value={value.responsibleTeam} onChange={e => update("responsibleTeam", e.target.value)}><option value="">Choose a team</option>{window.TaskAssign.teams.map(team => <option key={team.key} value={team.key}>{team.label}</option>)}</select>{fieldError("responsibleTeam")}</div>
-    <div className={"field " + (errors.assigneeUserId ? "field--error" : "")}><label className="field__label" htmlFor="task-assignee">Assignee {crossTeam ? "" : "*"}</label>{crossTeam ? <div className="input">Receiving team will assign a person</div> : <><input className="input" type="search" aria-label="Search team assignees" placeholder="Search team members" value={assigneeQuery} onChange={e => setAssigneeQuery(e.target.value)} /><select id="task-assignee" className="select" value={value.assigneeUserId} onChange={e => update("assigneeUserId", e.target.value)}><option value="">Choose a team member</option>{visibleAssignees.map(member => <option key={member.userId} value={member.userId}>{member.name}</option>)}</select></>}{fieldError("assigneeUserId")}{memberError && <div className="field__error" role="alert">{memberError}</div>}</div>
+    <div className={"field " + (errors.assigneeUserId ? "field--error" : "")}><label className="field__label" htmlFor="task-assignee">Assignee {crossTeam ? "" : "*"}</label>{crossTeam ? <div className="input">Receiving team will assign a person</div> : <div className="task-assignee-picker" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAssigneeOpen(false); }}>
+      <input id="task-assignee" className="input" role="combobox" aria-label="Search team assignees" aria-autocomplete="list" aria-expanded={showAssignees} aria-controls="task-assignee-options" aria-activedescendant={showAssignees && assigneeIndex >= 0 ? `task-assignee-option-${assigneeIndex}` : undefined} placeholder="Type a name, e.g. Aof" value={assigneeQuery} onFocus={() => setAssigneeOpen(true)} onKeyDown={assigneeKeyDown} onChange={e => { setAssigneeQuery(e.target.value); setAssigneeOpen(true); setAssigneeIndex(-1); if (value.assigneeUserId) update("assigneeUserId", ""); }} />
+      {showAssignees && <div id="task-assignee-options" role="listbox" aria-label="Matching active team members" className="task-assignee-options">{matchingAssignees.map((member, index) => <button type="button" role="option" id={`task-assignee-option-${index}`} key={member.userId} aria-selected={index === assigneeIndex} className="task-assignee-option" onMouseDown={e => e.preventDefault()} onClick={() => chooseAssignee(member)}>{member.name}</button>)}{!matchingAssignees.length && <div className="muted" role="status">No matching active members.</div>}</div>}
+      <div className="muted">{membersLoading ? "Loading active team members…" : value.assigneeUserId ? "Team member selected." : "Type to search, then choose an active team member."}</div>
+    </div>}{fieldError("assigneeUserId")}{memberError && <div className="field__error" role="alert">{memberError}</div>}</div>
     <div className="field"><label className="field__label" htmlFor="task-review">1st Review Date (optional)</label><input id="task-review" className="input" type="date" min={getFlowMateTodayDateKey()} max={value.launchDate || undefined} value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />{fieldError("dueDate")}</div>
     <div className="field"><label className="field__label" htmlFor="task-deadline">Deadline / Requested delivery *</label><input id="task-deadline" className="input" type="date" min={getFlowMateTodayDateKey()} value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />{fieldError("launchDate")}</div>
     <div className="field"><label className="field__label" htmlFor="task-priority">Priority</label><select id="task-priority" className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>{["low", "normal", "high", "urgent"].map(priority => <option key={priority} value={priority}>{priority[0].toUpperCase() + priority.slice(1)}</option>)}</select></div>
     {value.priority === "urgent" && <div className="field field--full"><label className="field__label" htmlFor="task-urgent">Urgent reason *</label><textarea id="task-urgent" className="textarea" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} />{fieldError("urgentReason")}<div className="muted">Urgent requests still require the receiving team to accept the commitment.</div></div>}
     <div className="field field--full"><label className="field__label" htmlFor="task-references">Reference / File links (optional)</label><textarea id="task-references" className="textarea" value={value.referenceLinks} onChange={e => update("referenceLinks", e.target.value)} placeholder="One complete HTTP(S) link per line" />{fieldError("referenceLinks")}<div className="muted">Link to files in your approved storage. Check their sharing permissions separately.</div></div>
-    <div className="field"><label className="field__label" htmlFor="task-parent">Parent task (optional)</label><select id="task-parent" className="select" value={value.parentId} onChange={e => update("parentId", e.target.value)}><option value="">Standalone task</option>{parents.map(parent => <option key={parent.id} value={parent.id}>{parent.display_id} — {parent.title}</option>)}</select></div>
-    <div className="field"><label className="field__label"><input type="checkbox" checked={Boolean(value.confidential)} onChange={e => update("confidential", e.target.checked)} /> Confidential task</label><div className="muted">Visible only to requester, assignee, selected collaborators, and administrators.</div></div>
-    {value.confidential && <div className="field field--full"><label className="field__label" >Selected collaborators</label><div className="muted">Select collaborators below. Cross-team confidential requests must include a dispatcher from the receiving team.</div><TaskAssignCollaborators team={value.responsibleTeam} sourceMembers={members} selected={value.collaboratorIds || []} onChange={ids => update("collaboratorIds", ids)} /></div>}
+    <div className="field"><label className="field__label" htmlFor="task-parent">Parent task (optional)</label><select id="task-parent" className="select" value={value.parentId} disabled={parentsLoading || Boolean(parentError)} onChange={e => update("parentId", e.target.value)}><option value="">Standalone task</option>{parents.map(parent => <option key={parent.id} value={parent.id}>{parent.display_id} — {parent.title}</option>)}</select><div className="muted">{parentsLoading ? "Loading parent tasks…" : parentError ? "Parent tasks could not load. You can still create a standalone task." : parents.length ? "Choose an existing task you created to make this a subtask." : "No existing tasks you created are available. Keep Standalone task."}</div>{parentError && <div className="field__error" role="alert">{parentError}</div>}</div>
   </div>;
 }
 
