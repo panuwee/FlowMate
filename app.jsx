@@ -2651,7 +2651,7 @@ function getMarketingPlanTimelineChannelCountsByDay(rows, selectedMonth, channel
   const countsByDay = {};
   (rows || []).forEach(row => {
     const publishDate = String(row.publishDate || "");
-    const rowMonth = row.monthKey || (publishDate ? publishDate.slice(0, 7) : "");
+    const rowMonth = publishDate ? publishDate.slice(0, 7) : row.monthKey || "";
     if (!publishDate || !windowMonths.has(rowMonth) || !countChannels.has(row.channel)) return;
     if (!countsByDay[publishDate]) countsByDay[publishDate] = {};
     countsByDay[publishDate][row.channel] = (countsByDay[publishDate][row.channel] || 0) + 1;
@@ -2662,7 +2662,7 @@ function groupMarketingPlanTimelineRows(rows, selectedMonth) {
   const campaigns = new Map();
   const windowMonths = new Set(getMarketingPlanTimelineWindow(selectedMonth).monthKeys);
   (rows || []).filter(row => {
-    const rowMonth = row.monthKey || (row.publishDate ? row.publishDate.slice(0, 7) : "");
+    const rowMonth = row.publishDate ? row.publishDate.slice(0, 7) : row.monthKey || "";
     return windowMonths.has(rowMonth);
   }).forEach(row => {
     const campaignKey = getMarketingPlanCampaignKey(row.campaignName) || row.campaignId || "uncategorized";
@@ -4929,7 +4929,7 @@ function MarketingPlanTimelineScreen({
       return;
     }
     try {
-      const normalizedRows = await loadMarketingPlanTimelineRows("campaign", selectedMonth, options);
+      const normalizedRows = await loadMarketingPlanTimelineRows("campaign", selectedMonth, { ...options, useLaunchMonth: true });
       if (!isAlive()) return;
       setRows(normalizedRows);
       setLoadState({

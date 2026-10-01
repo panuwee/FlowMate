@@ -4003,7 +4003,7 @@ describe("Marketing Plan product split shell", () => {
 
     expect(appJsx).toContain("function MarketingPlanTimelineScreen");
     expect(appJsx).toContain('.from("marketing_plan_timeline_v")');
-    expect(timelineSource).toContain('loadMarketingPlanTimelineRows("campaign", selectedMonth, options)');
+    expect(timelineSource).toContain('loadMarketingPlanTimelineRows("campaign", selectedMonth, { ...options, useLaunchMonth: true })');
     expect(appJsx).toContain("const publishDate = row.publish_date");
     expect(appJsx).toContain("publishTime: row.publish_time");
     expect(timelineSource).toContain("loadMarketingPlanAvailableMonths()");
