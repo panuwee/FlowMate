@@ -1901,6 +1901,19 @@ function CreateResultScreen({ result, onAgain, onNav }) {
 /* ============================================================
    WORK ITEM DETAIL
    ============================================================ */
+function flowmateAutomationBriefReview(review, brief, currentLink) {
+  const history = brief?.history || [];
+  const submission = history.filter(item => item.action === "submitted").sort((a, b) => b.id - a.id)[0];
+  const linkMatches = Boolean(submission && submission.brief_link === currentLink);
+  const acceptance = linkMatches && history.find(item => item.action === "accepted" && item.submission_id === submission.id);
+  const sourceHeld = review?.state === "source_review";
+  return {
+    ...review, held: sourceHeld || Boolean(review?.held) || !acceptance,
+    can_accept: Boolean(brief?.can_accept) && !sourceHeld && linkMatches && !acceptance,
+    submission, acceptance,
+  };
+}
+
 function DetailScreen({ onNav, onOpen, focusId }) {
   const id = focusId || "";
   const detailBackContext = window.readFlowMateDetailBackContext ? window.readFlowMateDetailBackContext() : null;
@@ -1947,9 +1960,12 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const [assigneeTargetMemberId, setAssigneeTargetMemberId] = useState((w && w.assignee) || "");
   const [assigneeReason, setAssigneeReason] = useState("");
   const [battlePassReview, setBattlePassReview] = useState(null);
+  const [briefReviewComment, setBriefReviewComment] = useState("");
   const isBattlePassAttribution = Boolean(w?.isSupabaseRow && w.requesterUserId === "2ef0289c-d1d8-4c3d-a28d-de67ca8f80ee");
   const currentBattlePassReview = battlePassReview?.workItemId === w?.workItemId ? battlePassReview : null;
   const battlePassAssignmentHeld = isBattlePassAttribution && (!currentBattlePassReview || currentBattlePassReview.loading || currentBattlePassReview.error || currentBattlePassReview.data?.held);
+
+  useEffect(() => { setBriefReviewComment(""); }, [w?.workItemId]);
 
   useEffect(() => {
     let alive = true;
@@ -1961,14 +1977,17 @@ function DetailScreen({ onNav, onOpen, focusId }) {
     setBattlePassReview({ workItemId, loading: true });
     Promise.resolve().then(async () => {
       if (!window.flowmateSupabase) throw new Error("Connection unavailable");
-      const result = await window.flowmateSupabase.rpc("battle_pass_review_status", { p_work_item_id: workItemId });
-      if (result.error) throw result.error;
-      if (alive) setBattlePassReview({ workItemId, data: result.data });
+      const [result, brief] = await Promise.all([
+        window.flowmateSupabase.rpc("battle_pass_review_status", { p_work_item_id: workItemId }),
+        window.flowmateSupabase.rpc("flowmate_creative_brief", { p_work_item_id: workItemId, p_action: "read" }),
+      ]);
+      if (result.error || brief.error) throw result.error || brief.error;
+      if (alive) setBattlePassReview({ workItemId, data: flowmateAutomationBriefReview(result.data, brief.data, w.briefLink) });
     }).catch(() => {
       if (alive) setBattlePassReview({ workItemId, error: true });
     });
     return () => { alive = false; };
-  }, [isBattlePassAttribution, w?.workItemId, detailRefreshTick]);
+  }, [isBattlePassAttribution, w?.workItemId, w?.briefLink, detailRefreshTick]);
 
   useEffect(() => {
     if (!w) return;
@@ -2685,29 +2704,43 @@ function DetailScreen({ onNav, onOpen, focusId }) {
       )}
 
       {isBattlePassAttribution && (battlePassAssignmentHeld || currentBattlePassReview?.data) && (
-        <section className="card" aria-label="Battle Pass review" style={{ marginBottom: 16 }}>
-          <div className="card__head"><span className="card__title">Battle Pass review</span></div>
+        <section className="card" aria-label="ยืนยันบรีฟ" style={{ marginBottom: 16 }}>
+          <div className="card__head"><span className="card__title">ตรวจและยืนยันบรีฟ — Operations</span></div>
           <div className="card__body">
             <div className="reason-box" role="status">
               {currentBattlePassReview?.error ? "Review status could not be loaded. Refresh before assigning this work."
                 : !currentBattlePassReview || currentBattlePassReview.loading ? "Checking brief acceptance status..."
                 : currentBattlePassReview.data?.state === "source_review" ? "Source data changed. This work is paused until the source and brief have been checked."
+                : !currentBattlePassReview.data?.submission ? "ยังไม่มีบรีฟที่ส่งให้ตรวจ กรุณาตรวจการสร้าง Brief Link ก่อน"
+                : currentBattlePassReview.data.submission.brief_link !== w.briefLink ? "Brief Link เปลี่ยนแล้ว ต้องส่งบรีฟฉบับปัจจุบันให้ตรวจก่อนยืนยัน"
                 : currentBattlePassReview.data?.held ? "ตรวจบรีฟและ Slides แล้วกด ยืนยันบรีฟครบ เพื่อให้ระบบ Auto Assign."
                 : "บรีฟผ่านการยืนยันแล้ว ตรวจผล Auto Assign ได้จากผู้รับงานและ Activity Log."}
             </div>
-            {currentBattlePassReview?.data?.held && currentBattlePassReview.data.can_release && !isArchivedDetail && (
-              <button className="btn btn--primary" style={{ marginTop: 12 }} disabled={pending} onClick={async () => {
+            {currentBattlePassReview?.data?.submission && window.flowmateSafeHttpUrl?.(currentBattlePassReview.data.submission.brief_link) && <div style={{ marginTop: 12 }}><a href={window.flowmateSafeHttpUrl(currentBattlePassReview.data.submission.brief_link)} target="_blank" rel="noopener noreferrer">เปิดบรีฟเพื่อตรวจสอบ</a></div>}
+            {currentBattlePassReview?.data?.acceptance && <div style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>คอมเมนต์ยืนยัน: {currentBattlePassReview.data.acceptance.reason}</div>}
+            {currentBattlePassReview?.data?.can_accept && !isArchivedDetail && (
+              <div style={{ marginTop: 12 }}>
+              <label htmlFor="automation-brief-confirm-comment">คอมเมนต์ยืนยันบรีฟ (จำเป็น)</label>
+              <textarea id="automation-brief-confirm-comment" className="input" rows={3} value={briefReviewComment} disabled={pending} onChange={event => setBriefReviewComment(event.target.value)} placeholder="ระบุผลตรวจบรีฟและสิ่งที่ยืนยัน" style={{ width: "100%", marginTop: 8 }} />
+              <button className="btn btn--primary" style={{ marginTop: 12 }} disabled={pending || !briefReviewComment.trim()} onClick={async () => {
+                const comment = briefReviewComment.trim();
+                if (!comment || pending) return;
                 setPending(true);
                 try {
-                  const result = await window.flowmateSupabase.rpc("battle_pass_release_review", { p_work_item_id: w.workItemId });
+                  const result = await window.flowmateSupabase.rpc("flowmate_creative_brief", {
+                    p_work_item_id: w.workItemId, p_action: "accepted", p_reason: comment,
+                    p_submission_id: currentBattlePassReview.data.submission.id,
+                  });
                   if (result.error) throw result.error;
                   await refreshDetailItem();
                   setDetailRefreshTick(tick => tick + 1);
-                  setActionMsg({ tone: "ok", text: "Brief review completed. Ready for GD assignment." });
+                  setActionMsg({ tone: "ok", text: "ยืนยันบรีฟและบันทึกคอมเมนต์แล้ว ระบบเรียก Auto Assign แล้ว ตรวจผลที่ผู้รับงานและ Activity Log" });
                 } catch (error) {
                   setActionMsg({ tone: "bad", text: error?.message || "Could not complete the review. Please retry." });
+                  setDetailRefreshTick(tick => tick + 1);
                 } finally { setPending(false); }
-              }}>Brief checked — allow GD assignment</button>
+              }}>ยืนยันบรีฟครบ</button>
+              </div>
             )}
           </div>
         </section>
