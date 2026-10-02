@@ -313,7 +313,7 @@ function TaskAssignDetailScreen({
   const closed = work && ["delivered", "cancelled"].includes(work.status);
   const waiting = work && ["pending", "need_information"].includes(work.task_request_state);
   return React.createElement("div", {
-    className: "page",
+    className: "page task-detail",
     "data-testid": "task-assign-detail"
   }, React.createElement("div", {
     className: "page__header"
@@ -350,13 +350,20 @@ function TaskAssignDetailScreen({
   }, React.createElement("div", {
     className: "stat__lbl"
   }, "Acceptance / Status"), React.createElement("strong", null, TASK_ASSIGN_REQUEST_LABELS[work.task_request_state]), React.createElement("div", null, taskAssignStatusLabel(work.status)))), React.createElement("div", {
-    className: "card"
+    className: "task-detail__layout"
+  }, React.createElement("section", {
+    className: "card task-detail__brief",
+    "aria-labelledby": "task-brief-heading"
   }, React.createElement("div", {
     className: "card__head"
-  }, React.createElement("strong", null, "Task brief"), work.is_requester && !closed && React.createElement("button", {
+  }, React.createElement("h2", {
+    id: "task-brief-heading",
+    className: "task-section-title"
+  }, "Task brief"), work.is_requester && !closed && React.createElement("button", {
     className: "btn btn--sm btn--ghost",
     onClick: () => setEditing(!editing),
-    disabled: pending
+    disabled: pending,
+    "aria-expanded": editing
   }, editing ? "Cancel editing" : "Edit brief")), React.createElement("div", {
     className: "card__body"
   }, editing ? React.createElement("div", {
@@ -404,35 +411,37 @@ function TaskAssignDetailScreen({
     disabled: pending,
     onClick: () => mutate(() => window.TaskAssign.edit(work, brief))
   }, "Save brief"))) : React.createElement(React.Fragment, null, React.createElement("p", {
-    style: {
-      whiteSpace: "pre-wrap"
-    }
-  }, work.description || "No note"), React.createElement("p", null, "Project: ", work.project_name || "General work", " · Priority: ", work.priority), work.urgent_reason && React.createElement("p", null, "Urgent reason: ", work.urgent_reason)), React.createElement("div", {
-    className: "form-grid"
-  }, React.createElement("div", null, "Requested deadline: ", React.createElement("strong", null, work.task_requested_deadline || work.launch_date || "—")), React.createElement("div", null, "Committed deadline: ", React.createElement("strong", null, work.task_committed_deadline || (work.task_request_state === "accepted" ? work.launch_date : null) || "Awaiting acceptance")), React.createElement("div", null, "1st review: ", work.due_date || "Not required"), React.createElement("div", null, work.task_confidential ? "Confidential · selected people only" : "Shared with involved teams")), work.parent_display_id && React.createElement("p", null, "Parent task: ", React.createElement("button", {
+    className: "task-detail__description"
+  }, work.description || "No note"), work.urgent_reason && React.createElement("p", null, "Urgent reason: ", work.urgent_reason)), React.createElement("dl", {
+    className: "task-detail__facts"
+  }, React.createElement("div", null, React.createElement("dt", null, "Project / Campaign"), React.createElement("dd", null, work.project_name || "General work")), React.createElement("div", null, React.createElement("dt", null, "Priority"), React.createElement("dd", null, work.priority)), React.createElement("div", null, React.createElement("dt", null, "Requested deadline"), React.createElement("dd", null, work.task_requested_deadline || work.launch_date || "—")), React.createElement("div", null, React.createElement("dt", null, "Committed deadline"), React.createElement("dd", null, work.task_committed_deadline || (work.task_request_state === "accepted" ? work.launch_date : null) || "Awaiting acceptance")), React.createElement("div", null, React.createElement("dt", null, "1st review"), React.createElement("dd", null, work.due_date || "Not required")), React.createElement("div", null, React.createElement("dt", null, "Visibility"), React.createElement("dd", null, work.task_confidential ? "Confidential · selected people only" : "Shared with involved teams"))), work.parent_display_id && React.createElement("p", null, "Parent task: ", React.createElement("button", {
     className: "btn btn--ghost",
     onClick: () => onOpen(work.parent_display_id)
-  }, work.parent_display_id)), (work.task_reference_links || []).map(link => {
+  }, work.parent_display_id)), (work.task_reference_links || []).length > 0 && React.createElement("h3", {
+    className: "task-section-title"
+  }, "Reference / File links"), (work.task_reference_links || []).map(link => {
     try {
       if (!["http:", "https:"].includes(new URL(link).protocol)) return null;
     } catch {
       return null;
     }
     return React.createElement("p", {
+      className: "task-detail__reference",
       key: link
     }, React.createElement("a", {
       href: link,
       target: "_blank",
       rel: "noopener noreferrer"
     }, link));
-  }))), !closed && React.createElement("div", {
-    className: "card",
-    style: {
-      marginTop: 16
-    }
+  }))), !closed && React.createElement("section", {
+    className: "card task-detail__actions",
+    "aria-labelledby": "task-actions-heading"
   }, React.createElement("div", {
     className: "card__head"
-  }, React.createElement("strong", null, "Actions")), React.createElement("div", {
+  }, React.createElement("h2", {
+    id: "task-actions-heading",
+    className: "task-section-title"
+  }, "Actions")), React.createElement("div", {
     className: "card__body"
   }, React.createElement("div", {
     className: "form-grid"
@@ -503,14 +512,17 @@ function TaskAssignDetailScreen({
       gap: 8,
       marginTop: 12
     }
-  }, waiting && work.can_dispatch && [button("accept", "Accept & assign", true), button("need_information", "Request information"), button("reject", "Reject request")], work.task_request_state === "accepted" && work.can_dispatch && button("reassign", "Update assignee / commitment"), work.can_execute && work.status === "assigned" && button("start", "Start work", true), work.can_execute && work.status === "in_progress" && button("submit", "Submit for review", true), work.can_execute && ["assigned", "in_progress"].includes(work.status) && button("block", "Block"), work.can_execute && work.status === "blocked" && button("resume", "Resume"), work.is_requester && work.status === "review" && [button("approve", "Confirm delivery", true), button("request_changes", "Request changes")], work.is_requester && ["need_information", "rejected"].includes(work.task_request_state) && button("resubmit", "Resubmit request", true), (work.can_dispatch || work.is_requester && work.task_request_state !== "accepted") && !work.task_confidential && button("forward", "Forward request"), work.is_requester && button("cancel", "Cancel task")), !work.can_dispatch && waiting && React.createElement("p", {
+  }, waiting && work.can_dispatch && [button("accept", "Accept & assign", true), button("need_information", "Request information"), button("reject", "Reject request")], work.task_request_state === "accepted" && work.can_dispatch && button("reassign", "Update assignee / commitment"), work.can_execute && work.status === "assigned" && button("start", "Start work", true), work.can_execute && work.status === "in_progress" && button("submit", "Submit for review", true), work.can_execute && ["assigned", "in_progress"].includes(work.status) && button("block", "Block"), work.can_execute && work.status === "blocked" && button("resume", "Resume"), work.is_requester && work.status === "review" && [button("approve", "Confirm delivery", true), button("request_changes", "Request changes")], work.is_requester && ["need_information", "rejected"].includes(work.task_request_state) && button("resubmit", "Resubmit request", true), (work.can_dispatch || work.is_requester && work.task_request_state !== "accepted") && !work.task_confidential && button("forward", "Forward request")), !work.can_dispatch && waiting && React.createElement("p", {
     className: "muted"
-  }, "Waiting for the receiving team dispatcher to accept and assign this request."))), closed && work.is_requester && React.createElement("div", {
-    className: "card",
-    style: {
-      marginTop: 16
-    }
+  }, "Waiting for the receiving team dispatcher to accept and assign this request."), work.is_requester && React.createElement("div", {
+    className: "task-detail__secondary-action"
+  }, button("cancel", "Cancel task")))), closed && work.is_requester && React.createElement("section", {
+    className: "card task-detail__actions"
   }, React.createElement("div", {
+    className: "card__head"
+  }, React.createElement("h2", {
+    className: "task-section-title"
+  }, "Reopen task")), React.createElement("div", {
     className: "card__body"
   }, React.createElement("label", {
     htmlFor: "task-reopen-reason"
@@ -522,24 +534,25 @@ function TaskAssignDetailScreen({
       ...values,
       reason: e.target.value
     })
-  }), button("reopen", "Reopen into team queue"))), React.createElement("div", {
-    className: "card",
-    style: {
-      marginTop: 16
-    }
+  }), button("reopen", "Reopen into team queue")))), React.createElement("section", {
+    className: "card task-detail__comments",
+    "aria-labelledby": "task-comments-heading"
   }, React.createElement("div", {
     className: "card__head"
-  }, React.createElement("strong", null, "Comments")), React.createElement("div", {
+  }, React.createElement("h2", {
+    id: "task-comments-heading",
+    className: "task-section-title"
+  }, "Comments"), React.createElement("span", {
+    className: "task-detail__count"
+  }, comments.length)), React.createElement("div", {
     className: "card__body"
-  }, comments.map(entry => React.createElement("div", {
+  }, !comments.length && React.createElement("p", {
+    className: "muted task-detail__empty"
+  }, "No comments yet."), comments.map(entry => React.createElement("div", {
     key: entry.id,
-    style: {
-      marginBottom: 12
-    }
+    className: "task-detail__comment"
   }, React.createElement("p", {
-    style: {
-      whiteSpace: "pre-wrap"
-    }
+    className: "task-detail__description"
   }, entry.body), React.createElement("span", {
     className: "muted"
   }, new Date(entry.created_at).toLocaleString("en-SG", {
@@ -568,19 +581,18 @@ function TaskAssignDetailScreen({
       p_body: comment
     }))
   }, "Add comment"))), React.createElement("details", {
-    className: "card",
-    style: {
-      marginTop: 16
-    }
+    className: "card task-detail__history"
   }, React.createElement("summary", {
     className: "card__head"
-  }, "Task history"), React.createElement("div", {
+  }, "Task history ", React.createElement("span", {
+    className: "task-detail__count"
+  }, events.length)), React.createElement("div", {
     className: "card__body"
-  }, events.map(event => React.createElement("div", {
+  }, !events.length && React.createElement("p", {
+    className: "muted task-detail__empty"
+  }, "No task history available."), events.map(event => React.createElement("div", {
     key: event.id,
-    style: {
-      marginBottom: 8
-    }
+    className: "task-detail__event"
   }, React.createElement("strong", null, event.metadata?.action || event.metadata?.request_state || "Created"), " · ", new Date(event.created_at).toLocaleString("en-SG", {
     timeZone: "Asia/Bangkok"
   }), event.metadata?.reason && React.createElement("p", null, event.metadata.reason), event.metadata?.committed_deadline && React.createElement("span", null, "Committed: ", event.metadata.committed_deadline)))))));

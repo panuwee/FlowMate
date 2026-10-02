@@ -1271,6 +1271,11 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
       }
       setValidationErrors(nextValidationErrors);
       setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please correct the highlighted fields.");
+      if (isTaskAssignProduct) {
+        const errorControls = { title: "task-title", note: "task-note", responsibleTeam: "task-team", assigneeUserId: "task-assignee", dueDate: "task-review", launchDate: "task-deadline", urgentReason: "task-urgent", referenceLinks: "task-references" };
+        const firstError = Object.keys(errorControls).find(key => nextValidationErrors[key]);
+        if (firstError) requestAnimationFrame(() => document.getElementById(errorControls[firstError])?.focus());
+      }
       return;
     }
 
@@ -1376,24 +1381,15 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
   }
 
   return (
-    <div className="page" style={{ maxWidth: 1100 }}>
+    <div className={"page" + (isTaskAssignProduct ? " task-create" : "")} style={{ maxWidth: 1100 }}>
       <div className="page__header">
         <div>
-          <h1 className="page__title">Create</h1>
+          <h1 className="page__title">{isTaskAssignProduct ? "Create task" : "Create"}</h1>
           <div className="page__sub">{isTaskAssignProduct ? "Create work for your team or send a request to another team. Requester workspace is recorded automatically." : "Create a Creative Request for the assignment engine."}</div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: isTaskAssignProduct ? "minmax(0, 1fr)" : "1fr 1fr", gap: 16, marginBottom: 24 }}>
-        {isTaskAssignProduct && <button className={`choice-card ${mode === "quick" ? "is-active" : ""}`} onClick={() => switchCreateMode("quick")}>
-          <div className="choice-card__title"><Icon name="zap" /> Quick task</div>
-          <div className="choice-card__sub">Non-creative work with one responsible team and one shared task record.</div>
-          <ul className="choice-card__list">
-            <li>Describe the expected deliverable</li>
-            <li>Assign a teammate or send to another team’s queue</li>
-            <li>Tracked separately from creative requests</li>
-          </ul>
-        </button>}
+      {!isTaskAssignProduct && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         {!isTaskAssignProduct && <button className={`choice-card ${mode === "creative" ? "is-active" : ""}`} onClick={() => switchCreateMode("creative")}>
           <div className="choice-card__title"><Icon name="layers" /> Creative request</div>
           <div className="choice-card__sub">Structured request for production creative - banner, video, motion, esport pack.</div>
@@ -1402,7 +1398,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
             <li>Owner is confirmed after routing review</li>
           </ul>
         </button>}
-      </div>
+      </div>}
 
       <div className="card">
         <div className="card__head">
@@ -1411,7 +1407,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
         </div>
         <div className="card__body">
           {createAlert && (
-            <div className="reason-box reason-box--need" style={{ marginBottom: 16 }}>
+            <div className="reason-box reason-box--need" role="alert" style={{ marginBottom: 16 }}>
               {createAlert}
             </div>
           )}
@@ -1421,7 +1417,7 @@ function CreateScreen({ onNav, onOpen, initialMode = "creative", product = "flow
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+      <div className={isTaskAssignProduct ? "task-create__footer" : undefined} style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
         <button className="btn btn--ghost" onClick={() => onNav("my-work")}>Cancel</button>
         <button className="btn btn--primary" onClick={handleSubmit} disabled={isSubmitting}>
           <Icon name="send" /> {isSubmitting ? "Saving..." : mode === "quick" ? (quickDraft.responsibleTeam !== window.TaskAssign.sourceTeam() ? "Send request" : "Create task") : "Submit request"}
@@ -1463,7 +1459,7 @@ function QuickTaskForm({ value, onChange, errors = {} }) {
     if (field === "responsibleTeam") { next.assigneeUserId = ""; next.collaboratorIds = []; setAssigneeQuery(""); setAssigneeOpen(false); }
     onChange(next);
   }
-  function fieldError(key) { return errors[key] ? <div className="field__error" role="alert">{errors[key]}</div> : null; }
+  function fieldError(key) { return errors[key] ? <div className="field__error" id={`task-error-${key}`} role="alert">{errors[key]}</div> : null; }
   const matchingAssignees = members.filter(member => String(member.name || "").toLowerCase().includes(assigneeQuery.trim().toLowerCase()));
   const showAssignees = assigneeOpen && Boolean(assigneeQuery.trim()) && !membersLoading && !memberError;
   function chooseAssignee(member) { setAssigneeQuery(member.name); setAssigneeOpen(false); setAssigneeIndex(-1); update("assigneeUserId", member.userId); }
@@ -1473,26 +1469,38 @@ function QuickTaskForm({ value, onChange, errors = {} }) {
       event.preventDefault(); setAssigneeOpen(true);
       setAssigneeIndex(index => event.key === "ArrowDown" ? (index + 1) % matchingAssignees.length : (index <= 0 ? matchingAssignees.length - 1 : index - 1));
     } else if (event.key === "Enter" && showAssignees) {
-      event.preventDefault(); if (assigneeIndex >= 0) chooseAssignee(matchingAssignees[assigneeIndex]);
+      event.preventDefault(); if (assigneeIndex >= 0 && matchingAssignees[assigneeIndex]) chooseAssignee(matchingAssignees[assigneeIndex]);
     }
   }
-  return <div className="form-grid" data-testid="task-assign-create-form">
-    <div className="field field--full"><div className="reason-box">Requester workspace: <strong>{window.TaskAssign.teamLabel(sourceTeam)}</strong>. {crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team."}</div></div>
-    <div className={"field field--full " + (errors.title ? "field--error" : "")}><label className="field__label" htmlFor="task-title">Title *</label><input id="task-title" className="input" value={value.title} onChange={e => update("title", e.target.value)} placeholder="e.g. Prepare the event venue" />{fieldError("title")}</div>
-    <div className={"field field--full " + (errors.note ? "field--error" : "")}><label className="field__label" htmlFor="task-note">Note / Expected deliverable *</label><textarea id="task-note" className="textarea" value={value.note} onChange={e => update("note", e.target.value)} placeholder={"What needs doing:\nExpected deliverable:\nImportant conditions:\nReference information:"} />{fieldError("note")}</div>
+  return <div className="task-form" data-testid="task-assign-create-form">
+    <div className="field field--full"><div className="task-form__routing" role="status">Requester workspace: <strong>{window.TaskAssign.teamLabel(sourceTeam)}</strong>. {crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team."}</div></div>
+    <fieldset className="task-form__section"><legend>Task brief</legend><div className="form-grid">
+    <div className={"field field--full " + (errors.title ? "field--error" : "")}><label className="field__label" htmlFor="task-title">Title *</label><input id="task-title" aria-required="true" aria-invalid={Boolean(errors.title)} aria-describedby={errors.title ? "task-error-title" : undefined} className="input" value={value.title} onChange={e => update("title", e.target.value)} placeholder="e.g. Prepare the event venue" />{fieldError("title")}</div>
+    <div className={"field field--full " + (errors.note ? "field--error" : "")}><label className="field__label" htmlFor="task-note">Note / Expected deliverable *</label><textarea id="task-note" aria-required="true" aria-invalid={Boolean(errors.note)} aria-describedby={errors.note ? "task-error-note" : undefined} className="textarea" value={value.note} onChange={e => update("note", e.target.value)} placeholder={"What needs doing:\nExpected deliverable:\nImportant conditions:\nReference information:"} />{fieldError("note")}</div>
     <div className="field"><label className="field__label" htmlFor="task-project">Project / Campaign (optional)</label><input id="task-project" className="input" value={value.projectName} onChange={e => update("projectName", e.target.value)} placeholder="General work, or campaign name" /></div>
-    <div className={"field " + (errors.responsibleTeam ? "field--error" : "")}><label className="field__label" htmlFor="task-team">Responsible team *</label><select id="task-team" className="select" value={value.responsibleTeam} onChange={e => update("responsibleTeam", e.target.value)}><option value="">Choose a team</option>{window.TaskAssign.teams.map(team => <option key={team.key} value={team.key}>{team.label}</option>)}</select>{fieldError("responsibleTeam")}</div>
+
+    </div></fieldset>
+    <fieldset className="task-form__section"><legend>Responsibility</legend><div className="form-grid">
+    <div className={"field " + (errors.responsibleTeam ? "field--error" : "")}><label className="field__label" htmlFor="task-team">Responsible team *</label><select id="task-team" aria-required="true" aria-invalid={Boolean(errors.responsibleTeam)} aria-describedby={errors.responsibleTeam ? "task-error-responsibleTeam" : undefined} className="select" value={value.responsibleTeam} onChange={e => update("responsibleTeam", e.target.value)}><option value="">Choose a team</option>{window.TaskAssign.teams.map(team => <option key={team.key} value={team.key}>{team.label}</option>)}</select>{fieldError("responsibleTeam")}</div>
     <div className={"field " + (errors.assigneeUserId ? "field--error" : "")}><label className="field__label" htmlFor="task-assignee">Assignee {crossTeam ? "" : "*"}</label>{crossTeam ? <div className="input">Receiving team will assign a person</div> : <div className="task-assignee-picker" onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget)) setAssigneeOpen(false); }}>
-      <input id="task-assignee" className="input" role="combobox" aria-label="Search team assignees" aria-autocomplete="list" aria-expanded={showAssignees} aria-controls="task-assignee-options" aria-activedescendant={showAssignees && assigneeIndex >= 0 ? `task-assignee-option-${assigneeIndex}` : undefined} placeholder="Type a name, e.g. Aof" value={assigneeQuery} onFocus={() => setAssigneeOpen(true)} onKeyDown={assigneeKeyDown} onChange={e => { setAssigneeQuery(e.target.value); setAssigneeOpen(true); setAssigneeIndex(-1); if (value.assigneeUserId) update("assigneeUserId", ""); }} />
+      <input id="task-assignee" aria-invalid={Boolean(errors.assigneeUserId)} aria-describedby={errors.assigneeUserId ? "task-error-assigneeUserId" : undefined} className="input" role="combobox" aria-label="Search team assignees" aria-autocomplete="list" aria-expanded={showAssignees} aria-controls="task-assignee-options" aria-activedescendant={showAssignees && assigneeIndex >= 0 ? `task-assignee-option-${assigneeIndex}` : undefined} placeholder="Type a name, e.g. Aof" value={assigneeQuery} onFocus={() => setAssigneeOpen(true)} onKeyDown={assigneeKeyDown} onChange={e => { setAssigneeQuery(e.target.value); setAssigneeOpen(true); setAssigneeIndex(-1); if (value.assigneeUserId) update("assigneeUserId", ""); }} />
       {showAssignees && <div id="task-assignee-options" role="listbox" aria-label="Matching active team members" className="task-assignee-options">{matchingAssignees.map((member, index) => <button type="button" role="option" id={`task-assignee-option-${index}`} key={member.userId} aria-selected={index === assigneeIndex} className="task-assignee-option" onMouseDown={e => e.preventDefault()} onClick={() => chooseAssignee(member)}>{member.name}</button>)}{!matchingAssignees.length && <div className="muted" role="status">No matching active members.</div>}</div>}
       <div className="muted">{membersLoading ? "Loading active team members…" : value.assigneeUserId ? "Team member selected." : "Type to search, then choose an active team member."}</div>
     </div>}{fieldError("assigneeUserId")}{memberError && <div className="field__error" role="alert">{memberError}</div>}</div>
-    <div className="field"><label className="field__label" htmlFor="task-review">1st Review Date (optional)</label><input id="task-review" className="input" type="date" min={getFlowMateTodayDateKey()} max={value.launchDate || undefined} value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />{fieldError("dueDate")}</div>
-    <div className="field"><label className="field__label" htmlFor="task-deadline">Deadline / Requested delivery *</label><input id="task-deadline" className="input" type="date" min={getFlowMateTodayDateKey()} value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />{fieldError("launchDate")}</div>
+
+    </div></fieldset>
+    <fieldset className="task-form__section"><legend>Schedule & priority</legend><div className="form-grid">
+    <div className="field"><label className="field__label" htmlFor="task-review">1st Review Date (optional)</label><input id="task-review" aria-invalid={Boolean(errors.dueDate)} aria-describedby={errors.dueDate ? "task-error-dueDate" : undefined} className="input" type="date" min={getFlowMateTodayDateKey()} max={value.launchDate || undefined} value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />{fieldError("dueDate")}</div>
+    <div className="field"><label className="field__label" htmlFor="task-deadline">Deadline / Requested delivery *</label><input id="task-deadline" aria-required="true" aria-invalid={Boolean(errors.launchDate)} aria-describedby={errors.launchDate ? "task-error-launchDate" : undefined} className="input" type="date" min={getFlowMateTodayDateKey()} value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />{fieldError("launchDate")}</div>
     <div className="field"><label className="field__label" htmlFor="task-priority">Priority</label><select id="task-priority" className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>{["low", "normal", "high", "urgent"].map(priority => <option key={priority} value={priority}>{priority[0].toUpperCase() + priority.slice(1)}</option>)}</select></div>
-    {value.priority === "urgent" && <div className="field field--full"><label className="field__label" htmlFor="task-urgent">Urgent reason *</label><textarea id="task-urgent" className="textarea" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} />{fieldError("urgentReason")}<div className="muted">Urgent requests still require the receiving team to accept the commitment.</div></div>}
-    <div className="field field--full"><label className="field__label" htmlFor="task-references">Reference / File links (optional)</label><textarea id="task-references" className="textarea" value={value.referenceLinks} onChange={e => update("referenceLinks", e.target.value)} placeholder="One complete HTTP(S) link per line" />{fieldError("referenceLinks")}<div className="muted">Link to files in your approved storage. Check their sharing permissions separately.</div></div>
+    {value.priority === "urgent" && <div className="field field--full"><label className="field__label" htmlFor="task-urgent">Urgent reason *</label><textarea id="task-urgent" aria-required="true" aria-invalid={Boolean(errors.urgentReason)} aria-describedby={errors.urgentReason ? "task-error-urgentReason" : undefined} className="textarea" value={value.urgentReason} onChange={e => update("urgentReason", e.target.value)} />{fieldError("urgentReason")}<div className="muted">Urgent requests still require the receiving team to accept the commitment.</div></div>}
+
+    </div></fieldset>
+    <fieldset className="task-form__section"><legend>References & related task</legend><div className="form-grid">
+    <div className="field field--full"><label className="field__label" htmlFor="task-references">Reference / File links (optional)</label><textarea id="task-references" aria-invalid={Boolean(errors.referenceLinks)} aria-describedby={errors.referenceLinks ? "task-error-referenceLinks" : undefined} className="textarea" value={value.referenceLinks} onChange={e => update("referenceLinks", e.target.value)} placeholder="One complete HTTP(S) link per line" />{fieldError("referenceLinks")}<div className="muted">Link to files in your approved storage. Check their sharing permissions separately.</div></div>
     <div className="field"><label className="field__label" htmlFor="task-parent">Parent task (optional)</label><select id="task-parent" className="select" value={value.parentId} disabled={parentsLoading || Boolean(parentError)} onChange={e => update("parentId", e.target.value)}><option value="">Standalone task</option>{parents.map(parent => <option key={parent.id} value={parent.id}>{parent.display_id} — {parent.title}</option>)}</select><div className="muted">{parentsLoading ? "Loading parent tasks…" : parentError ? "Parent tasks could not load. You can still create a standalone task." : parents.length ? "Choose an existing task you created to make this a subtask." : "No existing tasks you created are available. Keep Standalone task."}</div>{parentError && <div className="field__error" role="alert">{parentError}</div>}</div>
+    </div></fieldset>
+
   </div>;
 }
 

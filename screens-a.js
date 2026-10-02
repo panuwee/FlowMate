@@ -1494,6 +1494,20 @@ function CreateScreen({
       }
       setValidationErrors(nextValidationErrors);
       setCreateAlert(hasInvalidBriefLink ? FLOWMATE_INVALID_BRIEF_LINK_MESSAGE : "Please correct the highlighted fields.");
+      if (isTaskAssignProduct) {
+        const errorControls = {
+          title: "task-title",
+          note: "task-note",
+          responsibleTeam: "task-team",
+          assigneeUserId: "task-assignee",
+          dueDate: "task-review",
+          launchDate: "task-deadline",
+          urgentReason: "task-urgent",
+          referenceLinks: "task-references"
+        };
+        const firstError = Object.keys(errorControls).find(key => nextValidationErrors[key]);
+        if (firstError) requestAnimationFrame(() => document.getElementById(errorControls[firstError])?.focus());
+      }
       return;
     }
     setValidationErrors({});
@@ -1610,7 +1624,7 @@ function CreateScreen({
     setCreateAlert("");
   }
   return React.createElement("div", {
-    className: "page",
+    className: "page" + (isTaskAssignProduct ? " task-create" : ""),
     style: {
       maxWidth: 1100
     }
@@ -1618,27 +1632,16 @@ function CreateScreen({
     className: "page__header"
   }, React.createElement("div", null, React.createElement("h1", {
     className: "page__title"
-  }, "Create"), React.createElement("div", {
+  }, isTaskAssignProduct ? "Create task" : "Create"), React.createElement("div", {
     className: "page__sub"
-  }, isTaskAssignProduct ? "Create work for your team or send a request to another team. Requester workspace is recorded automatically." : "Create a Creative Request for the assignment engine."))), React.createElement("div", {
+  }, isTaskAssignProduct ? "Create work for your team or send a request to another team. Requester workspace is recorded automatically." : "Create a Creative Request for the assignment engine."))), !isTaskAssignProduct && React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: isTaskAssignProduct ? "minmax(0, 1fr)" : "1fr 1fr",
+      gridTemplateColumns: "1fr 1fr",
       gap: 16,
       marginBottom: 24
     }
-  }, isTaskAssignProduct && React.createElement("button", {
-    className: `choice-card ${mode === "quick" ? "is-active" : ""}`,
-    onClick: () => switchCreateMode("quick")
-  }, React.createElement("div", {
-    className: "choice-card__title"
-  }, React.createElement(Icon, {
-    name: "zap"
-  }), " Quick task"), React.createElement("div", {
-    className: "choice-card__sub"
-  }, "Non-creative work with one responsible team and one shared task record."), React.createElement("ul", {
-    className: "choice-card__list"
-  }, React.createElement("li", null, "Describe the expected deliverable"), React.createElement("li", null, "Assign a teammate or send to another team’s queue"), React.createElement("li", null, "Tracked separately from creative requests"))), !isTaskAssignProduct && React.createElement("button", {
+  }, !isTaskAssignProduct && React.createElement("button", {
     className: `choice-card ${mode === "creative" ? "is-active" : ""}`,
     onClick: () => switchCreateMode("creative")
   }, React.createElement("div", {
@@ -1661,6 +1664,7 @@ function CreateScreen({
     className: "card__body"
   }, createAlert && React.createElement("div", {
     className: "reason-box reason-box--need",
+    role: "alert",
     style: {
       marginBottom: 16
     }
@@ -1675,6 +1679,7 @@ function CreateScreen({
     onChange: updateCreativeDraft,
     errors: validationErrors
   }))), React.createElement("div", {
+    className: isTaskAssignProduct ? "task-create__footer" : undefined,
     style: {
       display: "flex",
       gap: 8,
@@ -1761,6 +1766,7 @@ function QuickTaskForm({
   function fieldError(key) {
     return errors[key] ? React.createElement("div", {
       className: "field__error",
+      id: `task-error-${key}`,
       role: "alert"
     }, errors[key]) : null;
   }
@@ -1783,23 +1789,31 @@ function QuickTaskForm({
       setAssigneeIndex(index => event.key === "ArrowDown" ? (index + 1) % matchingAssignees.length : index <= 0 ? matchingAssignees.length - 1 : index - 1);
     } else if (event.key === "Enter" && showAssignees) {
       event.preventDefault();
-      if (assigneeIndex >= 0) chooseAssignee(matchingAssignees[assigneeIndex]);
+      if (assigneeIndex >= 0 && matchingAssignees[assigneeIndex]) chooseAssignee(matchingAssignees[assigneeIndex]);
     }
   }
   return React.createElement("div", {
-    className: "form-grid",
+    className: "task-form",
     "data-testid": "task-assign-create-form"
   }, React.createElement("div", {
     className: "field field--full"
   }, React.createElement("div", {
-    className: "reason-box"
-  }, "Requester workspace: ", React.createElement("strong", null, window.TaskAssign.teamLabel(sourceTeam)), ". ", crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team.")), React.createElement("div", {
+    className: "task-form__routing",
+    role: "status"
+  }, "Requester workspace: ", React.createElement("strong", null, window.TaskAssign.teamLabel(sourceTeam)), ". ", crossTeam ? "The receiving team will accept and assign this request." : "Assign an active member of your team.")), React.createElement("fieldset", {
+    className: "task-form__section"
+  }, React.createElement("legend", null, "Task brief"), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("div", {
     className: "field field--full " + (errors.title ? "field--error" : "")
   }, React.createElement("label", {
     className: "field__label",
     htmlFor: "task-title"
   }, "Title *"), React.createElement("input", {
     id: "task-title",
+    "aria-required": "true",
+    "aria-invalid": Boolean(errors.title),
+    "aria-describedby": errors.title ? "task-error-title" : undefined,
     className: "input",
     value: value.title,
     onChange: e => update("title", e.target.value),
@@ -1811,6 +1825,9 @@ function QuickTaskForm({
     htmlFor: "task-note"
   }, "Note / Expected deliverable *"), React.createElement("textarea", {
     id: "task-note",
+    "aria-required": "true",
+    "aria-invalid": Boolean(errors.note),
+    "aria-describedby": errors.note ? "task-error-note" : undefined,
     className: "textarea",
     value: value.note,
     onChange: e => update("note", e.target.value),
@@ -1826,13 +1843,20 @@ function QuickTaskForm({
     value: value.projectName,
     onChange: e => update("projectName", e.target.value),
     placeholder: "General work, or campaign name"
-  })), React.createElement("div", {
+  })))), React.createElement("fieldset", {
+    className: "task-form__section"
+  }, React.createElement("legend", null, "Responsibility"), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("div", {
     className: "field " + (errors.responsibleTeam ? "field--error" : "")
   }, React.createElement("label", {
     className: "field__label",
     htmlFor: "task-team"
   }, "Responsible team *"), React.createElement("select", {
     id: "task-team",
+    "aria-required": "true",
+    "aria-invalid": Boolean(errors.responsibleTeam),
+    "aria-describedby": errors.responsibleTeam ? "task-error-responsibleTeam" : undefined,
     className: "select",
     value: value.responsibleTeam,
     onChange: e => update("responsibleTeam", e.target.value)
@@ -1855,6 +1879,8 @@ function QuickTaskForm({
     }
   }, React.createElement("input", {
     id: "task-assignee",
+    "aria-invalid": Boolean(errors.assigneeUserId),
+    "aria-describedby": errors.assigneeUserId ? "task-error-assigneeUserId" : undefined,
     className: "input",
     role: "combobox",
     "aria-label": "Search team assignees",
@@ -1894,13 +1920,19 @@ function QuickTaskForm({
   }, membersLoading ? "Loading active team members…" : value.assigneeUserId ? "Team member selected." : "Type to search, then choose an active team member.")), fieldError("assigneeUserId"), memberError && React.createElement("div", {
     className: "field__error",
     role: "alert"
-  }, memberError)), React.createElement("div", {
+  }, memberError)))), React.createElement("fieldset", {
+    className: "task-form__section"
+  }, React.createElement("legend", null, "Schedule & priority"), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("div", {
     className: "field"
   }, React.createElement("label", {
     className: "field__label",
     htmlFor: "task-review"
   }, "1st Review Date (optional)"), React.createElement("input", {
     id: "task-review",
+    "aria-invalid": Boolean(errors.dueDate),
+    "aria-describedby": errors.dueDate ? "task-error-dueDate" : undefined,
     className: "input",
     type: "date",
     min: getFlowMateTodayDateKey(),
@@ -1914,6 +1946,9 @@ function QuickTaskForm({
     htmlFor: "task-deadline"
   }, "Deadline / Requested delivery *"), React.createElement("input", {
     id: "task-deadline",
+    "aria-required": "true",
+    "aria-invalid": Boolean(errors.launchDate),
+    "aria-describedby": errors.launchDate ? "task-error-launchDate" : undefined,
     className: "input",
     type: "date",
     min: getFlowMateTodayDateKey(),
@@ -1939,18 +1974,27 @@ function QuickTaskForm({
     htmlFor: "task-urgent"
   }, "Urgent reason *"), React.createElement("textarea", {
     id: "task-urgent",
+    "aria-required": "true",
+    "aria-invalid": Boolean(errors.urgentReason),
+    "aria-describedby": errors.urgentReason ? "task-error-urgentReason" : undefined,
     className: "textarea",
     value: value.urgentReason,
     onChange: e => update("urgentReason", e.target.value)
   }), fieldError("urgentReason"), React.createElement("div", {
     className: "muted"
-  }, "Urgent requests still require the receiving team to accept the commitment.")), React.createElement("div", {
+  }, "Urgent requests still require the receiving team to accept the commitment.")))), React.createElement("fieldset", {
+    className: "task-form__section"
+  }, React.createElement("legend", null, "References & related task"), React.createElement("div", {
+    className: "form-grid"
+  }, React.createElement("div", {
     className: "field field--full"
   }, React.createElement("label", {
     className: "field__label",
     htmlFor: "task-references"
   }, "Reference / File links (optional)"), React.createElement("textarea", {
     id: "task-references",
+    "aria-invalid": Boolean(errors.referenceLinks),
+    "aria-describedby": errors.referenceLinks ? "task-error-referenceLinks" : undefined,
     className: "textarea",
     value: value.referenceLinks,
     onChange: e => update("referenceLinks", e.target.value),
@@ -1978,7 +2022,7 @@ function QuickTaskForm({
   }, parentsLoading ? "Loading parent tasks…" : parentError ? "Parent tasks could not load. You can still create a standalone task." : parents.length ? "Choose an existing task you created to make this a subtask." : "No existing tasks you created are available. Keep Standalone task."), parentError && React.createElement("div", {
     className: "field__error",
     role: "alert"
-  }, parentError)));
+  }, parentError)))));
 }
 function TaskAssignCollaborators({
   team,
