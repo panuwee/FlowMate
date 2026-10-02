@@ -247,13 +247,52 @@ function showProductChoicePathInAddressBar() {
   } catch (e) {}
 }
 function getVisibleNavGroups(role) {
+  if (role === "viewer") return MEMBER_NAV_GROUPS.map(group => ({
+    ...group,
+    items: group.items.filter(item => item.key !== "create")
+  })).filter(group => group.items.length);
   return role === "admin" ? NAV : MEMBER_NAV_GROUPS;
 }
 function isFlowMateRouteAllowedForRole(role, routeKey) {
+  if (role === "viewer" && routeKey === "create") return false;
   if (role === "admin") return Boolean(TITLE_MAP[routeKey]);
   return MEMBER_ROUTE_KEYS.has(routeKey);
 }
 function App() {
+  useEffectApp(() => {
+    function applyViewerControls() {
+      const viewer = window.FLOWMATE_CURRENT_USER?.role === "viewer";
+      document.documentElement.dataset.flowmateViewer = viewer ? "true" : "false";
+      document.querySelectorAll("button,[role='button']").forEach(button => {
+        const label = `${button.getAttribute('aria-label') || ''} ${button.getAttribute('title') || ''} ${button.textContent || ''}`.trim();
+        const mutation = /\b(create|add|edit|save|delete|remove|archive|restore|assign|reassign|reschedule|submit|approve|reject|cancel task|complete|rerun|recheck|upload|publish|deactivate|reactivate|request leave|mark.*read|dismiss)\b/i.test(label) || button.type === "submit";
+        if (viewer && mutation && !button.disabled) {
+          button.disabled = true;
+          button.dataset.viewerDisabled = 'true';
+        }
+        if (!viewer && button.dataset.viewerDisabled) {
+          button.disabled = false;
+          delete button.dataset.viewerDisabled;
+        }
+      });
+    }
+    const observer = new MutationObserver(applyViewerControls);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    function blockViewerDrag(event) {
+      if (window.FLOWMATE_CURRENT_USER?.role === 'viewer') event.preventDefault();
+    }
+    document.addEventListener('dragstart', blockViewerDrag, true);
+    window.addEventListener('flowmate:auth-changed', applyViewerControls);
+    applyViewerControls();
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('dragstart', blockViewerDrag, true);
+      window.removeEventListener('flowmate:auth-changed', applyViewerControls);
+    };
+  }, []);
   const [route, setRoute] = useStateApp(() => {
     const h = getFlowMateHashRouteKey();
     return h && TITLE_MAP[h] ? h : "my-work";
@@ -888,9 +927,13 @@ function App() {
   const currentUserEmail = user.email || "";
   const avatarMemberId = user.team_member_id || null;
   const isAdminUser = user.role === "admin";
+  const isViewerUser = user.role === "viewer";
   const isTaskAssignProduct = activeProduct === TASK_ASSIGN_PRODUCT_KEY;
-  const visibleNavGroups = isTaskAssignProduct ? TASK_ASSIGN_NAV : getVisibleNavGroups(user.role);
-  const allowedRoute = isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route);
+  const visibleNavGroups = isTaskAssignProduct ? TASK_ASSIGN_NAV.map(group => ({
+    ...group,
+    items: group.items.filter(item => !isViewerUser || item.key !== "create")
+  })) : getVisibleNavGroups(user.role);
+  const allowedRoute = (!isViewerUser || route !== "create") && (isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route));
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
   const accessibleTeams = getFlowMateAccessibleTeams(user).filter(team => !isTaskAssignProduct || team.key !== "gdve");
@@ -1161,7 +1204,10 @@ function App() {
   })), React.createElement("main", {
     className: "app__main",
     key: route + (focusId || "") + activeProduct + (route === "detail" ? "" : activeTeamKey)
-  }, allowedRoute && route === "my-work" && React.createElement(isTaskAssignProduct ? TaskAssignWorkspaceScreen : MyWorkScreen, {
+  }, isViewerUser && React.createElement("div", {
+    className: "reason-box",
+    role: "status"
+  }, "Viewer · ดูข้อมูลได้อย่างเดียว"), allowedRoute && route === "my-work" && React.createElement(isTaskAssignProduct ? TaskAssignWorkspaceScreen : MyWorkScreen, {
     onOpen: open,
     onNav: nav,
     searchQuery: searchQuery,
@@ -9283,7 +9329,7 @@ function LoginScreen({
     className: "wha-cta__label"
   }, isSigningIn ? "Crossing the threshold..." : "Sign in with Google")), React.createElement("p", {
     className: "wha-runes wha-runes--small"
-  }, "Garena Workspace only")));
+  }, "บัญชีองค์กรที่ Admin อนุญาตเท่านั้น")));
 }
 function SigilGlyph({
   kind

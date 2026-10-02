@@ -2811,15 +2811,17 @@ function DetailScreen({
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const currentTeamMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const isViewerUser = window.FLOWMATE_CURRENT_USER?.role === "viewer";
   const isArchivedDetail = Boolean(w.archivedAt);
-  const isRequesterUser = currentUserId === w.requesterUserId;
-  const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
-  const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
+  const canModifyDetail = !isArchivedDetail && !isViewerUser;
+  const isRequesterUser = currentUserId === w.requesterUserId && !isViewerUser;
+  const isOwnerUser = !isViewerUser && (currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId);
+  const isActiveCreativeMember = !isViewerUser && activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
   const canManageAssignee = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
   const canSelfAssignUnassigned = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : w.assignmentWarnings || [];
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
-  const canTransitionTo = nextStatus => Boolean(!isArchivedDetail && !battlePassAssignmentHeld && window.canFlowMateTransitionWorkItem?.(w, nextStatus, window.FLOWMATE_CURRENT_USER || {}, window.MEMBERS_BY_ID || {}));
+  const canTransitionTo = nextStatus => Boolean(canModifyDetail && !battlePassAssignmentHeld && window.canFlowMateTransitionWorkItem?.(w, nextStatus, window.FLOWMATE_CURRENT_USER || {}, window.MEMBERS_BY_ID || {}));
   const canStatusTransition = ["in_progress", "review", "delivered", "blocked", "assigned", "cancelled"].some(canTransitionTo);
   const visibleLinks = detailLinks;
   const visibleComments = detailComments;
@@ -3594,7 +3596,7 @@ function DetailScreen({
       marginTop: 12,
       whiteSpace: "pre-wrap"
     }
-  }, "คอมเมนต์ยืนยัน: ", currentBattlePassReview.data.acceptance.reason), currentBattlePassReview?.data?.can_accept && !isArchivedDetail && React.createElement("div", {
+  }, "คอมเมนต์ยืนยัน: ", currentBattlePassReview.data.acceptance.reason), currentBattlePassReview?.data?.can_accept && canModifyDetail && React.createElement("div", {
     style: {
       marginTop: 12
     }
@@ -3849,7 +3851,7 @@ function DetailScreen({
     }
   }, link.url)))) : React.createElement("div", {
     className: "muted"
-  }, "No links yet."), !isArchivedDetail && React.createElement("form", {
+  }, "No links yet."), canModifyDetail && React.createElement("form", {
     className: "form-grid",
     onSubmit: submitLink
   }, React.createElement("label", {
@@ -3948,7 +3950,7 @@ function DetailScreen({
     }
   }, comment.body)))) : React.createElement("div", {
     className: "muted"
-  }, "No comments yet."), !isArchivedDetail && React.createElement("form", {
+  }, "No comments yet."), canModifyDetail && React.createElement("form", {
     className: "form-grid",
     onSubmit: submitComment
   }, React.createElement("label", {
@@ -4112,7 +4114,7 @@ function DetailScreen({
     size: 13
   }), React.createElement("span", null, watcher.watcherName || watcher.watcher_user_id)))) : React.createElement("span", {
     className: "muted"
-  }, "No watchers"), !isArchivedDetail && React.createElement("form", {
+  }, "No watchers"), canModifyDetail && React.createElement("form", {
     className: "watcher-add-form",
     onSubmit: submitWatcher
   }, React.createElement("select", {
@@ -4171,7 +4173,7 @@ function DetailScreen({
   }, React.createElement(Icon, {
     name: "zap",
     size: 11
-  }), " ", tag.tag, !isArchivedDetail && !aiTagsUnavailable && w.isSupabaseRow && window.removeFlowMateAiTag && React.createElement("button", {
+  }), " ", tag.tag, canModifyDetail && !aiTagsUnavailable && w.isSupabaseRow && window.removeFlowMateAiTag && React.createElement("button", {
     type: "button",
     className: "ai-tag__remove",
     onClick: () => removeAiTag(tag),
@@ -4182,7 +4184,7 @@ function DetailScreen({
     size: 10
   }), React.createElement("span", null, "Remove tag")))) : React.createElement("span", {
     className: "muted"
-  }, "No AI tags"), !isArchivedDetail && React.createElement("button", {
+  }, "No AI tags"), canModifyDetail && React.createElement("button", {
     type: "button",
     className: "btn btn--xs btn--secondary",
     onClick: addAiTag,

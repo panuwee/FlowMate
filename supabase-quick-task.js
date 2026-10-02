@@ -1235,6 +1235,18 @@ window.saveFlowMateTeamMember = async function (input) {
   window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason: "team_member_updated" } }));
 };
 
+window.loadFlowMateAllowedDomains = async function () {
+  assertFlowMateAdminAccess();
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_admin_domains");
+  if (error) throw error;
+  return data || [];
+};
+window.saveFlowMateAllowedDomain = async function (domain, enabled) {
+  assertFlowMateAdminAccess();
+  const { error } = await window.flowmateSupabase.rpc("flowmate_admin_save_domain", { p_domain: domain, p_enabled: enabled });
+  if (error) throw error;
+};
+
 async function flowmateSignInWithGoogle() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -1261,9 +1273,8 @@ async function flowmateSignInWithGoogle() {
     provider: "google",
     options: {
       redirectTo: redirectTo,
-      // Hint Google to show only Garena Workspace accounts. Final domain
-      // enforcement still happens in the SQL trigger `enforce_garena_domain`.
-      queryParams: { hd: "garena.com" },
+      // Exact domains and individual whitelist are enforced by the database.
+      queryParams: { prompt: "select_account" },
     },
   });
   if (error) throw error;

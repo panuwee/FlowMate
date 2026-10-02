@@ -2055,16 +2055,18 @@ function DetailScreen({ onNav, onOpen, focusId }) {
   const currentUserId = window.FLOWMATE_CURRENT_USER?.id || null;
   const currentTeamMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id || null;
   const isAdminUser = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const isViewerUser = window.FLOWMATE_CURRENT_USER?.role === "viewer";
   const isArchivedDetail = Boolean(w.archivedAt);
-  const isRequesterUser = currentUserId === w.requesterUserId;
-  const isOwnerUser = currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId;
-  const isActiveCreativeMember = activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
+  const canModifyDetail = !isArchivedDetail && !isViewerUser;
+  const isRequesterUser = currentUserId === w.requesterUserId && !isViewerUser;
+  const isOwnerUser = !isViewerUser && (currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId);
+  const isActiveCreativeMember = !isViewerUser && activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
   const canManageAssignee = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
   const canSelfAssignUnassigned = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
   const detailAssignmentWarnings = window.getFlowMateAssignmentWarnings ? window.getFlowMateAssignmentWarnings(w) : (w.assignmentWarnings || []);
   const detailAttentionCodes = window.getFlowMateAttentionCategoryCodes ? window.getFlowMateAttentionCategoryCodes(w) : [];
   const canTransitionTo = (nextStatus) => Boolean(
-    !isArchivedDetail
+    canModifyDetail
     && !battlePassAssignmentHeld
     && window.canFlowMateTransitionWorkItem?.(
       w,
@@ -2664,7 +2666,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
             </div>
             {currentBattlePassReview?.data?.submission && window.flowmateSafeHttpUrl?.(currentBattlePassReview.data.submission.brief_link) && <div style={{ marginTop: 12 }}><a href={window.flowmateSafeHttpUrl(currentBattlePassReview.data.submission.brief_link)} target="_blank" rel="noopener noreferrer">เปิดบรีฟเพื่อตรวจสอบ</a></div>}
             {currentBattlePassReview?.data?.acceptance && <div style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>คอมเมนต์ยืนยัน: {currentBattlePassReview.data.acceptance.reason}</div>}
-            {currentBattlePassReview?.data?.can_accept && !isArchivedDetail && (
+            {currentBattlePassReview?.data?.can_accept && canModifyDetail && (
               <div style={{ marginTop: 12 }}>
               <label htmlFor="automation-brief-confirm-comment">คอมเมนต์ยืนยันบรีฟ (จำเป็น)</label>
               <textarea id="automation-brief-confirm-comment" className="input" rows={3} value={briefReviewComment} disabled={pending} onChange={event => setBriefReviewComment(event.target.value)} placeholder="ระบุผลตรวจบรีฟและสิ่งที่ยืนยัน" style={{ width: "100%", marginTop: 8 }} />
@@ -2765,7 +2767,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               )) : (
                 <div className="muted">No links yet.</div>
               )}
-              {!isArchivedDetail && <form className="form-grid" onSubmit={submitLink}>
+              {canModifyDetail && <form className="form-grid" onSubmit={submitLink}>
                 <label className="field">
                   <span className="field__label">URL</span>
                   <input className="input" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} placeholder="https://..." disabled={pending} />
@@ -2819,7 +2821,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
               ) : (
                 <div className="muted">No comments yet.</div>
               )}
-              {!isArchivedDetail && <form className="form-grid" onSubmit={submitComment}>
+              {canModifyDetail && <form className="form-grid" onSubmit={submitComment}>
                 <label className="field field--full">
                   <span className="field__label">Comment</span>
                   <textarea className="textarea" value={commentBody} onChange={(e) => setCommentBody(e.target.value)} placeholder="Add comment" disabled={pending}></textarea>
@@ -2905,7 +2907,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                   ) : (
                     <span className="muted">No watchers</span>
                   )}
-                  {!isArchivedDetail && <form className="watcher-add-form" onSubmit={submitWatcher}>
+                  {canModifyDetail && <form className="watcher-add-form" onSubmit={submitWatcher}>
                     <select className="select watcher-add-form__select" value={watcherUserId} onChange={(e) => setWatcherUserId(e.target.value)} disabled={pending}>
                       <option value="">Add watcher</option>
                       {watcherOptions.map((member) => (
@@ -2943,7 +2945,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                     ) : visibleAiTags.length > 0 ? visibleAiTags.map((tag) => (
                       <span className="tag ai-tag" key={tag.id || tag.tag}>
                         <Icon name="zap" size={11} /> {tag.tag}
-                        {!isArchivedDetail && !aiTagsUnavailable && w.isSupabaseRow && window.removeFlowMateAiTag && (
+                        {canModifyDetail && !aiTagsUnavailable && w.isSupabaseRow && window.removeFlowMateAiTag && (
                           <button type="button" className="ai-tag__remove" onClick={() => removeAiTag(tag)} disabled={pending} aria-label={`Remove ${tag.tag}`}>
                             <Icon name="x" size={10} />
                             <span>Remove tag</span>
@@ -2953,7 +2955,7 @@ function DetailScreen({ onNav, onOpen, focusId }) {
                     )) : (
                       <span className="muted">No AI tags</span>
                     )}
-                    {!isArchivedDetail && <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || aiTagsUnavailable || !w.isSupabaseRow || !window.addFlowMateAiTag}>
+                    {canModifyDetail && <button type="button" className="btn btn--xs btn--secondary" onClick={addAiTag} disabled={pending || aiTagsUnavailable || !w.isSupabaseRow || !window.addFlowMateAiTag}>
                       <Icon name="plus" /> Add AI Tag
                     </button>}
                   </div>

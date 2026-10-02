@@ -4812,6 +4812,7 @@ html[data-theme="dark"] .product-book-cms__message--error {
 .tm-summary strong { font-size:20px; color:var(--text,#252525); margin-right:7px; font-weight:600; }
 .tm-card { overflow:hidden; }
 .tm-toolbar { display:flex; flex-wrap:wrap; gap:20px; align-items:center; justify-content:space-between; padding:18px 20px; }
+.tm-domain-panel { padding:0 20px 20px; }
 .tm-tabs { display:flex; gap:4px; }
 .tm-tabs button { border:0; border-radius:6px; padding:9px 13px; background:transparent; color:inherit; cursor:pointer; font:inherit; font-size:13px; }
 .tm-tabs button.is-active { background:var(--surface-hover,#f2f3f5); font-weight:600; }
