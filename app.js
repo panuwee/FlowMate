@@ -4711,6 +4711,21 @@ function getCampaignPlannerWorkingRow(item) {
 function sortCampaignPlannerItems(items) {
   return [...items].sort((a, b) => (getCampaignPlannerWorkingRow(a).launchDate || "9999-12-31").localeCompare(getCampaignPlannerWorkingRow(b).launchDate || "9999-12-31") || String(a.content_title || "").localeCompare(String(b.content_title || "")) || String(a.content_item_id).localeCompare(String(b.content_item_id)));
 }
+function getCampaignPlannerLaunchGroups(items, range) {
+  const groups = new Map();
+  for (const item of sortCampaignPlannerItems(items)) {
+    const dates = new Set((item.working_placements || []).map(row => row.launch_date).filter(Boolean));
+    for (const date of dates) {
+      if (date < range.start || date > range.end) continue;
+      if (!groups.has(date)) groups.set(date, []);
+      groups.get(date).push(item);
+    }
+  }
+  return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => ({
+    date,
+    items
+  }));
+}
 function shiftCampaignPlannerWindow(start, amount) {
   const [year, month] = start.slice(0, 7).split("-").map(Number);
   return new Date(Date.UTC(year, month - 1 + amount, 1)).toISOString().slice(0, 7);
@@ -4768,7 +4783,7 @@ function MarketingPlanCampaignPlannerScreen({
   const [includeArchived, setIncludeArchived] = useStateApp(false);
   const [manageMode, setManageMode] = useStateApp(false);
   const [managerSort, setManagerSort] = useStateApp("newest");
-  const [expanded, setExpanded] = useStateApp([]);
+  const [taskPanel, setTaskPanel] = useStateApp(null);
   const [items, setItems] = useStateApp({});
   const [itemErrors, setItemErrors] = useStateApp({});
   const [selected, setSelected] = useStateApp(null);
@@ -4780,6 +4795,10 @@ function MarketingPlanCampaignPlannerScreen({
   const dialogRef = useRefApp(null);
   const aliveRef = useRefApp(true);
   const loadIdRef = useRefApp(0);
+  const itemLoadsRef = useRefApp(new Set());
+  const headerRef = useRefApp(null);
+  const panelCloseRef = useRefApp(null);
+  const panelTriggerRef = useRefApp(null);
   const range = getCampaignPlannerWindow(anchor, span);
   const isAdmin = user && user.role === "admin";
   const client = window.flowmateSupabase;
@@ -4800,7 +4819,7 @@ function MarketingPlanCampaignPlannerScreen({
       setCanManage(isAdmin && permission.data === true);
       setItems({});
       setItemErrors({});
-      setExpanded([]);
+      setTaskPanel(null);
       setState({
         status: "ready",
         message: ""
@@ -4828,6 +4847,9 @@ function MarketingPlanCampaignPlannerScreen({
   }, [selected]);
   async function loadItems(id) {
     const generation = loadIdRef.current;
+    const key = `${generation}:${id}`;
+    if (itemLoadsRef.current.has(key)) return;
+    itemLoadsRef.current.add(key);
     setItemErrors(current => ({
       ...current,
       [id]: ""
@@ -4843,12 +4865,34 @@ function MarketingPlanCampaignPlannerScreen({
         ...current,
         [id]: "โหลดงานไม่สำเร็จ"
       }));
+    } finally {
+      itemLoadsRef.current.delete(key);
     }
   }
-  function toggleItems(id) {
-    setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
-    if (!items[id]) loadItems(id);
+  function showTaskPanel(campaign, date = "", trigger) {
+    panelTriggerRef.current = trigger || document.activeElement;
+    setTaskPanel({
+      campaign,
+      date
+    });
+    if (!items[campaign.campaign_tag_id]) loadItems(campaign.campaign_tag_id);
   }
+  function closeTaskPanel() {
+    setTaskPanel(null);
+    panelTriggerRef.current?.focus();
+  }
+  useEffectApp(() => {
+    if (!taskPanel) return;
+    panelCloseRef.current?.focus();
+    const onKey = event => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeTaskPanel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [taskPanel]);
   function openCampaign(campaign, edit = false) {
     setSelected(campaign);
     setEditing(edit);
@@ -4920,11 +4964,16 @@ function MarketingPlanCampaignPlannerScreen({
   }
   const filtered = campaigns.filter(campaign => (includeArchived || !campaign.is_archived) && (functionFilter === "all" || campaign.function_code === functionFilter) && `${campaign.name} ${campaign.tagline}`.toLowerCase().includes(search.trim().toLowerCase()));
   const scheduled = filtered.filter(campaign => getCampaignPlannerBar(campaign.start_date, campaign.end_date, range)).sort((a, b) => a.start_date.localeCompare(b.start_date) || a.name.localeCompare(b.name));
+  const visibleCampaignIds = scheduled.map(campaign => campaign.campaign_tag_id).join(",");
+  useEffectApp(() => {
+    if (state.status !== "ready" || manageMode) return;
+    for (const campaign of scheduled) if (!items[campaign.campaign_tag_id] && !itemErrors[campaign.campaign_tag_id]) loadItems(campaign.campaign_tag_id);
+  }, [visibleCampaignIds, state.status, manageMode]);
   const unscheduled = filtered.filter(campaign => !campaign.start_date || !campaign.end_date);
   const managementRows = [...filtered].sort((a, b) => managerSort === "oldest" ? String(a.created_at || "").localeCompare(String(b.created_at || "")) : managerSort === "recently-used" ? String(b.last_used_at || "").localeCompare(String(a.last_used_at || "")) : String(b.created_at || "").localeCompare(String(a.created_at || "")));
   const today = getMarketingPlanTodayKey();
   const todayBar = getCampaignPlannerBar(today, today, range);
-  function renderItems(campaign) {
+  function renderItems(campaign, date = "") {
     const id = campaign.campaign_tag_id;
     if (itemErrors[id]) return React.createElement("div", {
       role: "alert"
@@ -4938,6 +4987,10 @@ function MarketingPlanCampaignPlannerScreen({
     if (!items[id].length) return React.createElement("p", {
       className: "muted"
     }, "ยังไม่มีงานในแคมเปญนี้");
+    const rows = date ? items[id].filter(item => (item.working_placements || []).some(row => row.launch_date === date)).map(item => ({
+      ...item,
+      working_placements: item.working_placements.filter(row => row.launch_date === date)
+    })) : items[id];
     return React.createElement("div", {
       className: "campaign-planner__working-scroll"
     }, React.createElement("table", {
@@ -4950,7 +5003,7 @@ function MarketingPlanCampaignPlannerScreen({
       scope: "col"
     }, "Launch Date"), React.createElement("th", {
       scope: "col"
-    }, "Status"))), React.createElement("tbody", null, sortCampaignPlannerItems(items[id]).map(item => {
+    }, "Status"))), React.createElement("tbody", null, sortCampaignPlannerItems(rows).map(item => {
       const row = getCampaignPlannerWorkingRow(item);
       return React.createElement("tr", {
         key: item.content_item_id
@@ -4961,53 +5014,47 @@ function MarketingPlanCampaignPlannerScreen({
   }
   function renderItemTimeline(campaign, colour) {
     const id = campaign.campaign_tag_id;
-    if (!items[id] || itemErrors[id] || !items[id].length) return React.createElement("div", {
-      className: "campaign-planner__expanded"
-    }, renderItems(campaign));
-    return sortCampaignPlannerItems(items[id]).map(item => {
-      const row = getCampaignPlannerWorkingRow(item);
-      const bar = getCampaignPlannerBar(row.launchDate, row.launchEnd, range);
-      const label = row.launchDate ? `Launch ${dateLabel(row.launchDate)}${row.launchEnd !== row.launchDate ? ` – ${dateLabel(row.launchEnd)}` : ""}` : "ยังไม่มี Launch date";
-      return React.createElement("div", {
-        className: "campaign-planner__row campaign-planner__task",
-        key: item.content_item_id
-      }, React.createElement("div", {
-        className: "campaign-planner__identity"
-      }, React.createElement("div", null, React.createElement("strong", null, item.content_title), React.createElement("span", {
-        className: "muted"
-      }, row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"), React.createElement("span", {
-        className: "muted"
-      }, label, row.launchDate && !bar ? " · นอกช่วงที่แสดง" : ""), row.status && React.createElement("span", {
-        className: `badge ${getMarketingPlanStatusClass(row.status)}`
-      }, getMarketingPlanStatusLabel(row.status), row.hasMixedStatus ? " (mixed)" : ""))), React.createElement("div", {
-        className: "campaign-planner__track"
-      }, React.createElement("div", {
-        className: "campaign-planner__guides",
-        "aria-hidden": "true",
-        style: {
-          gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)`
-        }
-      }, range.weeks.map(week => React.createElement("span", {
-        key: week.start,
-        "data-month-start": week.monthStart
-      }))), todayBar && React.createElement("span", {
-        className: "campaign-planner__today",
-        style: {
-          left: `${todayBar.left}%`
-        }
-      }), bar && React.createElement("span", {
-        className: "campaign-planner__task-bar",
-        "data-single": row.launchDate === row.launchEnd,
+    if (itemErrors[id]) return React.createElement("div", {
+      className: "campaign-planner__launch-strip"
+    }, React.createElement("button", {
+      className: "campaign-planner__text-button",
+      onClick: () => loadItems(id)
+    }, "โหลด Launch ไม่สำเร็จ · ลองอีกครั้ง"));
+    if (!items[id]) return React.createElement("div", {
+      className: "campaign-planner__launch-strip muted",
+      role: "status"
+    }, "กำลังโหลด Launch…");
+    const groups = getCampaignPlannerLaunchGroups(items[id], range);
+    return React.createElement("div", {
+      className: "campaign-planner__launch-strip",
+      "aria-label": `Launch ของ ${campaign.name}`
+    }, groups.length ? groups.map(group => {
+      const bar = getCampaignPlannerBar(group.date, group.date, range);
+      const details = group.items.map(item => {
+        const row = getCampaignPlannerWorkingRow({
+          ...item,
+          working_placements: item.working_placements.filter(placement => placement.launch_date === group.date)
+        });
+        return `${item.content_title} · ${row.channels.map(getMarketingPlanChannelLabel).join(", ")} · ${getMarketingPlanStatusLabel(row.status)}`;
+      }).join("\n");
+      return React.createElement("button", {
+        key: group.date,
+        className: "campaign-planner__launch-marker",
         style: {
           ...colour,
-          left: `${bar.left}%`,
-          width: `${bar.width}%`
+          left: `${bar.left + bar.width / 2}%`
         },
-        role: "img",
-        "aria-label": `${item.content_title}: ${label}`,
-        title: `${item.content_title}: ${label}`
-      })));
-    });
+        title: `Launch ${dateLabel(group.date)} · ${group.items.length} งาน\n${details}`,
+        "aria-label": `Launch ${dateLabel(group.date)} · ${group.items.length} งาน: ${details}`,
+        onClick: event => showTaskPanel(campaign, group.date, event.currentTarget)
+      }, React.createElement("span", {
+        className: "campaign-planner__launch-tick"
+      }), group.items.length > 1 && React.createElement("span", {
+        className: "campaign-planner__launch-count"
+      }, group.items.length));
+    }) : React.createElement("span", {
+      className: "muted campaign-planner__launch-empty"
+    }, items[id].length ? "ไม่มี Launch ในช่วงนี้" : "ยังไม่มีงาน"));
   }
   function campaignName(campaign) {
     return React.createElement(React.Fragment, null, React.createElement("button", {
@@ -5144,11 +5191,9 @@ function MarketingPlanCampaignPlannerScreen({
     className: "btn btn--secondary",
     onClick: () => openCampaign(campaign, !campaign.is_archived)
   }, campaign.is_archived ? "รายละเอียด" : "แก้ไข")))) : React.createElement(React.Fragment, null, React.createElement("div", {
-    className: "campaign-planner__scroller",
-    tabIndex: 0,
-    "aria-label": "ช่วงเวลาแคมเปญ เลื่อนแนวนอนได้"
+    className: "campaign-planner__axis",
+    ref: headerRef
   }, React.createElement("div", {
-    className: "campaign-planner__grid",
     style: {
       minWidth: Math.max(860, 290 + range.weeks.length * 28)
     }
@@ -5171,7 +5216,19 @@ function MarketingPlanCampaignPlannerScreen({
   }, range.weeks.map(week => React.createElement("span", {
     key: week.start,
     title: `${dateLabel(week.start)} – ${dateLabel(week.end)}`
-  }, React.createElement("span", null, Number(week.start.slice(-2)))))))), scheduled.map(campaign => {
+  }, React.createElement("span", null, Number(week.start.slice(-2)))))))))), React.createElement("div", {
+    className: "campaign-planner__scroller",
+    tabIndex: 0,
+    "aria-label": "ช่วงเวลาแคมเปญ เลื่อนแนวนอนได้",
+    onScroll: event => {
+      if (headerRef.current) headerRef.current.scrollLeft = event.currentTarget.scrollLeft;
+    }
+  }, React.createElement("div", {
+    className: "campaign-planner__grid",
+    style: {
+      minWidth: Math.max(860, 290 + range.weeks.length * 28)
+    }
+  }, scheduled.map(campaign => {
     const bar = getCampaignPlannerBar(campaign.start_date, campaign.end_date, range);
     const colour = getMarketingCampaignFunctionStyle({
       lightBackground: campaign.light_background,
@@ -5187,15 +5244,14 @@ function MarketingPlanCampaignPlannerScreen({
       className: "campaign-planner__identity"
     }, React.createElement("button", {
       className: "iconbtn",
-      "aria-label": `${expanded.includes(campaign.campaign_tag_id) ? "ยุบ" : "ขยาย"}งาน ${campaign.name}`,
-      "aria-expanded": expanded.includes(campaign.campaign_tag_id),
-      onClick: () => toggleItems(campaign.campaign_tag_id)
+      "aria-label": `ดูงาน ${campaign.name}`,
+      onClick: event => showTaskPanel(campaign, "", event.currentTarget)
     }, React.createElement(Icon, {
-      name: "chevron",
-      style: {
-        transform: expanded.includes(campaign.campaign_tag_id) ? "rotate(90deg)" : "none"
-      }
-    })), React.createElement("div", null, campaignName(campaign))), React.createElement("div", {
+      name: "chevron"
+    })), React.createElement("div", null, campaignName(campaign), items[campaign.campaign_tag_id] && items[campaign.campaign_tag_id].some(item => !(item.working_placements || []).some(row => row.launch_date)) && React.createElement("button", {
+      className: "campaign-planner__text-button",
+      onClick: event => showTaskPanel(campaign, "", event.currentTarget)
+    }, "รอกำหนดวัน ", items[campaign.campaign_tag_id].filter(item => !(item.working_placements || []).some(row => row.launch_date)).length, " งาน"))), React.createElement("div", {
       className: "campaign-planner__track"
     }, React.createElement("div", {
       className: "campaign-planner__guides",
@@ -5232,7 +5288,7 @@ function MarketingPlanCampaignPlannerScreen({
     }), React.createElement("span", null, campaign.tagline || campaign.name), bar.after && React.createElement(Icon, {
       name: "chevron",
       size: 12
-    })))), expanded.includes(campaign.campaign_tag_id) && renderItemTimeline(campaign, colour));
+    })), renderItemTimeline(campaign, colour))));
   }))), !scheduled.length && React.createElement("p", {
     className: "campaign-planner__empty"
   }, "ไม่มีแคมเปญในช่วงนี้ ลองเปลี่ยนช่วงเวลาหรือตัวกรอง"), unscheduled.length > 0 && React.createElement("section", {
@@ -5245,7 +5301,27 @@ function MarketingPlanCampaignPlannerScreen({
   }, React.createElement("div", null, campaignName(campaign)), canManage && !campaign.is_archived && React.createElement("button", {
     className: "btn btn--secondary",
     onClick: () => openCampaign(campaign, true)
-  }, "กำหนดช่วงเวลา")))))), selected && React.createElement("dialog", {
+  }, "กำหนดช่วงเวลา")))))), taskPanel && React.createElement("aside", {
+    className: "campaign-planner__panel",
+    "aria-labelledby": "planner-task-panel-title"
+  }, React.createElement("div", {
+    className: "campaign-planner__panel-head"
+  }, React.createElement("div", null, React.createElement("h2", {
+    id: "planner-task-panel-title"
+  }, taskPanel.campaign.name), React.createElement("p", null, taskPanel.date ? `Launch ${dateLabel(taskPanel.date)}` : "งานทั้งหมด · เรียงตาม Launch date")), React.createElement("button", {
+    ref: panelCloseRef,
+    className: "iconbtn",
+    "aria-label": "ปิดรายการงาน",
+    onClick: closeTaskPanel
+  }, React.createElement(Icon, {
+    name: "x"
+  }))), taskPanel.date && React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: () => setTaskPanel({
+      ...taskPanel,
+      date: ""
+    })
+  }, "ดูงานทั้งหมดในแคมเปญ"), renderItems(taskPanel.campaign, taskPanel.date)), selected && React.createElement("dialog", {
     className: "campaign-planner__dialog",
     ref: dialogRef,
     onCancel: event => {

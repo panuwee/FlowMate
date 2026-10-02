@@ -4659,6 +4659,18 @@ function sortCampaignPlannerItems(items) {
   return [...items].sort((a, b) => (getCampaignPlannerWorkingRow(a).launchDate || "9999-12-31").localeCompare(getCampaignPlannerWorkingRow(b).launchDate || "9999-12-31")
     || String(a.content_title || "").localeCompare(String(b.content_title || "")) || String(a.content_item_id).localeCompare(String(b.content_item_id)));
 }
+function getCampaignPlannerLaunchGroups(items, range) {
+  const groups = new Map();
+  for (const item of sortCampaignPlannerItems(items)) {
+    const dates = new Set((item.working_placements || []).map(row => row.launch_date).filter(Boolean));
+    for (const date of dates) {
+      if (date < range.start || date > range.end) continue;
+      if (!groups.has(date)) groups.set(date, []);
+      groups.get(date).push(item);
+    }
+  }
+  return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([date, items]) => ({ date, items }));
+}
 function shiftCampaignPlannerWindow(start, amount) {
   const [year, month] = start.slice(0, 7).split("-").map(Number);
   return new Date(Date.UTC(year, month - 1 + amount, 1)).toISOString().slice(0, 7);
@@ -4711,7 +4723,7 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
   const [includeArchived, setIncludeArchived] = useStateApp(false);
   const [manageMode, setManageMode] = useStateApp(false);
   const [managerSort, setManagerSort] = useStateApp("newest");
-  const [expanded, setExpanded] = useStateApp([]);
+  const [taskPanel, setTaskPanel] = useStateApp(null);
   const [items, setItems] = useStateApp({});
   const [itemErrors, setItemErrors] = useStateApp({});
   const [selected, setSelected] = useStateApp(null);
@@ -4723,6 +4735,10 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
   const dialogRef = useRefApp(null);
   const aliveRef = useRefApp(true);
   const loadIdRef = useRefApp(0);
+  const itemLoadsRef = useRefApp(new Set());
+  const headerRef = useRefApp(null);
+  const panelCloseRef = useRefApp(null);
+  const panelTriggerRef = useRefApp(null);
   const range = getCampaignPlannerWindow(anchor, span);
   const isAdmin = user && user.role === "admin";
   const client = window.flowmateSupabase;
@@ -4739,7 +4755,7 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
       if (permission.error) throw permission.error;
       if (!aliveRef.current || requestId !== loadIdRef.current) return;
       setCampaigns(rows); setFunctions(functionRows); setCanManage(isAdmin && permission.data === true);
-      setItems({}); setItemErrors({}); setExpanded([]);
+      setItems({}); setItemErrors({}); setTaskPanel(null);
       setState({ status: "ready", message: "" });
     } catch (error) {
       if (!aliveRef.current || requestId !== loadIdRef.current) return;
@@ -4759,18 +4775,30 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
   }, [selected]);
   async function loadItems(id) {
     const generation = loadIdRef.current;
+    const key = `${generation}:${id}`;
+    if (itemLoadsRef.current.has(key)) return;
+    itemLoadsRef.current.add(key);
     setItemErrors(current => ({ ...current, [id]: "" }));
     try {
       const rows = await loadCampaignPlannerPages(() => client.from("marketing_campaign_planner_items_v").select("*").eq("campaign_tag_id", id).order("content_item_id"));
       if (aliveRef.current && generation === loadIdRef.current) setItems(current => ({ ...current, [id]: rows }));
     } catch (error) {
       if (aliveRef.current && generation === loadIdRef.current) setItemErrors(current => ({ ...current, [id]: "โหลดงานไม่สำเร็จ" }));
-    }
+    } finally { itemLoadsRef.current.delete(key); }
   }
-  function toggleItems(id) {
-    setExpanded(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]);
-    if (!items[id]) loadItems(id);
+  function showTaskPanel(campaign, date = "", trigger) {
+    panelTriggerRef.current = trigger || document.activeElement;
+    setTaskPanel({ campaign, date });
+    if (!items[campaign.campaign_tag_id]) loadItems(campaign.campaign_tag_id);
   }
+  function closeTaskPanel() { setTaskPanel(null); panelTriggerRef.current?.focus(); }
+  useEffectApp(() => {
+    if (!taskPanel) return;
+    panelCloseRef.current?.focus();
+    const onKey = event => { if (event.key === "Escape") { event.preventDefault(); closeTaskPanel(); } };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [taskPanel]);
   function openCampaign(campaign, edit = false) {
     setSelected(campaign); setEditing(edit); setErrors({}); setSaveError("");
     setForm({ name: campaign.name || "", tagline: campaign.tagline || "", functionCode: campaign.function_code || "", startDate: campaign.start_date || "", endDate: campaign.end_date || "" });
@@ -4818,6 +4846,11 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
     && `${campaign.name} ${campaign.tagline}`.toLowerCase().includes(search.trim().toLowerCase()));
   const scheduled = filtered.filter(campaign => getCampaignPlannerBar(campaign.start_date, campaign.end_date, range))
     .sort((a, b) => a.start_date.localeCompare(b.start_date) || a.name.localeCompare(b.name));
+  const visibleCampaignIds = scheduled.map(campaign => campaign.campaign_tag_id).join(",");
+  useEffectApp(() => {
+    if (state.status !== "ready" || manageMode) return;
+    for (const campaign of scheduled) if (!items[campaign.campaign_tag_id] && !itemErrors[campaign.campaign_tag_id]) loadItems(campaign.campaign_tag_id);
+  }, [visibleCampaignIds, state.status, manageMode]);
   const unscheduled = filtered.filter(campaign => !campaign.start_date || !campaign.end_date);
   const managementRows = [...filtered].sort((a, b) => managerSort === "oldest"
     ? String(a.created_at || "").localeCompare(String(b.created_at || ""))
@@ -4825,30 +4858,32 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
     : String(b.created_at || "").localeCompare(String(a.created_at || "")));
   const today = getMarketingPlanTodayKey();
   const todayBar = getCampaignPlannerBar(today, today, range);
-  function renderItems(campaign) {
+  function renderItems(campaign, date = "") {
     const id = campaign.campaign_tag_id;
     if (itemErrors[id]) return <div role="alert">{itemErrors[id]} <button className="btn btn--secondary" onClick={() => loadItems(id)}>ลองอีกครั้ง</button></div>;
     if (!items[id]) return <p role="status">กำลังโหลดงาน…</p>;
     if (!items[id].length) return <p className="muted">ยังไม่มีงานในแคมเปญนี้</p>;
-    return <div className="campaign-planner__working-scroll"><table className="campaign-planner__working"><thead><tr><th scope="col">Product / Event</th><th scope="col">Channel</th><th scope="col">Launch Date</th><th scope="col">Status</th></tr></thead><tbody>{sortCampaignPlannerItems(items[id]).map(item => {
+    const rows = date ? items[id].filter(item => (item.working_placements || []).some(row => row.launch_date === date)).map(item => ({ ...item, working_placements: item.working_placements.filter(row => row.launch_date === date) })) : items[id];
+    return <div className="campaign-planner__working-scroll"><table className="campaign-planner__working"><thead><tr><th scope="col">Product / Event</th><th scope="col">Channel</th><th scope="col">Launch Date</th><th scope="col">Status</th></tr></thead><tbody>{sortCampaignPlannerItems(rows).map(item => {
       const row = getCampaignPlannerWorkingRow(item);
       return <tr key={item.content_item_id}><td>{item.content_title}</td><td>{row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"}</td><td>{row.launchDate ? dateLabel(row.launchDate) : "—"}</td><td>{row.status ? <span className={`badge ${getMarketingPlanStatusClass(row.status)}`}>{getMarketingPlanStatusLabel(row.status)}{row.hasMixedStatus ? " (mixed)" : ""}</span> : "—"}</td></tr>;
     })}</tbody></table></div>;
   }
   function renderItemTimeline(campaign, colour) {
     const id = campaign.campaign_tag_id;
-    if (!items[id] || itemErrors[id] || !items[id].length) return <div className="campaign-planner__expanded">{renderItems(campaign)}</div>;
-    return sortCampaignPlannerItems(items[id]).map(item => {
-      const row = getCampaignPlannerWorkingRow(item);
-      const bar = getCampaignPlannerBar(row.launchDate, row.launchEnd, range);
-      const label = row.launchDate ? `Launch ${dateLabel(row.launchDate)}${row.launchEnd !== row.launchDate ? ` – ${dateLabel(row.launchEnd)}` : ""}` : "ยังไม่มี Launch date";
-      return <div className="campaign-planner__row campaign-planner__task" key={item.content_item_id}>
-        <div className="campaign-planner__identity"><div><strong>{item.content_title}</strong><span className="muted">{row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"}</span><span className="muted">{label}{row.launchDate && !bar ? " · นอกช่วงที่แสดง" : ""}</span>{row.status && <span className={`badge ${getMarketingPlanStatusClass(row.status)}`}>{getMarketingPlanStatusLabel(row.status)}{row.hasMixedStatus ? " (mixed)" : ""}</span>}</div></div>
-        <div className="campaign-planner__track"><div className="campaign-planner__guides" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} data-month-start={week.monthStart} />)}</div>
-          {todayBar && <span className="campaign-planner__today" style={{ left: `${todayBar.left}%` }} />}
-          {bar && <span className="campaign-planner__task-bar" data-single={row.launchDate === row.launchEnd} style={{ ...colour, left: `${bar.left}%`, width: `${bar.width}%` }} role="img" aria-label={`${item.content_title}: ${label}`} title={`${item.content_title}: ${label}`} />}
-        </div></div>;
-    });
+    if (itemErrors[id]) return <div className="campaign-planner__launch-strip"><button className="campaign-planner__text-button" onClick={() => loadItems(id)}>โหลด Launch ไม่สำเร็จ · ลองอีกครั้ง</button></div>;
+    if (!items[id]) return <div className="campaign-planner__launch-strip muted" role="status">กำลังโหลด Launch…</div>;
+    const groups = getCampaignPlannerLaunchGroups(items[id], range);
+    return <div className="campaign-planner__launch-strip" aria-label={`Launch ของ ${campaign.name}`}>
+      {groups.length ? groups.map(group => {
+        const bar = getCampaignPlannerBar(group.date, group.date, range);
+        const details = group.items.map(item => {
+          const row = getCampaignPlannerWorkingRow({ ...item, working_placements: item.working_placements.filter(placement => placement.launch_date === group.date) });
+          return `${item.content_title} · ${row.channels.map(getMarketingPlanChannelLabel).join(", ")} · ${getMarketingPlanStatusLabel(row.status)}`;
+        }).join("\n");
+        return <button key={group.date} className="campaign-planner__launch-marker" style={{ ...colour, left: `${bar.left + bar.width / 2}%` }} title={`Launch ${dateLabel(group.date)} · ${group.items.length} งาน\n${details}`} aria-label={`Launch ${dateLabel(group.date)} · ${group.items.length} งาน: ${details}`} onClick={event => showTaskPanel(campaign, group.date, event.currentTarget)}><span className="campaign-planner__launch-tick" />{group.items.length > 1 && <span className="campaign-planner__launch-count">{group.items.length}</span>}</button>;
+      }) : <span className="muted campaign-planner__launch-empty">{items[id].length ? "ไม่มี Launch ในช่วงนี้" : "ยังไม่มีงาน"}</span>}
+    </div>;
   }
   function campaignName(campaign) {
     return <><button className="campaign-planner__name" onClick={() => openCampaign(campaign)}>{campaign.name}</button>
@@ -4884,17 +4919,19 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
         {filtered.length === 0 && <p>ไม่พบแคมเปญที่ตรงกับตัวกรอง</p>}
         {managementRows.map(campaign => <div key={campaign.campaign_tag_id} className="campaign-planner__catalog-row"><div>{campaignName(campaign)}</div><span>{dateLabel(campaign.start_date)} – {dateLabel(campaign.end_date)}</span><button className="btn btn--secondary" onClick={() => openCampaign(campaign, !campaign.is_archived)}>{campaign.is_archived ? "รายละเอียด" : "แก้ไข"}</button></div>)}
       </section> : <>
-        <div className="campaign-planner__scroller" tabIndex={0} aria-label="ช่วงเวลาแคมเปญ เลื่อนแนวนอนได้">
+        <div className="campaign-planner__axis" ref={headerRef}><div style={{ minWidth: Math.max(860, 290 + range.weeks.length * 28) }}><div className="campaign-planner__row campaign-planner__header"><div className="campaign-planner__identity">Campaign / ความคืบหน้า</div><div><div className="campaign-planner__months" style={{ gridTemplateColumns: range.months.map(month => `${month.weeks.length}fr`).join(" ") }}>{range.months.map(month => <div key={month.key}>{month.label}</div>)}</div><div className="campaign-planner__weeks" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} title={`${dateLabel(week.start)} – ${dateLabel(week.end)}`}><span>{Number(week.start.slice(-2))}</span></span>)}</div></div></div></div></div>
+        <div className="campaign-planner__scroller" tabIndex={0} aria-label="ช่วงเวลาแคมเปญ เลื่อนแนวนอนได้" onScroll={event => { if (headerRef.current) headerRef.current.scrollLeft = event.currentTarget.scrollLeft; }}>
           <div className="campaign-planner__grid" style={{ minWidth: Math.max(860, 290 + range.weeks.length * 28) }}>
-            <div className="campaign-planner__row campaign-planner__header"><div className="campaign-planner__identity">Campaign / ความคืบหน้า</div><div><div className="campaign-planner__months" style={{ gridTemplateColumns: range.months.map(month => `${month.weeks.length}fr`).join(" ") }}>{range.months.map(month => <div key={month.key}>{month.label}</div>)}</div><div className="campaign-planner__weeks" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} title={`${dateLabel(week.start)} – ${dateLabel(week.end)}`}><span>{Number(week.start.slice(-2))}</span></span>)}</div></div></div>
+
             {scheduled.map(campaign => {
               const bar = getCampaignPlannerBar(campaign.start_date, campaign.end_date, range);
               const colour = getMarketingCampaignFunctionStyle({ lightBackground: campaign.light_background, lightForeground: campaign.light_foreground, darkBackground: campaign.dark_background, darkForeground: campaign.dark_foreground });
-              return <React.Fragment key={campaign.campaign_tag_id}><div className="campaign-planner__row"><div className="campaign-planner__identity"><button className="iconbtn" aria-label={`${expanded.includes(campaign.campaign_tag_id) ? "ยุบ" : "ขยาย"}งาน ${campaign.name}`} aria-expanded={expanded.includes(campaign.campaign_tag_id)} onClick={() => toggleItems(campaign.campaign_tag_id)}><Icon name="chevron" style={{ transform: expanded.includes(campaign.campaign_tag_id) ? "rotate(90deg)" : "none" }} /></button><div>{campaignName(campaign)}</div></div>
+              return <React.Fragment key={campaign.campaign_tag_id}><div className="campaign-planner__row"><div className="campaign-planner__identity"><button className="iconbtn" aria-label={`ดูงาน ${campaign.name}`} onClick={event => showTaskPanel(campaign, "", event.currentTarget)}><Icon name="chevron" /></button><div>{campaignName(campaign)}{items[campaign.campaign_tag_id] && items[campaign.campaign_tag_id].some(item => !(item.working_placements || []).some(row => row.launch_date)) && <button className="campaign-planner__text-button" onClick={event => showTaskPanel(campaign, "", event.currentTarget)}>รอกำหนดวัน {items[campaign.campaign_tag_id].filter(item => !(item.working_placements || []).some(row => row.launch_date)).length} งาน</button>}</div></div>
                 <div className="campaign-planner__track"><div className="campaign-planner__guides" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} data-month-start={week.monthStart} />)}</div>
                   {todayBar && <span className="campaign-planner__today" style={{ left: `${todayBar.left}%` }} title={`Today ${today}`} />}
                   <button className="campaign-planner__bar" data-compact={bar.width < 3} style={{ ...colour, left: `${bar.left}%`, width: `${bar.width}%` }} title={`${campaign.name}: ${dateLabel(campaign.start_date)} – ${dateLabel(campaign.end_date)}`} aria-label={`${campaign.name} ${dateLabel(campaign.start_date)} ถึง ${dateLabel(campaign.end_date)}${bar.before ? " เริ่มก่อนช่วงที่แสดง" : ""}${bar.after ? " ต่อเนื่องหลังช่วงที่แสดง" : ""}`} onClick={() => openCampaign(campaign)}>{bar.before && <Icon name="chevron" size={12} style={{ transform: "rotate(180deg)" }} />}<span>{campaign.tagline || campaign.name}</span>{bar.after && <Icon name="chevron" size={12} />}</button>
-                </div></div>{expanded.includes(campaign.campaign_tag_id) && renderItemTimeline(campaign, colour)}</React.Fragment>;
+                  {renderItemTimeline(campaign, colour)}
+                </div></div></React.Fragment>;
             })}
           </div>
         </div>
@@ -4902,6 +4939,11 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
         {unscheduled.length > 0 && <section className="campaign-planner__unscheduled"><h2>รอกำหนดช่วงเวลา <span className="muted">({unscheduled.length})</span></h2>{unscheduled.map(campaign => <div className="campaign-planner__catalog-row" key={campaign.campaign_tag_id}><div>{campaignName(campaign)}</div>{canManage && !campaign.is_archived && <button className="btn btn--secondary" onClick={() => openCampaign(campaign, true)}>กำหนดช่วงเวลา</button>}</div>)}</section>}
       </>}
     </>}
+    {taskPanel && <aside className="campaign-planner__panel" aria-labelledby="planner-task-panel-title">
+      <div className="campaign-planner__panel-head"><div><h2 id="planner-task-panel-title">{taskPanel.campaign.name}</h2><p>{taskPanel.date ? `Launch ${dateLabel(taskPanel.date)}` : "งานทั้งหมด · เรียงตาม Launch date"}</p></div><button ref={panelCloseRef} className="iconbtn" aria-label="ปิดรายการงาน" onClick={closeTaskPanel}><Icon name="x" /></button></div>
+      {taskPanel.date && <button className="btn btn--secondary" onClick={() => setTaskPanel({ ...taskPanel, date: "" })}>ดูงานทั้งหมดในแคมเปญ</button>}
+      {renderItems(taskPanel.campaign, taskPanel.date)}
+    </aside>}
     {selected && <dialog className="campaign-planner__dialog" ref={dialogRef} onCancel={event => { if (saving) event.preventDefault(); else setSelected(null); }} onClose={() => { if (!saving) setSelected(null); }} aria-labelledby="campaign-planner-dialog-title">
       <div className="campaign-planner__dialog-head"><h2 id="campaign-planner-dialog-title">{editing ? selected.campaign_tag_id ? "แก้ไขแคมเปญ" : "New Campaign" : selected.name}</h2><button className="iconbtn" aria-label="ปิดรายละเอียดแคมเปญ" disabled={saving} onClick={closeDialog}><Icon name="x" /></button></div>
       {saveError && <p role="alert" className="reason-box reason-box--need">{saveError}</p>}

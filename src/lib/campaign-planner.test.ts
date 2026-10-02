@@ -71,6 +71,18 @@ describe("Campaign Planner validation", () => {
   });
 });
 describe("Campaign Planner integration boundaries", () => {
+  it("groups actual launch days, deduplicates channels and excludes dates outside the viewport", () => {
+    const items = [
+      { content_item_id: 1, working_placements: [{ launch_date: "2026-08-01" }, { launch_date: "2026-08-01" }, { launch_date: "2026-08-05" }] },
+      { content_item_id: 2, working_placements: [{ launch_date: "2026-08-01" }] },
+      { content_item_id: 3, working_placements: [{ launch_date: "2026-07-31" }, { launch_date: "2026-11-01" }] },
+      { content_item_id: 4, working_placements: [] }
+    ];
+    const groups = context.getCampaignPlannerLaunchGroups(items, context.getCampaignPlannerWindow("2026-08", 3));
+    expect(groups.map(group => ({ date: group.date, ids: group.items.map(item => item.content_item_id) }))).toEqual([
+      { date: "2026-08-01", ids: [1, 2] }, { date: "2026-08-05", ids: [1] }
+    ]);
+  });
   it("sorts tasks by earliest dated placement, missing dates last, without mutating input", () => {
     const items = [
       { content_item_id: 1, working_placements: [] },
