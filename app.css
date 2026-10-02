@@ -4853,3 +4853,8 @@ html[data-theme="dark"] .product-book-cms__message--error {
   [data-testid="task-assign-create-form"],
   [data-testid="task-assign-detail"] .form-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+.campaign-planner__task .campaign-planner__identity { padding-left: 42px; }
+.campaign-planner__task-bar { position: absolute; top: 42px; height: 12px; min-width: 3px; border: 1px solid currentColor; border-radius: 3px; background: var(--campaign-function-bg-light); color: var(--campaign-function-fg-light); }
+.campaign-planner__task-bar[data-single="true"] { width: 3px !important; height: 22px; top: 37px; border-radius: 1px; }
+html[data-theme="dark"] .campaign-planner__task-bar { background: var(--campaign-function-bg-dark); color: var(--campaign-function-fg-dark); }

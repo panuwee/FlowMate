@@ -9,9 +9,10 @@ vm.runInContext(source.slice(source.indexOf("function normalizeMarketingPlanWork
 vm.runInContext(helpers, context);
 
 describe("Campaign Planner calendar dates", () => {
-  it("anchors quarter, half-year and full year without changing campaign data", () => {
-    expect(context.getCampaignPlannerWindow("2026-09", 3)).toMatchObject({ start: "2026-07-01", end: "2026-09-30", days: 92 });
-    expect(context.getCampaignPlannerWindow("2026-09", 6)).toMatchObject({ start: "2026-07-01", end: "2026-12-31", days: 184 });
+  it("starts rolling windows at the selected month and keeps full year", () => {
+    expect(context.getCampaignPlannerWindow("2026-08", 3)).toMatchObject({ start: "2026-08-01", end: "2026-10-31", days: 92 });
+    expect(context.getCampaignPlannerWindow("2026-09", 6)).toMatchObject({ start: "2026-09-01", end: "2027-02-28", days: 181 });
+    expect(context.getCampaignPlannerWindow("2026-12", 3).months.map(month => month.key)).toEqual(["2026-12", "2027-01", "2027-02"]);
     expect(context.getCampaignPlannerWindow("2026-09", 12)).toMatchObject({ start: "2026-01-01", end: "2026-12-31", days: 365 });
     expect(context.getCampaignPlannerWindow("2028-02", 12).days).toBe(366);
   });
@@ -70,6 +71,16 @@ describe("Campaign Planner validation", () => {
   });
 });
 describe("Campaign Planner integration boundaries", () => {
+  it("sorts tasks by earliest dated placement, missing dates last, without mutating input", () => {
+    const items = [
+      { content_item_id: 1, working_placements: [] },
+      { content_item_id: 2, working_placements: [{ launch_date: "2026-10-02" }] },
+      { content_item_id: 3, working_placements: [{ launch_date: null }, { launch_date: "2026-08-01" }, { launch_date: "2026-08-05" }] }
+    ];
+    expect(context.sortCampaignPlannerItems(items).map(item => item.content_item_id)).toEqual([3, 2, 1]);
+    expect(items.map(item => item.content_item_id)).toEqual([1, 2, 3]);
+    expect(context.getCampaignPlannerWorkingRow(items[2])).toMatchObject({ launchDate: "2026-08-01", launchEnd: "2026-08-05" });
+  });
   it("matches Working Sheet primary placement dates, stored statuses and mixed status", () => {
     const row = context.getCampaignPlannerWorkingRow({ working_placements: [
       { channel: "youtube", launch_date: "2026-08-02", publish_time: "14:00", status: "posted" },

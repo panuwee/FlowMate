@@ -4625,7 +4625,7 @@ function getMarketingCampaignFunctionStyle(campaign) {
 function getCampaignPlannerWindow(anchor, span = 3) {
   const count = [3, 6, 12].includes(Number(span)) ? Number(span) : 3;
   const [year, month] = anchor.split("-").map(Number);
-  const firstMonth = count === 12 ? 0 : Math.floor((month - 1) / count) * count;
+  const firstMonth = count === 12 ? 0 : month - 1;
   const start = new Date(Date.UTC(year, firstMonth, 1));
   const end = new Date(Date.UTC(year, firstMonth + count, 0));
   const months = Array.from({ length: count }, (_, index) => {
@@ -4647,12 +4647,17 @@ function getCampaignPlannerWindow(anchor, span = 3) {
   return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10), months, weeks, days: Math.round((end - start) / 86400000) + 1, axisStart: axisStart.toISOString().slice(0, 10), axisDays: weeks.length * 7 };
 }
 function getCampaignPlannerWorkingRow(item) {
-  const placements = [...(item.working_placements || [])].sort((a, b) => String(a.launch_date || "").localeCompare(String(b.launch_date || ""))
+  const placements = [...(item.working_placements || [])].sort((a, b) => String(a.launch_date || "9999-12-31").localeCompare(String(b.launch_date || "9999-12-31"))
     || String(a.publish_time || "").localeCompare(String(b.publish_time || "")) || String(a.channel || "").localeCompare(String(b.channel || "")));
   const primary = placements[0];
   const channels = [...new Set(placements.map(row => row.channel).filter(Boolean))];
   const statuses = new Set(placements.map(row => normalizeMarketingPlanWorkingStatus(row.status)));
-  return { channels, launchDate: primary?.launch_date || "", status: primary ? getMarketingPlanWorkingSheetStatus({ placementStatus: primary.status }) : "", hasMixedStatus: statuses.size > 1 };
+  const dates = placements.map(row => row.launch_date).filter(Boolean);
+  return { channels, launchDate: dates[0] || "", launchEnd: dates[dates.length - 1] || "", status: primary ? getMarketingPlanWorkingSheetStatus({ placementStatus: primary.status }) : "", hasMixedStatus: statuses.size > 1 };
+}
+function sortCampaignPlannerItems(items) {
+  return [...items].sort((a, b) => (getCampaignPlannerWorkingRow(a).launchDate || "9999-12-31").localeCompare(getCampaignPlannerWorkingRow(b).launchDate || "9999-12-31")
+    || String(a.content_title || "").localeCompare(String(b.content_title || "")) || String(a.content_item_id).localeCompare(String(b.content_item_id)));
 }
 function shiftCampaignPlannerWindow(start, amount) {
   const [year, month] = start.slice(0, 7).split("-").map(Number);
@@ -4825,10 +4830,25 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
     if (itemErrors[id]) return <div role="alert">{itemErrors[id]} <button className="btn btn--secondary" onClick={() => loadItems(id)}>ลองอีกครั้ง</button></div>;
     if (!items[id]) return <p role="status">กำลังโหลดงาน…</p>;
     if (!items[id].length) return <p className="muted">ยังไม่มีงานในแคมเปญนี้</p>;
-    return <div className="campaign-planner__working-scroll"><table className="campaign-planner__working"><thead><tr><th scope="col">Product / Event</th><th scope="col">Channel</th><th scope="col">Launch Date</th><th scope="col">Status</th></tr></thead><tbody>{items[id].map(item => {
+    return <div className="campaign-planner__working-scroll"><table className="campaign-planner__working"><thead><tr><th scope="col">Product / Event</th><th scope="col">Channel</th><th scope="col">Launch Date</th><th scope="col">Status</th></tr></thead><tbody>{sortCampaignPlannerItems(items[id]).map(item => {
       const row = getCampaignPlannerWorkingRow(item);
       return <tr key={item.content_item_id}><td>{item.content_title}</td><td>{row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"}</td><td>{row.launchDate ? dateLabel(row.launchDate) : "—"}</td><td>{row.status ? <span className={`badge ${getMarketingPlanStatusClass(row.status)}`}>{getMarketingPlanStatusLabel(row.status)}{row.hasMixedStatus ? " (mixed)" : ""}</span> : "—"}</td></tr>;
     })}</tbody></table></div>;
+  }
+  function renderItemTimeline(campaign, colour) {
+    const id = campaign.campaign_tag_id;
+    if (!items[id] || itemErrors[id] || !items[id].length) return <div className="campaign-planner__expanded">{renderItems(campaign)}</div>;
+    return sortCampaignPlannerItems(items[id]).map(item => {
+      const row = getCampaignPlannerWorkingRow(item);
+      const bar = getCampaignPlannerBar(row.launchDate, row.launchEnd, range);
+      const label = row.launchDate ? `Launch ${dateLabel(row.launchDate)}${row.launchEnd !== row.launchDate ? ` – ${dateLabel(row.launchEnd)}` : ""}` : "ยังไม่มี Launch date";
+      return <div className="campaign-planner__row campaign-planner__task" key={item.content_item_id}>
+        <div className="campaign-planner__identity"><div><strong>{item.content_title}</strong><span className="muted">{row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"}</span><span className="muted">{label}{row.launchDate && !bar ? " · นอกช่วงที่แสดง" : ""}</span>{row.status && <span className={`badge ${getMarketingPlanStatusClass(row.status)}`}>{getMarketingPlanStatusLabel(row.status)}{row.hasMixedStatus ? " (mixed)" : ""}</span>}</div></div>
+        <div className="campaign-planner__track"><div className="campaign-planner__guides" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} data-month-start={week.monthStart} />)}</div>
+          {todayBar && <span className="campaign-planner__today" style={{ left: `${todayBar.left}%` }} />}
+          {bar && <span className="campaign-planner__task-bar" data-single={row.launchDate === row.launchEnd} style={{ ...colour, left: `${bar.left}%`, width: `${bar.width}%` }} role="img" aria-label={`${item.content_title}: ${label}`} title={`${item.content_title}: ${label}`} />}
+        </div></div>;
+    });
   }
   function campaignName(campaign) {
     return <><button className="campaign-planner__name" onClick={() => openCampaign(campaign)}>{campaign.name}</button>
@@ -4852,7 +4872,7 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
           <label><input aria-label="เลือกเดือน" className="input" type="month" min="1000-01" max="9998-12" value={anchor} onChange={event => { if (/^[1-9]\d{3}-\d{2}$/.test(event.target.value)) setAnchor(event.target.value); }} /></label>
           <button className="btn btn--secondary" aria-label="ช่วงถัดไป" onClick={() => setAnchor(shiftCampaignPlannerWindow(range.start, span))}><Icon name="chevron" /></button>
           <button className="btn btn--secondary" onClick={() => setAnchor(getMarketingPlanCurrentMonthKey())}>Today</button></div>
-        <p className="campaign-planner__range">{range.months[0].label} – {range.months[range.months.length - 1].label} {range.start.slice(0, 4)}</p>
+        <p className="campaign-planner__range">{range.months[0].label} {range.start.slice(0, 4)} – {range.months[range.months.length - 1].label} {range.end.slice(0, 4)}</p>
       </div>
       <div className="campaign-planner__filters">
         <label><input aria-label="ค้นหาแคมเปญ" className="input" type="search" placeholder="ชื่อแคมเปญหรือ Tagline" value={search} onChange={event => setSearch(event.target.value)} /></label>
@@ -4874,7 +4894,7 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
                 <div className="campaign-planner__track"><div className="campaign-planner__guides" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)` }}>{range.weeks.map(week => <span key={week.start} data-month-start={week.monthStart} />)}</div>
                   {todayBar && <span className="campaign-planner__today" style={{ left: `${todayBar.left}%` }} title={`Today ${today}`} />}
                   <button className="campaign-planner__bar" data-compact={bar.width < 3} style={{ ...colour, left: `${bar.left}%`, width: `${bar.width}%` }} title={`${campaign.name}: ${dateLabel(campaign.start_date)} – ${dateLabel(campaign.end_date)}`} aria-label={`${campaign.name} ${dateLabel(campaign.start_date)} ถึง ${dateLabel(campaign.end_date)}${bar.before ? " เริ่มก่อนช่วงที่แสดง" : ""}${bar.after ? " ต่อเนื่องหลังช่วงที่แสดง" : ""}`} onClick={() => openCampaign(campaign)}>{bar.before && <Icon name="chevron" size={12} style={{ transform: "rotate(180deg)" }} />}<span>{campaign.tagline || campaign.name}</span>{bar.after && <Icon name="chevron" size={12} />}</button>
-                </div></div>{expanded.includes(campaign.campaign_tag_id) && <div className="campaign-planner__expanded">{renderItems(campaign)}</div>}</React.Fragment>;
+                </div></div>{expanded.includes(campaign.campaign_tag_id) && renderItemTimeline(campaign, colour)}</React.Fragment>;
             })}
           </div>
         </div>

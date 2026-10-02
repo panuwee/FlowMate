@@ -4648,7 +4648,7 @@ function getMarketingCampaignFunctionStyle(campaign) {
 function getCampaignPlannerWindow(anchor, span = 3) {
   const count = [3, 6, 12].includes(Number(span)) ? Number(span) : 3;
   const [year, month] = anchor.split("-").map(Number);
-  const firstMonth = count === 12 ? 0 : Math.floor((month - 1) / count) * count;
+  const firstMonth = count === 12 ? 0 : month - 1;
   const start = new Date(Date.UTC(year, firstMonth, 1));
   const end = new Date(Date.UTC(year, firstMonth + count, 0));
   const months = Array.from({
@@ -4693,18 +4693,23 @@ function getCampaignPlannerWindow(anchor, span = 3) {
   };
 }
 function getCampaignPlannerWorkingRow(item) {
-  const placements = [...(item.working_placements || [])].sort((a, b) => String(a.launch_date || "").localeCompare(String(b.launch_date || "")) || String(a.publish_time || "").localeCompare(String(b.publish_time || "")) || String(a.channel || "").localeCompare(String(b.channel || "")));
+  const placements = [...(item.working_placements || [])].sort((a, b) => String(a.launch_date || "9999-12-31").localeCompare(String(b.launch_date || "9999-12-31")) || String(a.publish_time || "").localeCompare(String(b.publish_time || "")) || String(a.channel || "").localeCompare(String(b.channel || "")));
   const primary = placements[0];
   const channels = [...new Set(placements.map(row => row.channel).filter(Boolean))];
   const statuses = new Set(placements.map(row => normalizeMarketingPlanWorkingStatus(row.status)));
+  const dates = placements.map(row => row.launch_date).filter(Boolean);
   return {
     channels,
-    launchDate: primary?.launch_date || "",
+    launchDate: dates[0] || "",
+    launchEnd: dates[dates.length - 1] || "",
     status: primary ? getMarketingPlanWorkingSheetStatus({
       placementStatus: primary.status
     }) : "",
     hasMixedStatus: statuses.size > 1
   };
+}
+function sortCampaignPlannerItems(items) {
+  return [...items].sort((a, b) => (getCampaignPlannerWorkingRow(a).launchDate || "9999-12-31").localeCompare(getCampaignPlannerWorkingRow(b).launchDate || "9999-12-31") || String(a.content_title || "").localeCompare(String(b.content_title || "")) || String(a.content_item_id).localeCompare(String(b.content_item_id)));
 }
 function shiftCampaignPlannerWindow(start, amount) {
   const [year, month] = start.slice(0, 7).split("-").map(Number);
@@ -4945,7 +4950,7 @@ function MarketingPlanCampaignPlannerScreen({
       scope: "col"
     }, "Launch Date"), React.createElement("th", {
       scope: "col"
-    }, "Status"))), React.createElement("tbody", null, items[id].map(item => {
+    }, "Status"))), React.createElement("tbody", null, sortCampaignPlannerItems(items[id]).map(item => {
       const row = getCampaignPlannerWorkingRow(item);
       return React.createElement("tr", {
         key: item.content_item_id
@@ -4953,6 +4958,56 @@ function MarketingPlanCampaignPlannerScreen({
         className: `badge ${getMarketingPlanStatusClass(row.status)}`
       }, getMarketingPlanStatusLabel(row.status), row.hasMixedStatus ? " (mixed)" : "") : "—"));
     }))));
+  }
+  function renderItemTimeline(campaign, colour) {
+    const id = campaign.campaign_tag_id;
+    if (!items[id] || itemErrors[id] || !items[id].length) return React.createElement("div", {
+      className: "campaign-planner__expanded"
+    }, renderItems(campaign));
+    return sortCampaignPlannerItems(items[id]).map(item => {
+      const row = getCampaignPlannerWorkingRow(item);
+      const bar = getCampaignPlannerBar(row.launchDate, row.launchEnd, range);
+      const label = row.launchDate ? `Launch ${dateLabel(row.launchDate)}${row.launchEnd !== row.launchDate ? ` – ${dateLabel(row.launchEnd)}` : ""}` : "ยังไม่มี Launch date";
+      return React.createElement("div", {
+        className: "campaign-planner__row campaign-planner__task",
+        key: item.content_item_id
+      }, React.createElement("div", {
+        className: "campaign-planner__identity"
+      }, React.createElement("div", null, React.createElement("strong", null, item.content_title), React.createElement("span", {
+        className: "muted"
+      }, row.channels.map(getMarketingPlanChannelLabel).join(", ") || "—"), React.createElement("span", {
+        className: "muted"
+      }, label, row.launchDate && !bar ? " · นอกช่วงที่แสดง" : ""), row.status && React.createElement("span", {
+        className: `badge ${getMarketingPlanStatusClass(row.status)}`
+      }, getMarketingPlanStatusLabel(row.status), row.hasMixedStatus ? " (mixed)" : ""))), React.createElement("div", {
+        className: "campaign-planner__track"
+      }, React.createElement("div", {
+        className: "campaign-planner__guides",
+        "aria-hidden": "true",
+        style: {
+          gridTemplateColumns: `repeat(${range.weeks.length}, 1fr)`
+        }
+      }, range.weeks.map(week => React.createElement("span", {
+        key: week.start,
+        "data-month-start": week.monthStart
+      }))), todayBar && React.createElement("span", {
+        className: "campaign-planner__today",
+        style: {
+          left: `${todayBar.left}%`
+        }
+      }), bar && React.createElement("span", {
+        className: "campaign-planner__task-bar",
+        "data-single": row.launchDate === row.launchEnd,
+        style: {
+          ...colour,
+          left: `${bar.left}%`,
+          width: `${bar.width}%`
+        },
+        role: "img",
+        "aria-label": `${item.content_title}: ${label}`,
+        title: `${item.content_title}: ${label}`
+      })));
+    });
   }
   function campaignName(campaign) {
     return React.createElement(React.Fragment, null, React.createElement("button", {
@@ -5043,7 +5098,7 @@ function MarketingPlanCampaignPlannerScreen({
     onClick: () => setAnchor(getMarketingPlanCurrentMonthKey())
   }, "Today")), React.createElement("p", {
     className: "campaign-planner__range"
-  }, range.months[0].label, " – ", range.months[range.months.length - 1].label, " ", range.start.slice(0, 4))), React.createElement("div", {
+  }, range.months[0].label, " ", range.start.slice(0, 4), " – ", range.months[range.months.length - 1].label, " ", range.end.slice(0, 4))), React.createElement("div", {
     className: "campaign-planner__filters"
   }, React.createElement("label", null, React.createElement("input", {
     "aria-label": "ค้นหาแคมเปญ",
@@ -5177,9 +5232,7 @@ function MarketingPlanCampaignPlannerScreen({
     }), React.createElement("span", null, campaign.tagline || campaign.name), bar.after && React.createElement(Icon, {
       name: "chevron",
       size: 12
-    })))), expanded.includes(campaign.campaign_tag_id) && React.createElement("div", {
-      className: "campaign-planner__expanded"
-    }, renderItems(campaign)));
+    })))), expanded.includes(campaign.campaign_tag_id) && renderItemTimeline(campaign, colour));
   }))), !scheduled.length && React.createElement("p", {
     className: "campaign-planner__empty"
   }, "ไม่มีแคมเปญในช่วงนี้ ลองเปลี่ยนช่วงเวลาหรือตัวกรอง"), unscheduled.length > 0 && React.createElement("section", {
