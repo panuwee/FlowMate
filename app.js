@@ -819,7 +819,7 @@ function App() {
     let alive = true;
     async function refreshNavCounts(event) {
       if (!window.loadFlowMateNavigationRows || !window.getFlowMateNavCounts) return;
-      if (event?.detail?.reason && window.flowMateRefreshReasonMatches && !window.flowMateRefreshReasonMatches(event, ["work_items", "assignment_runs", "work_item_events", "work_status_changed", "admin_work_status_changed", "active_team_changed", "recheck_brief", "capacity_allocation_rescheduled", "admin_archive", "admin_restore"])) return;
+      if (window.flowMateRefreshReasonMatches && !window.flowMateRefreshReasonMatches(event, ["work_items", "assignment_runs", "work_item_events", "work_status_changed", "admin_work_status_changed", "active_team_changed", "recheck_brief", "capacity_allocation_rescheduled", "admin_archive", "admin_restore"])) return;
       try {
         const rows = await window.loadFlowMateNavigationRows();
         if (!alive) return;
@@ -855,7 +855,9 @@ function App() {
       return rows;
     }
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows, {
+      reasons: ["notifications", "work_items", "work_status_changed", "admin_work_status_changed", "admin_archive", "admin_restore", "creative_assignee_changed", "rerun_assignment", "quick_task_created", "archived_work_item_restored"]
+    }) : () => {};
     return () => {
       alive = false;
       cleanup();

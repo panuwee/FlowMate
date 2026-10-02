@@ -22,6 +22,7 @@ const FLOWMATE_REALTIME_TABLES = [
 
 let flowmateRealtimeChannel = null;
 let flowmateRealtimeRefreshTimer = null;
+const flowmateRealtimeRefreshReasons = new Set();
 
 window.FLOWMATE_REALTIME_STATE = window.FLOWMATE_REALTIME_STATE || {
   status: "idle",
@@ -44,6 +45,7 @@ function emitFlowMateSynced(source) {
 }
 
 function scheduleFlowMateRealtimeRefresh(reason) {
+  flowmateRealtimeRefreshReasons.add(reason);
   if (flowmateRealtimeRefreshTimer) clearTimeout(flowmateRealtimeRefreshTimer);
   setFlowMateRealtimeState({
     status: "syncing",
@@ -52,8 +54,13 @@ function scheduleFlowMateRealtimeRefresh(reason) {
   });
   flowmateRealtimeRefreshTimer = setTimeout(() => {
     flowmateRealtimeRefreshTimer = null;
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail: { reason } }));
-    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts", { detail: { reason } }));
+    const reasons = Array.from(flowmateRealtimeRefreshReasons);
+    flowmateRealtimeRefreshReasons.clear();
+    // Keep every table changed during this debounce window. Older listeners
+    // treat an empty reason as a full refresh, so mixed events remain safe.
+    const detail = { reason: reasons.length === 1 ? reasons[0] : "", reasons };
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-request", { detail }));
+    window.dispatchEvent(new CustomEvent("flowmate:refresh-counts", { detail }));
   }, FLOWMATE_REALTIME_DEBOUNCE_MS);
 }
 
@@ -94,6 +101,7 @@ function startFlowMateRealtime() {
 }
 
 function stopFlowMateRealtime() {
+  flowmateRealtimeRefreshReasons.clear();
   if (flowmateRealtimeRefreshTimer) {
     clearTimeout(flowmateRealtimeRefreshTimer);
     flowmateRealtimeRefreshTimer = null;
@@ -107,8 +115,10 @@ function stopFlowMateRealtime() {
 
 function flowMateRefreshReasonMatches(event, allowedReasons) {
   const reason = String(event?.detail?.reason || "").trim();
-  if (!reason || !Array.isArray(allowedReasons) || allowedReasons.length === 0) return true;
-  return allowedReasons.includes(reason);
+  const reasons = Array.isArray(event?.detail?.reasons) && event.detail.reasons.length
+    ? event.detail.reasons : (reason ? [reason] : []);
+  if (!reasons.length || !Array.isArray(allowedReasons) || allowedReasons.length === 0) return true;
+  return reasons.some(value => allowedReasons.includes(value));
 }
 
 function attachFlowMateLiveRefresh(refreshFn, options = {}) {
@@ -117,8 +127,9 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
   //  - refreshes immediately when the tab regains focus,
   //  - backs off exponentially (up to 8x) when a refresh fails, resetting on
   //    success, so a backend outage doesn't turn into a fixed retry storm.
-  // Event-driven refreshes (mutations / realtime via flowmate:refresh-request)
-  // still fire immediately regardless of the timer.
+  // Relevant events refresh immediately and restart the polling interval.
+  // Only data-change events queue a follow-up during an active request;
+  // focus and timer refreshes share it instead of fetching the same data again.
   const baseMs = options.intervalMs || FLOWMATE_REFRESH_POLL_MS;
   const maxMs = baseMs * 8;
   let running = false;
@@ -141,16 +152,18 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
       return;
     }
     await runRefresh();
-    schedule();
   }
 
   async function runRefresh(event) {
     if (stopped) return;
     if (event?.type === "flowmate:refresh-request" && !flowMateRefreshReasonMatches(event, options.reasons)) return;
+    if (typeof document !== "undefined" && document.hidden) return;
     if (running) {
-      queued = true;
+      if (event?.type === "flowmate:refresh-request") queued = true;
       return;
     }
+    if (timer) clearTimeout(timer);
+    timer = null;
     running = true;
     try {
       await refreshFn();
@@ -160,9 +173,11 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
       console.warn("[FlowMate LiveRefresh] refresh failed; backing off to", delay, "ms:", error && error.message);
     } finally {
       running = false;
-      if (queued) {
+      if (queued && !stopped) {
         queued = false;
         runRefresh();
+      } else {
+        schedule();
       }
     }
   }
@@ -781,6 +796,8 @@ if (typeof window.addEventListener === "function") {
   window.addEventListener("flowmate:team-workspace-changed", () => invalidateFlowMateListRowsCache());
   window.addEventListener("flowmate:refresh-request", (event) => {
     const reason = String(event?.detail?.reason || "").trim();
+    // Notification rows do not change task-list profiles or their caches.
+    if (reason === "notifications") return;
     if (reason === "comments") {
       Array.from(flowMateListRowsCacheByWorkspace.keys())
         .filter((key) => key.endsWith(":my-work") || key.endsWith(":legacy"))
