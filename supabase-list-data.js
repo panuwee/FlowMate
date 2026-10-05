@@ -3,6 +3,13 @@ function flowmateToKebab(value) {
 }
 
 const FLOWMATE_ALLOWED_REQUESTER_TEAMS = ["Operations", "Marketing", "Esport", "GD/VE"];
+async function flowmateReadWorkItemLinks(ids) {
+  const fields = "id,work_item_id,url,description,created_by_user_id,created_at,deleted_at";
+  const read = columns => window.flowmateSupabase.from("work_item_links").select(columns).in("work_item_id", ids).is("deleted_at", null).order("created_at", { ascending: true });
+  const typed = await read(fields + ",link_kind");
+  if (["42703", "PGRST204"].includes(typed.error?.code) && String(typed.error.message || "").includes("link_kind")) return read(fields);
+  return typed;
+}
 const FLOWMATE_REALTIME_DEBOUNCE_MS = 700;
 const FLOWMATE_REFRESH_POLL_MS = 60000;
 const FLOWMATE_REALTIME_TABLES = [
@@ -479,7 +486,7 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
       ? window.flowmateSupabase.from("comments").select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at").in("work_item_id", workItemIds).is("deleted_at", null).order("created_at", { ascending: true })
       : emptyFlowMateQueryResult(),
     profile.links
-      ? window.flowmateSupabase.from("work_item_links").select("id,work_item_id,url,description,created_by_user_id,created_at,deleted_at").in("work_item_id", workItemIds).is("deleted_at", null).order("created_at", { ascending: true })
+      ? flowmateReadWorkItemLinks(workItemIds)
       : emptyFlowMateQueryResult(),
     profile.watchers
       ? window.flowmateSupabase.from("work_item_watchers").select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at").in("work_item_id", workItemIds).is("removed_at", null).order("created_at", { ascending: true })
@@ -935,7 +942,7 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
   ];
   const detailQueries = options.includeDetail ? [
     window.flowmateSupabase.from("comments").select("id,work_item_id,author_user_id,body,created_at,updated_at,deleted_at").in("work_item_id", ids).is("deleted_at", null).order("created_at", { ascending: true }),
-    window.flowmateSupabase.from("work_item_links").select("id,work_item_id,url,description,created_by_user_id,created_at,deleted_at").in("work_item_id", ids).is("deleted_at", null).order("created_at", { ascending: true }),
+    flowmateReadWorkItemLinks(ids),
     window.flowmateSupabase.from("work_item_watchers").select("id,work_item_id,watcher_user_id,added_by_user_id,created_at,removed_at").in("work_item_id", ids).is("removed_at", null).order("created_at", { ascending: true }),
     window.flowmateSupabase.from("work_item_ai_tags").select("id,work_item_id,tag,created_by_user_id,created_at").in("work_item_id", ids).order("created_at", { ascending: true }),
     window.flowmateSupabase.from("work_item_events").select("id,work_item_id,actor_user_id,event_type,from_status,to_status,metadata,created_at").in("work_item_id", ids).order("created_at", { ascending: false }),

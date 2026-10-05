@@ -1,0 +1,71 @@
+{
+  "status": "database_verified_frontend_pending",
+  "base": "8c1f62984a8f78ebd6afcce77766891e4f70bb5e",
+  "target": "version2.1.1",
+  "stamp": "20261005-74c906",
+  "files": [
+    {
+      "path": "app.js",
+      "sha256": "e5a330532b6f681ae3f93698a24b0aaa65eb411fb2baee4384c2bc4e0fb7879b"
+    },
+    {
+      "path": "app.jsx",
+      "sha256": "23e6b1ffd4f100343112e1a9a4f153c5a0b8b311da3a1bec4c9cb9bda6f2b39d"
+    },
+    {
+      "path": "kpi-workspace.js",
+      "sha256": "42d2a4cdefa66a3df5034404f23015e13357e2696700cfadbb3086bfd4144365"
+    },
+    {
+      "path": "kpi-workspace.ts",
+      "sha256": "b2b4307904bf36cb1045e1585f53751dbf3d91dbacd801d2f7a6fd87ee5d1cf6"
+    },
+    {
+      "path": "screens-a.js",
+      "sha256": "17b269f9f689aa03479a98d7086e5c03b0f969e90f09fabeb2c3591e386e38a9"
+    },
+    {
+      "path": "screens-a.jsx",
+      "sha256": "817929b4352e152d5fc1992abaafe6e619f7e751e905d112d4a249a0f153a42f"
+    },
+    {
+      "path": "screens-kpi.js",
+      "sha256": "963b25766e8044ecc12eb7b32ea1fccffa8c4530d433d20a671e32a3883637cc"
+    },
+    {
+      "path": "screens-kpi.jsx",
+      "sha256": "5aef1129dcdb3071e54ec8acd41926e04432070af6fbbc66365f5d36eaad5223"
+    },
+    {
+      "path": "supabase-list-data.js",
+      "sha256": "131230c7bfada44cfce3a0e3d8a4f9afe99d2e7560f0a3c86c868d70eaab5666"
+    },
+    {
+      "path": "supabase-quick-task.js",
+      "sha256": "9f8090e60b915affd9089b5c1a8081c99d756d057ff6d72e22c8955b40633588"
+    },
+    {
+      "path": "supabase/creative_link_asset_evidence.sql",
+      "sha256": "b1eee5a720cb887a22f58030c2af0f5c08f5036f5fc766bc708e681017f21cff"
+    },
+    {
+      "path": "index.html",
+      "sha256": "f733ce6f3e1d8ba32f96a078dc7c8cd03630f106063ae911b1ce4a0a16b7484d"
+    },
+    {
+      "path": "home/index.html",
+      "sha256": "5f0ac8b6cd7bb2b72d7c4b22259e9d2b21b48c200dc4eb13da607904ab130bf1"
+    },
+    {
+      "path": "product-book/index.html",
+      "sha256": "03bc9fef0f64dcf319d0cb68a5c912ea4aa8f5a52722ca658a69f06ffbde0400"
+    }
+  ],
+  "excluded": [
+    "kpi-asset-local-preview.html",
+    "output/campaign-planner/"
+  ],
+  "productionSqlApplied": true,
+  "published": false,
+  "migration": "20261005064805"
+}

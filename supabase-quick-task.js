@@ -429,6 +429,24 @@ async function addFlowMateWorkItemWatcher(displayId, watcherUserId) {
 }
 
 window.addFlowMateWorkItemLink = addFlowMateWorkItemLink;
+async function addFlowMateCreativeAssetLink(displayId, url, description, kind, requestKey) {
+  if (!["first_draft", "final_asset"].includes(kind)) throw new Error("Choose 1st Draft or Final Asset.");
+  if (!displayId || !requestKey) throw new Error("Work item and request key are required.");
+  const safeUrl = flowmateSafeHttpUrl(url);
+  if (!safeUrl) throw new Error("Enter a valid http(s) link.");
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const { data, error } = await window.flowmateSupabase.rpc("add_work_item_link_with_kind", {
+    p_display_id: displayId, p_url: safeUrl, p_description: String(description || "").trim() || null,
+    p_link_kind: kind, p_request_key: requestKey,
+  });
+  if (error) {
+    if (["PGRST202", "42883"].includes(error.code)) throw new Error("Asset link storage is not installed yet. Your selected type was not saved; contact the administrator.");
+    throw error;
+  }
+  if (!data?.id || data.link_kind !== kind) throw new Error("The server did not confirm the selected link type. Refresh before retrying.");
+  return data;
+}
+window.addFlowMateCreativeAssetLink = addFlowMateCreativeAssetLink;
 window.addFlowMateWorkItemWatcher = addFlowMateWorkItemWatcher;
 
 async function transitionFlowMateCreativeStatus(displayId, nextStatus, options = {}) {

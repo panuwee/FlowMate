@@ -138,7 +138,7 @@ const NAV = [{
   group: "KPI",
   items: [{
     key: "kpi",
-    label: "ภาพรวม KPI",
+    label: "KPI Overview",
     icon: "chart"
   }, {
     key: "kpi-creative",
@@ -204,7 +204,7 @@ const TITLE_MAP = {
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
-  "kpi": "ภาพรวม KPI",
+  "kpi": "KPI Overview",
   "kpi-creative": "Creative KPI",
   "kpi-requester": "Requester KPI",
   "kpi-task": "Task Assign KPI",

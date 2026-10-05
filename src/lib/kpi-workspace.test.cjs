@@ -43,7 +43,7 @@ test('creative counts first lifetime delivery once, preserves archived work and 
  const t=makeTables();t.work_item_events.push({id:999,work_item_id:'creative-1',created_at:'2026-08-15T10:00:00Z',to_status:'delivered'});t.flowmate_creative_kpi_report_v[3].status='cancelled';
  const s=await api.load(createClient(t),user,'creative','2026-09');assert.equal(metric(s,'C04').value,16);assert.equal(api.metrics(s,{person:'unknown'}).find(m=>m.id==='C04').value,1);
  for(const id of ['C01','C02'])assert.equal(metric(s,id).value,null);
- assert.ok(metric(s,'C03').value>0);assert.ok(metric(s,'C03').eligible.length<metric(s,'C03').cohort.length);
+ assert.equal(metric(s,'C03'),undefined);
  assert.ok(metric(s,'C04').cohort.some(f=>f.id==='creative-2'));assert.ok(!metric(s,'C04').cohort.some(f=>f.id==='creative-1'));
 });
 test('missing count, duplicate rows and truncated pages fail completeness',async()=>{
@@ -69,7 +69,7 @@ test('R03 counts the current Brief Link without receiver acceptance and ignores 
  assert.equal(m.value,11/18*100);assert.equal(m.available,true);
  assert.equal(m.eligible.find(f=>f.id==='creative-1').briefLink,'https://example.com/latest');
  assert.equal(m.eligible.find(f=>f.id==='creative-1').readyAt,null);
- assert.equal(api.metricRows(m).find(r=>r.fact.id==='creative-2').result,'ยังไม่มี Brief Link');
+ assert.equal(api.metricRows(m).find(r=>r.fact.id==='creative-2').result,'Missing Brief Link');
  assert.ok(c.calls.some(q=>q.name==='creative_request_details'));
  assert.ok(c.calls.some(q=>q.name==='creative_kpi_brief_evidence')); // R01 reads confirmation; R03 still uses only Brief Link.
 });
@@ -92,7 +92,7 @@ test('requester bounds report reads to monthly base IDs and fails closed on cand
 test('task throughput requires explicit first approve and excludes canonical TEST',async()=>{
  const t=makeTables();t.work_item_events.push({id:999,work_item_id:'task-1',created_at:'2026-08-20T00:00:00Z',to_status:'delivered',metadata:{source:'task_assign_workspace',action:'approve'}});
  const s=await api.load(createClient(t,{tests:['task-2']}),user,'task','2026-09');assert.equal(metric(s,'T03').value,11);assert.equal(s.testExcluded,1);assert.equal(metric(s,'T07').value,3);assert.equal(metric(s,'T06').value,4/16*100);
- for(const id of ['T01','T10'])assert.equal(metric(s,id).value,null);assert.equal(api.metricRows(metric(s,'T06')).filter(r=>r.result==='มีการขอแก้หลังส่งตรวจ').length,4);
+ for(const id of ['T01','T10'])assert.equal(metric(s,id).value,null);assert.equal(api.metricRows(metric(s,'T06')).filter(r=>r.result==='Revision requested').length,4);
 });
 test('registry failure is closed, independent backlog survives failed history',async()=>{
  await assert.rejects(api.load(createClient(makeTables(),{classifierError:true}),user,'task','2026-09'));const s=await api.load(createClient(makeTables(),{fail:q=>q.name==='work_item_events'}),user,'task','2026-09');assert.equal(s.partial,true);assert.equal(metric(s,'T03').value,null);assert.equal(metric(s,'T07').value,3);
@@ -139,10 +139,10 @@ test('Requester CSV round-trips quoted Thai content and matches team and missing
   for(const missing of [false,true]){
    const expected=api.metricRows(m).filter(r=>!missing||!r.fact.briefLink);
    const selected={...m,cohort:expected.map(r=>r.fact)},[headers,...rows]=parse(api.csv(s,selected));
-   assert.equal(headers.length,12);assert.ok(rows.every(r=>r.length===headers.length));assert.equal(rows.length,expected.length);
+   assert.equal(headers.length,13);assert.ok(rows.every(r=>r.length===headers.length));assert.equal(rows.length,expected.length);
    assert.equal(new Set(rows.map(r=>r[5])).size,rows.length);
    assert.deepEqual(rows.map(r=>r[5]).sort(),Array.from(expected,r=>r.fact.displayId).sort());
-   for(const row of rows){const fact=expected.find(r=>r.fact.displayId===row[5]).fact;assert.equal(row[6],fact.title);assert.equal(row[7],fact.team);assert.equal(row[9],fact.readyAt??'');assert.equal(row[10],fact.briefLink);assert.equal(row[11],fact.briefLink?'มี Brief Link':'ยังไม่มี Brief Link');}
+   for(const row of rows){const fact=expected.find(r=>r.fact.displayId===row[5]).fact;assert.equal(row[6],fact.title);assert.equal(row[7],fact.team);assert.equal(row[9],fact.readyAt??'');assert.equal(row[10],fact.briefLink);assert.equal(row[12],fact.briefLink?'Brief Link Coverage':'Missing Brief Link');}
    if(filters.team)assert.ok(rows.every(r=>r[7]===filters.team));if(missing)assert.ok(rows.every(r=>r[10]===''));
   }
  }

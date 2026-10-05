@@ -2662,6 +2662,12 @@ function DetailScreen({
   const [detailRefreshTick, setDetailRefreshTick] = useState(0);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkDescription, setLinkDescription] = useState("");
+  const [linkKind, setLinkKind] = useState("general");
+  const linkRequestRef = React.useRef({
+    signature: "",
+    key: "",
+    pending: false
+  });
   const [commentBody, setCommentBody] = useState("");
   const [mentionUsers, setMentionUsers] = useState(window.FLOWMATE_MENTION_USERS || []);
   const [watcherUserId, setWatcherUserId] = useState("");
@@ -2879,6 +2885,7 @@ function DetailScreen({
   const canModifyDetail = !isArchivedDetail && !isViewerUser;
   const isRequesterUser = currentUserId === w.requesterUserId && !isViewerUser;
   const isOwnerUser = !isViewerUser && (currentTeamMemberId === w.assignee || currentUserId === w.assigneeUserId || owner?.userId === currentUserId);
+  const canRecordAssetLink = canModifyDetail && w.type === "creative" && !["delivered", "cancelled"].includes(w.status) && (isOwnerUser || window.FlowMateKpi?.menuAllowed(window.FLOWMATE_CURRENT_USER));
   const isActiveCreativeMember = !isViewerUser && activeCreativeMembers.some(member => member.id === currentTeamMemberId && member.active !== false);
   const canManageAssignee = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && (isAdminUser || isRequesterUser));
   const canSelfAssignUnassigned = Boolean(!battlePassAssignmentHeld && !isArchivedDetail && w.isSupabaseRow && w.type !== "quick" && w.status === "unassigned" && isActiveCreativeMember);
@@ -3092,6 +3099,7 @@ function DetailScreen({
   }
   async function submitLink(event) {
     event.preventDefault();
+    if (linkRequestRef.current.pending) return;
     if (!w.isSupabaseRow) {
       setActionMsg({
         tone: "warn",
@@ -3099,9 +3107,17 @@ function DetailScreen({
       });
       return;
     }
+    const typedAsset = w.type === "creative" && linkKind !== "general";
+    const signature = JSON.stringify([w.id, linkUrl.trim(), linkDescription.trim(), typedAsset ? linkKind : "general"]);
+    if (linkRequestRef.current.signature !== signature) linkRequestRef.current = {
+      signature,
+      key: crypto.randomUUID(),
+      pending: false
+    };
+    linkRequestRef.current.pending = true;
     setPending(true);
     try {
-      const data = await window.addFlowMateWorkItemLink(w.id, linkUrl, linkDescription);
+      const data = typedAsset ? await window.addFlowMateCreativeAssetLink(w.id, linkUrl, linkDescription, linkKind, linkRequestRef.current.key) : await window.addFlowMateWorkItemLink(w.id, linkUrl, linkDescription);
       const addedLink = {
         id: data?.id || `local-link-${Date.now()}`,
         work_item_id: data?.work_item_id,
@@ -3110,6 +3126,7 @@ function DetailScreen({
         created_by_user_id: data?.created_by_user_id || window.FLOWMATE_CURRENT_USER?.id,
         createdByName: window.FLOWMATE_CURRENT_USER?.name || "You",
         created_at: data?.created_at,
+        link_kind: data?.link_kind || "general",
         createdLabel: "Just now"
       };
       setDetailLinks(current => {
@@ -3123,9 +3140,10 @@ function DetailScreen({
       });
       setLinkUrl("");
       setLinkDescription("");
+      setLinkKind("general");
       setActionMsg({
         tone: "ok",
-        text: "Link added."
+        text: typedAsset ? data.kpi_eligible === false ? "Asset link added. This stage already happened; this link does not create historical KPI evidence." : "Asset link added with server-recorded submission time." : "Link added."
       });
       window.dispatchEvent(new CustomEvent("flowmate:refresh-request", {
         detail: {
@@ -3138,6 +3156,7 @@ function DetailScreen({
         text: window.flowmateUserError(error, "Add link failed.")
       });
     } finally {
+      linkRequestRef.current.pending = false;
       setPending(false);
     }
   }
@@ -3898,7 +3917,12 @@ function DetailScreen({
     className: "meta-row__lbl"
   }, link.createdByName || "Link"), React.createElement("div", {
     className: "meta-row__val"
-  }, window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(link.url) ? React.createElement("a", {
+  }, ["first_draft", "final_asset"].includes(link.link_kind) && React.createElement("span", {
+    className: "badge",
+    style: {
+      marginRight: 8
+    }
+  }, link.link_kind === "first_draft" ? "1st Draft" : "Final Asset"), window.flowmateSafeHttpUrl && window.flowmateSafeHttpUrl(link.url) ? React.createElement("a", {
     href: window.flowmateSafeHttpUrl(link.url),
     target: "_blank",
     rel: "noopener noreferrer"
@@ -3917,7 +3941,24 @@ function DetailScreen({
   }, "No links yet."), canModifyDetail && React.createElement("form", {
     className: "form-grid",
     onSubmit: submitLink
-  }, React.createElement("label", {
+  }, w.type === "creative" && React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", {
+    className: "field__label"
+  }, "Link type"), React.createElement("select", {
+    className: "select",
+    value: linkKind,
+    onChange: e => setLinkKind(e.target.value),
+    disabled: pending
+  }, React.createElement("option", {
+    value: "general"
+  }, "General / Reference"), React.createElement("option", {
+    value: "first_draft",
+    disabled: !canRecordAssetLink
+  }, "1st Draft"), React.createElement("option", {
+    value: "final_asset",
+    disabled: !canRecordAssetLink
+  }, "Final Asset"))), React.createElement("label", {
     className: "field"
   }, React.createElement("span", {
     className: "field__label"
