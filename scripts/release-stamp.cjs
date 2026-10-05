@@ -28,6 +28,9 @@ const VERSIONED_ASSETS = [
   "screens-c.js",
   "screens-ot.js",
   "screens-task-assign.js",
+  "kpi-workspace.css",
+  "kpi-workspace.js",
+  "screens-kpi.js",
   "app.js",
 ];
 const EXCLUDED_FROM_FINGERPRINT = ENTRY_PAGES.map(file => `:(exclude)${file}`);

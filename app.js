@@ -130,13 +130,28 @@ const NAV = [{
 }, {
   group: "Supervisor",
   items: [{
-    key: "kpi",
-    label: "Creative KPI",
-    icon: "chart"
-  }, {
     key: "team-members",
     label: "Team Members",
     icon: "users"
+  }]
+}, {
+  group: "KPI",
+  items: [{
+    key: "kpi",
+    label: "ภาพรวม KPI",
+    icon: "chart"
+  }, {
+    key: "kpi-creative",
+    label: "Creative KPI",
+    icon: "chart"
+  }, {
+    key: "kpi-requester",
+    label: "Requester KPI",
+    icon: "chart"
+  }, {
+    key: "kpi-task",
+    label: "Task Assign KPI",
+    icon: "chart"
   }]
 }];
 const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));
@@ -189,7 +204,11 @@ const TITLE_MAP = {
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
-  "kpi": "Creative KPI",
+  "kpi": "ภาพรวม KPI",
+  "kpi-creative": "Creative KPI",
+  "kpi-requester": "Requester KPI",
+  "kpi-task": "Task Assign KPI",
+  "kpi-legacy": "Creative KPI · รายงานเดิม",
   "team-members": "Team Members",
   "settings": "Team Members",
   "admin-whitelist": "Team Members"
@@ -222,6 +241,14 @@ function getProductHashRoute(productKey, routeKey, id = "") {
   const hashKey = productKey === TASK_ASSIGN_PRODUCT_KEY ? TASK_ASSIGN_ROUTE_TO_HASH[routeKey] : routeKey;
   return id ? `${hashKey}/${id}` : hashKey;
 }
+function getFlowMateKpiDetailDestination(id, domain) {
+  const productKey = domain === "task" ? TASK_ASSIGN_PRODUCT_KEY : "flowmate";
+  return {
+    productKey,
+    route: "detail",
+    hash: getProductHashRoute(productKey, "detail", id)
+  };
+}
 function isProductChoicePath() {
   return /\/home\/?$/.test(String(window.location.pathname || ""));
 }
@@ -246,15 +273,18 @@ function showProductChoicePathInAddressBar() {
     window.history.replaceState(null, "", `${basePath}home`);
   } catch (e) {}
 }
-function getVisibleNavGroups(role) {
+function getVisibleNavGroups(role, currentUser) {
   if (role === "viewer") return MEMBER_NAV_GROUPS.map(group => ({
     ...group,
     items: group.items.filter(item => item.key !== "create")
   })).filter(group => group.items.length);
+  if (role !== "admin" && currentUser && window.FlowMateKpi?.menuAllowed(currentUser)) return MEMBER_NAV_GROUPS.concat(NAV.filter(group => group.group === "KPI"));
   return role === "admin" ? NAV : MEMBER_NAV_GROUPS;
 }
-function isFlowMateRouteAllowedForRole(role, routeKey) {
+function isFlowMateRouteAllowedForRole(role, routeKey, currentUser) {
   if (role === "viewer" && routeKey === "create") return false;
+  if (role === "viewer" && routeKey.startsWith("kpi")) return false;
+  if (routeKey.startsWith("kpi") && currentUser) return Boolean(TITLE_MAP[routeKey]) && Boolean(window.FlowMateKpi?.menuAllowed(currentUser));
   if (role === "admin") return Boolean(TITLE_MAP[routeKey]);
   return MEMBER_ROUTE_KEYS.has(routeKey);
 }
@@ -402,6 +432,12 @@ function App() {
     message: ""
   });
   function nav(key) {
+    if (key.startsWith("kpi")) {
+      setActiveProduct("flowmate");
+      setRoute(key);
+      window.location.hash = key;
+      return;
+    }
     setRoute(key);
     window.location.hash = getProductHashRoute(activeProduct, key);
   }
@@ -415,6 +451,19 @@ function App() {
     setFocusId(id);
     setRoute("detail");
     window.location.hash = getProductHashRoute(activeProduct, "detail", id);
+  }
+  function openKpiWorkItem(id, domain) {
+    const destination = getFlowMateKpiDetailDestination(id, domain);
+    if (window.saveFlowMateDetailBackContext && route !== "detail") {
+      window.saveFlowMateDetailBackContext({
+        route,
+        label: `Back to ${TITLE_MAP[route] || "Previous"}`
+      });
+    }
+    setActiveProduct(destination.productKey);
+    setFocusId(id);
+    setRoute(destination.route);
+    window.location.hash = destination.hash;
   }
   async function refreshNotifications(options = {}) {
     if (!window.loadFlowMateNotifications) {
@@ -934,8 +983,8 @@ function App() {
   const visibleNavGroups = isTaskAssignProduct ? TASK_ASSIGN_NAV.map(group => ({
     ...group,
     items: group.items.filter(item => !isViewerUser || item.key !== "create")
-  })) : getVisibleNavGroups(user.role);
-  const allowedRoute = (!isViewerUser || route !== "create") && (isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route));
+  })).concat(window.FlowMateKpi?.menuAllowed(user) ? NAV.filter(group => group.group === "KPI") : []) : getVisibleNavGroups(user.role, user);
+  const allowedRoute = (!isViewerUser || route !== "create") && (isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route, user));
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
   const accessibleTeams = getFlowMateAccessibleTeams(user).filter(team => !isTaskAssignProduct || team.key !== "gdve");
@@ -1035,7 +1084,7 @@ function App() {
     });
   }
   return React.createElement("div", {
-    className: "app",
+    className: `app ${["kpi", "kpi-creative", "kpi-requester", "kpi-task"].includes(route) ? "app--kpi" : ""}`,
     "data-active-team": activeTeamKey || undefined
   }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
     className: "app__brand"
@@ -1184,14 +1233,26 @@ function App() {
     className: "nav-section"
   }, group.group), group.items.map(it => {
     const itemCount = navCounts[it.key];
-    return React.createElement("div", {
+    return React.createElement(it.key.startsWith("kpi") ? "button" : "div", {
       key: it.key,
-      className: `nav-item ${route === it.key ? "is-active" : ""}`,
+      type: it.key.startsWith("kpi") ? "button" : undefined,
+      "aria-current": route === it.key ? "page" : undefined,
+      "aria-label": it.key.startsWith("kpi") ? it.label : undefined,
+      title: it.key.startsWith("kpi") ? it.label : undefined,
+      className: `nav-item ${it.key.startsWith("kpi") ? "kpi-nav" : ""} ${route === it.key ? "is-active" : ""}`,
       onClick: () => nav(it.key)
     }, React.createElement(Icon, {
       name: it.icon,
       size: 15
-    }), React.createElement("span", null, it.label), itemCount != null && React.createElement("span", {
+    }), React.createElement("span", null, it.label), it.key.startsWith("kpi") && React.createElement("span", {
+      className: "kpi-nav__compact",
+      "aria-hidden": true
+    }, {
+      kpi: "ภาพรวม",
+      "kpi-creative": "Creative",
+      "kpi-requester": "ผู้ขอ",
+      "kpi-task": "Task"
+    }[it.key]), itemCount != null && React.createElement("span", {
       className: "nav-item__count"
     }, itemCount));
   }))), automationAccess.userId === authState.user?.id && ["allowed", "unavailable"].includes(automationAccess.state) && React.createElement("a", {
@@ -1248,7 +1309,16 @@ function App() {
     onOpen: open
   }), allowedRoute && route === "planning-calendar" && React.createElement(PlanningContentCalendarScreen, {
     onOpen: open
-  }), allowedRoute && route === "kpi" && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "team-members" && isAdminUser && React.createElement(TeamMembersScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
+  }), allowedRoute && ["kpi", "kpi-creative", "kpi-requester", "kpi-task"].includes(route) && React.createElement(window.FlowMateKpiWorkspaceScreen, {
+    view: {
+      "kpi": "overview",
+      "kpi-creative": "creative",
+      "kpi-requester": "requester",
+      "kpi-task": "task"
+    }[route],
+    onOpen: openKpiWorkItem,
+    onNav: nav
+  }), allowedRoute && route === "kpi-legacy" && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "team-members" && isAdminUser && React.createElement(TeamMembersScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
     onNav: nav
   })), isGlobalLeaveModalOpen && React.createElement(GlobalLeaveRequestModal, {
     onClose: () => setIsGlobalLeaveModalOpen(false)

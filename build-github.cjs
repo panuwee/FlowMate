@@ -19,7 +19,7 @@ const babel = require("@babel/core");
 
 const targetArg = process.argv[2] || ".";
 const dir = path.resolve(__dirname, targetArg);
-const FILES = ["data.jsx", "screens-a.jsx", "screens-b.jsx", "screens-c.jsx", "screens-creative-kpi.jsx", "screens-ot.jsx", "screens-task-assign.jsx", "app.jsx"];
+const FILES = ["data.jsx", "screens-a.jsx", "screens-b.jsx", "screens-c.jsx", "screens-creative-kpi.jsx", "screens-kpi.jsx", "screens-ot.jsx", "screens-task-assign.jsx", "app.jsx"];
 const normalizeEol = value => value.replace(/\r\n/g, "\n");
 
 let ok = 0;
@@ -52,6 +52,16 @@ for (const file of FILES) {
     changed.push(path.basename(outPath));
     ok++;
   }
+}
+const kpiSource = fs.readFileSync(path.join(dir, "kpi-workspace.ts"), "utf8");
+const ts = require("typescript");
+const kpiCompiled = ts.transpileModule(kpiSource, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText;
+const kpiOutput = "/* AUTO-GENERATED from kpi-workspace.ts by build-github.cjs. */\n(function () { const module = { exports: {} }; const exports = module.exports;\n" + kpiCompiled + "\n})();\n";
+const kpiPath = path.join(dir, "kpi-workspace.js");
+if (!fs.existsSync(kpiPath) || normalizeEol(fs.readFileSync(kpiPath, "utf8")) !== normalizeEol(kpiOutput)) {
+  fs.writeFileSync(kpiPath, kpiOutput, "utf8");
+  changed.push("kpi-workspace.js");
+  console.log("UPDATED  kpi-workspace.js <- from strict TypeScript source");
 }
 if (changed.length === 0) {
   console.log("\nNo output changed.");

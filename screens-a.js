@@ -1169,7 +1169,7 @@ function isFlowMateValidHttpUrl(value) {
   }
 }
 const FLOWMATE_CREATE_DRAFT_FIELDS = {
-  quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority", "responsibleTeam", "urgentReason", "referenceLinks", "confidential", "collaboratorIds", "parentId", "requestKey"],
+  quick: ["title", "note", "requesterTeam", "projectName", "assigneeUserId", "assigneeOtherName", "dueDate", "launchDate", "priority", "kpiPlan", "responsibleTeam", "urgentReason", "referenceLinks", "confidential", "collaboratorIds", "parentId", "requestKey"],
   creative: ["title", "requesterTeam", "campaignName", "productEvent", "assetType", "assetSubtype", "assetCount", "assetType2", "assetSubtype2", "assetCount2", "platforms", "sizeFormats", "sizeFormat", "briefLink", "briefNote", "referenceLink", "priority", "urgentReason", "dueDate", "launchDate", "publishTime", "marketingPlanContentItemId", "marketingPlanOriginalBriefLink", "marketingPlanProductEvent", "marketingPlanCampaignName"]
 };
 function getDefaultQuickDraft() {
@@ -1186,6 +1186,7 @@ function getDefaultQuickDraft() {
     launchDate: todayDate,
     priority: "normal",
     responsibleTeam: window.TaskAssign?.sourceTeam() || "",
+    kpiPlan: "unknown",
     urgentReason: "",
     referenceLinks: "",
     confidential: false,
@@ -1925,6 +1926,24 @@ function QuickTaskForm({
   }, React.createElement("legend", null, "Schedule & priority"), React.createElement("div", {
     className: "form-grid"
   }, React.createElement("div", {
+    className: "field"
+  }, React.createElement("label", {
+    className: "field__label",
+    htmlFor: "task-kpi-plan"
+  }, "Work planning"), React.createElement("select", {
+    id: "task-kpi-plan",
+    className: "select",
+    value: value.kpiPlan || "unknown",
+    onChange: e => update("kpiPlan", e.target.value)
+  }, React.createElement("option", {
+    value: "unknown"
+  }, "ยังไม่ระบุ"), React.createElement("option", {
+    value: "planned"
+  }, "ตามแผน"), React.createElement("option", {
+    value: "unplanned"
+  }, "งานแทรก")), React.createElement("div", {
+    className: "muted"
+  }, "เก็บประเภทตอนส่งคำขอเพื่อ KPI · งานแทรกไม่จำเป็นต้องเป็นงานด่วน")), React.createElement("div", {
     className: "field"
   }, React.createElement("label", {
     className: "field__label",

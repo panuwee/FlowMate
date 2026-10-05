@@ -194,6 +194,7 @@ window.TaskAssign = {
     if (!String(input.title || "").trim()) errors.title = "Title is required.";
     if (!String(input.note || "").trim()) errors.note = "Describe the work and expected deliverable.";
     if (!this.teams.some(team => team.key === input.responsibleTeam)) errors.responsibleTeam = "Choose a responsible team.";
+    if (input.kpiPlan && !["unknown", "planned", "unplanned"].includes(input.kpiPlan)) errors.kpiPlan = "Choose a valid work planning type.";
     const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
     const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value || "") && !Number.isNaN(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
     if (!validDate(input.launchDate) || input.launchDate < today) errors.launchDate = "Deadline must be today or later.";
@@ -218,7 +219,9 @@ window.TaskAssign = {
     const errors = this.validate(input);
     if (Object.keys(errors).length) throw new Error(Object.values(errors)[0]);
     const source = this.sourceTeam();
-    const result = await this.rpc("task_assign_create", {
+    const planned = input.kpiPlan && input.kpiPlan !== "unknown";
+    const result = await this.rpc(planned ? "task_assign_create_with_kpi" : "task_assign_create", {
+      ...(planned ? { p_plan_at_intake: input.kpiPlan } : {}),
       p_source_team: source, p_responsible_team: input.responsibleTeam, p_title: input.title.trim(), p_note: input.note.trim(),
       p_deadline: input.launchDate, p_request_key: input.requestKey, p_review_date: input.dueDate || null,
       p_project: input.projectName || null, p_assignee: input.responsibleTeam === source ? input.assigneeUserId : null,

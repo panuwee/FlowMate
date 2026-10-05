@@ -896,7 +896,7 @@ const FLOWMATE_CREATE_DRAFT_FIELDS = {
     "dueDate",
     "launchDate",
     "priority",
-    "responsibleTeam", "urgentReason", "referenceLinks", "confidential", "collaboratorIds", "parentId", "requestKey",
+    "kpiPlan", "responsibleTeam", "urgentReason", "referenceLinks", "confidential", "collaboratorIds", "parentId", "requestKey",
   ],
   creative: [
     "title",
@@ -941,6 +941,7 @@ function getDefaultQuickDraft() {
     launchDate: todayDate,
     priority: "normal",
     responsibleTeam: window.TaskAssign?.sourceTeam() || "",
+    kpiPlan: "unknown",
     urgentReason: "",
     referenceLinks: "",
     confidential: false,
@@ -1490,6 +1491,7 @@ function QuickTaskForm({ value, onChange, errors = {} }) {
 
     </div></fieldset>
     <fieldset className="task-form__section"><legend>Schedule & priority</legend><div className="form-grid">
+    <div className="field"><label className="field__label" htmlFor="task-kpi-plan">Work planning</label><select id="task-kpi-plan" className="select" value={value.kpiPlan || "unknown"} onChange={e => update("kpiPlan", e.target.value)}><option value="unknown">ยังไม่ระบุ</option><option value="planned">ตามแผน</option><option value="unplanned">งานแทรก</option></select><div className="muted">เก็บประเภทตอนส่งคำขอเพื่อ KPI · งานแทรกไม่จำเป็นต้องเป็นงานด่วน</div></div>
     <div className="field"><label className="field__label" htmlFor="task-review">1st Review Date (optional)</label><input id="task-review" aria-invalid={Boolean(errors.dueDate)} aria-describedby={errors.dueDate ? "task-error-dueDate" : undefined} className="input" type="date" min={getFlowMateTodayDateKey()} max={value.launchDate || undefined} value={value.dueDate} onChange={e => update("dueDate", e.target.value)} />{fieldError("dueDate")}</div>
     <div className="field"><label className="field__label" htmlFor="task-deadline">Deadline / Requested delivery *</label><input id="task-deadline" aria-required="true" aria-invalid={Boolean(errors.launchDate)} aria-describedby={errors.launchDate ? "task-error-launchDate" : undefined} className="input" type="date" min={getFlowMateTodayDateKey()} value={value.launchDate} onChange={e => update("launchDate", e.target.value)} />{fieldError("launchDate")}</div>
     <div className="field"><label className="field__label" htmlFor="task-priority">Priority</label><select id="task-priority" className="select" value={value.priority} onChange={e => update("priority", e.target.value)}>{["low", "normal", "high", "urgent"].map(priority => <option key={priority} value={priority}>{priority[0].toUpperCase() + priority.slice(1)}</option>)}</select></div>
