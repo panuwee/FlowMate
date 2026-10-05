@@ -4787,6 +4787,7 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
   const [campaigns, setCampaigns] = useStateApp([]);
   const [functions, setFunctions] = useStateApp([]);
   const [canManage, setCanManage] = useStateApp(false);
+  const [canCreate, setCanCreate] = useStateApp(false);
   const [state, setState] = useStateApp({ status: "loading", message: "" });
   const [search, setSearch] = useStateApp("");
   const [functionFilter, setFunctionFilter] = useStateApp("all");
@@ -4818,18 +4819,22 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
     setState({ status: "loading", message: "" });
     try {
       if (!client) throw new Error("เชื่อมต่อไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง");
-      const [rows, functionRows, permission] = await Promise.all([
+      const [rows, functionRows, permission, createPermission] = await Promise.all([
         loadCampaignPlannerPages(() => client.from("marketing_campaign_planner_v").select("*").order("campaign_tag_id")),
-        loadMarketingPlanCampaignFunctions(), client.rpc("marketing_campaign_planner_can_manage")
+        loadMarketingPlanCampaignFunctions(), client.rpc("marketing_campaign_planner_can_manage"),
+        client.rpc("marketing_campaign_planner_can_create")
       ]);
       if (permission.error) throw permission.error;
+      if (createPermission.error) throw createPermission.error;
       if (!aliveRef.current || requestId !== loadIdRef.current) return;
       setCampaigns(rows); setFunctions(functionRows); setCanManage(isAdmin && permission.data === true);
+      setCanCreate(createPermission.data === true);
       setItems({}); setItemErrors({}); setTaskPanel(null);
       setState({ status: "ready", message: "" });
     } catch (error) {
       if (!aliveRef.current || requestId !== loadIdRef.current) return;
       setCanManage(false);
+      setCanCreate(false);
       setState({ status: "error", message: isWorkflowMvpCatalogUnavailable(error)
         ? "Campaign Planner ยังไม่พร้อมใช้งาน กรุณาให้ Admin ตรวจการตั้งค่าแล้วลองอีกครั้ง"
         : "โหลด Campaign Planner ไม่สำเร็จ กรุณาลองอีกครั้ง" });
@@ -4886,12 +4891,15 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
     }
     setSaving(true);
     try {
-      const result = await client.rpc("marketing_campaign_planner_save", {
-        p_campaign_tag_id: selected.campaign_tag_id || null, p_name: form.name.trim(),
+      const payload = {
+        p_name: form.name.trim(),
         p_function_code: form.functionCode, p_tagline: form.tagline.trim(),
-        p_start_date: form.startDate || null, p_end_date: form.endDate || null,
-        p_expected_updated_at: selected.updated_at || null
-      });
+        p_start_date: form.startDate || null, p_end_date: form.endDate || null
+      };
+      const result = selected.campaign_tag_id
+        ? await client.rpc("marketing_campaign_planner_save", { ...payload,
+          p_campaign_tag_id: selected.campaign_tag_id, p_expected_updated_at: selected.updated_at || null })
+        : await client.rpc("marketing_campaign_planner_create", payload);
       if (result.error) throw result.error;
       dialogRef.current?.close(); setSelected(null);
       invalidateMarketingPlanDataCache();
@@ -4965,7 +4973,7 @@ function MarketingPlanCampaignPlannerScreen({ user }) {
     <div className="page-head"><div><h1>Campaign Planner</h1></div>
       <div className="campaign-planner__actions">
         {canManage && <button className={`btn ${manageMode ? "btn--primary" : "btn--secondary"}`} aria-label="Manage Campaign" title="Manage Campaign" aria-pressed={manageMode} onClick={() => setManageMode(!manageMode)}><Icon name="settings" /></button>}
-        {canManage && <button className="btn btn--primary" onClick={() => openCampaign({}, true)}><Icon name="plus" /> New Campaign</button>}
+        {canCreate && <button className="btn btn--primary" onClick={() => openCampaign({}, true)}><Icon name="plus" /> New Campaign</button>}
         <button className="btn btn--secondary" aria-label="Refresh" title="Refresh" disabled={state.status === "loading"} onClick={refresh}><Icon name="rerun" /></button>
       </div></div>
     {state.status === "error" && <div className="reason-box reason-box--need" role="alert">{state.message}</div>}

@@ -115,4 +115,36 @@ describe("Campaign Planner integration boundaries", () => {
     expect(planner).toContain('.eq("campaign_tag_id", id)');
     expect(planner).not.toContain('.in("month_key"');
   });
+  it.each([null, "existing-id"])("routes save for campaign %s to the scoped RPC", async id => {
+    const calls: any[] = [];
+    const sandbox = vm.createContext({
+      selected: { campaign_tag_id: id, updated_at: "version" },
+      form: { name: " Sale [Oct-2026] ", functionCode: "marketing", tagline: "", startDate: "", endDate: "" },
+      validateCampaignPlannerForm: () => ({}), setErrors() {}, setSaveError() {}, setSaving() {},
+      client: { rpc: async (name, payload) => { calls.push({ name, payload }); return { data: "new-id" }; } },
+      dialogRef: { current: { close() {} } }, setSelected() {}, invalidateMarketingPlanDataCache() {},
+      refresh: async () => {}, loadMarketingPlanCampaignOptions: async () => {}
+    });
+    const start = source.indexOf("  async function saveCampaign(event)", source.indexOf("function MarketingPlanCampaignPlannerScreen("));
+    vm.runInContext(source.slice(start, source.indexOf("  async function archiveCampaign", start)), sandbox);
+    await sandbox.saveCampaign({ preventDefault() {} });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].name).toBe(id ? "marketing_campaign_planner_save" : "marketing_campaign_planner_create");
+    expect(calls[0].payload.p_name).toBe("Sale [Oct-2026]");
+    if (id) expect(calls[0].payload.p_campaign_tag_id).toBe(id);
+    else expect(calls[0].payload).not.toHaveProperty("p_campaign_tag_id");
+  });
+  it("separates creation from Admin management in UI and SQL", () => {
+    const planner = source.slice(source.indexOf("function MarketingPlanCampaignPlannerScreen("), source.indexOf("function MarketingPlanTimelineScreen("));
+    expect(planner).toContain("setCanCreate(createPermission.data === true)");
+    expect(planner).toContain('{canCreate && <button className="btn btn--primary" onClick={() => openCampaign({}, true)}');
+    expect(planner).toContain("{canManage && !selected.is_archived");
+    const sql = readFileSync("supabase/marketing_campaign_planner_create_access.sql", "utf8");
+    expect(sql).toContain("auth.uid() is not null and public.is_active_app_user() is true");
+    expect(sql).toContain("elsif public.marketing_campaign_planner_can_manage() is not true");
+    expect(sql).toContain("public.marketing_campaign_planner_can_create() is not true");
+    expect(sql).toContain("public.marketing_upsert_campaign_tag(null, p_name, p_function_code)");
+    expect(sql).not.toContain("on conflict");
+    expect(sql).not.toContain("grant insert");
+  });
 });

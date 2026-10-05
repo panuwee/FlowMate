@@ -4892,6 +4892,7 @@ function MarketingPlanCampaignPlannerScreen({
   const [campaigns, setCampaigns] = useStateApp([]);
   const [functions, setFunctions] = useStateApp([]);
   const [canManage, setCanManage] = useStateApp(false);
+  const [canCreate, setCanCreate] = useStateApp(false);
   const [state, setState] = useStateApp({
     status: "loading",
     message: ""
@@ -4929,12 +4930,14 @@ function MarketingPlanCampaignPlannerScreen({
     });
     try {
       if (!client) throw new Error("เชื่อมต่อไม่สำเร็จ กรุณารีเฟรชหน้าแล้วลองอีกครั้ง");
-      const [rows, functionRows, permission] = await Promise.all([loadCampaignPlannerPages(() => client.from("marketing_campaign_planner_v").select("*").order("campaign_tag_id")), loadMarketingPlanCampaignFunctions(), client.rpc("marketing_campaign_planner_can_manage")]);
+      const [rows, functionRows, permission, createPermission] = await Promise.all([loadCampaignPlannerPages(() => client.from("marketing_campaign_planner_v").select("*").order("campaign_tag_id")), loadMarketingPlanCampaignFunctions(), client.rpc("marketing_campaign_planner_can_manage"), client.rpc("marketing_campaign_planner_can_create")]);
       if (permission.error) throw permission.error;
+      if (createPermission.error) throw createPermission.error;
       if (!aliveRef.current || requestId !== loadIdRef.current) return;
       setCampaigns(rows);
       setFunctions(functionRows);
       setCanManage(isAdmin && permission.data === true);
+      setCanCreate(createPermission.data === true);
       setItems({});
       setItemErrors({});
       setTaskPanel(null);
@@ -4945,6 +4948,7 @@ function MarketingPlanCampaignPlannerScreen({
     } catch (error) {
       if (!aliveRef.current || requestId !== loadIdRef.current) return;
       setCanManage(false);
+      setCanCreate(false);
       setState({
         status: "error",
         message: isWorkflowMvpCatalogUnavailable(error) ? "Campaign Planner ยังไม่พร้อมใช้งาน กรุณาให้ Admin ตรวจการตั้งค่าแล้วลองอีกครั้ง" : "โหลด Campaign Planner ไม่สำเร็จ กรุณาลองอีกครั้ง"
@@ -5043,15 +5047,18 @@ function MarketingPlanCampaignPlannerScreen({
     }
     setSaving(true);
     try {
-      const result = await client.rpc("marketing_campaign_planner_save", {
-        p_campaign_tag_id: selected.campaign_tag_id || null,
+      const payload = {
         p_name: form.name.trim(),
         p_function_code: form.functionCode,
         p_tagline: form.tagline.trim(),
         p_start_date: form.startDate || null,
-        p_end_date: form.endDate || null,
+        p_end_date: form.endDate || null
+      };
+      const result = selected.campaign_tag_id ? await client.rpc("marketing_campaign_planner_save", {
+        ...payload,
+        p_campaign_tag_id: selected.campaign_tag_id,
         p_expected_updated_at: selected.updated_at || null
-      });
+      }) : await client.rpc("marketing_campaign_planner_create", payload);
       if (result.error) throw result.error;
       dialogRef.current?.close();
       setSelected(null);
@@ -5200,7 +5207,7 @@ function MarketingPlanCampaignPlannerScreen({
     onClick: () => setManageMode(!manageMode)
   }, React.createElement(Icon, {
     name: "settings"
-  })), canManage && React.createElement("button", {
+  })), canCreate && React.createElement("button", {
     className: "btn btn--primary",
     onClick: () => openCampaign({}, true)
   }, React.createElement(Icon, {
