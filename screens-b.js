@@ -2333,7 +2333,9 @@ function TeamMembersScreen() {
     className: "page__title"
   }, "Team Members"), React.createElement("div", {
     className: "page__sub"
-  }, "People, access & creative capacity")), React.createElement("div", {
+  }, "People, access & creative capacity · ", React.createElement("a", {
+    href: new URL("home/control-center.html", document.baseURI).href
+  }, "ตั้งค่า SeaTalk Notifications"))), React.createElement("div", {
     className: "page__actions"
   }, React.createElement("button", {
     className: "btn btn--secondary",

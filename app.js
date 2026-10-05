@@ -375,6 +375,29 @@ function App() {
     userId: null,
     state: "loading"
   });
+  const [controlCenterAccess, setControlCenterAccess] = useStateApp({
+    userId: null,
+    allowed: false
+  });
+  useEffectApp(() => {
+    let active = true;
+    const userId = authState.user?.id;
+    setControlCenterAccess({
+      userId,
+      allowed: false
+    });
+    if (authState.status === "signed-in" && userId && window.flowmateSupabase) {
+      window.flowmateSupabase.rpc("wcc_access").then(result => {
+        if (active) setControlCenterAccess({
+          userId,
+          allowed: !result.error && result.data === true
+        });
+      }).catch(() => {});
+    }
+    return () => {
+      active = false;
+    };
+  }, [authState.status, authState.user?.id, activeTeamKey]);
   useEffectApp(() => {
     let cancelled = false;
     const userId = authState.status === "signed-in" ? authState.user?.id : null;
@@ -1262,7 +1285,13 @@ function App() {
       textDecoration: "none"
     },
     title: automationAccess.state === "unavailable" ? "ยังตรวจสิทธิ์ไม่ได้ เปิดหน้าเพื่อลองตรวจอีกครั้ง" : "ติดตามระบบอัตโนมัติกิจกรรม"
-  }, "Activity Automation"), React.createElement(LiveStatus, {
+  }, "Activity Automation"), (isAdminUser || controlCenterAccess.userId === authState.user?.id && controlCenterAccess.allowed) && React.createElement("a", {
+    className: "nav-item",
+    href: new URL("home/control-center.html", document.baseURI).href,
+    style: {
+      textDecoration: "none"
+    }
+  }, "Control Center"), React.createElement(LiveStatus, {
     realtimeState: realtimeState
   })), React.createElement("main", {
     className: "app__main",

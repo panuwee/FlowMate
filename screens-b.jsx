@@ -1653,7 +1653,7 @@ function TeamMembersScreen() {
     finally { setSaving(false); }
   }
   return <div className="page team-members-page">
-    <div className="page__header"><div><h1 className="page__title">Team Members</h1><div className="page__sub">People, access & creative capacity</div></div>
+    <div className="page__header"><div><h1 className="page__title">Team Members</h1><div className="page__sub">People, access & creative capacity · <a href={new URL("home/control-center.html", document.baseURI).href}>ตั้งค่า SeaTalk Notifications</a></div></div>
       <div className="page__actions"><button className="btn btn--secondary" onClick={refresh} disabled={loading}>Refresh</button>
         <button className="btn btn--primary" disabled={loading || Boolean(error)} onClick={()=>{setTab("members");open(null);}}><Icon name="plus"/> Add member</button></div></div>
     <div className="tm-summary"><span><strong>{rows.length}</strong> Members</span><span><strong>{rows.filter(r=>r.access_active).length}</strong> Active</span><span><strong>{rows.filter(r=>r.access_active && r.deactivate_at).length}</strong> Scheduled to leave</span></div>
