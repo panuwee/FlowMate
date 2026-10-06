@@ -96,7 +96,20 @@
   async function rpc(name,args){let timer;try{const result=await Promise.race([client.rpc(name,args),new Promise((_,reject)=>{timer=root.setTimeout(()=>reject({code:'TIMEOUT'}),15000);})]);if(result.error)throw result.error;if(result.data?.version!==1||!result.data?.data)throw {code:'CONTRACT'};result.data.data=normalize(result.data.data);return result.data;}finally{root.clearTimeout(timer);}}
   function clear(){++generation;++detailGeneration;capabilities={};legacyAllowed=false;snapshot=false;cursor=null;cursors=[];$('am-content').replaceChildren();$('am-detail').replaceChildren();$('am-observed').textContent='';$('am-pagination').hidden=true;$('am-account').textContent='ยังไม่ได้เข้าสู่ระบบ';$('am-legacy').hidden=true;if($('am-drawer').open)$('am-drawer').close();}
   function outputs(parent,rows){if(!rows?.length){empty(parent,'ยังไม่มีชุดงานในช่วงที่เลือก');return;}const list=n('ul',null,'am-list');for(const o of rows){const li=n('li');li.append(n('strong',o.projectCode||(o.activity==='battle_pass'?battlePassProject(o):null)||o.displayId||labels[o.activity]||'ชุดงาน'));li.append(n('p',(o.campaignStart||'ไม่ทราบวันเริ่ม')+' — '+(o.campaignEnd||'ไม่ทราบวันสิ้นสุด'),'am-muted'));const states=n('p');states.append('การสร้าง: ',badge(o.generationState),' · บรีฟ: ',badge(o.briefState==='pending'?'pending_acceptance':o.briefState),' · มอบหมาย: ',badge(o.assignmentState));li.append(states);if(o.marketingWorkingSheetLinked!=null)li.append(n('p','Working Sheet ใน Marketing Plan: '+(o.marketingWorkingSheetLinked?'เชื่อมกับ CR แล้ว':'ยังยืนยันการเชื่อมไม่ได้')));if(o.briefUrl)li.append(link('เปิด Brief',o.briefUrl));if(o.workingSheetUrl)li.append(link(o.mode==='production'&&o.source==='shared'?'ต้นทาง Working Sheet':'Working Sheet',o.workingSheetUrl));const cr=o.workItemUrl||o.crUrl;if(cr)li.append(link('เปิด '+(o.displayId||'CR')+' เพื่อตรวจบรีฟ',cr));list.append(li);}parent.append(list);}
-  function projectRows(rows){return rows.flatMap(a=>a.projects?.length?a.projects.map(p=>({...a,...p,projects:null,label:a.label,key:a.key})):a.completedOutput?[{...a,projects:null,projectCode:battlePassProject(a.completedOutput)}]:[{...a,projects:null}]);}
+  function projectRows(rows){
+    const result=[],byProject=new Map();
+    const stamp=c=>Date.parse(c?.sourceCheckedAt||c?.checkedAt||'')||0;
+    for(const a of rows.flatMap(a=>a.projects?.length?a.projects.map(p=>({...a,...p,projects:null,label:a.label,key:a.key})):a.completedOutput?[{...a,projects:null,projectCode:battlePassProject(a.completedOutput)}]:[{...a,projects:null}])){
+      if(!a.projectCode){result.push(a);continue;}
+      const key=JSON.stringify([a.sourceSystem,a.key,a.projectCode.trim()]),previous=byProject.get(key);
+      if(!previous){const row={...a};byProject.set(key,row);result.push(row);continue;}
+      const done=isDone(previous)?{...previous}:isDone(a)?a:null;
+      if(stamp(a.lastSourceCheck)>stamp(previous.lastSourceCheck))previous.lastSourceCheck=a.lastSourceCheck;
+      if(a.lastRun&&(!previous.lastRun||Date.parse(a.lastRun.eventAt)>Date.parse(previous.lastRun.eventAt)))previous.lastRun=a.lastRun;
+      if(done){previous.completedOutput=done.completedOutput||previous.completedOutput;previous.lastRun=done.lastRun?.status==='complete'?done.lastRun:{...previous.lastRun,status:'complete'};}
+    }
+    return result;
+  }
   function isDone(a){return !!a.completedOutput||a.lastSourceCheck?.code==='existing_output_complete'||a.lastRun?.status==='complete';}
   function businessStatus(a){if(isDone(a))return badge('done');const c=a.lastSourceCheck,r=a.lastRun;
     return badge(r&&(!c||!c.checkedAt||new Date(r.eventAt)>=new Date(c.checkedAt))?r.status:c?.code||c?.status||'unknown');}
@@ -105,7 +118,7 @@
     table(parent,['กิจกรรม / โครงการ','สถานะงาน','ตรวจต้นทางล่าสุด','สิ่งที่ต้องทำ'],projectRows(rows),a=>{
       const name=n('div');name.append(n('strong',a.projectCode||a.label||labels[a.key]));if(a.projectCode)name.append(n('small',a.label||labels[a.key]));
       const action=n('div');action.append(n('small',nextAction(a)),button('ดูรายละเอียด',()=>activityDetail(a)));
-      const evidence=n('details',null,'am-source-evidence');evidence.append(n('summary',time(a.lastSourceCheck?.checkedAt||a.lastSourceCheck?.sourceCheckedAt)),sourceStatus(a));
+      const evidence=isDone(a)?n('span','—'):n('details',null,'am-source-evidence');if(!isDone(a))evidence.append(n('summary',time(a.lastSourceCheck?.sourceCheckedAt||a.lastSourceCheck?.checkedAt)),sourceStatus(a));
       return [name,businessStatus(a),evidence,action];
     });
   }

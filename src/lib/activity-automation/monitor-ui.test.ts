@@ -41,9 +41,25 @@ it('shows completed and waiting Golden Spin projects separately',async()=>{
  const text=p.$('am-content').textContent;expect(text).toContain('261005_Golden Spin (No.7)');expect(text).toContain('Done — สร้างแล้ว');expect(text).toContain('261019_Golden Spin (LE)');expect(text).toContain('รอยืนยันต้นทาง');
 });
 const diagnosisRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+it.each([false,true])('merges repeated source checks by project and hides checks for Done (reverse=%s)',async reverse=>{
+ const older='2026-10-05T09:30:00Z',latest='2026-10-06T04:00:00Z';
+ const codes=['261015_Conqueror Crate (Oct 2026)','261005_Golden Spin (No.7)','261019_Golden Spin (LE)'];
+ const activities=codes.map((projectCode,index)=>{
+  const projects=[older,latest].map(checkedAt=>({projectCode,lastRun:null,lastSourceCheck:{code:index<2&&checkedAt===older?'existing_output_complete':'waiting_confirmation',confirmed:false,checkedAt}}));
+  return {...activity,key:index===0?'conqueror_crate':'golden_spin',projects:reverse?projects.reverse():projects};
+ });
+ const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities}):undefined});
+ const table=[...p.$('am-content').querySelectorAll('table')].find((t:any)=>t.textContent.includes('ตรวจต้นทางล่าสุด')) as any;
+ const rows=[...table.querySelectorAll('tbody tr')];expect(rows).toHaveLength(3);
+ rows.forEach((row:any,index)=>{
+  expect(row.textContent).toContain(codes[index]);
+  if(index<2){expect(row.textContent).toContain('Done — สร้างแล้ว');expect(row.querySelector('.am-source-evidence')).toBeNull();expect(row.children[2].textContent).toBe('—');}
+  else{expect(row.textContent).toContain('รอยืนยันต้นทาง');expect(row.querySelectorAll('.am-source-evidence')).toHaveLength(1);expect(row.children[2].textContent).toContain('11:00');expect(row.children[2].textContent).not.toContain('16:30');}
+ });
+});
 it('shows a linked existing activity Done without stale source readiness warnings',async()=>{
  const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{...activity,key:'membership',projects:[{projectCode:'261001_Membership (Oct 2026)',lastRun:null,lastSourceCheck:{projectCode:'261001_Membership (Oct 2026)',code:'existing_output_complete',sourceReady:false,checkedAt:'2026-10-01T05:00Z'}}]}]}):undefined});
- const text=p.$('am-content').textContent;expect(text).toContain('Done — สร้างแล้ว');expect(text).toContain('ข้ามรายการนี้และตรวจรอบถัดไป');
+ const text=p.$('am-content').textContent;expect(text).toContain('Done — สร้างแล้ว');expect(text).toContain('ชุดงานครบแล้ว');
  expect(text).not.toContain('ต้นทางยังไม่พร้อม');
 });
 const integrationEvidence=(mode='test')=>({
