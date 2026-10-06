@@ -1,4 +1,4 @@
-import {afterEach,describe,expect,it} from 'vitest';
+import {afterEach,describe,expect,it,vi} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {Window} from 'happy-dom';
 
@@ -15,6 +15,7 @@ async function page(options:any={}){
  const dialog=w.document.getElementById('am-drawer');dialog.showModal=()=>{dialog.open=true;};dialog.close=()=>{dialog.open=false;};
  const calls:any[]=[];let callback:any;
  w.flowmateSupabase={auth:{getUser:async()=>({data:{user:options.signedOut?null:{id:'ops'}}}),onAuthStateChange:(cb:any)=>{callback=cb;}},rpc:async(name:string,args:any)=>{calls.push({name,args});if(options.rpc){const custom=await options.rpc(name,args);if(custom!==undefined)return custom;}if(name.endsWith('_access'))return envelope({sharedRead:true,battlePassRead:false,battlePassControls:false});if(name.endsWith('_summary'))return envelope(summary());if(name.endsWith('_run'))return envelope({run:{source:'shared',id:args.p_run_id,activity:'conqueror_crate',status:'ready_for_review'},outputs:[output],timeline:[{step:'generation',status:'ready_for_review',at:'2026-09-18T04:00:00Z'}]});return envelope({rows:[],hasMore:false,nextCursor:null});}};
+ if(options.fakeDate)w.Date=Date;
  w.eval(script);await tick();return {w,calls,auth:(event:string,session:any)=>callback(event,session),$: (id:string)=>w.document.getElementById(id)};
 }
 afterEach(async()=>{await Promise.all(windows.splice(0).map(w=>w.happyDOM.close()));});
@@ -41,6 +42,36 @@ it('shows completed and waiting Golden Spin projects separately',async()=>{
  const text=p.$('am-content').textContent;expect(text).toContain('261005_Golden Spin (No.7)');expect(text).toContain('Done — สร้างแล้ว');expect(text).toContain('261019_Golden Spin (LE)');expect(text).toContain('รอยืนยันต้นทาง');
 });
 const diagnosisRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+it.each([['2026-10-06T05:00:00Z','Oct 2026','Nov 2026'],['2026-11-01T00:00:00Z','Nov 2026','Dec 2026']])('defaults to the current Bangkok month and following month on %s',async(date,current,next)=>{
+ vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(date));
+ try{const p=await page({fakeDate:true});const headings=[...p.$('am-content').querySelectorAll('h2')].map((h:any)=>h.textContent);
+ expect(headings).toContain(`สถานะกิจกรรม · ${current} (ปัจจุบัน)`);expect(headings).toContain(`สถานะกิจกรรม · ${next}`);
+ }finally{vi.useRealTimers();}
+});
+it('shows next-month source checks for every activity without borrowing completed current-month outputs',async()=>{
+ const keys=['battle_pass','membership','conqueror_crate','golden_spin','topup_promotion'];
+ const p=await page({query:'?month=2026-10',rpc:(name:string,args:any)=>name.endsWith('_summary')?envelope({cards:{},outputs:[],activities:keys.map(key=>({...activity,key,label:key,lastRun:{status:'complete',period:'2026-10'},lastSourceCheck:{period:args.p_month,projectCode:key==='battle_pass'?'261111_Battle Pass (Nov 2026)':`261101_${key}`,code:'waiting_confirmation',confirmed:false,checkedAt:'2026-10-06T05:00Z'}}))}):undefined});
+ const panel=[...p.$('am-content').querySelectorAll('.am-panel')].find((x:any)=>x.querySelector('h2')?.textContent==='สถานะกิจกรรม · Nov 2026') as any;
+ expect(panel).toBeTruthy();expect(panel.querySelectorAll('tbody tr')).toHaveLength(5);
+ expect(panel.textContent).toContain('261111_Battle Pass (Nov 2026)');expect(panel.textContent).not.toContain('Done');
+ expect(panel.querySelectorAll('.am-source-evidence')).toHaveLength(5);
+ expect(p.calls.filter(x=>x.name.endsWith('_summary')).map(x=>x.args.p_month)).toEqual(['2026-10','2026-11']);
+});
+it('keeps next-month completed outputs separate and rolls December into January',async()=>{
+ const p=await page({query:'?month=2026-12',rpc:(name:string,args:any)=>name.endsWith('_summary')?envelope({cards:{},outputs:[{...output,activity:'battle_pass',mode:'production',period:'2027-01',projectCode:'270111_Battle Pass (Jan 2027)',complete:true,generationState:'complete',workItemId:'cr',workItemUrl:output.crUrl}],activities:[{...activity,key:'battle_pass',lastRun:null,lastSourceCheck:null}]}):undefined});
+ const panels=[...p.$('am-content').querySelectorAll('.am-panel')];const january=panels.find((x:any)=>x.querySelector('h2')?.textContent==='สถานะกิจกรรม · Jan 2027') as any;
+ expect(january.textContent).toContain('270111_Battle Pass (Jan 2027)');expect(january.textContent).toContain('Done');
+ expect(p.calls.filter(x=>x.name.endsWith('_summary')).map(x=>x.args.p_month)).toEqual(['2026-12','2027-01']);
+});
+it('shows missing next-month evidence instead of reusing another month',async()=>{
+ const p=await page({query:'?month=2026-10',rpc:(name:string)=>name.endsWith('_summary')?envelope({cards:{},outputs:[],activities:[{...activity,key:'battle_pass',lastRun:{status:'complete',period:'2026-10'},lastSourceCheck:{period:'2026-12',code:'waiting_confirmation',projectCode:'261211_Battle Pass (Dec 2026)'}}]}):undefined});
+ const panel=[...p.$('am-content').querySelectorAll('.am-panel')].find((x:any)=>x.querySelector('h2')?.textContent==='สถานะกิจกรรม · Nov 2026') as any;
+ expect(panel.textContent).toContain('ยังไม่มีข้อมูล');expect(panel.textContent).not.toContain('261211_');expect(panel.textContent).not.toContain('Done');
+});
+it('retains the selected month when the next-month read fails',async()=>{
+ const p=await page({query:'?month=2026-10',rpc:(name:string,args:any)=>name.endsWith('_summary')?(args.p_month==='2026-11'?{error:{code:'UNAVAILABLE'}}:envelope(summary())):undefined});
+ expect(p.$('am-content').textContent).toContain('สถานะกิจกรรม · Oct 2026');expect(p.$('am-content').textContent).toContain('อ่านผลตรวจเดือนถัดไปไม่ได้');
+});
 it.each([false,true])('merges repeated source checks by project and hides checks for Done (reverse=%s)',async reverse=>{
  const older='2026-10-05T09:30:00Z',latest='2026-10-06T04:00:00Z';
  const codes=['261015_Conqueror Crate (Oct 2026)','261005_Golden Spin (No.7)','261019_Golden Spin (LE)'];
@@ -262,7 +293,7 @@ describe('Workspace incident actions',()=>{
 });
 describe('Monitor browser contract',()=>{
  it('preserves one instance of every legacy ID and never grants BP access from shared permission',async()=>{
-  const p=await page({query:'?view=activities'});const ids=[...p.w.document.querySelectorAll('[id]')].map((x:any)=>x.id);expect(new Set(ids).size).toBe(ids.length);expect(p.$('monitor').hidden).toBe(true);expect(p.$('am-legacy').hidden).toBe(true);expect(p.$('am-content').textContent).toContain('Membership · Golden Spin · Conqueror · Topup');expect(p.$('am-content').textContent).toContain('สร้างบรีฟแล้ว');expect(p.$('am-content').textContent).toContain('รอยืนยันบรีฟ');expect(p.$('am-content').textContent).toContain('มอบหมายแล้ว');expect(p.calls.map(x=>x.name)).toEqual(['activity_automation_monitor_access','activity_automation_monitor_workspace_summary']);
+  const p=await page({query:'?view=activities'});const ids=[...p.w.document.querySelectorAll('[id]')].map((x:any)=>x.id);expect(new Set(ids).size).toBe(ids.length);expect(p.$('monitor').hidden).toBe(true);expect(p.$('am-legacy').hidden).toBe(true);expect(p.$('am-content').textContent).toContain('Membership · Golden Spin · Conqueror · Topup');expect(p.$('am-content').textContent).toContain('สร้างบรีฟแล้ว');expect(p.$('am-content').textContent).toContain('รอยืนยันบรีฟ');expect(p.$('am-content').textContent).toContain('มอบหมายแล้ว');expect(p.calls.map(x=>x.name)).toEqual(['activity_automation_monitor_access','activity_automation_monitor_workspace_summary','activity_automation_monitor_workspace_summary']);
  });
  it('defaults to production and rejects invalid URLs and filters',async()=>{const p=await page({query:'?mode=bad&view=bad&month=1999-13'});const api=p.w.ActivityAutomationMonitor;expect(p.$('am-mode').value).toBe('production');expect(p.$('am-month').value).toMatch(/^20\d{2}-\d{2}$/);for(const url of ['javascript:alert(1)','https://docs.google.com.evil/presentation/d/abc','https://name:pass@docs.google.com/presentation/d/abc','https://evil.test/','https://docs.google.com/presentation/d/a.b'])expect(api.safeUrl(url)).toBeNull();expect(api.safeUrl(output.briefUrl)).toBe(output.briefUrl);expect(p.$('am-status').tagName).toBe('SELECT');});
  it('never calls a read API signed out',async()=>{const p=await page({signedOut:true});expect(p.calls).toEqual([]);expect(p.$('am-content').textContent).toContain('เข้าสู่ระบบ');});
