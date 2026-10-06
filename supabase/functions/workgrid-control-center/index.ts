@@ -67,16 +67,16 @@ export async function verify(d:Dependencies,kind:string,key:string){const c=awai
 }
 function clean(v:unknown){return String(v??'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]!)).slice(0,1000);}
 export function notificationMessage(e:any,base:string,test=false,freelance=false){
- if(freelance){return {tag:'text',text:{format:1,content:(test?'TEST · ':'')+(e.event_kind==='creative.review_requested'?'มี Task ให้รีวิว':'มี Task เข้ามา')}};}
+ if(freelance&&(test||e.event_kind!=='creative.review_requested'||!e.payload?.display_id)){return {tag:'text',text:{format:1,content:(test?'TEST · ':'')+(e.event_kind==='creative.review_requested'?'มี Task ให้รีวิว':'มี Task เข้ามา')}};}
  let u:URL;try{u=new URL(base);}catch{throw new DeliveryError('failed','base_url_invalid');}
  if(u.protocol!=='https:'||u.username||u.password)throw new DeliveryError('failed','base_url_invalid');
  const k=e.event_kind,p=e.payload??{};
- const heading=test?'TEST · Workgrid Control Center':k==='creative.review_requested'?'งานพร้อมตรวจ · Review':k==='creative.assigned'||k==='quick_task.assigned'?'ได้รับงานใหม่ · Assign':k==='activity.output_ready'?'Activity · สร้างงานพร้อมตรวจ':'Activity · ต้องตรวจสอบ';
+ const heading=test?'TEST · Workgrid Control Center':k==='creative.review_requested'?'Assets พร้อม Review แล้ว':k==='creative.assigned'||k==='quick_task.assigned'?'ได้รับงานใหม่ · Assign':k==='activity.output_ready'?'Activity · สร้างงานพร้อมตรวจ':'Activity · ต้องตรวจสอบ';
  const lines=[heading,clean(p.display_id),clean(p.title)];const link=(id:string)=>base.replace(/\/$/,'')+'/#detail/'+encodeURIComponent(id);
  if(!test&&p.display_id&&['creative.assigned','creative.review_requested','quick_task.assigned'].includes(k)){
   const url=link(p.display_id);return {tag:'interactive_message',interactive_message:{elements:[
    {element_type:'title',title:{text:heading}},
-   {element_type:'description',description:{format:1,text:'Task: '+clean(p.display_id)+'\nRequester: '+clean(p.requester_email)+'\nDue: '+clean(p.due_date)}},
+   {element_type:'description',description:{format:1,text:'Task: '+clean(p.display_id)+(k==='creative.review_requested'?'':'\nRequester: '+clean(p.requester_email))+'\nDue: '+(clean(p.due_date)||'—')}},
    {element_type:'button',button:{button_type:'redirect',text:'เปิดใน Workgrid',mobile_link:{type:'web',path:url},desktop_link:{type:'web',path:url}}}]}};
  }
  if(p.display_id)lines.push(link(p.display_id));for(const item of p.outputs??[])if(item.display_id)lines.push(clean(item.display_id)+' '+link(item.display_id));
@@ -88,10 +88,10 @@ async function send(d:Dependencies,c:any,tk:string,event:any,test=false){const f
  const record=async(step:string,r:any)=>{if(c.delivery&&!await d.rpc('wcc_record_step',{p_id:c.delivery.id,p_lease:c.delivery.lease_id,p_step:step,p_provider:r.message_id??null}))throw new DeliveryError('uncertain','step_persistence_unknown');};
  if(c.delivery?.steps?.message?.accepted)return {message_id:c.delivery.steps.message.provider_id};
  if(c.destination?.data?.group_id){
-  // Freelance content policy permits only the generic notice, including in TEST.
+  // Freelance Assign/TEST remain generic; approved Review cards expose only Task/Due/CR link.
   if(freelance&&c.entity?.data?.seatalk_id&&message.tag==='text')message.text!.content='<mention-tag target="seatalk://user?id='+c.entity.data.seatalk_id+'"/> '+message.text!.content;
-  if(!freelance&&c.entity?.kind==='profile'&&c.entity.data.seatalk_id&&!test&&!c.delivery?.steps?.mention?.accepted){
-   const r=await call(d,'/messaging/v2/group_chat',{group_id:c.destination.data.group_id,message:{tag:'text',text:{format:1,content:'<mention-tag target="seatalk://user?id='+c.entity.data.seatalk_id+'"/> '+(event.event_kind==='creative.review_requested'?'มี Task ให้รีวิว':'มี Task เข้ามา')}}},tk,true);
+  if(message.tag==='interactive_message'&&c.entity?.kind==='profile'&&c.entity.data.seatalk_id&&!test&&!c.delivery?.steps?.mention?.accepted){
+   const r=await call(d,'/messaging/v2/group_chat',{group_id:c.destination.data.group_id,message:{tag:'text',text:{format:1,content:'<mention-tag target="seatalk://user?id='+c.entity.data.seatalk_id+'"/> '+(event.event_kind==='creative.review_requested'?'Assets พร้อม Review แล้ว':'มี Task เข้ามา')}}},tk,true);
    try{await record('mention',r);}catch{throw new DeliveryError('uncertain','step_persistence_unknown');}
   }
   const r=await call(d,'/messaging/v2/group_chat',{group_id:c.destination.data.group_id,message},tk,true);
@@ -133,7 +133,7 @@ export async function handleRequest(r:Request,d:Dependencies){if(r.method==='OPT
 }
 export function defaults():Dependencies{const env=(k:string)=>Deno.env.get(k);const url=env('SUPABASE_URL'),service=env('SUPABASE_SERVICE_ROLE_KEY'),anon=env('SUPABASE_ANON_KEY');
  if(!url||!service||!anon)throw new Error('Server environment missing');
- async function rpcWith(n:string,a:any,jwt:string,key:string){const r=await fetch(url+'/rest/v1/rpc/'+n,{method:'POST',headers:{apikey:key,authorization:'Bearer '+jwt,'content-type':'application/json'},body:JSON.stringify(a??{}),signal:AbortSignal.timeout(15000)});if(!r.ok)throw new Error('RPC unavailable');return r.json();}
+ async function rpcWith(n:string,a:any,jwt:string,key:string){const r=await fetch(url+'/rest/v1/rpc/'+n,{method:'POST',headers:{apikey:key,authorization:'Bearer '+jwt,'content-type':'application/json'},body:JSON.stringify(a??{}),signal:AbortSignal.timeout(15000)});if(!r.ok)throw new Error('RPC unavailable');if(r.status===204)return null;const body=await r.text();return body.trim()?JSON.parse(body):null;}
  return {env,fetch,rpc:(n,a)=>rpcWith(n,a,service,service),authorize:async(jwt)=>{const r=await fetch(url+'/auth/v1/user',{headers:{apikey:anon,authorization:'Bearer '+jwt},signal:AbortSignal.timeout(15000)});
   if(!r.ok)throw new Error('Invalid session');const user=await r.json();const ws=await rpcWith('wcc_workspace',{},jwt,anon);if(ws.actor_id!==user.id)throw new Error('Actor mismatch');return {admin:ws.admin,actor_id:user.id};}};
 }
