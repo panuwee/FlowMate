@@ -28,6 +28,22 @@ async function deliveries(){return (await db.query<any>('select * from wcc_priva
 beforeAll(async()=>{db=new PGlite();await db.exec(fixture);await db.exec(sql);});
 afterAll(async()=>db.close());
 beforeEach(async()=>{await db.exec('reset role');await actor();await db.exec("delete from wcc_private.deliveries;delete from wcc_private.events;delete from public.work_items;delete from wcc_private.checks;delete from wcc_private.proposals;delete from wcc_private.audit;delete from wcc_private.reviewers;delete from wcc_private.entities where kind='profile' or key='test-group';update wcc_private.entities set data=jsonb_set(data,'{state}', '\"draft\"') where kind='bot';update wcc_private.entities set data=jsonb_set(data,'{enabled}','false') where kind='rule';update wcc_private.settings set runtime_enabled=false;");});
+it('runtime repair preserves settings and permissions, and targets the singleton row',async()=>{
+ await setup();
+ const before=await db.query<any>('select runtime_enabled from wcc_private.settings where singleton=true');
+ const rules=await db.query<any>("select key,data,version from wcc_private.entities where kind='rule' order by key");
+ const acl=await db.query<any>("select proacl::text acl from pg_proc where oid='public.wcc_set_runtime(boolean,text)'::regprocedure");
+ await db.exec(readFileSync('supabase/workgrid_control_center_runtime_where_fix.sql','utf8'));
+ expect((await db.query<any>('select runtime_enabled from wcc_private.settings where singleton=true')).rows).toEqual(before.rows);
+ expect((await db.query<any>("select key,data,version from wcc_private.entities where kind='rule' order by key")).rows).toEqual(rules.rows);
+ expect((await db.query<any>("select proacl::text acl from pg_proc where oid='public.wcc_set_runtime(boolean,text)'::regprocedure")).rows).toEqual(acl.rows);
+ const definition=(await db.query<any>("select pg_get_functiondef('public.wcc_set_runtime(boolean,text)'::regprocedure) definition")).rows[0].definition;
+ // PGlite does not ship pg_safeupdate; verify the bounded statement as well as real RPC behavior.
+ expect(definition).toMatch(/update wcc_private\.settings set runtime_enabled=p_enabled where singleton=true/i);
+ await actor(ids.requester);await expect(rpc('wcc_set_runtime',[false,'unauthorized pause'])).rejects.toThrow('Admin');
+ await actor();await rpc('wcc_set_runtime',[false,'pause after repair']);expect((await rpc('wcc_workspace')).runtime).toBe(false);
+ await rpc('wcc_set_runtime',[true,'resume after repair']);expect((await rpc('wcc_workspace')).runtime).toBe(true);
+});
 it('installer is idempotent and leaves sending disabled',async()=>{await db.exec(sql);await actor();expect((await rpc('wcc_workspace')).runtime).toBe(false);});
 it('denies ordinary members and anonymous readers',async()=>{await actor(ids.requester);await expect(rpc('wcc_workspace')).rejects.toThrow('denied');await actor(null,'anon');await expect(rpc('wcc_workspace')).rejects.toThrow('denied');});
 it('denies member apply and browser access to provider verification',async()=>{await actor(ids.requester);await expect(rpc('wcc_apply',['bot','creative','{}',null,1,'test'])).rejects.toThrow('Admin');await db.exec('set role authenticated');await expect(rpc('wcc_record_check',['bot','creative',1,true,'{}'])).rejects.toThrow('permission denied');await db.exec('reset role');});

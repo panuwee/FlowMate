@@ -205,7 +205,7 @@ create or replace function public.wcc_set_runtime(p_enabled boolean,p_reason tex
 language plpgsql security definer set search_path='' as $$ begin
  if public.is_admin_app_user() is not true then raise exception 'Admin required' using errcode='42501'; end if;
  if p_enabled is null or nullif(trim(p_reason),'') is null then raise exception 'State and reason required'; end if;
- update wcc_private.settings set runtime_enabled=p_enabled;
+ update wcc_private.settings set runtime_enabled=p_enabled where singleton=true;
  if p_enabled then
   insert into wcc_private.ownership(event_kind,scope)
    select distinct 'creative.assigned',m.user_id::text from wcc_private.entities p join public.team_members m on m.id=(p.data->>'member_id')::uuid
