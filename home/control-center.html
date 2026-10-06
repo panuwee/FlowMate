@@ -10,7 +10,7 @@
  if(requested&&!local){document.getElementById('wcc-root').textContent='โหมดจำลองใช้ได้เฉพาะเครื่อง local';return;}
  window.WCC_OFFLINE_DEMO=requested;
  const load=src=>new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.body.append(s);});
- try{if(!requested){await load('../supabase-js-local.js');await load('../supabase-client.js');}await load('../workgrid-control-center.js?v=20261006-wcc-fix-01');}
+ try{if(!requested){await load('../supabase-js-local.js');await load('../supabase-client.js');}await load('../workgrid-control-center.js?v=20261006-wcc-activate-01');}
  catch{document.getElementById('wcc-root').textContent='โหลดไม่สำเร็จ กรุณาลองใหม่';}
 })();
 </script></body></html>
