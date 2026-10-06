@@ -1,6 +1,15 @@
 /* FlowMate — internal creative workflow app
    All values pulled from Garena Design System tokens. */
 @import url("garena/colors_and_type.css");
+.app__main.app__main--operations { padding: 0; overflow: hidden; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.operations-workspace { display: block; width: 100%; flex: 1; min-height: 480px; border: 0; background: var(--surface-page); }
+.nav-item.nav-item--operations { min-height: 48px; }
+.app.app--operations { grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: minmax(56px, auto) minmax(0, 1fr); }
+.app--operations .app__topbar { flex-wrap: wrap; gap: 6px 12px; min-height: 56px; padding-block: 8px; overflow: visible; }
+.app--operations .searchbar input { min-width: 0; }
+.app--operations .searchbar-wrap { min-width: 160px; }
+.app--operations [data-testid="product-switch"] { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+@media (max-width: 760px) { .app.app--operations { grid-template-columns: 72px minmax(0, 1fr); } .app--operations .app__topbar { padding-inline: 8px; } }
 
 /* Campaign Planner: inherit Marketing Plan's typography, theme and function colours. */
 .campaign-planner { color: var(--fg-primary); }
