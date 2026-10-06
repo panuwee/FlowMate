@@ -192,6 +192,8 @@ const TASK_ASSIGN_NAV = [{
   }]
 }];
 const TITLE_MAP = {
+  "activity-automation": "Activity Automation",
+  "control-center": "Control Center",
   "workspace": "Workspace",
   "my-work": "My work",
   "create": "Create",
@@ -288,6 +290,53 @@ function isFlowMateRouteAllowedForRole(role, routeKey, currentUser) {
   if (role === "admin") return Boolean(TITLE_MAP[routeKey]);
   return MEMBER_ROUTE_KEYS.has(routeKey);
 }
+function OperationsWorkspace({
+  route
+}) {
+  const frame = useRefApp(null);
+  const file = route === "activity-automation" ? "Activity-Automation.html" : "control-center.html";
+  function contentUrl() {
+    const url = new URL("home/" + file, document.baseURI);
+    try {
+      const tail = decodeURIComponent(window.location.hash.slice(1).split("/").slice(1).join("/"));
+      const parsed = new URL(tail || "", url);
+      url.search = parsed.search;
+      url.hash = parsed.hash;
+    } catch (_) {}
+    url.searchParams.set("embedded", "1");
+    return url.href;
+  }
+  const [initialUrl] = useStateApp(contentUrl);
+  useEffectApp(() => {
+    function restore() {
+      if (getFlowMateHashRouteKey() !== route || !frame.current) return;
+      const target = contentUrl();
+      try {
+        const current = new URL(frame.current.contentWindow.location.href);
+        current.searchParams.set("embedded", "1");
+        if (current.href === target) return;
+      } catch (_) {}
+      frame.current.src = target;
+    }
+    window.addEventListener("popstate", restore);
+    window.addEventListener("hashchange", restore);
+    return () => {
+      window.removeEventListener("popstate", restore);
+      window.removeEventListener("hashchange", restore);
+    };
+  }, [route]);
+  return React.createElement("iframe", {
+    ref: frame,
+    className: "operations-workspace",
+    src: initialUrl,
+    title: TITLE_MAP[route],
+    onLoad: () => {
+      try {
+        frame.current.contentDocument.documentElement.dataset.theme = document.documentElement.dataset.theme;
+      } catch (_) {}
+    }
+  });
+}
 function App() {
   useEffectApp(() => {
     function applyViewerControls() {
@@ -377,22 +426,37 @@ function App() {
   });
   const [controlCenterAccess, setControlCenterAccess] = useStateApp({
     userId: null,
-    allowed: false
+    allowed: false,
+    loading: true
   });
   useEffectApp(() => {
     let active = true;
     const userId = authState.user?.id;
     setControlCenterAccess({
       userId,
-      allowed: false
+      allowed: false,
+      loading: authState.status === "signed-in"
     });
     if (authState.status === "signed-in" && userId && window.flowmateSupabase) {
       window.flowmateSupabase.rpc("wcc_access").then(result => {
         if (active) setControlCenterAccess({
           userId,
-          allowed: !result.error && result.data === true
+          allowed: !result.error && result.data === true,
+          loading: false
         });
-      }).catch(() => {});
+      }).catch(() => {
+        if (active) setControlCenterAccess({
+          userId,
+          allowed: false,
+          loading: false
+        });
+      });
+    } else {
+      setControlCenterAccess({
+        userId,
+        allowed: false,
+        loading: false
+      });
     }
     return () => {
       active = false;
@@ -1007,7 +1071,11 @@ function App() {
     ...group,
     items: group.items.filter(item => !isViewerUser || item.key !== "create")
   })).concat(window.FlowMateKpi?.menuAllowed(user) ? NAV.filter(group => group.group === "KPI") : []) : getVisibleNavGroups(user.role, user);
-  const allowedRoute = (!isViewerUser || route !== "create") && (isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route, user));
+  const isOperationsRoute = ["activity-automation", "control-center"].includes(route);
+  const automationAllowed = automationAccess.userId === user.id && ["allowed", "unavailable"].includes(automationAccess.state);
+  const controlCenterAllowed = isAdminUser || controlCenterAccess.userId === user.id && controlCenterAccess.allowed;
+  const operationsLoading = route === "activity-automation" ? automationAccess.userId !== user.id || automationAccess.state === "loading" : !isAdminUser && (controlCenterAccess.userId !== user.id || controlCenterAccess.loading);
+  const allowedRoute = isOperationsRoute ? route === "activity-automation" ? automationAllowed : controlCenterAllowed : (!isViewerUser || route !== "create") && (isTaskAssignProduct ? TASK_ASSIGN_NAV.flatMap(group => group.items).some(item => item.key === route) || route === "detail" : isFlowMateRouteAllowedForRole(user.role, route, user));
   const unreadNotificationCount = notifications.filter(notification => !notification.readAt).length;
   const globalSearchResults = normalizedGlobalSearch ? (globalSearchRows || []).filter(row => window.matchesFlowMateSearch ? window.matchesFlowMateSearch(row, normalizedGlobalSearch) : false).slice(0, 8) : [];
   const accessibleTeams = getFlowMateAccessibleTeams(user).filter(team => !isTaskAssignProduct || team.key !== "gdve");
@@ -1107,7 +1175,7 @@ function App() {
     });
   }
   return React.createElement("div", {
-    className: `app ${["kpi", "kpi-creative", "kpi-requester", "kpi-task"].includes(route) ? "app--kpi" : ""}`,
+    className: `app ${isOperationsRoute ? "app--operations" : ""} ${["kpi", "kpi-creative", "kpi-requester", "kpi-task"].includes(route) ? "app--kpi" : ""}`,
     "data-active-team": activeTeamKey || undefined
   }, React.createElement(FlowMatePromptHost, null), React.createElement("div", {
     className: "app__brand"
@@ -1279,27 +1347,57 @@ function App() {
       className: "nav-item__count"
     }, itemCount));
   }))), automationAccess.userId === authState.user?.id && ["allowed", "unavailable"].includes(automationAccess.state) && React.createElement("a", {
-    className: "nav-item",
+    className: `nav-item nav-item--operations ${route === "activity-automation" ? "is-active" : ""}`,
+    "aria-label": "Activity Automation",
     href: new URL("home/Activity-Automation.html", document.baseURI).href,
+    "aria-current": route === "activity-automation" ? "page" : undefined,
+    onClick: event => {
+      if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
+        event.preventDefault();
+        nav("activity-automation");
+      }
+    },
     style: {
       textDecoration: "none"
     },
     title: automationAccess.state === "unavailable" ? "ยังตรวจสิทธิ์ไม่ได้ เปิดหน้าเพื่อลองตรวจอีกครั้ง" : "ติดตามระบบอัตโนมัติกิจกรรม"
-  }, "Activity Automation"), (isAdminUser || controlCenterAccess.userId === authState.user?.id && controlCenterAccess.allowed) && React.createElement("a", {
-    className: "nav-item",
+  }, React.createElement(Icon, {
+    name: "chart",
+    size: 15
+  }), React.createElement("span", null, "Activity Automation")), (isAdminUser || controlCenterAccess.userId === authState.user?.id && controlCenterAccess.allowed) && React.createElement("a", {
+    className: `nav-item nav-item--operations ${route === "control-center" ? "is-active" : ""}`,
     href: new URL("home/control-center.html", document.baseURI).href,
+    "aria-label": "Control Center",
+    "aria-current": route === "control-center" ? "page" : undefined,
+    onClick: event => {
+      if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && event.button === 0) {
+        event.preventDefault();
+        nav("control-center");
+      }
+    },
     style: {
       textDecoration: "none"
     }
-  }, "Control Center"), React.createElement(LiveStatus, {
+  }, React.createElement(Icon, {
+    name: "settings",
+    size: 15
+  }), React.createElement("span", null, "Control Center")), React.createElement(LiveStatus, {
     realtimeState: realtimeState
   })), React.createElement("main", {
-    className: "app__main",
+    className: `app__main ${isOperationsRoute ? "app__main--operations" : ""}`,
     key: route + (focusId || "") + activeProduct + (route === "detail" ? "" : activeTeamKey)
   }, isViewerUser && React.createElement("div", {
     className: "reason-box",
     role: "status"
-  }, "Viewer · ดูข้อมูลได้อย่างเดียว"), allowedRoute && route === "my-work" && React.createElement(isTaskAssignProduct ? TaskAssignWorkspaceScreen : MyWorkScreen, {
+  }, "Viewer · ดูข้อมูลได้อย่างเดียว"), isOperationsRoute && operationsLoading && React.createElement("p", {
+    role: "status",
+    style: {
+      padding: 24
+    }
+  }, "กำลังตรวจสิทธิ์…"), isOperationsRoute && !operationsLoading && allowedRoute && React.createElement(OperationsWorkspace, {
+    key: route,
+    route
+  }), allowedRoute && route === "my-work" && React.createElement(isTaskAssignProduct ? TaskAssignWorkspaceScreen : MyWorkScreen, {
     onOpen: open,
     onNav: nav,
     searchQuery: searchQuery,

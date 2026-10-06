@@ -160,13 +160,15 @@
   async function createApp(root, client, options = {}) {
     const demo = !!options.demo;
     if (demo && !['localhost', '127.0.0.1', '[::1]', ''].includes(location.hostname)) throw new Error('โหมดจำลองใช้ได้เฉพาะ local');
+    const initialTab = new URLSearchParams(location.search).get('view');
     let ws,
-      tab = 'overview',
+      tab = Object.hasOwn(tabs, initialTab) ? initialTab : 'overview',
       query = '',
       dialog,
       editing,
       pending,
-      busy = false;
+      busy = false,
+      readAt;
     const find = (kind, key) => ws.entities.find(e => e.kind === kind && e.key === key);
     const member = id => ws.members.find(m => m.id === id);
     const name = e => e.kind === 'profile' ? member(e.data.member_id)?.name || e.key : e.data.label || e.key;
@@ -190,6 +192,7 @@
     }
     async function load() {
       ws = demo ? ws || demoWorkspace(options.lead) : await rpc('wcc_workspace');
+      readAt = new Date();
       render();
     }
     async function effect(task) {
@@ -210,22 +213,33 @@
         let i = 0;
         return row.replace(/<td([^>]*)>/g, (_, attrs) => `<td data-label="${esc(headers[i++] || '')}"${attrs}>`);
       });
-      return `<div class="table-wrap"><table><thead><tr>${headers.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? labeled.join('') : `<tr><td colspan="${headers.length}" class="empty">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>`;
+      return `<div class="table-wrap" tabindex="0" role="region" aria-label="${esc(tabs[tab])}"><table><thead><tr>${headers.map(h => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.length ? labeled.join('') : `<tr><td colspan="${headers.length}" class="empty">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>`;
     }
     function render() {
       root.innerHTML = `${demo ? '<div class="banner">โหมดจำลอง · ข้อมูลสมาชิกสมมติ ไม่เชื่อม production และไม่ส่ง SeaTalk · ทีมของ Folk ในหน้านี้เป็นตัวอย่าง</div>' : ''}
-        <header><div><a href="./">← Workgrid</a><h1>Control Center</h1><div class="muted">ตั้งค่าการแจ้งเตือน SeaTalk · v0.6</div></div><div>${badge(ws.admin ? 'Admin · ใช้ค่าจริงได้' : 'หัวหน้าทีม · ดูและเสนอ')}${button('reload', 'รีเฟรช')}</div></header>
+        <header><div><h1>Control Center</h1><div class="muted">ตั้งค่าการแจ้งเตือน SeaTalk</div></div><div>${badge(ws.admin ? 'Admin · ใช้ค่าจริงได้' : 'หัวหน้าทีม · ดูและเสนอ')}${button('reload', 'รีเฟรชข้อมูล')}</div></header>
         <div class="shell"><nav aria-label="ส่วนของ Control Center">${Object.entries(tabs).map(([key, label]) => button('tab', label, key, '', tab === key ? 'aria-current="page"' : '')).join('')}</nav>
-        <main><div id="wcc-status" class="status" role="status" aria-live="polite">${ws.runtime ? 'ระบบแจ้งเตือนเปิดใช้งาน' : 'ระบบแจ้งเตือนใหม่ยังพักอยู่ · การพักแจ้งเตือนไม่หยุดการสร้างงาน'}</div><section id="wcc-content"></section><footer>ผล provider ยอมรับข้อความไม่เท่ากับผู้รับอ่านแล้ว · Freelance รับเฉพาะแจ้ง Task ใหม่ / ให้รีวิว</footer></main></div><dialog id="wcc-dialog" aria-labelledby="wcc-dialog-title"></dialog>`;
+        <main><p class="muted">อ่านข้อมูลล่าสุด ${esc(new Intl.DateTimeFormat('th-TH', {
+        timeZone: 'Asia/Bangkok',
+        dateStyle: 'medium',
+        timeStyle: 'short'
+      }).format(readAt))} · Bangkok</p><div id="wcc-status" class="status" role="status" aria-live="polite">${ws.runtime ? 'ระบบแจ้งเตือนเปิดใช้งาน' : 'ระบบแจ้งเตือนยังพักอยู่ · การพักแจ้งเตือนไม่หยุดการสร้างงาน'}</div><section id="wcc-content"></section><footer>API รับข้อความแล้วไม่ได้หมายถึงผู้รับอ่านแล้ว · Freelance รับเฉพาะแจ้ง Task ใหม่ / ให้รีวิว</footer></main></div><dialog id="wcc-dialog" aria-labelledby="wcc-dialog-title"></dialog>`;
       dialog = root.querySelector('dialog');
       content();
     }
+    window.addEventListener('popstate', () => {
+      const view = new URLSearchParams(location.search).get('view');
+      tab = Object.hasOwn(tabs, view) ? view : 'overview';
+      query = '';
+      if (ws) render();
+    });
     function content() {
       const node = root.querySelector('#wcc-content');
       if (tab === 'overview') {
         const unready = ws.entities.filter(e => ['bot', 'destination', 'profile'].includes(e.kind) && !e.verification?.current).length;
         node.innerHTML = `<div class="cards"><div class="card"><span>การเชื่อมต่อรอตรวจ</span><strong>${unready}</strong></div><div class="card"><span>ข้อความต้องตรวจสอบ</span><strong>${ws.deliveries.filter(d => ['failed', 'uncertain'].includes(d.status)).length}</strong></div><div class="card"><span>ข้อเสนอรออนุมัติ</span><strong>${ws.proposals.filter(p => p.status === 'pending').length}</strong></div></div>
-          <div class="stack"><div class="panel"><h2>เริ่มใช้งาน</h2><p>1. เชื่อม Bot และตรวจการเชื่อมต่อ → 2. เพิ่มกลุ่มและผู้รับ → 3. ตรวจ / ทดสอบ → 4. เปิดกฎและระบบแจ้งเตือน</p><p class="muted">Review เป็นฟังก์ชันใหม่ เลือก Requester ของงาน · Task Assign ใช้ FlowMate · Activity สำเร็จเมื่อครบชุดเท่านั้น</p>${ws.admin ? button('runtime', ws.runtime ? 'พักระบบแจ้งเตือน' : 'เปิดระบบแจ้งเตือน') : ''}</div>
+          <div class="stack"><section class="panel"><h2>การทำงานของระบบแจ้งเตือน</h2><p>การเปิดหรือพักมีผลต่อการส่ง SeaTalk การสร้างงานยังใช้กติกาเดิม</p>${ws.admin ? button('runtime', ws.runtime ? 'พักระบบแจ้งเตือน' : 'เปิดระบบแจ้งเตือน') : ''}</section>
+          <details class="setup-guide" ${unready ? 'open' : ''}><summary>คู่มือเริ่มใช้งาน${unready ? ' · มีการเชื่อมต่อรอตรวจ' : ''}</summary><p>1. เชื่อม Bot และตรวจการเชื่อมต่อ → 2. เพิ่มกลุ่มและผู้รับ → 3. ตรวจ / ทดสอบ → 4. เปิดกฎและระบบแจ้งเตือน</p><p class="muted">Review เลือก Requester ของงาน · Task Assign ใช้ FlowMate · Activity สำเร็จเมื่อครบชุดเท่านั้น</p></details>
           <div class="panel"><h2>จำลองเส้นทาง · ไม่ส่งข้อความ</h2><form id="wcc-preview"><label class="field">งาน<select name="work">${ws.work_items.map(w => `<option value="${esc(w.id)}">${esc(w.display_id + ' · ' + w.title)}</option>`).join('')}</select></label><label class="field">เหตุการณ์<select name="event">${Object.entries(catalog).filter(([k]) => !k.startsWith('activity.')).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></label><p><button class="primary" ${!ws.work_items.length ? 'disabled' : ''}>ดูเส้นทาง</button></p></form><div id="preview-result"></div></div></div>`;
         return;
       }
@@ -436,8 +450,12 @@
         return;
       }
       if (action === 'tab') {
+        if (!Object.hasOwn(tabs, key)) return;
         tab = key;
         query = '';
+        const url = new URL(location.href);
+        url.searchParams.set('view', tab);
+        history.pushState({}, '', url);
         content();
         root.querySelectorAll('nav button').forEach(x => x.toggleAttribute('aria-current', false));
         b.setAttribute('aria-current', 'page');

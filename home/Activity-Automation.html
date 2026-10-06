@@ -5,28 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>Activity Automation · FlowMate</title>
+  <base target="_top">
+  <link rel="icon" href="../garena/logo_graphic.png">
+  <script src="../operations-workspace.js?v=20261006-operations-01"></script>
   <link rel="stylesheet" href="../battle-pass-monitor.css?v=20260916-bp2b4-07">
   <link rel="stylesheet" href="../activity-automation-monitor.css?v=20261001-workspace-v1">
+  <link rel="stylesheet" href="../operations-workspace.css?v=20261006-operations-01">
 </head>
 <body>
   <div class="am-layout">
-  <aside class="am-sidebar">
-    <a class="am-brand" href="./"><span aria-hidden="true">F</span> FlowMate</a>
-    <button type="button" id="am-menu" aria-controls="am-nav" aria-expanded="false">☰ เมนู</button>
-    <p class="am-nav-label">OPERATION WORKSPACE</p>
-    <nav id="am-nav" aria-label="Activity Automation" class="am-nav">
-      <a href="?view=overview" data-am-view="overview">◫ <span>ภาพรวม</span></a>
-      <a href="?view=activities" data-am-view="activities">▦ <span>กิจกรรม</span></a>
-      <a href="?view=runs" data-am-view="runs">◷ <span>ประวัติรัน</span></a>
-      <a href="?view=notifications" data-am-view="notifications">♧ <span>การแจ้งเตือน</span></a>
-      <a href="?view=tools&amp;activity=battle_pass" data-am-view="tools" id="am-tools-link" hidden><span>เครื่องมือ Battle Pass</span></a>
-    </nav>
-    <div class="am-sidebar-foot"><p>Activity Automation</p><small>ติดตามงานและหลักฐานในที่เดียว</small><a href="./">← กลับ FlowMate</a></div>
-  </aside>
   <main class="am-main">
-    <div class="am-topbar"><span>Operation <span aria-hidden="true">/</span> Activity Automation</span><span id="am-account">กำลังตรวจบัญชี…</span></div>
+    <span id="am-account" class="operations-account" role="status">กำลังตรวจบัญชี…</span>
     <section id="am-shell" aria-labelledby="am-title">
-      <div class="am-heading"><div><h1 id="am-title">ภาพรวมระบบอัตโนมัติกิจกรรม</h1><p class="am-muted">ระบบตรวจครบไหม · งานไหนต้องทำต่อ</p></div><button id="am-refresh" type="button">รีเฟรชข้อมูล</button></div>
+      <div class="am-heading"><div><h1 id="am-title">Activity Automation</h1><p class="am-muted" id="am-view-title">ติดตามงานอัตโนมัติและรายการที่ต้องตรวจ</p></div><button id="am-refresh" type="button">รีเฟรชข้อมูล</button></div>
+      <button type="button" id="am-menu" hidden aria-controls="am-nav" aria-expanded="false">เมนูภายในหน้า</button>
+      <nav id="am-nav" aria-label="ส่วนของ Activity Automation" class="am-nav">
+        <a href="?view=overview" data-am-view="overview">ภาพรวม</a>
+        <a href="?view=activities" data-am-view="activities">กิจกรรม</a>
+        <a href="?view=runs" data-am-view="runs">ประวัติรัน</a>
+        <a href="?view=notifications" data-am-view="notifications">การแจ้งเตือน</a>
+        <a href="?view=tools&amp;activity=battle_pass" data-am-view="tools" id="am-tools-link" hidden>เครื่องมือ Battle Pass</a>
+      </nav>
       <div class="am-filters">
         <label>สภาพแวดล้อม<select id="am-mode"><option value="production">Production</option><option value="test">TEST</option></select></label>
         <label>กิจกรรม<select id="am-activity"><option value="all">ทุกกิจกรรม</option><option value="battle_pass">Battle Pass</option><option value="membership">Membership</option><option value="conqueror_crate">Conqueror Crate</option><option value="golden_spin">Golden Spin</option><option value="topup_promotion">Topup Promotion</option></select></label>
@@ -134,6 +133,6 @@
   <script src="../battle-pass-operator.js?v=20260915-bp2b-02"></script>
   <script src="../battle-pass-diagnosis.js?v=20260915-bp2b-02"></script>
   <script src="../battle-pass-recovery.js?v=20260916-bp2b4-07"></script>
-  <script src="../activity-automation-monitor.js?v=20261001-workspace-v1"></script>
+  <script src="../activity-automation-monitor.js?v=20261006-operations-01"></script>
 </body>
 </html>
