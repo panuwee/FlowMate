@@ -676,6 +676,8 @@ async function handleRejectionReason(payload: Record<string, unknown>, runtime: 
 
 export async function handleRequest(request: Request, dependencies: Dependencies = {}): Promise<Response> {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+  // OT is temporarily suspended: no RPC, provider call, or callback processing.
+  return json({ code: "OT_MODULE_SUSPENDED", message: "OT Request is temporarily unavailable." }, 503);
   if (request.method !== "POST") return json({ code: "METHOD_NOT_ALLOWED" }, 405);
 
   let rawBody: Uint8Array;

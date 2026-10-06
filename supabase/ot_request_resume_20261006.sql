@@ -1,0 +1,45 @@
+-- Requires explicit approval to resume OT. Preserve subsequent unrelated hook changes.
+begin;
+do $resume$
+declare definition text; guard text := E' if path ~ \'^/(rpc/)?ot_\' then\n raise exception \'OT Request is temporarily suspended.\' using errcode=\'42501\'; end if;\n';
+begin
+ definition := pg_get_functiondef('public.flowmate_check_member_access()'::regprocedure);
+ if position(guard in definition) = 0 then raise exception 'OT guard changed; review before resuming'; end if;
+ execute replace(definition, guard, '');
+end $resume$;
+grant execute on function public.ot_list_request_audit(uuid) to authenticated;
+grant execute on function public.ot_current_user_is_hr_admin() to authenticated;
+grant execute on function public.ot_list_people_for_event() to authenticated;
+grant execute on function public.ot_calculate_occurrence_minutes(timestamp with time zone,timestamp with time zone,integer) to authenticated;
+grant execute on function public.ot_get_access_context() to authenticated;
+grant execute on function public.ot_reassign_pending_approver(uuid,uuid,text,uuid) to authenticated;
+grant execute on function public.ot_list_compliance_queue(date) to authenticated;
+grant execute on function public.ot_current_user_is_owner() to authenticated;
+grant execute on function public.ot_current_user_is_eligible_approver() to authenticated;
+grant execute on function public.ot_submit_actual(uuid,jsonb,uuid) to authenticated;
+grant execute on function public.ot_current_user_can_read_request(uuid) to authenticated;
+grant execute on function public.ot_list_requester_access() to authenticated;
+grant execute on function public.ot_create_event_plan(jsonb,uuid[],uuid) to authenticated;
+grant execute on function public.ot_record_consent(uuid,boolean,text,uuid) to authenticated;
+grant execute on function public.ot_review_plan(uuid,text,text,uuid) to authenticated;
+grant execute on function public.ot_mark_exported(uuid[],text,uuid) to authenticated;
+grant execute on function public.ot_resolve_current_requester_access() to authenticated;
+grant execute on function public.ot_get_my_dashboard(date) to authenticated;
+grant execute on function public.ot_list_my_requests(date) to authenticated;
+grant execute on function public.ot_resubmit_plan(uuid,jsonb,text,uuid) to authenticated;
+grant execute on function public.ot_get_manager_dashboard(date,text) to authenticated;
+grant execute on function public.ot_upsert_requester_access(jsonb,uuid) to authenticated;
+grant execute on function public.ot_set_requester_access(uuid,boolean,uuid) to authenticated;
+grant execute on function public.ot_review_compliance(uuid,text,text,uuid) to authenticated;
+grant execute on function public.ot_create_request(jsonb,uuid) to authenticated;
+grant execute on function public.ot_preview_event_plan(jsonb,uuid[]) to authenticated;
+grant execute on function public.ot_request_actual_amendment(uuid,text,uuid) to authenticated;
+grant execute on function public.ot_verify_actual(uuid,text,text,uuid) to authenticated;
+grant execute on function public.ot_list_hr_ready(date) to authenticated;
+grant execute on function public.ot_set_approver(uuid,boolean,text,uuid) to authenticated;
+grant execute on function public.ot_set_system_role(uuid,text,boolean,text,uuid) to authenticated;
+grant execute on function public.ot_list_eligible_approvers() to authenticated;
+grant execute on function public.ot_list_access_admin_identities() to authenticated;
+grant select on table public.ot_requests to authenticated;
+notify pgrst, 'reload schema';
+commit;
