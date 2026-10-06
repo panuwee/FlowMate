@@ -270,7 +270,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
 
     loadRows();
     const cleanup = window.attachFlowMateLiveRefresh
-      ? window.attachFlowMateLiveRefresh(loadRows)
+      ? window.attachFlowMateLiveRefresh(loadRows, { realtimeIntervalMs: 180000, ignoreReasons: ["notifications"] })
       : () => {};
     return () => { alive = false; cleanup(); };
   }, []);
@@ -1261,7 +1261,7 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
       }
     }
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows, { realtimeIntervalMs: 180000, ignoreReasons: ["notifications"] }) : () => {};
     return () => { alive = false; cleanup(); };
   }, []);
 

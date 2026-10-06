@@ -51,7 +51,10 @@ function MyWorkScreen({
   useEffect(() => {
     let alive = true;
     loadMyWorkRows(() => alive);
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadMyWorkRows(() => alive)) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(() => loadMyWorkRows(() => alive), {
+      realtimeIntervalMs: 180000,
+      ignoreReasons: ["notifications"]
+    }) : () => {};
     return () => {
       alive = false;
       cleanup();
