@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="th">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Control Center · FlowMate</title><base target="_top"><link rel="icon" href="../garena/logo_graphic.png"><script src="../operations-workspace.js?v=20261006-operations-01"></script><link rel="stylesheet" href="../workgrid-control-center.css?v=20261006-wcc-spacing-01"><link rel="stylesheet" href="../operations-workspace.css?v=20261006-operations-01"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Control Center · FlowMate</title><base target="_top"><link rel="icon" href="../garena/logo_graphic.png"><script src="../operations-workspace.js?v=20261006-operations-01"></script><link rel="stylesheet" href="../workgrid-control-center.css?v=20261006-wcc-runtime-01"><link rel="stylesheet" href="../operations-workspace.css?v=20261006-operations-01"></head>
 <body><div id="wcc-root"><p role="status">กำลังเปิด Control Center…</p></div>
 <script>
 // Offline demo never initializes the production client or contacts a provider.
@@ -10,7 +10,7 @@
  if(requested&&!local){document.getElementById('wcc-root').textContent='โหมดจำลองใช้ได้เฉพาะเครื่อง local';return;}
  window.WCC_OFFLINE_DEMO=requested;
  const load=src=>new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=reject;document.body.append(s);});
- try{if(!requested){await load('../supabase-js-local.js');await load('../supabase-client.js');}await load('../workgrid-control-center.js?v=20261006-wcc-activate-01');}
+ try{if(!requested){await load('../supabase-js-local.js');await load('../supabase-client.js');}await load('../workgrid-control-center.js?v=20261006-wcc-runtime-01');}
  catch{document.getElementById('wcc-root').textContent='โหลดไม่สำเร็จ กรุณาลองใหม่';}
 })();
 </script></body></html>

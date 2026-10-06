@@ -10,3 +10,27 @@ table{min-width:850px}td:first-child{min-width:160px}td:nth-child(2){min-width:1
 #wcc-reviewer > p {
   margin: 0;
 }
+.wcc-runtime-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-weight: 650;
+}
+.wcc-runtime-state.is-online { color: #226543; }
+.wcc-runtime-state.is-offline { color: #b42318; }
+.wcc-runtime-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+.is-online .wcc-runtime-dot { animation: wcc-online-pulse 2s ease-in-out infinite; }
+@keyframes wcc-online-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-online .wcc-runtime-dot { animation: none; }
+}
