@@ -138,10 +138,9 @@ const NAV = [{
 }, {
   group: "KPI",
   items: [
-    { key: "kpi", label: "KPI Overview", icon: "chart" },
+    { key: "kpi", label: "KPI Report", icon: "chart" },
     { key: "kpi-creative", label: "Creative KPI", icon: "chart" },
-    { key: "kpi-requester", label: "Requester KPI", icon: "chart" },
-    { key: "kpi-task", label: "Task Assign KPI", icon: "chart" }
+    { key: "kpi-requester", label: "Requester KPI", icon: "chart" }
   ]
 }];
 const MEMBER_NAV_GROUPS = NAV.filter(group => ["Personal", "Team", "Creative"].includes(group.group));
@@ -188,7 +187,7 @@ const TITLE_MAP = {
   "planning-channel": "Channel View",
   "planning-campaign": "Campaign View",
   "planning-calendar": "Content Calendar",
-  "kpi": "KPI Overview",
+  "kpi": "KPI Report",
   "kpi-creative": "Creative KPI",
   "kpi-requester": "Requester KPI",
   "kpi-task": "Task Assign KPI",
@@ -1298,11 +1297,13 @@ function App() {
     onOpen: open
   }), allowedRoute && route === "planning-calendar" && React.createElement(PlanningContentCalendarScreen, {
     onOpen: open
-  }), allowedRoute && ["kpi", "kpi-creative", "kpi-requester", "kpi-task"].includes(route) && React.createElement(window.FlowMateKpiWorkspaceScreen, {
-    view: ({"kpi":"overview", "kpi-creative":"creative", "kpi-requester":"requester", "kpi-task":"task"})[route],
+  }), allowedRoute && ["kpi", "kpi-creative", "kpi-legacy"].includes(route) && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "kpi-requester" && React.createElement(CreativeKpiMonthlyScreenC, {
+    requesterOnly: true
+  }), allowedRoute && route === "kpi-task" && React.createElement(window.FlowMateKpiWorkspaceScreen, {
+    view: "task",
     onOpen: openKpiWorkItem,
     onNav: nav
-  }), allowedRoute && route === "kpi-legacy" && React.createElement(CreativeKpiScreen, null), allowedRoute && route === "team-members" && isAdminUser && React.createElement(TeamMembersScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
+  }), allowedRoute && route === "team-members" && isAdminUser && React.createElement(TeamMembersScreen, null), !allowedRoute && React.createElement(AccessDeniedScreen, {
     onNav: nav
   })), isGlobalLeaveModalOpen && React.createElement(GlobalLeaveRequestModal, {
     onClose: () => setIsGlobalLeaveModalOpen(false)

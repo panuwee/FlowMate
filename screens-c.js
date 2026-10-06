@@ -2486,7 +2486,11 @@ function CreativeKpiMonthlyScreenC({
   });
   const [showLegacyReport, setShowLegacyReport] = useStateC(false);
   const [showMonthlyDetail, setShowMonthlyDetail] = useStateC(false);
+  const monthlyLoad = React.useRef(null);
   async function loadMonthlyKpi() {
+    monthlyLoad.current?.abort();
+    const controller = new AbortController();
+    monthlyLoad.current = controller;
     if (!window.loadFlowMateCreativeKpiMonthly) {
       setLoadState({
         status: "error",
@@ -2499,13 +2503,20 @@ function CreativeKpiMonthlyScreenC({
       message: "Loading monthly KPI history..."
     });
     try {
-      const nextData = await window.loadFlowMateCreativeKpiMonthly();
+      const nextData = requesterOnly ? {
+        gdveRows: [],
+        requesterRows: (await window.loadFlowMateRequesterKpiMonthly({
+          signal: controller.signal
+        })).map(normalizeFlowMateCreativeKpiMonthlyRow)
+      } : await window.loadFlowMateCreativeKpiMonthly();
+      if (controller.signal.aborted) return;
       setData(nextData);
       setLoadState({
         status: "live",
         message: "Updated from approved Creative KPI views"
       });
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error("[FlowMate Creative KPI] load failed:", error);
       setData({
         gdveRows: [],
@@ -2519,6 +2530,7 @@ function CreativeKpiMonthlyScreenC({
   }
   useEffectC(() => {
     loadMonthlyKpi();
+    return () => monthlyLoad.current?.abort();
   }, []);
   const allRows = [...data.gdveRows, ...data.requesterRows];
   const months = flowMateKpiMonthWindowC(allRows, range);
