@@ -34,6 +34,22 @@
     "'": '&#39;'
   })[c]);
   const clone = value => JSON.parse(JSON.stringify(value));
+  const bangkokTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  });
+  function formatTime(value) {
+    if (!value) return '—';
+    const date = value instanceof Date ? value : new Date(value);
+    if (!Number.isFinite(date.getTime())) return '—';
+    const parts = Object.fromEntries(bangkokTime.formatToParts(date).map(p => [p.type, p.value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} (GMT+7)`;
+  }
   const badge = (text, mode = '') => `<span class="badge ${mode}">${esc(text)}</span>`;
   const evtLabel = key => catalog[key] || key;
   const fieldLabels = {
@@ -172,7 +188,7 @@
     const find = (kind, key) => ws.entities.find(e => e.kind === kind && e.key === key);
     const member = id => ws.members.find(m => m.id === id);
     const name = e => e.kind === 'profile' ? member(e.data.member_id)?.name || e.key : e.data.label || e.key;
-    const verification = e => e.verification?.current ? badge(demo ? 'จำลอง: ตรวจผ่าน' : e.kind === 'bot' ? 'ตรวจ authentication ผ่าน' : e.kind === 'destination' ? 'อ่านกลุ่มผ่าน' : e.verification?.evidence?.method === 'human_confirmation_not_api_membership' ? 'Admin ยืนยันสมาชิก' : 'ตรวจ identity ผ่าน', 'ok') + `<div class="muted">${esc(e.verification.checked_at || '')}</div>` : badge('รอตรวจ / ผลตรวจหมดอายุ', 'warn');
+    const verification = e => e.verification?.current ? badge(demo ? 'จำลอง: ตรวจผ่าน' : e.kind === 'bot' ? 'ตรวจ authentication ผ่าน' : e.kind === 'destination' ? 'อ่านกลุ่มผ่าน' : e.verification?.evidence?.method === 'human_confirmation_not_api_membership' ? 'Admin ยืนยันสมาชิก' : 'ตรวจ identity ผ่าน', 'ok') + `<div class="muted">${esc(formatTime(e.verification.checked_at))}</div>` : badge('รอตรวจ / ผลตรวจหมดอายุ', 'warn');
     const active = e => e.data.enabled ?? e.data.state === 'active';
     function notify(text, error = false) {
       const node = root.querySelector('#wcc-status');
@@ -219,11 +235,7 @@
       root.innerHTML = `${demo ? '<div class="banner">โหมดจำลอง · ข้อมูลสมาชิกสมมติ ไม่เชื่อม production และไม่ส่ง SeaTalk · ทีมของ Folk ในหน้านี้เป็นตัวอย่าง</div>' : ''}
         <header><div><h1>Control Center</h1><div class="muted">ตั้งค่าการแจ้งเตือน SeaTalk</div></div><div>${badge(ws.admin ? 'Admin · ใช้ค่าจริงได้' : 'หัวหน้าทีม · ดูและเสนอ')}${button('reload', 'รีเฟรชข้อมูล')}</div></header>
         <div class="shell"><nav aria-label="ส่วนของ Control Center">${Object.entries(tabs).map(([key, label]) => button('tab', label, key, '', tab === key ? 'aria-current="page"' : '')).join('')}</nav>
-        <main><p class="muted">อ่านข้อมูลล่าสุด ${esc(new Intl.DateTimeFormat('th-TH', {
-        timeZone: 'Asia/Bangkok',
-        dateStyle: 'medium',
-        timeStyle: 'short'
-      }).format(readAt))} · Bangkok</p><div id="wcc-status" class="status" role="status" aria-live="polite">${ws.runtime ? 'ระบบแจ้งเตือนเปิดใช้งาน' : 'ระบบแจ้งเตือนยังพักอยู่ · การพักแจ้งเตือนไม่หยุดการสร้างงาน'}</div><section id="wcc-content"></section><footer>API รับข้อความแล้วไม่ได้หมายถึงผู้รับอ่านแล้ว · Freelance รับเฉพาะแจ้ง Task ใหม่ / ให้รีวิว</footer></main></div><dialog id="wcc-dialog" aria-labelledby="wcc-dialog-title"></dialog>`;
+        <main><p class="muted">อ่านข้อมูลล่าสุด ${esc(formatTime(readAt))}</p><div id="wcc-status" class="status" role="status" aria-live="polite">${ws.runtime ? 'ระบบแจ้งเตือนเปิดใช้งาน' : 'ระบบแจ้งเตือนยังพักอยู่ · การพักแจ้งเตือนไม่หยุดการสร้างงาน'}</div><section id="wcc-content"></section><footer>API รับข้อความแล้วไม่ได้หมายถึงผู้รับอ่านแล้ว · Freelance รับเฉพาะแจ้ง Task ใหม่ / ให้รีวิว</footer></main></div><dialog id="wcc-dialog" aria-labelledby="wcc-dialog-title"></dialog>`;
       dialog = root.querySelector('dialog');
       content();
     }
@@ -260,10 +272,10 @@
         return;
       }
       if (tab === 'history') {
-        node.innerHTML = `<h2>ประวัติส่ง</h2><p class="muted">Retry ส่งข้อความเท่านั้น ไม่สร้างงานซ้ำ · uncertain อาจส่งถึง provider แล้ว</p>` + table(['เหตุการณ์ / งาน', 'Bot / ผู้รับ', 'ผลส่ง', 'เหตุผล / เวลา', 'จัดการ'], ws.deliveries.map(d => `<tr><td>${esc(evtLabel(d.event_kind))}<br>${esc(d.payload?.display_id)}</td><td>${esc(d.bot_key)}<br>${esc(d.profile_key || d.destination_key)}</td><td>${badge(d.status, d.status === 'provider_accepted' ? 'ok' : 'warn')}<br>ครั้งที่ ${d.attempt || 0}</td><td>${esc(d.reason || '—')}<br>${esc(d.created_at)}</td><td>${ws.admin && ['failed', 'uncertain'].includes(d.status) ? button('retry', 'ตรวจและ Retry…', d.id) : ''}</td></tr>`));
+        node.innerHTML = `<h2>ประวัติส่ง</h2><p class="muted">Retry ส่งข้อความเท่านั้น ไม่สร้างงานซ้ำ · uncertain อาจส่งถึง provider แล้ว</p>` + table(['เหตุการณ์ / งาน', 'Bot / ผู้รับ', 'ผลส่ง', 'เหตุผล / เวลา', 'จัดการ'], ws.deliveries.map(d => `<tr><td>${esc(evtLabel(d.event_kind))}<br>${esc(d.payload?.display_id)}</td><td>${esc(d.bot_key)}<br>${esc(d.profile_key || d.destination_key)}</td><td>${badge(d.status, d.status === 'provider_accepted' ? 'ok' : 'warn')}<br>ครั้งที่ ${d.attempt || 0}</td><td>${esc(d.reason || '—')}<br>${esc(formatTime(d.created_at))}</td><td>${ws.admin && ['failed', 'uncertain'].includes(d.status) ? button('retry', 'ตรวจและ Retry…', d.id) : ''}</td></tr>`));
         return;
       }
-      node.innerHTML = `<h2>ข้อเสนอและ Audit</h2>` + table(['รายการ', 'ทีม / ผู้เสนอ', 'สถานะ', 'จัดการ'], ws.proposals.map(p => `<tr><td>${esc(p.kind + ' · ' + p.key)}<br>${esc(p.reason)}</td><td>${esc(teams[p.team_code] || p.team_code)}<br>${esc(p.actor_id)}</td><td>${badge(p.status)}</td><td>${ws.admin && p.status === 'pending' ? button('decide', 'ตรวจข้อเสนอ…', p.id) : ''}</td></tr>`)) + `<h2 style="margin-top:24px">ประวัติเปลี่ยนค่า</h2>` + table(['เวลา', 'การกระทำ', 'รายการ', 'เหตุผล'], ws.audit.map(a => `<tr><td>${esc(a.created_at)}</td><td>${esc(a.action)}</td><td>${esc(a.key || a.team_code)}</td><td>${esc(a.reason)}</td></tr>`)) + (ws.admin ? `<div class="panel" style="margin-top:24px"><h2>สิทธิ์หัวหน้าทีม</h2><p class="muted">ต้องเป็นสมาชิกทีมที่ยัง active · ดูและเสนอได้เฉพาะทีม</p><form id="wcc-reviewer">${select('user', 'สมาชิก', ws.members.filter(m => m.active).map(m => [m.user_id, m.name]))}${select('team', 'ทีม', ws.teams.map(t => [t, teams[t] || t]))}${select('enabled', 'สิทธิ์', [['true', 'ให้สิทธิ์ดู / เสนอ'], ['false', 'ถอนสิทธิ์']])}<p><button>Review สิทธิ์…</button></p></form></div>` : '');
+      node.innerHTML = `<h2>ข้อเสนอและ Audit</h2>` + table(['รายการ', 'ทีม / ผู้เสนอ', 'สถานะ', 'จัดการ'], ws.proposals.map(p => `<tr><td>${esc(p.kind + ' · ' + p.key)}<br>${esc(p.reason)}</td><td>${esc(teams[p.team_code] || p.team_code)}<br>${esc(p.actor_id)}</td><td>${badge(p.status)}</td><td>${ws.admin && p.status === 'pending' ? button('decide', 'ตรวจข้อเสนอ…', p.id) : ''}</td></tr>`)) + `<h2 style="margin-top:24px">ประวัติเปลี่ยนค่า</h2>` + table(['เวลา', 'การกระทำ', 'รายการ', 'เหตุผล'], ws.audit.map(a => `<tr><td>${esc(formatTime(a.created_at))}</td><td>${esc(a.action)}</td><td>${esc(a.key || a.team_code)}</td><td>${esc(a.reason)}</td></tr>`)) + (ws.admin ? `<div class="panel" style="margin-top:24px"><h2>สิทธิ์หัวหน้าทีม</h2><p class="muted">ต้องเป็นสมาชิกทีมที่ยัง active · ดูและเสนอได้เฉพาะทีม</p><form id="wcc-reviewer">${select('user', 'สมาชิก', ws.members.filter(m => m.active).map(m => [m.user_id, m.name]))}${select('team', 'ทีม', ws.teams.map(t => [t, teams[t] || t]))}${select('enabled', 'สิทธิ์', [['true', 'ให้สิทธิ์ดู / เสนอ'], ['false', 'ถอนสิทธิ์']])}<p><button>Review สิทธิ์…</button></p></form></div>` : '');
     }
     function show(title, html) {
       dialog.innerHTML = `<div class="dialog-head"><h2 id="wcc-dialog-title">${esc(title)}</h2>${button('close', 'ปิด')}</div>${html}<div id="wcc-dialog-error" class="muted" role="alert"></div>`;
@@ -433,7 +445,7 @@
           request_id: requestId
         }
       });
-      if (error) throw new Error('ตรวจหรือ TEST ไม่สำเร็จ กรุณาดู connection และประวัติ');
+      if (error) throw new Error(action === 'test' ? 'ยังยืนยันผล TEST ไม่ได้ · อาจส่งถึงแล้ว กรุณาตรวจข้อความและประวัติก่อนส่งซ้ำ' : 'ยังยืนยันผลตรวจการเชื่อมต่อไม่ได้ กรุณารีเฟรชผลตรวจ');
       if (data?.code && !data?.evidence) throw new Error(data.code);
       return data;
     }
@@ -488,7 +500,7 @@
             });
             await load();
           };
-          show('ยืนยันจากผู้รับ · ไม่ใช่ API ตรวจสมาชิก', `<p>ผู้รับ ${esc(name(e))} / SeaTalk ID ${esc(e.data.seatalk_id)} ต้องยืนยันว่าอยู่ในกลุ่มกับ Bot และเห็นข้อความ TEST แล้ว</p><form id="wcc-confirm">${select('test', 'ผล TEST', tests.map(t => [t.id, t.created_at]))}<label><input type="checkbox" required style="width:auto">ยืนยันกับผู้รับและตรวจสมาชิกกลุ่มแล้ว</label><label class="field">หลักฐาน / เหตุผล<textarea name="reason" required maxlength="300"></textarea></label><button>ยืนยันสมาชิก</button></form>`);
+          show('ยืนยันจากผู้รับ · ไม่ใช่ API ตรวจสมาชิก', `<p>ผู้รับ ${esc(name(e))} / SeaTalk ID ${esc(e.data.seatalk_id)} ต้องยืนยันว่าอยู่ในกลุ่มกับ Bot และเห็นข้อความ TEST แล้ว</p><form id="wcc-confirm">${select('test', 'ผล TEST', tests.map(t => [t.id, formatTime(t.created_at)]))}<label><input type="checkbox" required style="width:auto">ยืนยันกับผู้รับและตรวจสมาชิกกลุ่มแล้ว</label><label class="field">หลักฐาน / เหตุผล<textarea name="reason" required maxlength="300"></textarea></label><button>ยืนยันสมาชิก</button></form>`);
           return;
         }
         if (action === 'test') {
@@ -496,10 +508,33 @@
           if (!ws.admin) throw new Error('Admin required');
           if (!e.verification?.current) throw new Error('ตรวจการเชื่อมต่อก่อน TEST');
           const target = kind === 'profile' ? e.data.channel === 'group' ? find('destination', e.data.destination_key)?.data.group_id : member(e.data.member_id)?.email : e.data.group_id;
+          const requestId = crypto.randomUUID();
+          let attempted = false;
           pending = async () => {
-            const result = await provider('test', kind, key, crypto.randomUUID());
-            await load();
-            notify('TEST: ' + result.status + ' · กรุณายืนยันการเห็นข้อความแยกต่างหาก');
+            if (attempted) return;
+            attempted = true;
+            const submit = dialog.querySelector('#wcc-confirm button');
+            if (submit) {
+              submit.disabled = true;
+              submit.textContent = 'กำลังตรวจผล TEST…';
+            }
+            let result;
+            try {
+              result = await provider('test', kind, key, requestId);
+            } catch {}
+            let refreshed = true;
+            try {
+              await load();
+            } catch {
+              refreshed = false;
+            }
+            if (!result?.status && refreshed) {
+              const recorded = (ws.tests || []).find(t => t.id === requestId && t.kind === kind && t.key === key && t.status === 'finished');
+              result = recorded?.outcome;
+            }
+            const accepted = result?.status === 'provider_accepted' || result?.status === 'demo_accepted';
+            const message = accepted ? 'TEST: ' + (demo ? 'จำลองสำเร็จ' : 'SeaTalk รับข้อความแล้ว') + ' · กรุณายืนยันการเห็นข้อความแยกต่างหาก' + (refreshed ? '' : ' · รีเฟรชประวัติไม่ได้') : result?.status === 'failed' ? 'TEST ส่งไม่สำเร็จ: ' + (result.code || 'ไม่ทราบสาเหตุ') : 'ยังยืนยันผล TEST ไม่ได้ · อาจส่งถึงแล้ว กรุณาตรวจข้อความและประวัติก่อนส่งซ้ำ';
+            notify(message, !accepted);
           };
           show('ตรวจปลายทาง TEST', `<p>Bot: ${esc(e.data.bot_key)}<br>ปลายทาง: <strong>${esc(target)}</strong></p><p class="notice">ข้อความ TEST สำหรับตรวจช่องทาง ไม่มีการสร้างหรือเปลี่ยนงาน${e.data.employment_type === 'Freelance' ? ' · มี Task เข้ามา' : ''}</p><form id="wcc-confirm"><input name="reason" type="hidden" value="Explicit TEST"><div class="dialog-actions"><button class="primary">${demo ? 'จำลอง TEST' : 'ส่ง TEST จริง'}</button></div></form>`);
           return;
