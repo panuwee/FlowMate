@@ -138,17 +138,22 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
   // Only data-change events queue a follow-up during an active request;
   // focus and timer refreshes share it instead of fetching the same data again.
   const baseMs = options.intervalMs || FLOWMATE_REFRESH_POLL_MS;
-  const maxMs = baseMs * 8;
+  // Opt in only for screens whose data has realtime coverage. Other consumers
+  // (including notifications and non-subscribed tables) keep their cadence.
+  const realtimeMs = options.realtimeIntervalMs || baseMs;
+  const connected = () => ["connected", "syncing"].includes(window.FLOWMATE_REALTIME_STATE?.status);
+  const cadence = () => connected() ? realtimeMs : baseMs;
+  let failures = 0;
+  let wasConnected = connected();
   let running = false;
   let queued = false;
   let stopped = false;
   let timer = null;
-  let delay = baseMs;
 
   function schedule() {
     if (stopped) return;
     if (timer) clearTimeout(timer);
-    timer = setTimeout(tick, delay);
+    timer = setTimeout(tick, cadence() * Math.min(2 ** failures, 8));
   }
 
   async function tick() {
@@ -164,6 +169,10 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
   async function runRefresh(event) {
     if (stopped) return;
     if (event?.type === "flowmate:refresh-request" && !flowMateRefreshReasonMatches(event, options.reasons)) return;
+    if (event?.type === "flowmate:refresh-request") {
+      const reasons = event.detail?.reasons?.length ? event.detail.reasons : [event.detail?.reason];
+      if (reasons.every(reason => options.ignoreReasons?.includes(reason))) return;
+    }
     if (typeof document !== "undefined" && document.hidden) return;
     if (running) {
       if (event?.type === "flowmate:refresh-request") queued = true;
@@ -174,10 +183,10 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
     running = true;
     try {
       await refreshFn();
-      delay = baseMs;
+      failures = 0;
     } catch (error) {
-      delay = Math.min(delay * 2, maxMs);
-      console.warn("[FlowMate LiveRefresh] refresh failed; backing off to", delay, "ms:", error && error.message);
+      failures = Math.min(failures + 1, 3);
+      console.warn("[FlowMate LiveRefresh] refresh failed; backing off to", cadence() * 2 ** failures, "ms:", error && error.message);
     } finally {
       running = false;
       if (queued && !stopped) {
@@ -191,12 +200,23 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
 
   function onVisibility() {
     if (typeof document !== "undefined" && !document.hidden) {
-      delay = baseMs;
+      failures = 0;
       runRefresh();
     }
   }
 
+  function onRealtimeState() {
+    const nextConnected = connected();
+    if (nextConnected === wasConnected) return;
+    wasConnected = nextConnected;
+    // Reconcile changes missed during a disconnect immediately on reconnect.
+    // On disconnect, restart the shorter fallback without resetting backoff.
+    if (nextConnected) runRefresh({ type: "flowmate:refresh-request", detail: {} });
+    else if (!running) schedule();
+  }
+
   window.addEventListener("flowmate:refresh-request", runRefresh);
+  window.addEventListener("flowmate:realtime-state", onRealtimeState);
   if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
     document.addEventListener("visibilitychange", onVisibility);
   }
@@ -205,6 +225,7 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
   return () => {
     stopped = true;
     window.removeEventListener("flowmate:refresh-request", runRefresh);
+    window.removeEventListener("flowmate:realtime-state", onRealtimeState);
     if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
       document.removeEventListener("visibilitychange", onVisibility);
     }
@@ -362,7 +383,26 @@ async function loadFlowMateAiTagRowsForList(workItemIds = []) {
   return res;
 }
 
-async function loadFlowMateWorkItemsForList(options = {}) {
+const flowMateWorkItemRequests = new Map();
+
+function loadFlowMateWorkItemsForList(options = {}) {
+  // Share only overlapping reads with identical scope; never retain settled
+  // data here or share a My Work filter with the workspace-wide list.
+  const scope = options.profile === "my-work" ? "my-work" : "workspace";
+  const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate";
+  const teams = options.allTaskTeams === true ? "all-teams" : "active-team";
+  const key = `${getFlowMateListRowsWorkspaceKey()}:${product}:${window.FLOWMATE_CURRENT_USER?.team_member_id || ""}:${scope}:${teams}`;
+  let request = flowMateWorkItemRequests.get(key);
+  if (!request) {
+    request = loadFlowMateWorkItemsForListUncached(options).finally(() => {
+      if (flowMateWorkItemRequests.get(key) === request) flowMateWorkItemRequests.delete(key);
+    });
+    flowMateWorkItemRequests.set(key, request);
+  }
+  return request.then(result => ({ ...result, data: cloneFlowMateListData(result.data) }));
+}
+
+async function loadFlowMateWorkItemsForListUncached(options = {}) {
   const baseColumns = "id,display_id,title,description,work_type,status,priority,urgent_reason,due_date,final_approved_due_date,launch_date,publish_date,publish_time,effort_point,project_name,campaign_name,requester_user_id,requester_team,assignee_user_id,assignee_other_name,final_owner_member_id,needs_split,assignment_reason,review_round,blocked_reason,cancel_reason,archived_at,created_at,delivered_at";
   const isTaskAssignProduct = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign";
   const workType = isTaskAssignProduct ? "quick_task" : "creative_request";
@@ -432,6 +472,7 @@ function getFlowMateListRowsWorkspaceKey() {
 }
 
 function invalidateFlowMateListRowsCache(options = {}) {
+  flowMateWorkItemRequests.clear();
   const workspaceKey = options.workspaceKey || null;
   const keys = workspaceKey ? [workspaceKey] : Array.from(flowMateListRowsCacheByWorkspace.keys());
   keys.forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));

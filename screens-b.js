@@ -251,7 +251,10 @@ function ListScreen({
       }
     }
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows, {
+      realtimeIntervalMs: 180000,
+      ignoreReasons: ["notifications"]
+    }) : () => {};
     return () => {
       alive = false;
       cleanup();
@@ -1759,7 +1762,10 @@ function QueueScreen({
       }
     }
     loadRows();
-    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows) : () => {};
+    const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows, {
+      realtimeIntervalMs: 180000,
+      ignoreReasons: ["notifications"]
+    }) : () => {};
     return () => {
       alive = false;
       cleanup();
