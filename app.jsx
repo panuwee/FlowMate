@@ -21,6 +21,8 @@ function getFlowMateAppVersion() {
 const FLOWMATE_APP_VERSION = getFlowMateAppVersion();
 const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
 const OT_REQUEST_PRODUCT_KEY = "ot-request";
+// Temporary UI suspension; preserves stored OT data and server permissions.
+const OT_REQUEST_UI_ENABLED = false;
 const TASK_ASSIGN_PRODUCT_KEY = "task-assign";
 const FLOWMATE_APPEARANCE_KEY = "flowmate:appearance:v1";
 const FLOWMATE_ACTIVE_TEAM_KEY = "flowmate:activeTeam:v1";
@@ -212,7 +214,7 @@ const TASK_ASSIGN_HASH_TO_ROUTE = {
   "task-assign-detail": "detail"
 };
 const TASK_ASSIGN_ROUTE_TO_HASH = Object.fromEntries(Object.entries(TASK_ASSIGN_HASH_TO_ROUTE).map(([hashKey, routeKey]) => [routeKey, hashKey]));
-const VALID_PRODUCT_KEYS = new Set([TASK_ASSIGN_PRODUCT_KEY, "flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY, OT_REQUEST_PRODUCT_KEY]);
+const VALID_PRODUCT_KEYS = new Set([TASK_ASSIGN_PRODUCT_KEY, "flowmate", "marketing-plan", PRODUCT_BOOK_PRODUCT_KEY].concat(OT_REQUEST_UI_ENABLED ? [OT_REQUEST_PRODUCT_KEY] : []));
 function getFlowMateHashRouteKey(hashValue) {
   const routeKey = String(hashValue || window.location.hash || "").replace("#", "").split("/")[0];
   if (TASK_ASSIGN_HASH_TO_ROUTE[routeKey]) return TASK_ASSIGN_HASH_TO_ROUTE[routeKey];
@@ -236,7 +238,7 @@ function getProductFromHashRouteKey(hashValue) {
   const hashKey = getFlowMateHashRouteKey(hashValue);
   if (MARKETING_PLAN_HASH_KEYS.has(hashKey)) return "marketing-plan";
   if (PRODUCT_BOOK_HASH_KEYS.has(hashKey)) return PRODUCT_BOOK_PRODUCT_KEY;
-  if (OT_REQUEST_HASH_KEYS.has(hashKey)) return OT_REQUEST_PRODUCT_KEY;
+  if (OT_REQUEST_HASH_KEYS.has(hashKey)) return OT_REQUEST_UI_ENABLED ? OT_REQUEST_PRODUCT_KEY : "";
   if (TITLE_MAP[hashKey]) return "flowmate";
   return "";
 }
@@ -346,6 +348,7 @@ function App() {
   const [activeProduct, setActiveProduct] = useStateApp(() => {
     try {
       const hashKey = getFlowMateHashRouteKey();
+      if (!OT_REQUEST_UI_ENABLED && OT_REQUEST_HASH_KEYS.has(hashKey)) return null;
       const hashProduct = getProductFromHashRouteKey();
       if (isProductChoicePath()) return hashProduct || null;
       if (hashProduct) return hashProduct;
@@ -581,6 +584,10 @@ function App() {
       const h = window.location.hash.replace("#", "");
       const r = getFlowMateHashRouteKey(h);
       const id = h.split("/")[1];
+      if (!OT_REQUEST_UI_ENABLED && OT_REQUEST_HASH_KEYS.has(r)) {
+        returnToProductHome();
+        return;
+      }
       if (h.split("/")[0] === "queue") {
         window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#attention`);
       }
@@ -772,6 +779,10 @@ function App() {
     window.location.hash = "product-book";
   }
   function chooseOtRequestProduct() {
+    if (!OT_REQUEST_UI_ENABLED) {
+      returnToProductHome();
+      return;
+    }
     setActiveProduct(OT_REQUEST_PRODUCT_KEY);
     try {
       sessionStorage.setItem("flowmate:activeProduct", OT_REQUEST_PRODUCT_KEY);
@@ -1007,7 +1018,7 @@ function App() {
       }));
     }, 0);
   }
-  if (!activeProduct) {
+  if (!activeProduct || !VALID_PRODUCT_KEYS.has(activeProduct)) {
     return React.createElement(ProductChoiceScreen, {
       user: user,
       currentUserName: currentUserName,
@@ -1338,7 +1349,7 @@ function ProductSwitch({
     onClick: onSwitchProductBook,
     "aria-pressed": activeProduct === PRODUCT_BOOK_PRODUCT_KEY,
     "data-testid": "product-switch-product-book"
-  }, "Product Book"), React.createElement("button", {
+  }, "Product Book"), OT_REQUEST_UI_ENABLED && React.createElement("button", {
     type: "button",
     className: `btn btn--xs ${activeProduct === OT_REQUEST_PRODUCT_KEY ? "btn--primary" : "btn--ghost"}`,
     onClick: onSwitchOtRequest,
@@ -1508,7 +1519,7 @@ function ProductChoiceScreen({
       margin: 0,
       maxWidth: 620
     }
-  }, "Task Assign handles operational Quick Tasks. FlowMate handles Creative Requests. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team. OT Request coordinates overtime workflows."), React.createElement("div", {
+  }, "Task Assign handles operational Quick Tasks. FlowMate handles Creative Requests. Marketing Plan handles campaign planning. Product Book keeps patch notes readable for the team." + (OT_REQUEST_UI_ENABLED ? " OT Request coordinates overtime workflows." : "")), React.createElement("div", {
     style: gridStyle
   }, React.createElement("button", {
     type: "button",
@@ -1610,7 +1621,7 @@ function ProductChoiceScreen({
     style: {
       lineHeight: 1.55
     }
-  }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")), React.createElement("button", {
+  }, "Read monthly patch notes, team impact summaries, marketing angles, and source PDF references.")), OT_REQUEST_UI_ENABLED && React.createElement("button", {
     type: "button",
     style: cardStyle,
     onClick: onChooseOtRequest
@@ -10030,6 +10041,3 @@ function FlowMatePromptHost() {
   }, req.confirmText || "OK")))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
-
-
-

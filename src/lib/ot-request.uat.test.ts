@@ -35,6 +35,7 @@ function renderProductSwitch(activeProduct: string) {
     const TASK_ASSIGN_PRODUCT_KEY = "task-assign";
     const PRODUCT_BOOK_PRODUCT_KEY = "product-book";
     const OT_REQUEST_PRODUCT_KEY = "ot-request";
+    const OT_REQUEST_UI_ENABLED = false;
     ${source}
     globalThis.result = ProductSwitch(globalThis.props);
   `, sandbox);
@@ -2446,12 +2447,12 @@ describe("OT Request static module integration", () => {
   });
 
   it("exposes the current module as aria-pressed on every ProductSwitch button", () => {
-    const productKeys = ["task-assign", "flowmate", "marketing-plan", "product-book", "ot-request"];
+    const productKeys = ["task-assign", "flowmate", "marketing-plan", "product-book"];
 
     for (const activeProduct of productKeys) {
       const rendered = renderProductSwitch(activeProduct);
-      const buttons = rendered.children;
-      expect(buttons).toHaveLength(5);
+      const buttons = rendered.children.filter(Boolean);
+      expect(buttons).toHaveLength(4);
       expect(buttons.map((button: any) => button.props["aria-pressed"])).toEqual(
         productKeys.map(productKey => productKey === activeProduct),
       );
