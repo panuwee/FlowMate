@@ -53,6 +53,7 @@
     const name = e => e.kind==='profile' ? member(e.data.member_id)?.name || e.key : e.data.label || e.key;
     const verification = e => e.verification?.current ? badge(demo?'จำลอง: ตรวจผ่าน':e.kind==='bot'?'ตรวจ authentication ผ่าน':e.kind==='destination'?'อ่านกลุ่มผ่าน':e.verification?.evidence?.method==='human_confirmation_not_api_membership'?'Admin ยืนยันสมาชิก':'ตรวจ identity ผ่าน','ok')+`<div class="muted">${esc(formatTime(e.verification.checked_at))}</div>` : badge('รอตรวจ / ผลตรวจหมดอายุ','warn');
     const active = e => e.data.enabled ?? (e.data.state==='active');
+    const stateLabel = e => active(e)?'เปิด':e.data.state==='draft'?'ร่าง':e.data.state==='archived'?'เก็บเข้าคลัง':'พัก';
     function notify(text, error = false) { const node=root.querySelector('#wcc-status');if(node){node.textContent=text;node.className='status'+(error?' error':'');} }
     async function rpc(name,args={}) {
       if(demo) throw new Error('Demo must use the offline adapter');
@@ -79,7 +80,7 @@
         const unready=ws.entities.filter(e=>['bot','destination','profile'].includes(e.kind)&&!e.verification?.current).length;
         node.innerHTML=`<div class="cards"><div class="card"><span>การเชื่อมต่อรอตรวจ</span><strong>${unready}</strong></div><div class="card"><span>ข้อความต้องตรวจสอบ</span><strong>${ws.deliveries.filter(d=>['failed','uncertain'].includes(d.status)).length}</strong></div><div class="card"><span>ข้อเสนอรออนุมัติ</span><strong>${ws.proposals.filter(p=>p.status==='pending').length}</strong></div></div>
           <div class="stack"><section class="panel"><h2>การทำงานของระบบแจ้งเตือน</h2><p>การเปิดหรือพักมีผลต่อการส่ง SeaTalk การสร้างงานยังใช้กติกาเดิม</p>${ws.admin?button('runtime',ws.runtime?'พักระบบแจ้งเตือน':'เปิดระบบแจ้งเตือน'):''}</section>
-          <details class="setup-guide" ${unready?'open':''}><summary>คู่มือเริ่มใช้งาน${unready?' · มีการเชื่อมต่อรอตรวจ':''}</summary><p>1. เชื่อม Bot และตรวจการเชื่อมต่อ → 2. เพิ่มกลุ่มและผู้รับ → 3. ตรวจ / ทดสอบ → 4. เปิดกฎและระบบแจ้งเตือน</p><p class="muted">Review เลือก Requester ของงาน · Task Assign ใช้ FlowMate · Activity สำเร็จเมื่อครบชุดเท่านั้น</p></details>
+          <details class="setup-guide" ${unready?'open':''}><summary>คู่มือเริ่มใช้งาน${unready?' · มีการเชื่อมต่อรอตรวจ':''}</summary><p>1. เชื่อม Bot แล้วตรวจและเปิดใช้งาน → 2. เพิ่มกลุ่มและผู้รับ แล้วตรวจแต่ละรายการ → 3. TEST และยืนยันกับผู้รับ → 4. เปิดกฎและระบบแจ้งเตือน</p><p class="muted">รายการร่างเปิดเมื่อตรวจผ่าน · รายการพักคงเดิม · ผู้รับที่ปิดอยู่ต้องเลือกเปิดหลังตรวจผ่าน · Review เลือก Requester ของงาน · Task Assign ใช้ FlowMate · Activity สำเร็จเมื่อครบชุดเท่านั้น</p></details>
           <div class="panel"><h2>จำลองเส้นทาง · ไม่ส่งข้อความ</h2><form id="wcc-preview"><label class="field">งาน<select name="work">${ws.work_items.map(w=>`<option value="${esc(w.id)}">${esc(w.display_id+' · '+w.title)}</option>`).join('')}</select></label><label class="field">เหตุการณ์<select name="event">${Object.entries(catalog).filter(([k])=>!k.startsWith('activity.')).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join('')}</select></label><p><button class="primary" ${!ws.work_items.length?'disabled':''}>ดูเส้นทาง</button></p></form><div id="preview-result"></div></div></div>`;
         return;
       }
@@ -92,8 +93,8 @@
           if(tab==='destination')detail=`Group ID <span class="code">${esc(d.group_id)}</span><br>${esc(find('bot',d.bot_key)?.data.label||d.bot_key)} · ${esc(d.purpose)}`;
           if(tab==='profile')detail=`${esc(d.employment_type)} · ${esc(member(d.member_id)?.role)}<br>${esc(member(d.member_id)?.email)}<br>${esc(find('bot',d.bot_key)?.data.label||d.bot_key)} · ${esc(d.channel==='group'?'กลุ่ม '+(find('destination',d.destination_key)?.data.group_id||'ยังไม่เลือก'):d.channel==='direct'?'ส่งตรง':'พักช่องทาง')}<br>SeaTalk ID: ${esc(d.seatalk_id||'ยังไม่ระบุ')}<br>${(d.events||[]).map(evtLabel).map(esc).join('<br>')}`;
           if(tab==='rule')detail=`${esc(evtLabel(d.event))}<br>${esc(d.bot_key)} · ${esc(d.destination_key||'เลือกจากผู้รับจริงของงาน')}`;
-          const actions=(ws.admin||tab!=='bot'?button('edit',ws.admin?'แก้ไข':'เสนอแก้ไข',e.key,e.kind):'')+(ws.admin&&tab!=='rule'?button('verify','ตรวจการเชื่อมต่อ',e.key,e.kind):'')+(ws.admin&&['destination','profile'].includes(tab)?button('test','ส่ง TEST…',e.key,e.kind):'')+(ws.admin&&tab==='profile'&&e.verification?.evidence?.code==='member_list_hidden'?button('confirm-member','ยืนยันสมาชิกที่ถูกซ่อน…',e.key,e.kind):'');
-          return `<tr><td><strong>${esc(name(e))}</strong><div class="muted">${esc(e.key)} · v${e.version}</div></td><td>${esc(teams[e.team_code]||'หลายทีม')}</td><td>${detail}</td><td>${badge(active(e)?'เปิด':'พัก / ร่าง',active(e)?'ok':'')}${tab!=='rule'?'<br>'+verification(e):''}</td><td class="actions">${actions}</td></tr>`;
+          const actions=(ws.admin||tab!=='bot'?button('edit',ws.admin?'แก้ไข':'เสนอแก้ไข',e.key,e.kind):'')+(ws.admin&&tab!=='rule'?button('verify','ตรวจและเปิดใช้งาน',e.key,e.kind):'')+(ws.admin&&['destination','profile'].includes(tab)?button('test','ส่ง TEST…',e.key,e.kind):'')+(ws.admin&&tab==='profile'&&e.verification?.evidence?.code==='member_list_hidden'?button('confirm-member','ยืนยันสมาชิกที่ถูกซ่อน…',e.key,e.kind):'');
+          return `<tr><td><strong>${esc(name(e))}</strong><div class="muted">${esc(e.key)} · v${e.version}</div></td><td>${esc(teams[e.team_code]||'หลายทีม')}</td><td>${detail}</td><td>${badge(stateLabel(e),active(e)?'ok':'')}${tab!=='rule'?'<br>'+verification(e):''}</td><td class="actions">${actions}</td></tr>`;
         });node.innerHTML+=table(['ชื่อ','ทีม','ข้อมูลเชื่อมต่อ / เหตุการณ์','สถานะ','จัดการ'],rows);return;
       }
       if(tab==='history') {
@@ -116,7 +117,7 @@
       if(kind==='destination')html+=field('group_id','SeaTalk Group ID',d.group_id)+field('owner','เจ้าของกลุ่ม',d.owner)+field('purpose','ใช้รับเหตุการณ์',d.purpose)+select('state','สถานะ',['draft','active','inactive','archived'].map(k=>[k,k]),d.state);
       if(kind==='profile')html+=select('member_id','Team Member',ws.members.map(m=>[m.id,m.name+(m.active?'':' (inactive)')]),d.member_id)+select('employment_type','ประเภท',[['Fulltime','Fulltime'],['Freelance','Freelance'],['unknown','ยังไม่ยืนยัน']],d.employment_type)+select('channel','ช่องทาง',[['direct','ส่งตรง (Fulltime)'],['group','กลุ่ม SeaTalk'],['disabled','พักช่องทาง']],d.channel)+field('seatalk_id','SeaTalk ID (จำเป็นสำหรับผู้รับในกลุ่ม)',d.seatalk_id)+select('destination_key','กลุ่มสำหรับ Bot นี้',[['','ไม่ใช้กลุ่ม'],...ws.entities.filter(x=>x.kind==='destination').map(x=>[x.key,x.data.label+' · '+x.data.bot_key])],d.destination_key)+checks('events','Situations · รับเฉพาะงานที่คุณเป็นผู้เกี่ยวข้อง',Object.entries(catalog).filter(([k])=>!k.startsWith('activity.')),d.events||[])+select('enabled','การรับแจ้งเตือน',[['false','พัก'],['true','เปิด']],String(d.enabled||false));
       if(kind==='rule')html+=select('event','เหตุการณ์',Object.entries(catalog),d.event)+select('destination_key','กลุ่ม Activity',[['','เลือกจากผู้รับของงาน'],...ws.entities.filter(x=>x.kind==='destination').map(x=>[x.key,x.data.label])],d.destination_key)+select('enabled','กฎ',[['false','พัก'],['true','เปิด']],String(d.enabled||false));
-      show(ws.admin?'ตั้งค่า '+tabs[kind]:'เสนอการตั้งค่า',`<p class="notice">การเปลี่ยนช่องทางให้บันทึกแบบพักก่อน แล้วตรวจการเชื่อมต่อและ TEST ก่อนเปิดใช้ · Archive เก็บประวัติและไม่ลบ app บน SeaTalk</p><form id="wcc-edit"><div class="form-grid">${html}</div><div class="dialog-actions"><button class="primary">ตรวจค่าก่อน${ws.admin?' Apply':'เสนอ'}</button></div></form>`);
+      show(ws.admin?'ตั้งค่า '+tabs[kind]:'เสนอการตั้งค่า',`<p class="notice">การเปลี่ยนช่องทางให้บันทึกแบบพักก่อน แล้วตรวจและเปิดใช้งาน · รายการที่ตั้งพักไว้คงเดิม ผู้รับต้องเลือกเปิดหลังตรวจผ่าน · TEST และยืนยันกับผู้รับก่อนเปิดกฎและระบบแจ้งเตือน · Archive เก็บประวัติและไม่ลบ app บน SeaTalk</p><form id="wcc-edit"><div class="form-grid">${html}</div><div class="dialog-actions"><button class="primary">ตรวจค่าก่อน${ws.admin?' Apply':'เสนอ'}</button></div></form>`);
       updateEditorChoices();
     }
     function updateEditorChoices(){const form=dialog.querySelector('#wcc-edit');if(!form)return;const key=form.querySelector('[name=bot_key]')?.value,team=form.querySelector('[name=team]')?.value;const bot=find('bot',key);if(!bot)return;
@@ -144,13 +145,41 @@
       ws.audit.unshift({created_at:new Date().toISOString(),action:'demo_test',key,reason:'จำลองผล TEST เท่านั้น'});return {status:'demo_accepted'};}
       const {data,error}=await client.functions.invoke('workgrid-control-center',{body:{action,kind,key,request_id:requestId}});if(error)throw new Error(action==='test'?'ยังยืนยันผล TEST ไม่ได้ · อาจส่งถึงแล้ว กรุณาตรวจข้อความและประวัติก่อนส่งซ้ำ':'ยังยืนยันผลตรวจการเชื่อมต่อไม่ได้ กรุณารีเฟรชผลตรวจ');if(data?.code&&!data?.evidence)throw new Error(data.code);return data;
     }
+    async function verifyAndActivate(kind,key,openProfile=false) {
+      if(!ws.admin)throw new Error('Admin required');
+      const before=clone(find(kind,key));
+      const result=await provider('verify',kind,key);
+      try{await load();}catch{notify(result?.verified?'ตรวจผ่าน แต่รีเฟรชข้อมูลไม่ได้ · ยังไม่เปิดใช้งาน':'ยังยืนยันผลตรวจไม่ได้ กรุณารีเฟรชข้อมูล',true);return;}
+      if(!result?.verified){notify('ตรวจไม่ผ่าน: '+(result?.evidence?.code||'ไม่ทราบสาเหตุ')+' · คงสถานะเดิม',true);return;}
+      const shouldOpen=['bot','destination'].includes(kind)?before.data.state==='draft':kind==='profile'&&openProfile&&before.data.enabled===false&&before.data.channel!=='disabled';
+      if(!shouldOpen){notify('ตรวจผ่าน · '+(active(before)?'รายการเปิดอยู่แล้ว':'คงสถานะ'+stateLabel(before))+' · ผลนี้ยังไม่พิสูจน์ว่าคนได้รับข้อความ');return;}
+      const current=find(kind,key);
+      if(!current||current.version!==before.version||JSON.stringify(current.data)!==JSON.stringify(before.data)){notify('ตรวจผ่าน แต่ค่ารายการเปลี่ยนระหว่างตรวจ · ยังไม่เปิดใช้งาน กรุณาตรวจรายการล่าสุด',true);return;}
+      const data={...before.data,...(kind==='profile'?{enabled:true}:{state:'active'})};
+      const reason='Admin เลือกตรวจและเปิดใช้งาน · ตรวจผ่านแล้ว';
+      try{
+        if(demo)demoApply(kind,key,data,before.team_code,before.version,reason);
+        else await rpc('wcc_apply',{p_kind:kind,p_key:key,p_data:data,p_team:before.team_code,p_expected:before.version,p_reason:reason});
+      }catch(e){notify('ตรวจผ่าน แต่ยังยืนยันการเปิดใช้งานไม่ได้: '+e.message+' · กรุณารีเฟรชตรวจสถานะก่อนลองอีกครั้ง',true);return;}
+      try{await load();notify('ตรวจผ่านและเปิดรายการนี้แล้ว · กฎและระบบแจ้งเตือนคงสถานะเดิม · ผลนี้ยังไม่พิสูจน์ว่าคนได้รับข้อความ');}
+      catch{notify('เปิดรายการนี้แล้ว แต่รีเฟรชข้อมูลไม่ได้ · กรุณารีเฟรชตรวจสถานะ',true);}
+    }
     root.addEventListener('click', event => {const b=event.target.closest('[data-action]');if(!b||busy)return;const {action,key,kind}=b.dataset;
       if(action==='close'){dialog.close?dialog.close():dialog.removeAttribute('open');return;}
       if(action==='tab'){if(!Object.hasOwn(tabs,key))return;tab=key;query='';const url=new URL(location.href);url.searchParams.set('view',tab);history.pushState({},'',url);content();root.querySelectorAll('nav button').forEach(x=>x.toggleAttribute('aria-current',false));b.setAttribute('aria-current','page');return;}
       if(action==='add'||action==='edit'){editor(kind,key);return;}
       effect(async()=>{
         if(action==='reload'){await load();return;}
-        if(action==='verify'){const result=await provider('verify',kind,key);await load();notify(result.verified?'ตรวจผ่าน · ผลนี้ยังไม่พิสูจน์ว่าคนได้รับข้อความ':'ตรวจไม่ผ่าน: '+(result.evidence?.code||''),!result.verified);return;}
+        if(action==='verify'){
+          if(!ws.admin)throw new Error('Admin required');
+          const e=find(kind,key);
+          if(kind==='profile'&&e.data.enabled===false){
+            let attempted=false;
+            pending=async()=>{if(attempted)return;attempted=true;const selected=!!dialog.querySelector('[name=open_after_verify]')?.checked;const submit=dialog.querySelector('#wcc-confirm button');if(submit)submit.disabled=true;await verifyAndActivate(kind,key,selected);};
+            show('ตรวจและเปิดใช้งานผู้รับ',`<p>ผู้รับ: <strong>${esc(name(e))}</strong></p><p>ตรวจการเชื่อมต่อก่อน หากผ่านจะเปิดรับแจ้งเตือนเฉพาะเมื่อเลือกด้านล่าง</p><form id="wcc-confirm"><label class="checks"><input type="checkbox" name="open_after_verify" ${e.data.channel==='disabled'?'disabled':''}>เปิดหลังตรวจผ่าน</label>${e.data.channel==='disabled'?'<p class="muted">ช่องทางนี้ตั้งพักไว้ กรุณาแก้ไขช่องทางก่อนเปิดผู้รับ</p>':''}<p class="muted">ไม่เปิด Bot กลุ่ม กฎ หรือระบบแจ้งเตือนรายการอื่น และไม่ส่ง TEST</p><button class="primary">ตรวจและเปิดใช้งาน</button></form>`);return;
+          }
+          await verifyAndActivate(kind,key);return;
+        }
         if(action==='confirm-member'){const e=find('profile',key);const tests=(ws.tests||[]).filter(t=>t.kind==='destination'&&t.key===e.data.destination_key&&t.outcome?.status==='provider_accepted');if(!tests.length)throw new Error('ตรวจกลุ่มและส่ง TEST ของกลุ่มให้ผ่านก่อน');pending=async reason=>{await rpc('wcc_confirm_group_member',{p_profile:key,p_test:dialog.querySelector('[name=test]').value,p_reason:reason});await load();};show('ยืนยันจากผู้รับ · ไม่ใช่ API ตรวจสมาชิก',`<p>ผู้รับ ${esc(name(e))} / SeaTalk ID ${esc(e.data.seatalk_id)} ต้องยืนยันว่าอยู่ในกลุ่มกับ Bot และเห็นข้อความ TEST แล้ว</p><form id="wcc-confirm">${select('test','ผล TEST',tests.map(t=>[t.id,formatTime(t.created_at)]))}<label><input type="checkbox" required style="width:auto">ยืนยันกับผู้รับและตรวจสมาชิกกลุ่มแล้ว</label><label class="field">หลักฐาน / เหตุผล<textarea name="reason" required maxlength="300"></textarea></label><button>ยืนยันสมาชิก</button></form>`);return;}
         if(action==='test'){const e=find(kind,key);if(!ws.admin)throw new Error('Admin required');if(!e.verification?.current)throw new Error('ตรวจการเชื่อมต่อก่อน TEST');
           const target=kind==='profile'?(e.data.channel==='group'?find('destination',e.data.destination_key)?.data.group_id:member(e.data.member_id)?.email):e.data.group_id;
