@@ -333,6 +333,7 @@ function App() {
   const searchWrapRef = useRefApp(null);
   const [navCounts, setNavCounts] = useStateApp({});
   const [notifications, setNotifications] = useStateApp([]);
+  const notificationRequestRef = useRefApp(0);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useStateApp(false);
   const [notificationLoadState, setNotificationLoadState] = useStateApp({
     status: "idle",
@@ -448,6 +449,9 @@ function App() {
     window.location.hash = destination.hash;
   }
   async function refreshNotifications(options = {}) {
+    const requestId = ++notificationRequestRef.current;
+    const requestUser = window.FLOWMATE_CURRENT_USER;
+    const isCurrent = () => requestId === notificationRequestRef.current && requestUser === window.FLOWMATE_CURRENT_USER;
     if (!window.loadFlowMateNotifications) {
       setNotifications([]);
       setNotificationLoadState({
@@ -464,6 +468,7 @@ function App() {
     }
     try {
       const rows = await window.loadFlowMateNotifications();
+      if (!isCurrent()) return [];
       setNotifications(rows || []);
       setNotificationLoadState({
         status: "live",
@@ -471,12 +476,14 @@ function App() {
       });
       return rows || [];
     } catch (error) {
+      if (!isCurrent() || error?.code === "FLOWMATE_NOTIFICATIONS_SUPERSEDED") return [];
       console.error("[FlowMate Notifications] Load failed:", error);
       setNotifications([]);
       setNotificationLoadState({
         status: "error",
         message: window.flowmateUserError(error, "Notification load failed.")
       });
+      if (options.throwOnError) throw error;
       return [];
     }
   }
@@ -886,27 +893,29 @@ function App() {
       });
       return;
     }
+    // A newly signed-in identity must not display the previous user's rows.
+    setNotifications([]);
+    setIsNotificationCenterOpen(false);
     let alive = true;
     async function loadRows() {
       const rows = await refreshNotifications({
-        showLoading: notifications.length === 0
+        showLoading: notifications.length === 0,
+        throwOnError: true
       });
       if (!alive) return;
       return rows;
     }
-    loadRows();
+    loadRows().catch(() => {}); // Error state is set by refreshNotifications.
     const cleanup = window.attachFlowMateLiveRefresh ? window.attachFlowMateLiveRefresh(loadRows, {
-      reasons: [
-        "notifications", "work_items", "work_status_changed", "admin_work_status_changed",
-        "admin_archive", "admin_restore", "creative_assignee_changed", "rerun_assignment",
-        "quick_task_created", "archived_work_item_restored",
-      ],
+      reasons: window.FLOWMATE_NOTIFICATION_REFRESH_REASONS,
     }) : () => {};
     return () => {
       alive = false;
+      notificationRequestRef.current += 1;
+      window.invalidateFlowMateNotifications?.();
       cleanup();
     };
-  }, [authState.status]);
+  }, [authState.status, authState.user && authState.user.id]);
   useEffectApp(() => {
     if (authState.status !== "signed-in") {
       setGlobalSearchRows([]);
