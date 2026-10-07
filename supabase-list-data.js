@@ -384,6 +384,28 @@ async function loadFlowMateAiTagRowsForList(workItemIds = []) {
 }
 
 const flowMateWorkItemRequests = new Map();
+const flowMateFlagRequests = new Map();
+
+function loadFlowMateFlagsForWorkItems(workItemIds) {
+  const ids = Array.from(new Set(workItemIds)).sort();
+  if (!ids.length) return emptyFlowMateQueryResult();
+  const client = window.flowmateSupabase;
+  const key = JSON.stringify([getFlowMateListRowsWorkspaceKey(), window.FLOWMATE_CURRENT_USER?.team_member_id || "", ids]);
+  let entry = flowMateFlagRequests.get(key);
+  if (!entry || entry.client !== client) {
+    entry = { client, promise: null };
+    entry.promise = Promise.resolve().then(() => client
+      .from("work_item_flags_v")
+      .select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked")
+      .in("work_item_id", ids))
+      .finally(() => {
+        if (flowMateFlagRequests.get(key) === entry) flowMateFlagRequests.delete(key);
+      });
+    flowMateFlagRequests.set(key, entry);
+  }
+  // Share overlapping reads only; each consumer receives independent data.
+  return entry.promise.then(result => ({ ...result, data: cloneFlowMateListData(result.data) }));
+}
 
 function loadFlowMateWorkItemsForList(options = {}) {
   // Share only overlapping reads with identical scope; never retain settled
@@ -473,6 +495,7 @@ function getFlowMateListRowsWorkspaceKey() {
 
 function invalidateFlowMateListRowsCache(options = {}) {
   flowMateWorkItemRequests.clear();
+  flowMateFlagRequests.clear();
   const workspaceKey = options.workspaceKey || null;
   const keys = workspaceKey ? [workspaceKey] : Array.from(flowMateListRowsCacheByWorkspace.keys());
   keys.forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
@@ -507,10 +530,7 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
   const memberIds = Array.from(new Set(activeWorkItems.map((item) => item.final_owner_member_id).filter(Boolean)));
 
   const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = await Promise.all([
-    window.flowmateSupabase
-      .from("work_item_flags_v")
-      .select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked")
-      .in("work_item_id", workItemIds),
+    loadFlowMateFlagsForWorkItems(workItemIds),
     userIds.length
       ? window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", userIds)
       : emptyFlowMateQueryResult(),
@@ -970,7 +990,7 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
   const userIds = Array.from(new Set(items.flatMap(item => [item.requester_user_id, item.assignee_user_id]).filter(Boolean)));
   const memberIds = Array.from(new Set(items.map(item => item.final_owner_member_id).filter(Boolean)));
   const baseQueries = [
-    window.flowmateSupabase.from("work_item_flags_v").select("work_item_id,is_overdue,is_due_soon,is_queued,is_blocked").in("work_item_id", ids),
+    loadFlowMateFlagsForWorkItems(ids),
     userIds.length
       ? window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", userIds)
       : Promise.resolve({ data: [], error: null }),
