@@ -286,11 +286,18 @@ describe('Live refresh request reduction (no network)', () => {
     const app = readFileSync('app.jsx', 'utf8');
     const wiring = app.indexOf('window.attachFlowMateLiveRefresh(loadRows, {');
     const start = app.lastIndexOf('useEffectApp(() => {', wiring);
-    const end = app.indexOf('}, [authState.status]);', wiring) + '}, [authState.status]);'.length;
+    const effectEnd = '}, [authState.status, authState.user && authState.user.id]);';
+    const end = app.indexOf(effectEnd, wiring) + effectEnd.length;
+    const notificationSource = readFileSync('supabase-quick-task.js', 'utf8');
+    const sourceEnd = 'window.dismissReadFlowMateNotifications = dismissReadFlowMateNotifications;';
+    runInNewContext(notificationSource.slice(notificationSource.indexOf('function flowmateNotificationDateTimeLabel'),
+      notificationSource.indexOf(sourceEnd) + sourceEnd.length), { window, console, Date });
     let cleanup!: () => void;
     const refreshNotifications = vi.fn(async () => []);
     runInNewContext(app.slice(start, end), {
       window, authState: { status: 'signed-in' }, notifications: [], refreshNotifications,
+      notificationRequestRef: { current: 0 },
+      setNotifications: vi.fn(), setIsNotificationCenterOpen: vi.fn(),
       useEffectApp: (effect: () => (() => void)) => { cleanup = effect(); },
     });
     await vi.advanceTimersByTimeAsync(0);
@@ -302,6 +309,36 @@ describe('Live refresh request reduction (no network)', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(refreshNotifications).toHaveBeenCalledTimes(2);
     cleanup();
+  });
+
+  it('a notification event during a read queues fresh data without losing the event', async () => {
+    const { window, change } = browser();
+    const source = readFileSync('supabase-quick-task.js', 'utf8');
+    const end = 'window.dismissReadFlowMateNotifications = dismissReadFlowMateNotifications;';
+    runInNewContext(source.slice(source.indexOf('function flowmateNotificationDateTimeLabel'), source.indexOf(end) + end.length), { window, console, Date });
+    const pending: Array<(value: any) => void> = [];
+    window.flowmateSupabase = { from: vi.fn(() => {
+      const p = new Promise(resolve => pending.push(resolve));
+      const q: any = { then: (ok: any, fail: any) => p.then(ok, fail) };
+      for (const name of ['select', 'is', 'order', 'limit']) q[name] = () => q;
+      return q;
+    }) };
+    const rendered: any[] = [];
+    const refresh = async () => {
+      try { rendered.push(await window.loadFlowMateNotifications()); }
+      catch (error: any) { if (error.code !== 'FLOWMATE_NOTIFICATIONS_SUPERSEDED') throw error; }
+    };
+    const stop = window.attachFlowMateLiveRefresh(refresh, { reasons: window.FLOWMATE_NOTIFICATION_REFRESH_REASONS });
+    change('notifications');
+    change('work_items');
+    pending[0]({ data: [{ id: 'old' }], error: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rendered).toEqual([]);
+    expect(pending).toHaveLength(2);
+    pending[1]({ data: [{ id: 'fresh' }], error: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rendered[0][0].id).toBe('fresh');
+    stop();
   });
 
   it('keeps the task-list cache on notification-only realtime changes', async () => {

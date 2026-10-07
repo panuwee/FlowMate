@@ -945,6 +945,32 @@ function flowmateNotificationDateTimeLabel(dateValue) {
   });
 }
 
+let flowmateNotificationRequest = null;
+let flowmateNotificationRevision = 0;
+
+function invalidateFlowMateNotifications() {
+  flowmateNotificationRevision += 1;
+  flowmateNotificationRequest = null;
+}
+window.invalidateFlowMateNotifications = invalidateFlowMateNotifications;
+const FLOWMATE_NOTIFICATION_REFRESH_REASONS = [
+  "notifications", "work_items", "work_status_changed", "admin_work_status_changed",
+  "admin_archive", "admin_restore", "creative_assignee_changed", "rerun_assignment",
+  "quick_task_created", "archived_work_item_restored",
+];
+window.FLOWMATE_NOTIFICATION_REFRESH_REASONS = FLOWMATE_NOTIFICATION_REFRESH_REASONS;
+// Invalidating a request never caches its response. The live-refresh consumer
+// schedules a new read after data changes, including events during an active read.
+if (typeof window.addEventListener === "function") {
+  window.addEventListener("flowmate:refresh-request", event => {
+    const reasons = event.detail?.reasons?.length ? event.detail.reasons : [event.detail?.reason];
+    if (reasons.some(reason => !reason || FLOWMATE_NOTIFICATION_REFRESH_REASONS.includes(reason))) {
+      invalidateFlowMateNotifications();
+    }
+  });
+  window.addEventListener("flowmate:auth-changed", invalidateFlowMateNotifications);
+}
+
 async function loadFlowMateNotifications() {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
@@ -953,28 +979,43 @@ async function loadFlowMateNotifications() {
     throw new Error("Sign in is required to load notifications.");
   }
 
-  const { data, error } = await window.flowmateSupabase
+  const client = window.flowmateSupabase;
+  const user = window.FLOWMATE_CURRENT_USER;
+  const scope = JSON.stringify([user.id, window.FLOWMATE_ACTIVE_TEAM, window.FLOWMATE_ACTIVE_PRODUCT]);
+  let request = flowmateNotificationRequest;
+  if (!request || request.client !== client || request.user !== user || request.scope !== scope) {
+    request = { client, user, scope, revision: flowmateNotificationRevision, promise: null };
+    flowmateNotificationRequest = request;
+    request.promise = readFlowMateNotifications(client).finally(() => {
+      if (flowmateNotificationRequest === request) flowmateNotificationRequest = null;
+    });
+  }
+  const rows = await request.promise;
+  const currentScope = JSON.stringify([window.FLOWMATE_CURRENT_USER?.id, window.FLOWMATE_ACTIVE_TEAM, window.FLOWMATE_ACTIVE_PRODUCT]);
+  if (request.revision !== flowmateNotificationRevision || client !== window.flowmateSupabase ||
+      user !== window.FLOWMATE_CURRENT_USER || scope !== currentScope) {
+    const error = new Error("Notification request was superseded.");
+    error.code = "FLOWMATE_NOTIFICATIONS_SUPERSEDED";
+    throw error;
+  }
+  // Consumers may update read state independently; never share mutable rows.
+  return JSON.parse(JSON.stringify(rows));
+}
+
+async function readFlowMateNotifications(client) {
+  const { data, error } = await client
     .from("notifications")
-    .select("id,type,title,body,work_item_id,metadata,read_at,dismissed_at,created_at")
+    // Default left embedding preserves notifications with no visible work item.
+    // Both tables retain their existing RLS; no privileged RPC or settled cache.
+    .select("id,type,title,body,work_item_id,metadata,read_at,dismissed_at,created_at,work_item:work_items!notifications_work_item_id_fkey(id,display_id,title,status)")
     .is("dismissed_at", null)
     .order("created_at", { ascending: false })
     .limit(50);
 
   if (error) throw error;
 
-  const workItemIds = Array.from(new Set((data || []).map((row) => row.work_item_id).filter(Boolean)));
-  let workItemsById = {};
-  if (workItemIds.length > 0) {
-    const { data: workItems, error: workItemsError } = await window.flowmateSupabase
-      .from("work_items")
-      .select("id,display_id,title,status")
-      .in("id", workItemIds);
-    if (workItemsError) throw workItemsError;
-    workItemsById = Object.fromEntries((workItems || []).map((item) => [item.id, item]));
-  }
-
   return (data || []).map((row) => {
-    const workItem = row.work_item_id ? workItemsById[row.work_item_id] : null;
+    const workItem = row.work_item;
     const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
     const displayId = workItem?.display_id || metadata.display_id || metadata.work_item_display_id || "";
     return {
@@ -1006,6 +1047,7 @@ async function markFlowMateNotificationRead(notificationId) {
   });
 
   if (error) throw error;
+  invalidateFlowMateNotifications();
   return data;
 }
 
@@ -1017,6 +1059,7 @@ async function markAllFlowMateNotificationsRead() {
   const { data, error } = await window.flowmateSupabase.rpc("mark_all_notifications_read");
 
   if (error) throw error;
+  invalidateFlowMateNotifications();
   return data;
 }
 
@@ -1028,6 +1071,7 @@ async function dismissReadFlowMateNotifications() {
   const { data, error } = await window.flowmateSupabase.rpc("dismiss_read_notifications");
 
   if (error) throw error;
+  invalidateFlowMateNotifications();
   return data;
 }
 
@@ -1322,6 +1366,9 @@ try {
   if (window.flowmateSupabase && window.flowmateSupabase.auth
       && typeof window.flowmateSupabase.auth.onAuthStateChange === "function") {
     window.flowmateSupabase.auth.onAuthStateChange(function (event) {
+      if (["SIGNED_OUT", "SIGNED_IN", "USER_UPDATED", "TOKEN_REFRESHED"].includes(event)) {
+        invalidateFlowMateNotifications();
+      }
       if (event === "SIGNED_OUT") {
         var wasSignedIn = Boolean(window.FLOWMATE_CURRENT_USER);
         window.FLOWMATE_CURRENT_USER = null;
