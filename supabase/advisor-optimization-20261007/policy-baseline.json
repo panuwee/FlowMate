@@ -1,0 +1,50 @@
+[
+  {
+    "cmd": "DELETE",
+    "qual": "(is_active_app_user() AND (EXISTS ( SELECT 1\n   FROM marketing_content_items mci\n  WHERE ((mci.id = marketing_channel_placements.content_item_id) AND (is_admin_app_user() OR (mci.pic_user_id = auth.uid()) OR (mci.sub_pic_user_id = auth.uid()))))))",
+    "roles": [
+      "public"
+    ],
+    "tablename": "marketing_channel_placements",
+    "permissive": "PERMISSIVE",
+    "policyname": "pic or sub pic can delete marketing channel placements",
+    "schemaname": "public",
+    "with_check": null
+  },
+  {
+    "cmd": "UPDATE",
+    "qual": "(is_active_app_user() AND (EXISTS ( SELECT 1\n   FROM marketing_content_items mci\n  WHERE ((mci.id = marketing_channel_placements.content_item_id) AND (is_admin_app_user() OR (mci.pic_user_id = auth.uid()) OR (mci.sub_pic_user_id = auth.uid()))))))",
+    "roles": [
+      "public"
+    ],
+    "tablename": "marketing_channel_placements",
+    "permissive": "PERMISSIVE",
+    "policyname": "pic or sub pic can update marketing channel placements",
+    "schemaname": "public",
+    "with_check": "is_active_app_user()"
+  },
+  {
+    "cmd": "DELETE",
+    "qual": "(is_active_app_user() AND (is_admin_app_user() OR (pic_user_id = auth.uid()) OR (sub_pic_user_id = auth.uid())))",
+    "roles": [
+      "public"
+    ],
+    "tablename": "marketing_content_items",
+    "permissive": "PERMISSIVE",
+    "policyname": "pic or sub pic can delete marketing content items",
+    "schemaname": "public",
+    "with_check": null
+  },
+  {
+    "cmd": "UPDATE",
+    "qual": "(is_active_app_user() AND (is_admin_app_user() OR (pic_user_id = auth.uid()) OR (sub_pic_user_id = auth.uid())))",
+    "roles": [
+      "public"
+    ],
+    "tablename": "marketing_content_items",
+    "permissive": "PERMISSIVE",
+    "policyname": "pic or sub pic can update marketing content items",
+    "schemaname": "public",
+    "with_check": "is_active_app_user()"
+  }
+]
