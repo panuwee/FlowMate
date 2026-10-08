@@ -385,6 +385,8 @@ async function loadFlowMateAiTagRowsForList(workItemIds = []) {
 
 const flowMateWorkItemRequests = new Map();
 const flowMateFlagRequests = new Map();
+const flowMateBoardRequests = new Map();
+const flowMateRecentBoards = new Map();
 
 function loadFlowMateFlagsForWorkItems(workItemIds) {
   const ids = Array.from(new Set(workItemIds)).sort();
@@ -496,6 +498,9 @@ function getFlowMateListRowsWorkspaceKey() {
 function invalidateFlowMateListRowsCache(options = {}) {
   flowMateWorkItemRequests.clear();
   flowMateFlagRequests.clear();
+  // Keep active Board reads single-flight; refresh once after pending changes.
+  flowMateBoardRequests.forEach(entry => { entry.dirty = true; });
+  flowMateRecentBoards.clear();
   const workspaceKey = options.workspaceKey || null;
   const keys = workspaceKey ? [workspaceKey] : Array.from(flowMateListRowsCacheByWorkspace.keys());
   keys.forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
@@ -881,6 +886,7 @@ if (typeof window.addEventListener === "function") {
     invalidateFlowMateListRowsCache();
   });
   window.addEventListener("flowmate:signed-out", () => invalidateFlowMateListRowsCache());
+  window.addEventListener("flowmate:auth-changed", () => invalidateFlowMateListRowsCache());
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,12 +1225,57 @@ async function loadFlowMateBoardSummary() {
   };
 }
 
-async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
+function loadFlowMateActiveBoard({ laneLimits = {}, allowRecent = false } = {}) {
+  const limits = Object.fromEntries(FLOWMATE_ACTIVE_BOARD_STATUSES.map(status => [status,
+    Math.max(1, Math.min(500, Math.trunc(Number(laneLimits[status]) || 50))),
+  ]));
+  const scope = () => JSON.stringify([getFlowMateListRowsWorkspaceKey(),
+    window.FLOWMATE_CURRENT_USER?.team_member_id || "", window.FLOWMATE_CURRENT_USER?.role || "", limits]);
+  const key = scope();
+  const client = window.flowmateSupabase;
+  const user = window.FLOWMATE_CURRENT_USER;
+  let entry = flowMateBoardRequests.get(key);
+  flowMateRecentBoards.forEach((cached, cachedKey) => {
+    if (cached.expiresAt <= Date.now()) flowMateRecentBoards.delete(cachedKey);
+  });
+  const recent = flowMateRecentBoards.get(key);
+  if (!entry && allowRecent && recent?.client === client && recent?.user === user) {
+    return Promise.resolve(cloneFlowMateListData(recent.data));
+  }
+  if (!entry || entry.client !== client || entry.user !== user) {
+    entry = { client, user, dirty: false, promise: null };
+    const assertScope = () => {
+      if (window.flowmateSupabase !== client || window.FLOWMATE_CURRENT_USER !== user || scope() !== key) {
+        const error = new Error("Board request was superseded.");
+        error.code = "FLOWMATE_BOARD_SUPERSEDED";
+        throw error;
+      }
+    };
+    entry.promise = Promise.resolve().then(async () => {
+      let result;
+      do {
+        entry.dirty = false;
+        assertScope();
+        result = await loadFlowMateActiveBoardUncached({ laneLimits: limits }, assertScope);
+        assertScope();
+      } while (entry.dirty);
+      flowMateRecentBoards.set(key, { client, user, data: result, expiresAt: Date.now() + 2000 });
+      return result;
+    }).finally(() => {
+      if (flowMateBoardRequests.get(key) === entry) flowMateBoardRequests.delete(key);
+    });
+    flowMateBoardRequests.set(key, entry);
+  }
+  return entry.promise.then(cloneFlowMateListData);
+}
+
+async function loadFlowMateActiveBoardUncached({ laneLimits = {} } = {}, assertScope = () => {}) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   const laneRequests = FLOWMATE_ACTIVE_BOARD_STATUSES.map(async (status) => {
     const requestedSize = Math.max(1, Math.min(500, Math.trunc(Number(laneLimits[status] || 50))));
     const firstPageSize = flowMateClampPageSize(requestedSize);
     let result = await flowMateQueryBoardLane(status, null, firstPageSize + 1);
+    assertScope();
     if (result.error) return { status, requestedSize, loaded: [], nextCursor: null, error: result.error };
 
     let rawRows = result.data || [];
@@ -1235,6 +1286,7 @@ async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
     while (cursor && loaded.length < requestedSize) {
       const pageSize = flowMateClampPageSize(requestedSize - loaded.length);
       result = await flowMateQueryBoardLane(status, cursor, pageSize + 1);
+      assertScope();
       if (result.error) return { status, requestedSize, loaded: [], nextCursor: null, error: result.error };
       rawRows = result.data || [];
       const pageRows = rawRows.slice(0, pageSize);
@@ -1245,10 +1297,16 @@ async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
     }
     return { status, requestedSize, loaded, nextCursor: cursor, error: null };
   });
-  const [laneResults, summary] = await Promise.all([
-    Promise.all(laneRequests),
+  // Drain every query before releasing the flight, including error paths.
+  const settled = await Promise.allSettled([
+    ...laneRequests,
     loadFlowMateBoardSummary(),
   ]);
+  assertScope();
+  const rejected = settled.find(result => result.status === "rejected");
+  if (rejected) throw rejected.reason;
+  const laneResults = settled.slice(0, -1).map(result => result.value);
+  const summary = settled[settled.length - 1].value;
   const firstError = laneResults.find(entry => entry.error)?.error;
   if (firstError) throw firstError;
   const loadedByStatus = Object.fromEntries(laneResults.map(entry => [entry.status, entry.loaded]));
