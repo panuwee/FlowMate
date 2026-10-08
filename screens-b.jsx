@@ -637,7 +637,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
     }
   }
 
-  async function loadActiveBoard(isAlive = () => true, { preserveScroll = true, allowRecent = false } = {}) {
+  async function loadActiveBoard(isAlive = () => true, { preserveScroll = true, allowRecent = false, reason = "manual" } = {}) {
     if (!window.loadFlowMateActiveBoard) {
       setLoadState({ status: "error", message: "Active Board batch loader is not ready." });
       return false;
@@ -650,6 +650,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
     try {
       const result = await window.loadFlowMateActiveBoard({
         allowRecent,
+        reason,
         laneLimits: Object.fromEntries(columns.map(column => [
           column.key,
           Math.max(50, Number(laneLoadedCounts.current[column.key] || laneStateRef.current[column.key]?.rows.length || 0)),
@@ -677,9 +678,9 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
     }
   }
 
-  async function refreshActiveBoardPreservingState(isAlive = () => true, { allowRecent = false } = {}) {
+  async function refreshActiveBoardPreservingState(isAlive = () => true, { allowRecent = false, reason = "manual" } = {}) {
     columns.forEach(column => rememberLaneScroll(column.key, laneBodyRefs.current[column.key]));
-    return runFlowMateBoardRefresh(boardWorkspaceKeyRef.current, () => loadActiveBoard(isAlive, { preserveScroll: true, allowRecent }));
+    return runFlowMateBoardRefresh(boardWorkspaceKeyRef.current, () => loadActiveBoard(isAlive, { preserveScroll: true, allowRecent, reason }));
   }
 
   async function loadDelivered(cursor = deliveredCursorRef.current, isAlive = () => true, filters = deliveredFiltersRef.current) {
@@ -707,7 +708,7 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
 
   useEffectB(() => {
     let alive = true;
-    if (activeTab === "active") refreshActiveBoardPreservingState(() => alive, { allowRecent: true });
+    if (activeTab === "active") refreshActiveBoardPreservingState(() => alive, { allowRecent: true, reason: "mount" });
     return () => { alive = false; };
   }, [activeTab]);
 
@@ -818,8 +819,8 @@ function BoardScreen({ onOpen, searchQuery = "" }) {
 
   useEffectB(() => {
     if (!window.attachFlowMateLiveRefresh) return undefined;
-    const refreshCurrent = () => activeTabRef.current === "active"
-      ? refreshActiveBoardPreservingState(() => true, { allowRecent: true })
+    const refreshCurrent = ({ reason = "poll" } = {}) => activeTabRef.current === "active"
+      ? refreshActiveBoardPreservingState(() => true, { allowRecent: true, reason })
       : loadDelivered(deliveredCursorRef.current, () => true, { ...deliveredFiltersRef.current });
     return window.attachFlowMateLiveRefresh(refreshCurrent, {
       reasons: [

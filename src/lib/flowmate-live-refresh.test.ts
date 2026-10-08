@@ -33,6 +33,21 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe('Live refresh request reduction (no network)', () => {
+  it('preserves poll, focus, reconnect and mutation reasons through the shared callback', async () => {
+    const { window, focus, change } = browser();
+    const refresh = vi.fn(async () => {});
+    const stop = window.attachFlowMateLiveRefresh(refresh);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(refresh).toHaveBeenLastCalledWith({ reason: 'poll' });
+    focus(); await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenLastCalledWith({ reason: 'focus' });
+    window.FLOWMATE_REALTIME_STATE.status = 'connected';
+    window.dispatchEvent({ type: 'flowmate:realtime-state' }); await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenLastCalledWith({ reason: 'reconnect' });
+    change('work_items'); await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenLastCalledWith({ reason: 'data-change' });
+    stop();
+  });
   it('uses the opt-in connected cadence and restores fallback and reconnect refresh', async () => {
     const { window, change } = browser();
     window.FLOWMATE_REALTIME_STATE.status = 'connected';

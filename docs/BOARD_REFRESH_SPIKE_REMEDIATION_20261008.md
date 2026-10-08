@@ -1,5 +1,7 @@
 # Board refresh spike — local remediation, 8 October 2026
 
+> อัปเดตขอบเขต: ผู้ใช้อนุมัติให้ตรวจทั้ง 7 ข้อและรวมส่วนที่มีหลักฐานรองรับเป็น commit/push เดียวต่อยอด PR #17 รายละเอียดล่าสุดและกฎใช้งานอยู่ที่ [LOG_OPTIMIZATION_RULES_20261008.md](LOG_OPTIMIZATION_RULES_20261008.md) เพิ่ม opt-in local diagnostics, manual asset-version check และ stable related-query ID ordering; ส่วนวัดจริง/merge/deploy/SQL apply แยกจาก local completion เนื้อหาด้านล่างเป็น baseline ของ patch ก่อนเพิ่มส่วนนี้
+
 ## สถานะ
 
 เตรียม local patch บน branch `codex/board-refresh-coordination-20261008` จาก release `96f8519a3c7bcd60ddf798e7c1c12b11d7b3fef6` ผู้ใช้อนุมัติ commit/push/PR แล้ว; ยังไม่ deploy และไม่มี production SQL/CORS/cron changes
