@@ -2889,8 +2889,12 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
     .filter(row => row && row.type !== "leave")
     .map(row => row.subtype || row.assetType)
     .filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  // The live active roster is authoritative for Creative Gantt.
+  // Historical assignments must not reintroduce inactive members.
+  const activeMemberIds = new Set((members || []).filter(member => member.active !== false).map(member => member.id));
   const filteredRows = sourceRows.filter(row => {
     if (!row || row.type === "leave" || !TEAM_SCHEDULE_CAPACITY_STATUSES_C.includes(row.status)) return false;
+    if (!isTaskAssignProduct && row.assignee && !activeMemberIds.has(row.assignee)) return false;
     if (assigneeFilter !== "all" && row.assignee !== assigneeFilter) return false;
     if (statusFilter !== "all" && row.status !== statusFilter) return false;
     if (skillFilter !== "all" && (row.subtype || row.assetType) !== skillFilter) return false;
@@ -2906,7 +2910,7 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
     .filter(Boolean);
 
   const memberMap = new Map();
-  (members || []).forEach(member => memberMap.set(member.id, member));
+  (members || []).filter(member => activeMemberIds.has(member.id)).forEach(member => memberMap.set(member.id, member));
   tasks.forEach(task => {
     const id = task.item.assignee || "unassigned";
     if (!memberMap.has(id)) memberMap.set(id, MEMBERS_BY_ID[id] || { id, name: task.item.assigneeOtherName || "Unassigned", discipline: "GD/VE" });
