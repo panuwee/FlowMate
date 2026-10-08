@@ -834,7 +834,7 @@ describe("FlowMate Board and Delivered frontend", () => {
 
     const row = await windowObject.loadFlowMateWorkItemById("QT-1001");
 
-    expect(users.calls).toContainEqual(["in", "id", ["requester-1", "owner-user"]]);
+    expect(users.calls).toContainEqual(["in", "id", ["owner-user", "requester-1"]]);
     expect(row).toMatchObject({
       id: "QT-1001",
       assignee: "owner-user",

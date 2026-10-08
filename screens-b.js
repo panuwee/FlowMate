@@ -774,7 +774,9 @@ function BoardScreen({
     }
   }
   async function loadActiveBoard(isAlive = () => true, {
-    preserveScroll = true
+    preserveScroll = true,
+    allowRecent = false,
+    reason = "manual"
   } = {}) {
     if (!window.loadFlowMateActiveBoard) {
       setLoadState({
@@ -794,6 +796,8 @@ function BoardScreen({
     })));
     try {
       const result = await window.loadFlowMateActiveBoard({
+        allowRecent,
+        reason,
         laneLimits: Object.fromEntries(columns.map(column => [column.key, Math.max(50, Number(laneLoadedCounts.current[column.key] || laneStateRef.current[column.key]?.rows.length || 0))]))
       });
       if (!isAlive() || requestId !== activeBoardRequestRef.current) return false;
@@ -832,10 +836,15 @@ function BoardScreen({
       return false;
     }
   }
-  async function refreshActiveBoardPreservingState(isAlive = () => true) {
+  async function refreshActiveBoardPreservingState(isAlive = () => true, {
+    allowRecent = false,
+    reason = "manual"
+  } = {}) {
     columns.forEach(column => rememberLaneScroll(column.key, laneBodyRefs.current[column.key]));
     return runFlowMateBoardRefresh(boardWorkspaceKeyRef.current, () => loadActiveBoard(isAlive, {
-      preserveScroll: true
+      preserveScroll: true,
+      allowRecent,
+      reason
     }));
   }
   async function loadDelivered(cursor = deliveredCursorRef.current, isAlive = () => true, filters = deliveredFiltersRef.current) {
@@ -886,7 +895,10 @@ function BoardScreen({
   }
   useEffectB(() => {
     let alive = true;
-    if (activeTab === "active") refreshActiveBoardPreservingState(() => alive);
+    if (activeTab === "active") refreshActiveBoardPreservingState(() => alive, {
+      allowRecent: true,
+      reason: "mount"
+    });
     return () => {
       alive = false;
     };
@@ -1033,7 +1045,12 @@ function BoardScreen({
   }, []);
   useEffectB(() => {
     if (!window.attachFlowMateLiveRefresh) return undefined;
-    const refreshCurrent = () => activeTabRef.current === "active" ? refreshActiveBoardPreservingState() : loadDelivered(deliveredCursorRef.current, () => true, {
+    const refreshCurrent = ({
+      reason = "poll"
+    } = {}) => activeTabRef.current === "active" ? refreshActiveBoardPreservingState(() => true, {
+      allowRecent: true,
+      reason
+    }) : loadDelivered(deliveredCursorRef.current, () => true, {
       ...deliveredFiltersRef.current
     });
     return window.attachFlowMateLiveRefresh(refreshCurrent, {

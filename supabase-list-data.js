@@ -1,3 +1,65 @@
+// Opt-in, memory-only diagnostics. No request bodies, identities or telemetry.
+const flowMateBoardDebug = (() => {
+  let enabled = false;
+  let rows = [];
+  let scopes = new Map();
+  let sequence = 0;
+  let tab = "";
+  const assets = ["app.js", "screens-b.js", "supabase-list-data.js", "supabase-quick-task.js"];
+  const reasons = ["mount", "manual", "poll", "focus", "reconnect", "data-change", "queued-change", "workspace"];
+  function versions(doc) {
+    const result = {};
+    for (const script of Array.from(doc?.scripts || [])) {
+      try {
+        const url = new URL(script.src, window.location?.href);
+        const name = url.pathname.split("/").pop();
+        const stamp = url.searchParams.get("v") || "unstamped";
+        if (assets.includes(name)) result[name] = /^[a-zA-Z0-9-]{1,48}$/.test(stamp) ? stamp : "unknown";
+      } catch (_) {}
+    }
+    return result;
+  }
+  const loaded = versions(typeof document === "undefined" ? null : document);
+  function record(event, reason, scope, durationMs) {
+    if (!enabled) return;
+    if (!scopes.has(scope)) {
+      if (scopes.size >= 32) scopes.clear();
+      scopes.set(scope, ++sequence);
+    }
+    const route = String(window.location?.hash || "").split(/[?&/]/)[0];
+    rows.push({ event, reason: reasons.includes(reason) ? reason : "unknown", scope: scopes.get(scope),
+      tab, route: ["#board", "#list", "#home"].includes(route) ? route : "other",
+      at: Date.now(), ...(durationMs === undefined ? {} : { durationMs: Math.max(0, durationMs) }) });
+    if (rows.length > 200) rows.shift();
+  }
+  const api = {
+    enable() { enabled = true; tab ||= window.crypto?.randomUUID?.() || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; },
+    disable() { enabled = false; rows = []; scopes.clear(); },
+    clear() { rows = []; scopes.clear(); },
+    snapshot() { return { enabled, assets: { ...loaded }, records: rows.map(row => ({ ...row })) }; },
+    async checkRelease() {
+      // Manual only; fetch HTML from the confirmed main deployment, without credentials.
+      const location = window.location;
+      if (location?.origin !== "https://panuwee.github.io" ||
+          !["/FlowMate/", "/FlowMate/index.html", "/FlowMate/home/", "/FlowMate/home/index.html", "/FlowMate/product-book/", "/FlowMate/product-book/index.html"].includes(location.pathname)) {
+        return { status: "unsupported-origin" };
+      }
+      const response = await window.fetch(location.origin + location.pathname, { cache: "no-store", credentials: "omit", redirect: "error" });
+      if (!response.ok) throw new Error("Release check failed.");
+      const current = versions(new DOMParser().parseFromString(await response.text(), "text/html"));
+      if (assets.some(name => !current[name] || !loaded[name] || current[name] === "unstamped" || loaded[name] === "unstamped")) return { status: "unknown", loaded: { ...loaded }, current };
+      return { status: assets.some(name => current[name] !== loaded[name]) ? "update-available" : "current", loaded: { ...loaded }, current };
+    },
+  };
+  window.flowmateBoardDebug = api;
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("flowmate:signed-out", api.clear);
+    window.addEventListener("flowmate:auth-changed", api.clear);
+    window.addEventListener("flowmate:team-workspace-changed", api.clear);
+  }
+  return { record };
+})();
+
 function flowmateToKebab(value) {
   return value ? value.replaceAll("_", "-") : value;
 }
@@ -182,7 +244,7 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
     timer = null;
     running = true;
     try {
-      await refreshFn();
+      await refreshFn({ reason: event?.flowmateReason || (event?.type === "flowmate:refresh-request" ? "data-change" : "poll") });
       failures = 0;
     } catch (error) {
       failures = Math.min(failures + 1, 3);
@@ -191,7 +253,7 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
       running = false;
       if (queued && !stopped) {
         queued = false;
-        runRefresh();
+        runRefresh({ flowmateReason: "queued-change" });
       } else {
         schedule();
       }
@@ -201,7 +263,7 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
   function onVisibility() {
     if (typeof document !== "undefined" && !document.hidden) {
       failures = 0;
-      runRefresh();
+      runRefresh({ flowmateReason: "focus" });
     }
   }
 
@@ -211,7 +273,7 @@ function attachFlowMateLiveRefresh(refreshFn, options = {}) {
     wasConnected = nextConnected;
     // Reconcile changes missed during a disconnect immediately on reconnect.
     // On disconnect, restart the shorter fallback without resetting backoff.
-    if (nextConnected) runRefresh({ type: "flowmate:refresh-request", detail: {} });
+    if (nextConnected) runRefresh({ type: "flowmate:refresh-request", detail: {}, flowmateReason: "reconnect" });
     else if (!running) schedule();
   }
 
@@ -385,6 +447,8 @@ async function loadFlowMateAiTagRowsForList(workItemIds = []) {
 
 const flowMateWorkItemRequests = new Map();
 const flowMateFlagRequests = new Map();
+const flowMateBoardRequests = new Map();
+const flowMateRecentBoards = new Map();
 
 function loadFlowMateFlagsForWorkItems(workItemIds) {
   const ids = Array.from(new Set(workItemIds)).sort();
@@ -496,6 +560,9 @@ function getFlowMateListRowsWorkspaceKey() {
 function invalidateFlowMateListRowsCache(options = {}) {
   flowMateWorkItemRequests.clear();
   flowMateFlagRequests.clear();
+  // Keep active Board reads single-flight; refresh once after pending changes.
+  flowMateBoardRequests.forEach(entry => { entry.dirty = true; });
+  flowMateRecentBoards.clear();
   const workspaceKey = options.workspaceKey || null;
   const keys = workspaceKey ? [workspaceKey] : Array.from(flowMateListRowsCacheByWorkspace.keys());
   keys.forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
@@ -881,6 +948,7 @@ if (typeof window.addEventListener === "function") {
     invalidateFlowMateListRowsCache();
   });
   window.addEventListener("flowmate:signed-out", () => invalidateFlowMateListRowsCache());
+  window.addEventListener("flowmate:auth-changed", () => invalidateFlowMateListRowsCache());
 }
 
 // ---------------------------------------------------------------------------
@@ -981,14 +1049,14 @@ function flowMateGroupByWorkItemId(rows) {
 }
 
 async function loadFlowMateBoardRelatedData(items, options = {}) {
-  const ids = (items || []).map(item => item.id).filter(Boolean);
+  const ids = Array.from(new Set((items || []).map(item => item.id).filter(Boolean))).sort();
   if (!ids.length) return {
     flagsById: {}, usersById: {}, membersById: {}, membersByUserId: {}, detailsById: {}, checklistById: {},
     marketingSubPicById: {}, commentsById: {}, linksById: {}, watchersById: {}, aiTagsById: {}, eventsById: {}, assignmentRunById: {},
     aiTagsUnavailable: false,
   };
-  const userIds = Array.from(new Set(items.flatMap(item => [item.requester_user_id, item.assignee_user_id]).filter(Boolean)));
-  const memberIds = Array.from(new Set(items.map(item => item.final_owner_member_id).filter(Boolean)));
+  const userIds = Array.from(new Set(items.flatMap(item => [item.requester_user_id, item.assignee_user_id]).filter(Boolean))).sort();
+  const memberIds = Array.from(new Set(items.map(item => item.final_owner_member_id).filter(Boolean))).sort();
   const baseQueries = [
     loadFlowMateFlagsForWorkItems(ids),
     userIds.length
@@ -1023,7 +1091,7 @@ async function loadFlowMateBoardRelatedData(items, options = {}) {
     ...(watchersResult?.data || []).flatMap(row => [row.watcher_user_id, row.added_by_user_id]),
     ...(aiTagsResult?.data || []).map(row => row.created_by_user_id),
     ...(eventsResult?.data || []).map(row => row.actor_user_id),
-  ].filter(userId => userId && !baseUserIds.has(userId))));
+  ].filter(userId => userId && !baseUserIds.has(userId)))).sort();
   const relatedUsersResult = relatedUserIds.length
     ? await window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", relatedUserIds)
     : { data: [], error: null };
@@ -1219,12 +1287,70 @@ async function loadFlowMateBoardSummary() {
   };
 }
 
-async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
+function loadFlowMateActiveBoard({ laneLimits = {}, allowRecent = false, reason = "manual" } = {}) {
+  const limits = Object.fromEntries(FLOWMATE_ACTIVE_BOARD_STATUSES.map(status => [status,
+    Math.max(1, Math.min(500, Math.trunc(Number(laneLimits[status]) || 50))),
+  ]));
+  const scope = () => JSON.stringify([getFlowMateListRowsWorkspaceKey(),
+    window.FLOWMATE_CURRENT_USER?.team_member_id || "", window.FLOWMATE_CURRENT_USER?.role || "", limits]);
+  const key = scope();
+  const client = window.flowmateSupabase;
+  const user = window.FLOWMATE_CURRENT_USER;
+  let entry = flowMateBoardRequests.get(key);
+  flowMateRecentBoards.forEach((cached, cachedKey) => {
+    if (cached.expiresAt <= Date.now()) flowMateRecentBoards.delete(cachedKey);
+  });
+  const recent = flowMateRecentBoards.get(key);
+  flowMateBoardDebug.record("request", reason, key);
+  if (!entry && allowRecent && recent?.client === client && recent?.user === user) {
+    flowMateBoardDebug.record("recent", reason, key);
+    return Promise.resolve(cloneFlowMateListData(recent.data));
+  }
+  if (!entry || entry.client !== client || entry.user !== user) {
+    entry = { client, user, dirty: false, promise: null };
+    const assertScope = () => {
+      if (window.flowmateSupabase !== client || window.FLOWMATE_CURRENT_USER !== user || scope() !== key) {
+        const error = new Error("Board request was superseded.");
+        error.code = "FLOWMATE_BOARD_SUPERSEDED";
+        throw error;
+      }
+    };
+    entry.promise = Promise.resolve().then(async () => {
+      let result;
+      do {
+        entry.dirty = false;
+        assertScope();
+        const started = Date.now();
+        flowMateBoardDebug.record("start", reason, key);
+        try {
+          result = await loadFlowMateActiveBoardUncached({ laneLimits: limits }, assertScope);
+          assertScope();
+        } catch (error) {
+          flowMateBoardDebug.record("error", reason, key, Date.now() - started);
+          throw error;
+        }
+        flowMateBoardDebug.record("end", reason, key, Date.now() - started);
+        if (entry.dirty) flowMateBoardDebug.record("follow-up", "queued-change", key);
+      } while (entry.dirty);
+      flowMateRecentBoards.set(key, { client, user, data: result, expiresAt: Date.now() + 2000 });
+      return result;
+    }).finally(() => {
+      if (flowMateBoardRequests.get(key) === entry) flowMateBoardRequests.delete(key);
+    });
+    flowMateBoardRequests.set(key, entry);
+  } else {
+    flowMateBoardDebug.record("shared", reason, key);
+  }
+  return entry.promise.then(cloneFlowMateListData);
+}
+
+async function loadFlowMateActiveBoardUncached({ laneLimits = {} } = {}, assertScope = () => {}) {
   if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
   const laneRequests = FLOWMATE_ACTIVE_BOARD_STATUSES.map(async (status) => {
     const requestedSize = Math.max(1, Math.min(500, Math.trunc(Number(laneLimits[status] || 50))));
     const firstPageSize = flowMateClampPageSize(requestedSize);
     let result = await flowMateQueryBoardLane(status, null, firstPageSize + 1);
+    assertScope();
     if (result.error) return { status, requestedSize, loaded: [], nextCursor: null, error: result.error };
 
     let rawRows = result.data || [];
@@ -1235,6 +1361,7 @@ async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
     while (cursor && loaded.length < requestedSize) {
       const pageSize = flowMateClampPageSize(requestedSize - loaded.length);
       result = await flowMateQueryBoardLane(status, cursor, pageSize + 1);
+      assertScope();
       if (result.error) return { status, requestedSize, loaded: [], nextCursor: null, error: result.error };
       rawRows = result.data || [];
       const pageRows = rawRows.slice(0, pageSize);
@@ -1245,10 +1372,16 @@ async function loadFlowMateActiveBoard({ laneLimits = {} } = {}) {
     }
     return { status, requestedSize, loaded, nextCursor: cursor, error: null };
   });
-  const [laneResults, summary] = await Promise.all([
-    Promise.all(laneRequests),
+  // Drain every query before releasing the flight, including error paths.
+  const settled = await Promise.allSettled([
+    ...laneRequests,
     loadFlowMateBoardSummary(),
   ]);
+  assertScope();
+  const rejected = settled.find(result => result.status === "rejected");
+  if (rejected) throw rejected.reason;
+  const laneResults = settled.slice(0, -1).map(result => result.value);
+  const summary = settled[settled.length - 1].value;
   const firstError = laneResults.find(entry => entry.error)?.error;
   if (firstError) throw firstError;
   const loadedByStatus = Object.fromEntries(laneResults.map(entry => [entry.status, entry.loaded]));
