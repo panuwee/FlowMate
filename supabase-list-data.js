@@ -20,14 +20,18 @@ const flowMateBoardDebug = (() => {
     return result;
   }
   const loaded = versions(typeof document === "undefined" ? null : document);
-  function record(event, reason, scope, durationMs) {
+  function record(event, reason, scope, durationMs, consumer = "board", profile = "") {
     if (!enabled) return;
     if (!scopes.has(scope)) {
       if (scopes.size >= 32) scopes.clear();
       scopes.set(scope, ++sequence);
     }
     const route = String(window.location?.hash || "").split(/[?&/]/)[0];
-    rows.push({ event, reason: reasons.includes(reason) ? reason : "unknown", scope: scopes.get(scope),
+    const realtime = window.FLOWMATE_REALTIME_STATE?.status;
+    rows.push({ event: ["request", "start", "end", "error", "follow-up", "shared", "recent"].includes(event) ? event : "unknown", consumer: ["board", "list", "notifications"].includes(consumer) ? consumer : "unknown",
+      profile: ["legacy", "operational", "summary", "my-work"].includes(profile) ? profile : "",
+      realtime: ["connected", "syncing", "degraded", "idle"].includes(realtime) ? realtime : "unknown",
+      reason: reasons.includes(reason) ? reason : "unknown", scope: scopes.get(scope),
       tab, route: ["#board", "#list", "#home"].includes(route) ? route : "other",
       at: Date.now(), ...(durationMs === undefined ? {} : { durationMs: Math.max(0, durationMs) }) });
     if (rows.length > 200) rows.shift();
@@ -52,11 +56,13 @@ const flowMateBoardDebug = (() => {
     },
   };
   window.flowmateBoardDebug = api;
+  window.flowmateRequestDebug = api;
   if (typeof window.addEventListener === "function") {
     window.addEventListener("flowmate:signed-out", api.clear);
     window.addEventListener("flowmate:auth-changed", api.clear);
     window.addEventListener("flowmate:team-workspace-changed", api.clear);
   }
+  window.recordFlowMateRequestDebug = record;
   return { record };
 })();
 
@@ -477,15 +483,18 @@ function loadFlowMateWorkItemsForList(options = {}) {
   const scope = options.profile === "my-work" ? "my-work" : "workspace";
   const product = window.FLOWMATE_ACTIVE_PRODUCT === "task-assign" ? "task-assign" : "flowmate";
   const teams = options.allTaskTeams === true ? "all-teams" : "active-team";
-  const key = `${getFlowMateListRowsWorkspaceKey()}:${product}:${window.FLOWMATE_CURRENT_USER?.team_member_id || ""}:${scope}:${teams}`;
+  const key = `${getFlowMateListRowsWorkspaceKey()}:${product}:${window.FLOWMATE_CURRENT_USER?.team_member_id || ""}:${window.FLOWMATE_CURRENT_USER?.role || ""}:${scope}:${teams}`;
+  const client = window.flowmateSupabase;
+  const user = window.FLOWMATE_CURRENT_USER;
   let request = flowMateWorkItemRequests.get(key);
-  if (!request) {
-    request = loadFlowMateWorkItemsForListUncached(options).finally(() => {
+  if (!request || request.client !== client || request.user !== user) {
+    request = { client, user, promise: null };
+    request.promise = loadFlowMateWorkItemsForListUncached(options).finally(() => {
       if (flowMateWorkItemRequests.get(key) === request) flowMateWorkItemRequests.delete(key);
     });
     flowMateWorkItemRequests.set(key, request);
   }
-  return request.then(result => ({ ...result, data: cloneFlowMateListData(result.data) }));
+  return request.promise.then(result => ({ ...result, data: cloneFlowMateListData(result.data) }));
 }
 
 async function loadFlowMateWorkItemsForListUncached(options = {}) {
@@ -565,7 +574,13 @@ function invalidateFlowMateListRowsCache(options = {}) {
   flowMateRecentBoards.clear();
   const workspaceKey = options.workspaceKey || null;
   const keys = workspaceKey ? [workspaceKey] : Array.from(flowMateListRowsCacheByWorkspace.keys());
-  keys.forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
+  keys.forEach(invalidateFlowMateListProfile);
+}
+
+function invalidateFlowMateListProfile(key) {
+  const entry = flowMateListRowsCacheByWorkspace.get(key);
+  if (entry?.promise) { entry.dirty = true; entry.expiresAt = 0; }
+  else flowMateListRowsCacheByWorkspace.delete(key);
 }
 
 function cloneFlowMateListData(value) {
@@ -580,23 +595,24 @@ function emptyFlowMateQueryResult() {
   return Promise.resolve({ data: [], error: null });
 }
 
-async function loadFlowMateListRowsUncached(profileName = "legacy") {
+async function loadFlowMateListRowsUncached(profileName = "legacy", assertScope = () => {}) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
   const profile = FLOWMATE_LIST_ROW_PROFILES[profileName] || FLOWMATE_LIST_ROW_PROFILES.legacy;
   const workItemsResult = await loadFlowMateWorkItemsForList({ profile: profileName });
+  assertScope();
   if (workItemsResult.error) throw workItemsResult.error;
   const activeWorkItems = (workItemsResult.data || []).filter((item) => !item.archived_at);
-  const workItemIds = activeWorkItems.map((item) => item.id).filter(Boolean);
+  const workItemIds = Array.from(new Set(activeWorkItems.map((item) => item.id).filter(Boolean))).sort();
   if (!workItemIds.length) {
     emitFlowMateSynced("work_items");
     return [];
   }
-  const userIds = Array.from(new Set(activeWorkItems.flatMap((item) => [item.requester_user_id, item.assignee_user_id]).filter(Boolean)));
-  const memberIds = Array.from(new Set(activeWorkItems.map((item) => item.final_owner_member_id).filter(Boolean)));
+  const userIds = Array.from(new Set(activeWorkItems.flatMap((item) => [item.requester_user_id, item.assignee_user_id]).filter(Boolean))).sort();
+  const memberIds = Array.from(new Set(activeWorkItems.map((item) => item.final_owner_member_id).filter(Boolean))).sort();
 
-  const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = await Promise.all([
+  const settled = await Promise.allSettled([
     loadFlowMateFlagsForWorkItems(workItemIds),
     userIds.length
       ? window.flowmateSupabase.from("users").select("id,email,display_name,requester_team,is_active").in("id", userIds)
@@ -629,6 +645,10 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
       : emptyFlowMateQueryResult(),
   ]);
 
+  assertScope();
+  const rejected = settled.find(result => result.status === "rejected");
+  if (rejected) throw rejected.reason;
+  const [flagsResult, usersResult, membersResult, detailsResult, checklistResult, commentsResult, linksResult, watchersResult, aiTagsResult, eventsResult, assignmentRunsResult, marketingSubPicResult] = settled.map(result => result.value);
   const firstError =
     flagsResult.error ||
     usersResult.error ||
@@ -653,7 +673,7 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
     ...(watchersResult.data || []).flatMap((row) => [row.watcher_user_id, row.added_by_user_id]),
     ...(aiTagsResult.data || []).map((row) => row.created_by_user_id),
     ...(eventsResult.data || []).map((row) => row.actor_user_id),
-  ].filter((userId) => userId && !baseUserIds.has(userId))));
+  ].filter((userId) => userId && !baseUserIds.has(userId)))).sort();
   const relatedUsersResult = relatedUserIds.length
     ? await window.flowmateSupabase
       .from("users")
@@ -661,6 +681,7 @@ async function loadFlowMateListRowsUncached(profileName = "legacy") {
       .in("id", relatedUserIds)
     : { data: [], error: null };
   if (relatedUsersResult.error) throw relatedUsersResult.error;
+  assertScope();
   const scopedUsers = [...baseUsers, ...(relatedUsersResult.data || [])];
 
   const flagsByWorkItemId = Object.fromEntries(
@@ -872,15 +893,41 @@ function loadFlowMateListRows(options = {}) {
   }
 
   const profile = FLOWMATE_LIST_ROW_PROFILES[options.profile] ? options.profile : "legacy";
-  const workspaceKey = `${getFlowMateListRowsWorkspaceKey()}:${profile}`;
+  const scope = () => `${getFlowMateListRowsWorkspaceKey()}:${window.FLOWMATE_CURRENT_USER?.team_member_id || ""}:${window.FLOWMATE_CURRENT_USER?.role || ""}:${profile}`;
+  const workspaceKey = scope();
+  const client = window.flowmateSupabase;
+  const user = window.FLOWMATE_CURRENT_USER;
+  const reason = options.reason || "manual";
   const force = options.force === true;
   const now = Date.now();
-  const cached = flowMateListRowsCacheByWorkspace.get(workspaceKey);
-  if (cached?.promise) return cached.promise.then(cloneFlowMateListData);
-  if (!force && cached?.rows && cached.expiresAt > now) return Promise.resolve(cloneFlowMateListData(cached.rows));
+  let cached = flowMateListRowsCacheByWorkspace.get(workspaceKey);
+  if (cached?.client !== client || cached?.user !== user) cached = null;
+  const debug = (event, duration) => flowMateBoardDebug.record(event, reason, workspaceKey, duration, "list", profile);
+  debug("request");
+  if (cached?.promise) { debug("shared"); return cached.promise.then(cloneFlowMateListData); }
+  if (!force && cached?.rows && cached.expiresAt > now) { debug("recent"); return Promise.resolve(cloneFlowMateListData(cached.rows)); }
 
-  const entry = { rows: null, expiresAt: 0, promise: null };
-  const request = loadFlowMateListRowsUncached(profile);
+  const entry = { client, user, dirty: false, rows: null, expiresAt: 0, promise: null };
+  const assertScope = () => {
+    if (client !== window.flowmateSupabase || user !== window.FLOWMATE_CURRENT_USER || workspaceKey !== scope()) {
+      const error = new Error("List request was superseded.");
+      error.code = "FLOWMATE_LIST_SUPERSEDED";
+      throw error;
+    }
+  };
+  const request = (async () => {
+    let rows;
+    do {
+      entry.dirty = false;
+      assertScope();
+      const started = Date.now(); debug("start");
+      try { rows = await loadFlowMateListRowsUncached(profile, assertScope); assertScope(); }
+      catch (error) { debug("error", Date.now() - started); throw error; }
+      debug("end", Date.now() - started);
+      if (entry.dirty) debug("follow-up");
+    } while (entry.dirty);
+    return rows;
+  })();
   const tracked = request
     .then((rows) => {
       const cachedRows = cloneFlowMateListData(rows);
@@ -936,13 +983,13 @@ if (typeof window.addEventListener === "function") {
     if (reason === "comments") {
       Array.from(flowMateListRowsCacheByWorkspace.keys())
         .filter((key) => key.endsWith(":my-work") || key.endsWith(":legacy"))
-        .forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
+        .forEach(invalidateFlowMateListProfile);
       return;
     }
     if (["work_item_links", "work_item_watchers", "work_item_ai_tags"].includes(reason)) {
       Array.from(flowMateListRowsCacheByWorkspace.keys())
         .filter((key) => key.endsWith(":legacy"))
-        .forEach((key) => flowMateListRowsCacheByWorkspace.delete(key));
+        .forEach(invalidateFlowMateListProfile);
       return;
     }
     invalidateFlowMateListRowsCache();

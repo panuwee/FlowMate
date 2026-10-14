@@ -243,7 +243,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
   useEffectB(() => {
     let alive = true;
 
-    async function loadRows() {
+    async function loadRows({ reason = "mount" } = {}) {
       if (!window.loadFlowMateOperationalRows) {
         setSourceRows([]);
         setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
@@ -251,7 +251,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
       }
 
       try {
-        const rows = await window.loadFlowMateOperationalRows();
+        const rows = await window.loadFlowMateOperationalRows({ reason });
         let liveRequesterTeams = [];
         if (window.loadFlowMateRequesterTeams) {
           liveRequesterTeams = await window.loadFlowMateRequesterTeams();
@@ -261,7 +261,7 @@ function ListScreen({ onOpen, searchQuery = "" }) {
         if (liveRequesterTeams.length) setRequesterTeamOptions(liveRequesterTeams);
         setLoadState({ status: "live", message: "Live Supabase data" });
       } catch (error) {
-        if (!alive) return;
+        if (!alive || error?.code === "FLOWMATE_LIST_SUPERSEDED") return;
         console.error("[FlowMate List] Supabase load failed:", error);
         setSourceRows([]);
         setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });
@@ -1244,19 +1244,19 @@ function QueueScreen({ onOpen, searchQuery = "" }) {
 
   useEffectB(() => {
     let alive = true;
-    async function loadRows() {
+    async function loadRows({ reason = "mount" } = {}) {
       if (!window.loadFlowMateOperationalRows) {
         setSourceRows([]);
         setLoadState({ status: "error", message: "Live data unavailable: Supabase list loader is not ready." });
         return;
       }
       try {
-        const rows = await window.loadFlowMateOperationalRows();
+        const rows = await window.loadFlowMateOperationalRows({ reason });
         if (!alive) return;
         setSourceRows(rows);
         setLoadState({ status: "live", message: "Live Supabase data" });
       } catch (error) {
-        if (!alive) return;
+        if (!alive || error?.code === "FLOWMATE_LIST_SUPERSEDED") return;
         console.error("[FlowMate Attention] Supabase load failed:", error);
         setSourceRows([]);
         setLoadState({ status: "error", message: `Live data unavailable: ${window.flowmateUserError(error, "Supabase query failed.")}` });

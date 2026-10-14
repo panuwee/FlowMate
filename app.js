@@ -570,7 +570,9 @@ function App() {
       });
     }
     try {
-      const rows = await window.loadFlowMateNotifications();
+      const rows = await window.loadFlowMateNotifications({
+        reason: options.reason || "manual"
+      });
       if (!isCurrent()) return [];
       setNotifications(rows || []);
       setNotificationLoadState({
@@ -970,11 +972,14 @@ function App() {
       if (!window.loadFlowMateNavigationRows || !window.getFlowMateNavCounts) return;
       if (window.flowMateRefreshReasonMatches && !window.flowMateRefreshReasonMatches(event, ["work_items", "assignment_runs", "work_item_events", "work_status_changed", "admin_work_status_changed", "active_team_changed", "recheck_brief", "capacity_allocation_rescheduled", "admin_archive", "admin_restore"])) return;
       try {
-        const rows = await window.loadFlowMateNavigationRows();
+        const rows = await window.loadFlowMateNavigationRows({
+          reason: event ? "data-change" : "mount"
+        });
         if (!alive) return;
         const currentUser = window.FLOWMATE_CURRENT_USER || authState.user || {};
         setNavCounts(window.getFlowMateNavCounts(rows, currentUser, window.MEMBERS || []));
       } catch (error) {
+        if (!alive || error?.code === "FLOWMATE_LIST_SUPERSEDED") return;
         console.error("[FlowMate Nav] Count refresh failed:", error);
       }
     }
@@ -998,8 +1003,11 @@ function App() {
     setNotifications([]);
     setIsNotificationCenterOpen(false);
     let alive = true;
-    async function loadRows() {
+    async function loadRows({
+      reason = "mount"
+    } = {}) {
       const rows = await refreshNotifications({
+        reason,
         showLoading: notifications.length === 0,
         throwOnError: true
       });
@@ -1045,7 +1053,9 @@ function App() {
         return;
       }
       try {
-        const rows = await window.loadFlowMateSearchRows();
+        const rows = await window.loadFlowMateSearchRows({
+          reason: "mount"
+        });
         if (!alive) return;
         setGlobalSearchRows(rows || []);
         setGlobalSearchLoadState({
@@ -1053,7 +1063,7 @@ function App() {
           message: "Search ready"
         });
       } catch (error) {
-        if (!alive) return;
+        if (!alive || error?.code === "FLOWMATE_LIST_SUPERSEDED") return;
         console.error("[FlowMate Search] Global search load failed:", error);
         setGlobalSearchRows([]);
         setGlobalSearchLoadState({

@@ -35,6 +35,15 @@ function setup() {
 }
 
 describe('Notification reads (isolated mocks; no production calls)', () => {
+  it('records caller reason and one network span for shared joined notification reads', async () => {
+    const h = setup(); const record = vi.fn(); h.window.recordFlowMateRequestDebug = record;
+    const first = h.load({ reason: 'poll' }); const second = h.load({ reason: 'focus' });
+    expect(h.from).toHaveBeenCalledTimes(1);
+    h.requests[0].resolve({ data: [row()], error: null }); await Promise.all([first, second]);
+    expect(record.mock.calls.filter(c => c[0] === 'start')).toHaveLength(1);
+    expect(record.mock.calls.filter(c => c[0] === 'end')).toHaveLength(1);
+    expect(record.mock.calls.some(c => c[0] === 'shared' && c[1] === 'focus' && c[4] === 'notifications')).toBe(true);
+  });
   it('uses one left-embedded request, preserves filters and maps current work state', async () => {
     const h = setup(); const pending = h.load();
     expect(h.from).toHaveBeenCalledWith('notifications');
