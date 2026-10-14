@@ -218,7 +218,9 @@ function ListScreen({
   });
   useEffectB(() => {
     let alive = true;
-    async function loadRows() {
+    async function loadRows({
+      reason = "mount"
+    } = {}) {
       if (!window.loadFlowMateOperationalRows) {
         setSourceRows([]);
         setLoadState({
@@ -228,7 +230,9 @@ function ListScreen({
         return;
       }
       try {
-        const rows = await window.loadFlowMateOperationalRows();
+        const rows = await window.loadFlowMateOperationalRows({
+          reason
+        });
         let liveRequesterTeams = [];
         if (window.loadFlowMateRequesterTeams) {
           liveRequesterTeams = await window.loadFlowMateRequesterTeams();
@@ -241,7 +245,7 @@ function ListScreen({
           message: "Live Supabase data"
         });
       } catch (error) {
-        if (!alive) return;
+        if (!alive || error?.code === "FLOWMATE_LIST_SUPERSEDED") return;
         console.error("[FlowMate List] Supabase load failed:", error);
         setSourceRows([]);
         setLoadState({
@@ -1751,7 +1755,9 @@ function QueueScreen({
   });
   useEffectB(() => {
     let alive = true;
-    async function loadRows() {
+    async function loadRows({
+      reason = "mount"
+    } = {}) {
       if (!window.loadFlowMateOperationalRows) {
         setSourceRows([]);
         setLoadState({
@@ -1761,7 +1767,9 @@ function QueueScreen({
         return;
       }
       try {
-        const rows = await window.loadFlowMateOperationalRows();
+        const rows = await window.loadFlowMateOperationalRows({
+          reason
+        });
         if (!alive) return;
         setSourceRows(rows);
         setLoadState({
@@ -1769,7 +1777,7 @@ function QueueScreen({
           message: "Live Supabase data"
         });
       } catch (error) {
-        if (!alive) return;
+        if (!alive || error?.code === "FLOWMATE_LIST_SUPERSEDED") return;
         console.error("[FlowMate Attention] Supabase load failed:", error);
         setSourceRows([]);
         setLoadState({

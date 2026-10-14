@@ -140,9 +140,10 @@ describe('Live refresh request reduction (no network)', () => {
     expect(from).toHaveBeenCalledTimes(1);
     change('work_items');
     const c = window.loadFlowMateNavigationRows();
-    expect(from).toHaveBeenCalledTimes(2);
+    expect(from).toHaveBeenCalledTimes(1);
     release({ data: [], error: null });
     await Promise.all([a, b, c]);
+    expect(from).toHaveBeenCalledTimes(2);
   });
 
   it('never shares work-item requests across user, workspace or My Work scopes', async () => {
@@ -160,10 +161,12 @@ describe('Live refresh request reduction (no network)', () => {
     window.FLOWMATE_CURRENT_USER = { id: 'another-user' };
     requests.push(window.loadFlowMateNavigationRows());
     expect(from).toHaveBeenCalledTimes(4);
-    await Promise.all(requests);
+    const results = await Promise.allSettled(requests);
+    expect(results.slice(0, 3).every(r => r.status === 'rejected' && r.reason.code === 'FLOWMATE_LIST_SUPERSEDED')).toBe(true);
+    expect(results[3].status).toBe('fulfilled');
   });
 
-  it('an old completion cannot remove a newer in-flight request after invalidation', async () => {
+  it('a follow-up remains shared until it finishes after invalidation', async () => {
     const { window, change } = browser();
     const releases: Array<(value: any) => void> = [];
     const from = vi.fn(() => {
@@ -175,13 +178,13 @@ describe('Live refresh request reduction (no network)', () => {
     window.flowmateSupabase = { from };
     const old = window.loadFlowMateNavigationRows();
     change('work_items');
-    const fresh = window.loadFlowMateOperationalRows();
+    const fresh = window.loadFlowMateNavigationRows();
     releases[0]({ data: [], error: null });
-    await old;
-    const shared = window.loadFlowMateListRows();
+    await vi.advanceTimersByTimeAsync(0);
+    const shared = window.loadFlowMateNavigationRows();
     expect(from).toHaveBeenCalledTimes(2);
     releases[1]({ data: [], error: null });
-    await Promise.all([fresh, shared]);
+    await Promise.all([old, fresh, shared]);
   });
 
   it('restarts the minute timer after an event instead of polling again one second later', async () => {

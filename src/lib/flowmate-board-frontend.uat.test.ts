@@ -239,7 +239,7 @@ describe("FlowMate Board and Delivered frontend", () => {
     expect(supabase.workItemSelectCount()).toBe(3);
   });
 
-  it("tombstones an active List generation on invalidation so an old response cannot overwrite a fresh batch", async () => {
+  it("serializes invalidated List generations and returns fresh rows to every waiting caller", async () => {
     const supabase = makeDeferredListLoaderSupabase();
     const windowObject = loadBrowserScript("supabase-list-data.js", supabase);
 
@@ -250,15 +250,17 @@ describe("FlowMate Board and Delivered frontend", () => {
       windowObject.loadFlowMateListRows(),
       windowObject.loadFlowMateListRows(),
     ];
-    expect(supabase.workItemSelectCount()).toBe(2);
+    expect(supabase.workItemSelectCount()).toBe(1);
+
+    supabase.batches[0].resolve();
+    await vi.waitFor(() => expect(supabase.workItemSelectCount()).toBe(2));
 
     supabase.batches[1].resolve();
     const [freshRows, sharedRows] = await Promise.all([freshRequest, sharedFreshRequest]);
     expect(freshRows[0].title).toBe("fresh batch 1");
     expect(sharedRows[0].title).toBe("fresh batch 1");
 
-    supabase.batches[0].resolve();
-    await expect(oldRequest).resolves.toMatchObject([{ title: "old batch" }]);
+    await expect(oldRequest).resolves.toMatchObject([{ title: "fresh batch 1" }]);
     await expect(windowObject.loadFlowMateListRows()).resolves.toMatchObject([{ title: "fresh batch 1" }]);
     expect(supabase.workItemSelectCount()).toBe(2);
 

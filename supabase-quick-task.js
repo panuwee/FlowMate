@@ -457,6 +457,12 @@ async function transitionFlowMateCreativeStatus(displayId, nextStatus, options =
   if (!displayId) throw new Error("Work item ID is required.");
   if (!nextStatus) throw new Error("Next status is required.");
 
+  if (options.currentStatus && options.currentStatus === nextStatus) {
+    const error = new Error("The work item is already in this status. Refresh it before trying again.");
+    error.code = "FLOWMATE_STATUS_UNCHANGED";
+    throw error;
+  }
+
   const { data, error } = await window.flowmateSupabase.rpc("transition_creative_work_status", {
     p_actor_user_id: flowmateActorId(),
     p_display_id: displayId,
@@ -971,7 +977,7 @@ if (typeof window.addEventListener === "function") {
   window.addEventListener("flowmate:auth-changed", invalidateFlowMateNotifications);
 }
 
-async function loadFlowMateNotifications() {
+async function loadFlowMateNotifications({ reason = "manual" } = {}) {
   if (!window.flowmateSupabase) {
     throw new Error("Supabase client is not ready.");
   }
@@ -982,14 +988,19 @@ async function loadFlowMateNotifications() {
   const client = window.flowmateSupabase;
   const user = window.FLOWMATE_CURRENT_USER;
   const scope = JSON.stringify([user.id, window.FLOWMATE_ACTIVE_TEAM, window.FLOWMATE_ACTIVE_PRODUCT]);
+  const debug = (event, duration) => window.recordFlowMateRequestDebug?.(event, reason, scope, duration, "notifications");
+  debug("request");
   let request = flowmateNotificationRequest;
   if (!request || request.client !== client || request.user !== user || request.scope !== scope) {
     request = { client, user, scope, revision: flowmateNotificationRevision, promise: null };
     flowmateNotificationRequest = request;
-    request.promise = readFlowMateNotifications(client).finally(() => {
+    const started = Date.now(); debug("start");
+    request.promise = readFlowMateNotifications(client).then(rows => {
+      debug("end", Date.now() - started); return rows;
+    }, error => { debug("error", Date.now() - started); throw error; }).finally(() => {
       if (flowmateNotificationRequest === request) flowmateNotificationRequest = null;
     });
-  }
+  } else debug("shared");
   const rows = await request.promise;
   const currentScope = JSON.stringify([window.FLOWMATE_CURRENT_USER?.id, window.FLOWMATE_ACTIVE_TEAM, window.FLOWMATE_ACTIVE_PRODUCT]);
   if (request.revision !== flowmateNotificationRevision || client !== window.flowmateSupabase ||
