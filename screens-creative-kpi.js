@@ -10,9 +10,16 @@ function FlowMateCreativeReportScreen({
   const [role, setRole] = React.useState(''),
     [personId, setPersonId] = React.useState(''),
     [workType, setWorkType] = React.useState('');
-  const [snapshot, setSnapshot] = React.useState(null),
-    [error, setError] = React.useState(''),
-    [refresh, setRefresh] = React.useState(0);
+  const [loadState, setLoadState] = React.useState({}),
+    [refresh, setRefresh] = React.useState(0),
+    [annualRetry, setAnnualRetry] = React.useState(0);
+  const annualCache = React.useRef(null),
+    periodCache = React.useRef(null);
+  const currentLoad = loadState.year === year && loadState.refresh === refresh && (loadState.snapshot?.scope === 'year' || loadState.month === month);
+  const snapshot = currentLoad ? loadState.snapshot : null;
+  const error = currentLoad ? loadState.error : '';
+  const annualError = currentLoad ? loadState.annualError : '';
+  const annualReady = snapshot?.scope === 'year';
   const [requester, setRequester] = React.useState(false),
     [metric, setMetric] = React.useState('volume'),
     [context, setContext] = React.useState('assigned'),
@@ -20,27 +27,96 @@ function FlowMateCreativeReportScreen({
   React.useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    setSnapshot(null);
-    setError('');
-    window.loadFlowMateCreativeReport({
-      year,
-      signal: controller.signal
-    }).then(data => {
-      if (active) setSnapshot({
-        ...data,
-        year
+    const matches = cache => cache?.year === year && cache.refresh === refresh;
+    const publish = state => {
+      if (active) setLoadState({
+        year,
+        month,
+        refresh,
+        ...state
       });
-    }).catch(e => {
-      if (active) setError(e.message || 'Report unavailable');
+    };
+    const annual = annualCache.current;
+    if (matches(annual)) {
+      publish({
+        snapshot: annual.data
+      });
+      return () => {
+        active = false;
+        controller.abort();
+      };
+    }
+    let monthly = matches(periodCache.current) && periodCache.current.month === month ? periodCache.current.data : null;
+    publish({
+      snapshot: monthly
     });
+    (async () => {
+      if (month && !monthly) {
+        try {
+          monthly = await window.loadFlowMateCreativePeriod({
+            year,
+            month,
+            signal: controller.signal
+          });
+          if (!active) return;
+          periodCache.current = {
+            year,
+            month,
+            refresh,
+            data: monthly
+          };
+          publish({
+            snapshot: monthly
+          });
+        } catch (e) {
+          if (!active) return;
+          periodCache.current = null;
+          publish({
+            error: e.message || 'โหลดข้อมูลเดือนที่เลือกไม่สำเร็จ'
+          });
+          return;
+        }
+      }
+      try {
+        const data = await window.loadFlowMateCreativePeriod({
+          year,
+          month: null,
+          signal: controller.signal
+        });
+        if (!active) return;
+        annualCache.current = {
+          year,
+          refresh,
+          data
+        };
+        publish({
+          snapshot: data
+        });
+      } catch (e) {
+        if (!active) return;
+        if (e.accessDenied) {
+          annualCache.current = null;
+          periodCache.current = null;
+          publish({
+            error: e.message
+          });
+        } else if (monthly) publish({
+          snapshot: monthly,
+          annualError: e.message || 'โหลดข้อมูลทั้งปีไม่สำเร็จ'
+        });else publish({
+          error: e.message || 'โหลดข้อมูลทั้งปีไม่สำเร็จ'
+        });
+      }
+    })();
     return () => {
       active = false;
       controller.abort();
     };
-  }, [year, refresh]);
+  }, [year, month, refresh, annualRetry]);
   const fullReport = React.useMemo(() => snapshot?.year === year ? model.buildReport(snapshot.rows, {
     year,
     month,
+    coverage: snapshot.scope,
     role,
     personId,
     workType,
@@ -49,20 +125,24 @@ function FlowMateCreativeReportScreen({
   }) : null, [snapshot, year, month, role, personId, workType]);
   const report = React.useMemo(() => fullReport && timingGroup ? model.buildReport(snapshot.rows, {
     ...fullReport.filters,
+    coverage: snapshot.scope,
     timingSource: context,
     timingGroup,
     asOf: snapshot.asOf,
     calendarActiveN: snapshot.calendarActiveN
   }) : fullReport, [fullReport, timingGroup, context, snapshot]);
   const s = report?.selected,
-    previous = month > 1 ? report?.monthly[month - 2] : null;
+    previous = month > 1 ? report?.monthly?.[month - 2] : null;
   const volume = v => !s?.activityN || s.periodStatus === 'Future period' ? '—' : fmt(v);
   const note = (d, base) => `${base} · ${d.n} งานที่วัดได้ · ขาด ${d.missingN}`;
   const cards = s ? [['Delivered', volume(s.deliveredN), 'เดือนส่งมอบครั้งแรก · Task ละ 1 ครั้ง'], ['Delivered ที่ใช้ AI', volume(s.aiDeliveredN), `${fmt(s.aiAdoption.pct, 'percent')} ของ Delivered · เดือนส่งมอบ`], ['First Draft ตรงเวลา', fmt(s.onTime.pct, 'percent'), `${s.onTime.numerator}/${s.onTime.denominator} งาน · เดือนส่ง First Review`], ['ส่งก่อน Launch', fmt(s.launch.p50, 'days'), `${note(s.launch, 'เดือนส่ง First Review')} · ค่าลบ = ส่งหลัง`], ['ระยะเวลาผลิต', fmt(s.production.p50, 'days'), note(s.production, 'เดือนส่ง First Review')], ['ระยะเวลาจนเริ่มงาน', fmt(s.acknowledge.p50, 'days'), note(s.acknowledge, 'Created → Started · เดือนเริ่มงาน')]] : [];
   function download() {
-    if (!report) return;
+    if (!report || !annualReady) return;
     if (!window.flowmateDownloadWorkbook) {
-      setError('Workbook unavailable. Please refresh.');
+      setLoadState(state => ({
+        ...state,
+        error: 'Workbook unavailable. Please refresh.'
+      }));
       return;
     }
     window.flowmateDownloadWorkbook(`flowmate-creative-kpi-${year}-${month || 'year'}-${model.dateKey(report.asOf)}.xlsx`, model.buildWorkbook(report));
@@ -77,7 +157,8 @@ function FlowMateCreativeReportScreen({
   }));
   return React.createElement("div", {
     className: "page creative-report",
-    "data-testid": "creative-year-end-report"
+    "data-testid": "creative-year-end-report",
+    "data-coverage": snapshot?.scope || 'loading'
   }, React.createElement("div", {
     className: "page__header"
   }, React.createElement("div", null, React.createElement("h1", {
@@ -95,7 +176,7 @@ function FlowMateCreativeReportScreen({
   }, "Refresh"), React.createElement("button", {
     className: "btn btn--primary",
     "data-testid": "creative-report-export",
-    disabled: !report,
+    disabled: !report || !annualReady,
     onClick: download
   }, "Export Excel"))), React.createElement("div", {
     className: "creative-report__filters"
@@ -123,11 +204,12 @@ function FlowMateCreativeReportScreen({
   }, "ยังไม่ทราบบทบาท"))), React.createElement("label", null, "บุคคล", React.createElement("select", {
     className: "select",
     "aria-label": "Report person",
+    disabled: !annualReady,
     value: personId,
     onChange: e => setPersonId(e.target.value)
   }, React.createElement("option", {
     value: ""
-  }, "ทุกคน"), report?.availablePeople.map(p => React.createElement("option", {
+  }, annualReady ? 'ทุกคน' : 'กำลังโหลดรายชื่อทั้งปี…'), report?.availablePeople.map(p => React.createElement("option", {
     key: p.id,
     value: p.id
   }, p.name, " · ", p.role)))), React.createElement("label", null, "เดือน", React.createElement("select", {
@@ -145,11 +227,12 @@ function FlowMateCreativeReportScreen({
   }, flowMateProgressMonth(i))))), React.createElement("label", null, "ประเภทงาน", React.createElement("select", {
     className: "select",
     "aria-label": "Report work type",
+    disabled: !annualReady,
     value: workType,
     onChange: e => setWorkType(e.target.value)
   }, React.createElement("option", {
     value: ""
-  }, "ทุกประเภท"), report?.workTypes.map(t => React.createElement("option", {
+  }, annualReady ? 'ทุกประเภท' : 'กำลังโหลดประเภทงานทั้งปี…'), report?.workTypes.map(t => React.createElement("option", {
     key: t
   }, t))))), error && React.createElement("div", {
     className: "creative-report__notice is-warning",
@@ -160,21 +243,31 @@ function FlowMateCreativeReportScreen({
   }, "Retry")), !report && !error && React.createElement("div", {
     className: "creative-report__notice",
     role: "status"
-  }, "กำลังโหลดข้อมูลรายงาน…"), report && React.createElement(React.Fragment, null, React.createElement("div", {
+  }, month ? 'กำลังโหลดข้อมูลเดือนที่เลือก…' : 'กำลังโหลดรายงานทั้งปี…'), report && React.createElement(React.Fragment, null, React.createElement("div", {
     className: "creative-report__context"
-  }, React.createElement("strong", null, report.availablePeople.find(p => p.id === personId)?.name || role || 'Creative team', " · ", month ? flowMateProgressMonth(month - 1) : 'ทั้งปี', " ", year), React.createElement("span", null, flowMateProgressStatus(s.periodStatus), " · ณ ", model.dateKey(report.asOf), " (Bangkok)")), timingGroup && React.createElement("div", {
+  }, React.createElement("strong", null, report.availablePeople.find(p => p.id === personId)?.name || role || 'Creative team', " · ", month ? flowMateProgressMonth(month - 1) : 'ทั้งปี', " ", year), React.createElement("span", null, flowMateProgressStatus(s.periodStatus), " · ณ ", model.dateKey(report.asOf), " ", new Date(report.asOf).toLocaleTimeString('th-TH', {
+    timeZone: 'Asia/Bangkok'
+  }), " (Bangkok)")), !annualReady && React.createElement("div", {
+    className: "creative-report__notice",
+    "data-testid": "creative-annual-status",
+    role: annualError ? 'alert' : 'status'
+  }, annualError ? `ข้อมูลเดือนที่เลือกพร้อมแล้ว · ${annualError}` : 'ข้อมูลเดือนที่เลือกพร้อมแล้ว · กำลังโหลดกราฟทั้งปี รายชื่อตัวกรอง และ Excel…', annualError && React.createElement("button", {
+    className: "btn btn--secondary",
+    onClick: () => setAnnualRetry(v => v + 1)
+  }, "ลองโหลดทั้งปีอีกครั้ง")), timingGroup && React.createElement("div", {
     className: "creative-report__notice"
   }, "กำลังดูเฉพาะ: ", context === 'created' ? 'ตอนสร้าง Task' : 'ตอน Assign', " · ", flowMateTimingLabel(timingGroup), " ", React.createElement("button", {
     className: "btn btn--secondary",
     onClick: () => setTimingGroup('')
   }, "กลับไปดูทุกงาน")), React.createElement("div", {
-    className: "creative-report__cards"
+    className: "creative-report__cards",
+    "data-testid": "creative-selected-kpis"
   }, cards.map(([label, value, note]) => React.createElement("section", {
     className: "creative-report__card",
     key: label
   }, React.createElement("h2", null, label), React.createElement("div", {
     className: "creative-report__value"
-  }, value), React.createElement("p", null, note)))), React.createElement("section", {
+  }, value), React.createElement("p", null, note)))), annualReady && React.createElement("section", {
     className: "creative-report__details"
   }, React.createElement("h2", null, "Progression รายเดือน"), React.createElement("div", {
     className: "creative-report__tabs",
@@ -210,7 +303,7 @@ function FlowMateCreativeReportScreen({
     onClick: () => setTimingGroup(timingGroup === key ? '' : key)
   }, React.createElement("strong", null, fullReport.selected.timing[context][key].n, " งาน"), React.createElement("span", null, flowMateTimingLabel(key)), React.createElement("small", null, "ตรงเวลา ", fullReport.selected.timing[context][key].onTime.numerator, "/", fullReport.selected.timing[context][key].onTime.denominator))))), React.createElement("details", {
     className: "creative-report__details"
-  }, React.createElement("summary", null, "วิธีวัดและคุณภาพข้อมูล"), React.createElement("p", null, "ระยะเวลาแสดงค่ากลาง P50 ตามสูตรวันทำงานเดิม ไม่ใช่ชั่วโมงทำงานจริง · P85 และหลักฐานอยู่ใน Excel"), React.createElement("p", null, "Created → Assigned: ", fmt(s.queue.p50, 'days'), " · Assigned → Started: ", fmt(s.start.p50, 'days'), " · Created → Started: ", fmt(s.acknowledge.p50, 'days')), React.createElement("p", null, "Start → Review ภายใน 60 วินาที: ", s.shortProductionN, " งาน · ย้ายผู้รับผิดชอบระหว่างผลิต: ", s.mixedProductionN, " งาน (ไม่รวมเวลาทั้งงานในการวัดระยะเวลาผลิตรายบุคคล)"), React.createElement("p", null, "ข้อมูลเก่าอาจใช้วันกำหนดและ AI ปัจจุบัน ให้ตรวจข้อจำกัดราย Task · ข้อมูลไม่พอแสดง — · งานที่ไม่มี First Delivered event ไม่ถูกเดาเป็นยอดส่งมอบ"), React.createElement("p", null, report.calendarActiveN === 0 ? 'ยังไม่มีวันหยุดที่บันทึกไว้ในปีนี้' : `วันหยุดที่บันทึกไว้ในปีนี้: ${report.calendarActiveN ?? 'ไม่ทราบ'}`, " · เกณฑ์ 2 วันใช้เป็นบริบทเวลา")), React.createElement("details", {
+  }, React.createElement("summary", null, "วิธีวัดและคุณภาพข้อมูล"), React.createElement("p", null, "ระยะเวลาแสดงค่ากลาง P50 ตามสูตรวันทำงานเดิม ไม่ใช่ชั่วโมงทำงานจริง · P85 และหลักฐานอยู่ใน Excel"), React.createElement("p", null, "Created → Assigned: ", fmt(s.queue.p50, 'days'), " · Assigned → Started: ", fmt(s.start.p50, 'days'), " · Created → Started: ", fmt(s.acknowledge.p50, 'days')), React.createElement("p", null, "Start → Review ภายใน 60 วินาที: ", s.shortProductionN, " งาน · ย้ายผู้รับผิดชอบระหว่างผลิต: ", s.mixedProductionN, " งาน (ไม่รวมเวลาทั้งงานในการวัดระยะเวลาผลิตรายบุคคล)"), React.createElement("p", null, "ข้อมูลเก่าอาจใช้วันกำหนดและ AI ปัจจุบัน ให้ตรวจข้อจำกัดราย Task · ข้อมูลไม่พอแสดง — · งานที่ไม่มี First Delivered event ไม่ถูกเดาเป็นยอดส่งมอบ"), React.createElement("p", null, report.calendarActiveN === 0 ? 'ยังไม่มีวันหยุดที่บันทึกไว้ในปีนี้' : `วันหยุดที่บันทึกไว้ในปีนี้: ${report.calendarActiveN ?? 'ไม่ทราบ'}`, " · เกณฑ์ 2 วันใช้เป็นบริบทเวลา")), annualReady && React.createElement("details", {
     className: "creative-report__details"
   }, React.createElement("summary", null, "ตารางรายเดือนทั้งปี"), React.createElement("div", {
     className: "creative-report__table-wrap"

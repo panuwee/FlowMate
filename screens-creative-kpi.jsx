@@ -10,9 +10,16 @@ function FlowMateCreativeReportScreen({
   const [role, setRole] = React.useState(''),
     [personId, setPersonId] = React.useState(''),
     [workType, setWorkType] = React.useState('');
-  const [snapshot, setSnapshot] = React.useState(null),
-    [error, setError] = React.useState(''),
-    [refresh, setRefresh] = React.useState(0);
+  const [loadState, setLoadState] = React.useState({}),
+    [refresh, setRefresh] = React.useState(0),
+    [annualRetry, setAnnualRetry] = React.useState(0);
+  const annualCache = React.useRef(null), periodCache = React.useRef(null);
+  const currentLoad = loadState.year === year && loadState.refresh === refresh
+    && (loadState.snapshot?.scope === 'year' || loadState.month === month);
+  const snapshot = currentLoad ? loadState.snapshot : null;
+  const error = currentLoad ? loadState.error : '';
+  const annualError = currentLoad ? loadState.annualError : '';
+  const annualReady = snapshot?.scope === 'year';
   const [requester, setRequester] = React.useState(false),
     [metric, setMetric] = React.useState('volume'),
     [context, setContext] = React.useState('assigned'),
@@ -20,50 +27,77 @@ function FlowMateCreativeReportScreen({
   React.useEffect(() => {
     let active = true;
     const controller = new AbortController();
-    setSnapshot(null);
-    setError('');
-    window.loadFlowMateCreativeReport({
-      year,
-      signal: controller.signal
-    }).then(data => {
-      if (active) setSnapshot({
-        ...data,
-        year
-      });
-    }).catch(e => {
-      if (active) setError(e.message || 'Report unavailable');
-    });
+    const matches = cache => cache?.year === year && cache.refresh === refresh;
+    const publish = state => { if (active) setLoadState({ year, month, refresh, ...state }); };
+    const annual = annualCache.current;
+    if (matches(annual)) {
+      publish({ snapshot: annual.data });
+      return () => { active = false; controller.abort(); };
+    }
+    let monthly = matches(periodCache.current) && periodCache.current.month === month ? periodCache.current.data : null;
+    publish({ snapshot: monthly });
+    (async () => {
+      if (month && !monthly) {
+        try {
+          monthly = await window.loadFlowMateCreativePeriod({ year, month, signal: controller.signal });
+          if (!active) return;
+          periodCache.current = { year, month, refresh, data: monthly };
+          publish({ snapshot: monthly });
+        } catch (e) {
+          if (!active) return;
+          periodCache.current = null;
+          publish({ error: e.message || 'โหลดข้อมูลเดือนที่เลือกไม่สำเร็จ' });
+          return;
+        }
+      }
+      try {
+        const data = await window.loadFlowMateCreativePeriod({ year, month: null, signal: controller.signal });
+        if (!active) return;
+        annualCache.current = { year, refresh, data };
+        // Replace the entire snapshot together, including monthly cards and time.
+        publish({ snapshot: data });
+      } catch (e) {
+        if (!active) return;
+        if (e.accessDenied) {
+          annualCache.current = null;
+          periodCache.current = null;
+          publish({ error: e.message });
+        } else if (monthly) publish({ snapshot: monthly, annualError: e.message || 'โหลดข้อมูลทั้งปีไม่สำเร็จ' });
+        else publish({ error: e.message || 'โหลดข้อมูลทั้งปีไม่สำเร็จ' });
+      }
+    })();
     return () => {
       active = false;
       controller.abort();
     };
-  }, [year, refresh]);
+  }, [year, month, refresh, annualRetry]);
   const fullReport = React.useMemo(() => snapshot?.year === year ? model.buildReport(snapshot.rows, {
     year,
     month,
+    coverage: snapshot.scope,
     role,
     personId,
     workType,
     asOf: snapshot.asOf,
     calendarActiveN: snapshot.calendarActiveN
   }) : null, [snapshot, year, month, role, personId, workType]);
-  const report = React.useMemo(() => fullReport && timingGroup ? model.buildReport(snapshot.rows, {...fullReport.filters, timingSource:context, timingGroup, asOf:snapshot.asOf, calendarActiveN:snapshot.calendarActiveN}) : fullReport,[fullReport,timingGroup,context,snapshot]);
+  const report = React.useMemo(() => fullReport && timingGroup ? model.buildReport(snapshot.rows, {...fullReport.filters, coverage:snapshot.scope, timingSource:context, timingGroup, asOf:snapshot.asOf, calendarActiveN:snapshot.calendarActiveN}) : fullReport,[fullReport,timingGroup,context,snapshot]);
   const s = report?.selected,
-    previous = month > 1 ? report?.monthly[month - 2] : null;
+    previous = month > 1 ? report?.monthly?.[month - 2] : null;
   const volume = v => !s?.activityN || s.periodStatus === 'Future period' ? '—' : fmt(v);
   const note = (d, base) => `${base} · ${d.n} งานที่วัดได้ · ขาด ${d.missingN}`;
   const cards = s ? [['Delivered', volume(s.deliveredN), 'เดือนส่งมอบครั้งแรก · Task ละ 1 ครั้ง'], ['Delivered ที่ใช้ AI', volume(s.aiDeliveredN), `${fmt(s.aiAdoption.pct, 'percent')} ของ Delivered · เดือนส่งมอบ`], ['First Draft ตรงเวลา', fmt(s.onTime.pct, 'percent'), `${s.onTime.numerator}/${s.onTime.denominator} งาน · เดือนส่ง First Review`], ['ส่งก่อน Launch', fmt(s.launch.p50, 'days'), `${note(s.launch, 'เดือนส่ง First Review')} · ค่าลบ = ส่งหลัง`], ['ระยะเวลาผลิต', fmt(s.production.p50, 'days'), note(s.production, 'เดือนส่ง First Review')], ['ระยะเวลาจนเริ่มงาน', fmt(s.acknowledge.p50, 'days'), note(s.acknowledge, 'Created → Started · เดือนเริ่มงาน')]] : [];
   function download() {
-    if (!report) return;
+    if (!report || !annualReady) return;
     if (!window.flowmateDownloadWorkbook) {
-      setError('Workbook unavailable. Please refresh.');
+      setLoadState(state => ({ ...state, error: 'Workbook unavailable. Please refresh.' }));
       return;
     }
     window.flowmateDownloadWorkbook(`flowmate-creative-kpi-${year}-${month || 'year'}-${model.dateKey(report.asOf)}.xlsx`, model.buildWorkbook(report));
   }
   if (requester) return <div className="creative-report"><button className="btn btn--secondary" onClick={() => setRequester(false)}>กลับ GD / VE</button><RequesterView requesterOnly /></div>;
-  return <div className="page creative-report" data-testid="creative-year-end-report">
-    <div className="page__header"><div><h1 className="page__title">Creative KPI</h1><p className="page__sub">ผลงานรายเดือนและพัฒนาการของ GD / VE</p></div><div className="page__actions"><button className="btn btn--secondary" onClick={() => setRequester(true)}>Requester</button><button className="btn btn--secondary" onClick={() => setRefresh(v => v + 1)}>Refresh</button><button className="btn btn--primary" data-testid="creative-report-export" disabled={!report} onClick={download}>Export Excel</button></div></div>
+  return <div className="page creative-report" data-testid="creative-year-end-report" data-coverage={snapshot?.scope || 'loading'}>
+    <div className="page__header"><div><h1 className="page__title">Creative KPI</h1><p className="page__sub">ผลงานรายเดือนและพัฒนาการของ GD / VE</p></div><div className="page__actions"><button className="btn btn--secondary" onClick={() => setRequester(true)}>Requester</button><button className="btn btn--secondary" onClick={() => setRefresh(v => v + 1)}>Refresh</button><button className="btn btn--primary" data-testid="creative-report-export" disabled={!report || !annualReady} onClick={download}>Export Excel</button></div></div>
     <div className="creative-report__filters">
       <label>ปี<select className="select" aria-label="Report year" value={year} onChange={e => setYear(Number(e.target.value))}>{Array.from({
             length: Math.max(1, now.getFullYear() - 2025)
@@ -72,25 +106,26 @@ function FlowMateCreativeReportScreen({
           setRole(e.target.value);
           setPersonId('');
         }}><option value="">GD และ VE</option><option>GD</option><option>VE</option><option value="Unmapped">ยังไม่ทราบบทบาท</option></select></label>
-      <label>บุคคล<select className="select" aria-label="Report person" value={personId} onChange={e => setPersonId(e.target.value)}><option value="">ทุกคน</option>{report?.availablePeople.map(p => <option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}</select></label>
+      <label>บุคคล<select className="select" aria-label="Report person" disabled={!annualReady} value={personId} onChange={e => setPersonId(e.target.value)}><option value="">{annualReady ? 'ทุกคน' : 'กำลังโหลดรายชื่อทั้งปี…'}</option>{report?.availablePeople.map(p => <option key={p.id} value={p.id}>{p.name} · {p.role}</option>)}</select></label>
       <label>เดือน<select className="select" aria-label="Report month" value={month || ''} onChange={e => setMonth(Number(e.target.value) || null)}><option value="">ทั้งปี</option>{Array.from({
             length: 12
           }, (_, i) => <option key={i} value={i + 1}>{flowMateProgressMonth(i)}</option>)}</select></label>
-      <label>ประเภทงาน<select className="select" aria-label="Report work type" value={workType} onChange={e => setWorkType(e.target.value)}><option value="">ทุกประเภท</option>{report?.workTypes.map(t => <option key={t}>{t}</option>)}</select></label>
+      <label>ประเภทงาน<select className="select" aria-label="Report work type" disabled={!annualReady} value={workType} onChange={e => setWorkType(e.target.value)}><option value="">{annualReady ? 'ทุกประเภท' : 'กำลังโหลดประเภทงานทั้งปี…'}</option>{report?.workTypes.map(t => <option key={t}>{t}</option>)}</select></label>
     </div>
     {error && <div className="creative-report__notice is-warning" role="alert">{error}<button className="btn btn--secondary" onClick={() => setRefresh(v => v + 1)}>Retry</button></div>}
-    {!report && !error && <div className="creative-report__notice" role="status">กำลังโหลดข้อมูลรายงาน…</div>}
+    {!report && !error && <div className="creative-report__notice" role="status">{month ? 'กำลังโหลดข้อมูลเดือนที่เลือก…' : 'กำลังโหลดรายงานทั้งปี…'}</div>}
     {report && <>
-      <div className="creative-report__context"><strong>{report.availablePeople.find(p => p.id === personId)?.name || role || 'Creative team'} · {month ? flowMateProgressMonth(month - 1) : 'ทั้งปี'} {year}</strong><span>{flowMateProgressStatus(s.periodStatus)} · ณ {model.dateKey(report.asOf)} (Bangkok)</span></div>
+      <div className="creative-report__context"><strong>{report.availablePeople.find(p => p.id === personId)?.name || role || 'Creative team'} · {month ? flowMateProgressMonth(month - 1) : 'ทั้งปี'} {year}</strong><span>{flowMateProgressStatus(s.periodStatus)} · ณ {model.dateKey(report.asOf)} {new Date(report.asOf).toLocaleTimeString('th-TH',{timeZone:'Asia/Bangkok'})} (Bangkok)</span></div>
+      {!annualReady && <div className="creative-report__notice" data-testid="creative-annual-status" role={annualError ? 'alert' : 'status'}>{annualError ? `ข้อมูลเดือนที่เลือกพร้อมแล้ว · ${annualError}` : 'ข้อมูลเดือนที่เลือกพร้อมแล้ว · กำลังโหลดกราฟทั้งปี รายชื่อตัวกรอง และ Excel…'}{annualError && <button className="btn btn--secondary" onClick={() => setAnnualRetry(v => v + 1)}>ลองโหลดทั้งปีอีกครั้ง</button>}</div>}
       {timingGroup && <div className="creative-report__notice">กำลังดูเฉพาะ: {context==='created'?'ตอนสร้าง Task':'ตอน Assign'} · {flowMateTimingLabel(timingGroup)} <button className="btn btn--secondary" onClick={()=>setTimingGroup('')}>กลับไปดูทุกงาน</button></div>}
-      <div className="creative-report__cards">{cards.map(([label, value, note]) => <section className="creative-report__card" key={label}><h2>{label}</h2><div className="creative-report__value">{value}</div><p>{note}</p></section>)}</div>
-      <section className="creative-report__details"><h2>Progression รายเดือน</h2><div className="creative-report__tabs" aria-label="Trend metric">{[['volume', 'จำนวนงาน'], ['onTime', 'ส่งตรงเวลา'], ['launch', 'ก่อน Launch'], ['production', 'ระยะเวลาผลิต'], ['acknowledge', 'จนเริ่มงาน']].map(([key, label]) => <button className="btn btn--secondary" key={key} aria-pressed={metric === key} onClick={() => setMetric(key)}>{label}</button>)}</div>
+      <div className="creative-report__cards" data-testid="creative-selected-kpis">{cards.map(([label, value, note]) => <section className="creative-report__card" key={label}><h2>{label}</h2><div className="creative-report__value">{value}</div><p>{note}</p></section>)}</div>
+      {annualReady && <section className="creative-report__details"><h2>Progression รายเดือน</h2><div className="creative-report__tabs" aria-label="Trend metric">{[['volume', 'จำนวนงาน'], ['onTime', 'ส่งตรงเวลา'], ['launch', 'ก่อน Launch'], ['production', 'ระยะเวลาผลิต'], ['acknowledge', 'จนเริ่มงาน']].map(([key, label]) => <button className="btn btn--secondary" key={key} aria-pressed={metric === key} onClick={() => setMetric(key)}>{label}</button>)}</div>
         <FlowMateProgressChart months={report.monthly} metric={metric} selected={month} onSelect={setMonth} />
         <p>{previous && s.periodStatus === 'Recorded data' && previous.periodStatus === 'Recorded data' ? `Delivered ${s.deliveredN} งาน เทียบกับ ${previous.deliveredN} งานเดือนก่อน · First Draft ตรงเวลา ${s.onTime.numerator}/${s.onTime.denominator} เทียบกับ ${previous.onTime.numerator}/${previous.onTime.denominator} งาน` : 'เลือกเดือนบนกราฟเพื่อดูรายละเอียด · เดือนที่ยังไม่ครบไม่เปรียบเทียบจำนวนงานกับเดือนเต็ม'}</p>
-      </section>
+      </section>}
       <details className="creative-report__details"><summary>เวลาที่ได้รับก่อน First Draft Due</summary><p>จำนวนด้านล่างคืองานที่ส่ง First Review ในช่วงที่เลือก เลือกกลุ่มเพื่อกรอง KPI กราฟ และ Export ทุกส่วน · Created และ Assigned ยังไม่ใช่หลักฐานว่าบรีฟครบ</p><div className="creative-report__tabs">{[['created', 'ตอนสร้าง Task'], ['assigned', 'ตอน Assign']].map(([key, label]) => <button className="btn btn--secondary" key={key} aria-pressed={context === key} onClick={() => {setContext(key);setTimingGroup('');}}>{label}</button>)}</div><div className="creative-report__timing">{Object.keys(model.groupLabels).map(key => <button className="btn btn--secondary" key={key} aria-pressed={timingGroup===key} onClick={()=>setTimingGroup(timingGroup===key?'':key)}><strong>{fullReport.selected.timing[context][key].n} งาน</strong><span>{flowMateTimingLabel(key)}</span><small>ตรงเวลา {fullReport.selected.timing[context][key].onTime.numerator}/{fullReport.selected.timing[context][key].onTime.denominator}</small></button>)}</div></details>
       <details className="creative-report__details"><summary>วิธีวัดและคุณภาพข้อมูล</summary><p>ระยะเวลาแสดงค่ากลาง P50 ตามสูตรวันทำงานเดิม ไม่ใช่ชั่วโมงทำงานจริง · P85 และหลักฐานอยู่ใน Excel</p><p>Created → Assigned: {fmt(s.queue.p50, 'days')} · Assigned → Started: {fmt(s.start.p50, 'days')} · Created → Started: {fmt(s.acknowledge.p50, 'days')}</p><p>Start → Review ภายใน 60 วินาที: {s.shortProductionN} งาน · ย้ายผู้รับผิดชอบระหว่างผลิต: {s.mixedProductionN} งาน (ไม่รวมเวลาทั้งงานในการวัดระยะเวลาผลิตรายบุคคล)</p><p>ข้อมูลเก่าอาจใช้วันกำหนดและ AI ปัจจุบัน ให้ตรวจข้อจำกัดราย Task · ข้อมูลไม่พอแสดง — · งานที่ไม่มี First Delivered event ไม่ถูกเดาเป็นยอดส่งมอบ</p><p>{report.calendarActiveN === 0 ? 'ยังไม่มีวันหยุดที่บันทึกไว้ในปีนี้' : `วันหยุดที่บันทึกไว้ในปีนี้: ${report.calendarActiveN ?? 'ไม่ทราบ'}`} · เกณฑ์ 2 วันใช้เป็นบริบทเวลา</p></details>
-      <details className="creative-report__details"><summary>ตารางรายเดือนทั้งปี</summary><div className="creative-report__table-wrap"><table className="tbl"><thead><tr><th>เดือน</th><th>ช่วงข้อมูล</th><th>Delivered</th><th>AI Delivered</th><th>First Draft ตรงเวลา</th><th>ก่อน Launch</th><th>ผลิต P50</th><th>จนเริ่ม P50</th></tr></thead><tbody>{report.monthly.map((m, i) => <tr key={m.period}><td><button className="btn btn--secondary" onClick={() => setMonth(i + 1)}>{flowMateProgressMonth(i)}</button></td><td>{flowMateProgressStatus(m.periodStatus)}</td><td>{m.activityN ? m.deliveredN : '—'}</td><td>{m.activityN ? `${m.aiDeliveredN} (${fmt(m.aiAdoption.pct, 'percent')})` : '—'}</td><td>{fmt(m.onTime.pct, 'percent')} ({m.onTime.numerator}/{m.onTime.denominator})</td><td>{fmt(m.launch.p50, 'days')}</td><td>{fmt(m.production.p50, 'days')}</td><td>{fmt(m.acknowledge.p50, 'days')}</td></tr>)}</tbody></table></div></details>
+      {annualReady && <details className="creative-report__details"><summary>ตารางรายเดือนทั้งปี</summary><div className="creative-report__table-wrap"><table className="tbl"><thead><tr><th>เดือน</th><th>ช่วงข้อมูล</th><th>Delivered</th><th>AI Delivered</th><th>First Draft ตรงเวลา</th><th>ก่อน Launch</th><th>ผลิต P50</th><th>จนเริ่ม P50</th></tr></thead><tbody>{report.monthly.map((m, i) => <tr key={m.period}><td><button className="btn btn--secondary" onClick={() => setMonth(i + 1)}>{flowMateProgressMonth(i)}</button></td><td>{flowMateProgressStatus(m.periodStatus)}</td><td>{m.activityN ? m.deliveredN : '—'}</td><td>{m.activityN ? `${m.aiDeliveredN} (${fmt(m.aiAdoption.pct, 'percent')})` : '—'}</td><td>{fmt(m.onTime.pct, 'percent')} ({m.onTime.numerator}/{m.onTime.denominator})</td><td>{fmt(m.launch.p50, 'days')}</td><td>{fmt(m.production.p50, 'days')}</td><td>{fmt(m.acknowledge.p50, 'days')}</td></tr>)}</tbody></table></div></details>}
       <details className="creative-report__details"><summary>งานในช่วงที่เลือก ({report.selectedRows.length})</summary><FlowMateCreativeEvidenceTable rows={report.selectedRows} title="หลักฐานราย Task" /></details>
       <details className="creative-report__details"><summary>AI Delivered ในช่วงที่เลือก ({report.aiTasks.length})</summary><FlowMateCreativeEvidenceTable rows={report.aiTasks} title="รายชื่อ AI Delivered" /></details>
     </>}

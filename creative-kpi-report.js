@@ -228,6 +228,8 @@
     if (!Number.isFinite(Date.parse(asOf))) throw new Error('Report snapshot time is invalid.');
     const month = options.month ? Number(options.month) : null;
     if (month != null && (!Number.isInteger(month) || month < 1 || month > 12)) throw new Error('Invalid report month.');
+    const monthlyOnly = options.coverage === 'month';
+    if (monthlyOnly && month == null) throw new Error('A complete month is required for monthly coverage.');
     const filters = {
       year,
       month,
@@ -250,7 +252,7 @@
       return summarize(tasks, monthStart, monthEnd, asOf, false, scope);
     });
     const availablePeople = [...new Map(relevant.flatMap(r => Object.values(r.owners)).filter(o => !filters.role || o.role === filters.role).map(o => [o.id, o])).values()].sort((a, b) => a.name.localeCompare(b.name));
-    const people = availablePeople.filter(o => !filters.personId || o.id === filters.personId).map(person => {
+    const people = monthlyOnly ? [] : availablePeople.filter(o => !filters.personId || o.id === filters.personId).map(person => {
       const scope = {
           ...filters,
           personId: person.id
@@ -262,13 +264,14 @@
         monthly: monthlyFor(tasks, scope)
       };
     });
-    const annual = summarize(rows, start, end, asOf, true, filters),
-      monthly = monthlyFor(rows);
+    const annual = monthlyOnly ? null : summarize(rows, start, end, asOf, true, filters),
+      monthly = monthlyOnly ? null : monthlyFor(rows);
     const selectedStart = month ? `${year}-${String(month).padStart(2, '0')}-01` : start;
     const selectedEnd = month ? month === 12 ? end : `${year}-${String(month + 1).padStart(2, '0')}-01` : end;
     const selectedRows = rows.filter(r => [['review', 'review_submitted_at'], ['delivery', 'deliveryAt'], ['start', 'acknowledgeAt']].some(([k, d]) => matches(r, k, filters) && inRange(r[d], selectedStart, selectedEnd, asOf)));
     return {
       version: VERSION,
+      coverage: monthlyOnly ? 'month' : 'year',
       filters,
       asOf,
       start,
@@ -277,7 +280,7 @@
       people,
       annual,
       monthly,
-      selected: month ? monthly[month - 1] : annual,
+      selected: monthlyOnly ? summarize(rows, selectedStart, selectedEnd, asOf, false, filters) : month ? monthly[month - 1] : annual,
       selectedRows,
       timingOverview: summarize(relevant.filter(r => Object.keys(r.owners).some(k => matches(r,k,filters)) && (!filters.workType || r.workType===filters.workType)),selectedStart,selectedEnd,asOf,!month,filters).timing,
       aiTasks: rows.filter(r => r.deliveredTags.length && matches(r, 'delivery', filters) && inRange(r.deliveryAt, selectedStart, selectedEnd, asOf)),
@@ -300,6 +303,7 @@
     return [person,role,s.period,s.periodStatus,blank?null:s.deliveredN,blank?null:s.aiDeliveredN,s.aiAdoption.pct,s.onTime.pct,s.onTime.numerator,s.onTime.denominator,s.firstDraftMissingDueN,s.launch.p50,s.launch.n,s.launch.missingN,s.production.p50,s.production.p85,s.production.n,s.production.missingN,s.acknowledge.p50,s.acknowledge.p85,s.acknowledge.n,s.acknowledge.missingN,s.queue.p50,s.start.p50,s.mixedProductionN,s.shortProductionN,s.qualityFlaggedN];
   };
   function buildWorkbook(report) {
+    if (report.coverage === 'month') throw new Error('Wait for the complete annual report before exporting.');
     const f = report.filters;
     const taskHeaders = ['Task ID', 'Task name', 'Requester', 'Start owner', 'Review owner', 'Delivered owner', 'Review role', 'Delivery role', 'Current status', 'Created at', 'Assigned at', 'Acknowledged at', 'First Review at', 'First Delivered at', 'Due used', 'Current due', 'Launch used', 'Deadline source', 'AI tags used', 'AI source', 'Created timing context', 'Assigned timing context', 'Created to Started days', 'Assigned to Started days', 'Production days', 'Raw production days', 'Recorded blocked days', 'Days before Launch', 'Delivered event count', 'Owner evidence', 'Brief evidence', 'Date change history', 'Flags', 'Stable ID'];
     const taskRow = r => [r.displayId, r.title, r.requester_name || '', r.owners.start.name, r.owners.review.name, r.owners.delivery.name, r.owners.review.role, r.owners.delivery.role, r.status, r.created_at, r.assigned_at, r.acknowledgeAt, r.review_submitted_at, r.deliveryAt, r.evaluationDue, r.due_date, r.evaluationLaunch, r.deadline_source || 'current_dates', r.deliveredTags.join(', '), r.ai_evidence_source || 'current_tags', groupLabels[r.createdGroup], groupLabels[r.assignedGroup], r.acknowledgeDays, r.startDays, r.productionDays, r.raw_production_working_days, r.blocked_during_production_working_days, r.launchDays, r.delivered_event_n, JSON.stringify(r.owners), JSON.stringify(r.brief_evidence || []), JSON.stringify(r.deadline_history || []), formatFlags(r.flags), r.id];
