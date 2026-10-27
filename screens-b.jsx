@@ -1578,6 +1578,9 @@ function TeamMembersScreen() {
   const [domains, setDomains] = useStateB([]);
   const [newDomain, setNewDomain] = useStateB("");
   const admin = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const memberTeams = [['mkt','Marketing'],['ops','Operation'],['esport','eSport'],['gdve','GD/VE']];
+  const teamLabel = code => memberTeams.find(([value])=>value===code)?.[1] || 'ยังไม่ระบุ';
+  const teamSettingReady = rows.some(row => Object.prototype.hasOwnProperty.call(row, 'org_team'));
   const date = value => value ? new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "Asia/Bangkok" }) : "—";
   const localTime = value => value ? new Date(new Date(value).getTime() + 7 * 3600000).toISOString().slice(0,16) : "";
   const utc = value => value ? new Date(value + ":00+07:00").toISOString() : null;
@@ -1610,9 +1613,9 @@ function TeamMembersScreen() {
   }, [Boolean(edit), saving]);
   if (!admin) return <div className="page">Admin access required.</div>;
   const visible = rows.filter(r => (tab !== "creative" || r.creative) &&
-    `${r.display_name} ${r.email}`.toLowerCase().includes(query.toLowerCase()) &&
+    `${r.display_name} ${r.email} ${teamLabel(r.org_team)}`.toLowerCase().includes(query.toLowerCase()) &&
     (status === "all" || (status === "active" ? r.access_active : !r.access_active)));
-  const blank = { email:"",display_name:"",role:"member",team_member_code:"",new_profile_name:"",viewer_teams:[],stop_assign_at:"",last_working_day:"",deactivate_at:"",skills:[],open_work:[] };
+  const blank = { email:"",display_name:"",role:"member",org_team:"",team_member_code:"",new_profile_name:"",viewer_teams:[],stop_assign_at:"",last_working_day:"",deactivate_at:"",skills:[],open_work:[] };
   const profiles = [...new Set([...(window.MEMBERS || []).map(m=>m.code || m.member_code), ...rows.map(r=>r.team_member_code)].filter(Boolean))];
   function open(row) {
     setError("");
@@ -1645,6 +1648,7 @@ function TeamMembersScreen() {
         if(edit.role==='viewer' && !(edit.viewer_teams || []).length) throw new Error("Select at least one team for Viewer.");
         if(edit.team_member_code==='__new__' && !(edit.new_profile_name || '').trim()) throw new Error("Team Profile name is required.");
         await window.saveFlowMateTeamMember({email:edit.email,display_name:edit.display_name,role:edit.role,
+          ...(teamSettingReady ? {org_team:edit.org_team || null} : {}),
           team_member_code:edit.team_member_code==='__new__'?null:edit.team_member_code || null,
           new_profile_name:edit.team_member_code==='__new__'?edit.new_profile_name:null,
           viewer_teams:edit.role==='viewer'?edit.viewer_teams || []:[],
@@ -1671,17 +1675,18 @@ function TeamMembersScreen() {
         </form><table className="tbl"><thead><tr><th>Domain</th><th>Listed members</th><th>Status</th><th>Manage</th></tr></thead><tbody>
         {domains.map(d=><tr key={d.domain}><td>@{d.domain}</td><td>{d.member_count}</td><td>{d.enabled?'Enabled':'Disabled'}</td><td><button className="btn btn--xs btn--secondary" disabled={saving || loading || (d.enabled && window.FLOWMATE_CURRENT_USER?.email?.toLowerCase().endsWith('@'+d.domain))} onClick={()=>saveDomain(d.domain,!d.enabled)}>{d.enabled?'Disable':'Enable'}</button></td></tr>)}
         </tbody></table>
-      </div>:<><div className="tm-table-wrap"><table className="tbl tm-table"><thead><tr><th>Member</th>{tab==='creative'?<><th>Skills</th><th>Capacity / day</th><th>WIP limit</th></>:<><th>Role</th><th>Access</th><th>Assignment</th><th>Last day</th></>}<th><span className="muted">Manage</span></th></tr></thead>
+      </div>:<><div className="tm-table-wrap"><table className="tbl tm-table"><thead><tr><th>Member</th>{tab==='creative'?<><th>Skills</th><th>Capacity / day</th><th>WIP limit</th></>:<><th>Team</th><th>Role</th><th>Access</th><th>Assignment</th><th>Last day</th></>}<th><span className="muted">Manage</span></th></tr></thead>
       <tbody>{!loading && visible.map(r=><tr key={r.email}><td><div className="tm-person"><span className="tm-avatar">{(r.display_name || r.email).slice(0,2).toUpperCase()}</span><div><strong>{r.display_name}</strong><small>{r.email}</small></div></div></td>
-        {tab==='creative'?<><td><div className="tm-skills">{(r.skills||[]).slice(0,2).map(s=><span key={s}>{s}</span>)}{r.skills?.length>2 && <span>+{r.skills.length-2}</span>}</div></td><td>{r.capacity_per_day} pt</td><td>{r.wip_limit}</td></>:<><td>{r.role==='admin'?'Admin':r.role==='viewer'?'Viewer':'Member'}</td><td><span className={`tm-status ${r.access_active?'is-active':''}`}>{r.access_active?'Active':'Inactive'}</span></td><td>{!r.creative?'—':<span className={`tm-status ${r.assignment_active?'is-active':''}`}>{r.assignment_active?'Accepting':'Paused'}</span>}</td><td>{r.last_working_day?date(r.last_working_day+'T12:00:00+07:00'):'—'}</td></>}
+        {tab==='creative'?<><td><div className="tm-skills">{(r.skills||[]).slice(0,2).map(s=><span key={s}>{s}</span>)}{r.skills?.length>2 && <span>+{r.skills.length-2}</span>}</div></td><td>{r.capacity_per_day} pt</td><td>{r.wip_limit}</td></>:<><td>{teamLabel(r.org_team)}</td><td>{r.role==='admin'?'Admin':r.role==='viewer'?'Viewer':'Member'}</td><td><span className={`tm-status ${r.access_active?'is-active':''}`}>{r.access_active?'Active':'Inactive'}</span></td><td>{!r.creative?'—':<span className={`tm-status ${r.assignment_active?'is-active':''}`}>{r.assignment_active?'Accepting':'Paused'}</span>}</td><td>{r.last_working_day?date(r.last_working_day+'T12:00:00+07:00'):'—'}</td></>}
         <td><button className="btn btn--xs btn--secondary" aria-label={`Manage ${r.display_name}`} onClick={()=>open(r)}>Manage</button></td></tr>)}
-        {(loading || !visible.length) && <tr><td colSpan={tab==='creative'?5:6} className="tm-empty">{loading?'Loading members…':error?'Members unavailable':'No members found'}</td></tr>}</tbody></table></div>
+        {(loading || !visible.length) && <tr><td colSpan={tab==='creative'?5:7} className="tm-empty">{loading?'Loading members…':error?'Members unavailable':'No members found'}</td></tr>}</tbody></table></div>
       <div className="tm-footer">{visible.length} members{tab==='creative'?' · GD/VE':''}</div></>}</div>
     {edit && <div className="modal-backdrop tm-backdrop"><form id="team-member-dialog" className="tm-drawer" role="dialog" aria-modal="true" aria-labelledby="tm-dialog-title" onSubmit={save}>
       <div className="tm-drawer-head"><div><h2 id="tm-dialog-title">{edit.existing?edit.display_name:'Add member'}</h2><span className="muted">{tab==='creative'?'Creative Capacity':'Member details'}</span></div><button type="button" className="iconbtn" aria-label="Close member details" disabled={saving} onClick={()=>setEdit(null)}><Icon name="x"/></button></div>
       <div className="tm-drawer-body"><fieldset disabled={saving}>
       {tab==='creative'?<><label className="field"><span>Capacity / day</span><input className="input" type="number" min="0" max="24" step="0.25" required value={edit.capacity_per_day} onChange={e=>change('capacity_per_day',e.target.value)}/></label><label className="field"><span>WIP limit</span><input className="input" type="number" min="0" max="20" step="1" required value={edit.wip_limit} onChange={e=>change('wip_limit',e.target.value)}/></label><div className="field"><span>Skills</span><div className="skill-edit-grid">{(window.FLOWMATE_TEAM_SETTINGS_SKILL_OPTIONS||[]).map(s=><label key={s.key} className="skill-check"><input type="checkbox" checked={edit.skills.includes(s.key)} onChange={e=>change('skills',e.target.checked?[...edit.skills,s.key]:edit.skills.filter(k=>k!==s.key))}/>{s.label}</label>)}</div></div></>:<>
         <label className="field"><span>Name</span><input className="input" required value={edit.display_name} onChange={e=>change('display_name',e.target.value)}/></label>
+        <label className="field"><span>Team</span><select className="select" disabled={!teamSettingReady} value={edit.org_team || ''} onChange={e=>change('org_team',e.target.value)}><option value="">ยังไม่ระบุ</option>{memberTeams.map(([code,label])=><option key={code} value={code}>{label}</option>)}</select><small className="muted">{teamSettingReady?'สังกัด 1 ทีม ใช้แสดงข้อมูลเท่านั้น ไม่เปลี่ยนสิทธิ์เข้าถึงงาน':'ต้องติดตั้งการตั้งค่าทีมในฐานข้อมูลก่อนใช้งาน แล้วกด Refresh'}</small></label>
         <label className="field"><span>Team Profile</span><select className="select" value={edit.team_member_code || ''} onChange={e=>change('team_member_code',e.target.value)}><option value="">None</option>{profiles.map(code=><option key={code} value={code}>{rows.find(r=>r.team_member_code===code)?.team_profile_name || code}</option>)}<option value="__new__">Create new profile…</option></select></label>
         {edit.team_member_code==='__new__' && <label className="field"><span>New Team Profile name</span><input className="input" required maxLength={80} value={edit.new_profile_name || ''} onChange={e=>change('new_profile_name',e.target.value)}/><small className="muted">Starts paused. Set Skills and Capacity in Creative Capacity before assigning work.</small></label>}
         <label className="field"><span>Email</span><input className="input" required type="email" disabled={edit.existing} placeholder="name@sea.com" value={edit.email} onChange={e=>change('email',e.target.value)}/><small className="muted">Enabled domains: {domains.filter(d=>d.enabled).map(d=>'@'+d.domain).join(', ') || 'None'}</small></label>
