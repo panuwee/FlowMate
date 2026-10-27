@@ -1,0 +1,5 @@
+# Preserve exact SQL bytes used by production drift and rollback guards.
+supabase/creative_kpi_fast_report_20261027.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+supabase/creative_kpi_fast_report_20261027_rollback.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+supabase/creative_kpi_period_report_20261027.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+supabase/creative_kpi_period_report_20261027_rollback.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
