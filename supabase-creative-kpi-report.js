@@ -1,5 +1,37 @@
 /* Report-only loader. Do not fall back to the legacy due-date export. */
 (function (root) {
+  async function loadFlowMateCreativePeriod({ year, month = null, signal } = {}) {
+    year = Number(year);
+    if (!Number.isInteger(year) || year < 2026 || year > 2100) throw new Error('Invalid Creative report year.');
+    if (month !== null && (!Number.isInteger(month) || month < 1 || month > 12)) throw new Error('Invalid Creative report month.');
+    if (!root.flowmateSupabase?.rpc) throw new Error('Supabase client is not ready.');
+    const cancelled = () => { if (signal?.aborted) throw new Error('Report load cancelled.'); };
+    cancelled();
+    let query = root.flowmateSupabase.rpc('flowmate_creative_kpi_report_period', { p_year: year, p_month: month });
+    if (signal && query.abortSignal) query = query.abortSignal(signal);
+    const { data, error, status } = await query;
+    cancelled();
+    if (error) {
+      const failure = new Error(error.code === 'PGRST202'
+        ? 'ระบบรายงานแบบรายเดือนยังไม่พร้อม กรุณาติดต่อผู้ดูแล'
+        : error.code === '57014' ? 'โหลดรายงานเกินเวลา กรุณาลองใหม่'
+          : 'โหลดรายงานไม่สำเร็จ กรุณาลองใหม่หรือติดต่อผู้ดูแล');
+      failure.accessDenied = status === 401 || status === 403 || ['42501','PGRST301','PGRST302','55000'].includes(error.code);
+      throw failure;
+    }
+    const scope = month === null ? 'year' : 'month';
+    if (!data || data.version !== 1 || data.year !== year || data.month !== month || data.scope !== scope
+      || !Array.isArray(data.rows) || !Number.isInteger(data.rowCount) || data.rowCount !== data.rows.length
+      || data.rows.some(row => !row || typeof row.work_item_id !== 'string' || !row.work_item_id
+        || ['created_at','review_submitted_at','delivery_at','acknowledge_at','status'].some(field => !(field in row)))
+      || new Set(data.rows.map(row => row.work_item_id)).size !== data.rows.length
+      || typeof data.asOf !== 'string' || !Number.isFinite(Date.parse(data.asOf))
+      || !Number.isInteger(data.calendarActiveN) || data.calendarActiveN < 0) {
+      throw new Error('ข้อมูลรายงานไม่ครบ กรุณาลองใหม่หรือติดต่อผู้ดูแล');
+    }
+    return { year, month, scope, rows: data.rows, asOf: data.asOf, calendarActiveN: data.calendarActiveN };
+  }
+  root.loadFlowMateCreativePeriod = loadFlowMateCreativePeriod;
   async function loadFlowMateCreativeReport({ year, signal } = {}) {
     if (!Number.isInteger(Number(year)) || Number(year) < 2026 || Number(year) > 2100) throw new Error('Invalid Creative report year.');
     if (!root.flowmateSupabase) throw new Error('Supabase client is not ready.');
@@ -10,6 +42,29 @@
       : error.code === '57014'
         ? 'Creative report timed out. Please retry or contact the administrator.'
         : `Creative report could not be loaded completely (${/^[A-Z0-9]+$/.test(error.code || '') ? error.code : 'unknown'}). Please refresh or contact the administrator.`);
+    checkCancelled();
+    // One statement reuses permission-filtered history and returns the complete
+    // snapshot in a JSON envelope, avoiding repeated history/count requests.
+    if (typeof root.flowmateSupabase.rpc === 'function') {
+      let query = root.flowmateSupabase.rpc('flowmate_creative_kpi_report_fast', { p_year: Number(year) });
+      if (signal && query.abortSignal) query = query.abortSignal(signal);
+      const { data, error } = await query;
+      checkCancelled();
+      if (!error) {
+        if (!data || data.version !== 1 || data.year !== Number(year)
+          || !Array.isArray(data.rows) || !Number.isInteger(data.rowCount) || data.rowCount !== data.rows.length
+          || data.rows.some(row => !row || typeof row.work_item_id !== 'string' || !row.work_item_id)
+          || new Set(data.rows.map(row => row.work_item_id)).size !== data.rows.length
+          || typeof data.asOf !== 'string' || !Number.isFinite(Date.parse(data.asOf))
+          || !Number.isInteger(data.calendarActiveN) || data.calendarActiveN < 0) {
+          throw new Error('Creative report is incomplete. Please refresh or contact the administrator.');
+        }
+        return { rows: data.rows, asOf: data.asOf, calendarActiveN: data.calendarActiveN };
+      }
+      // Missing endpoint alone permits staged deployment/rollback. Never retry
+      // permission failures, source drift or timeouts through another loader.
+      if (error.code !== 'PGRST202') throw queryError(error);
+    }
     // Discover the complete permitted task set cheaply before evaluating history.
     // Include older and archived tasks: they may have events in the selected year.
     let expectedCount = null;
@@ -29,8 +84,10 @@
       if (data.length < pageSize) break;
     }
     if (ids.length !== expectedCount || ids.some(id => !id) || new Set(ids).size !== ids.length) throw new Error('Creative report is incomplete. Please refresh or contact the administrator.');
+    let batchFailure = null;
     async function loadBatch(batch) {
       checkCancelled();
+      if (batchFailure) throw batchFailure;
       let query = root.flowmateSupabase.from('flowmate_creative_kpi_progression_v').select('*', { count: 'exact' })
         .in('work_item_id', batch)
         .or(`created_year.eq.${year},review_year.eq.${year},first_delivery_year.eq.${year},started_year.eq.${year},and(is_open.eq.true,created_year.lte.${year})`)
@@ -49,8 +106,23 @@
       if (!Array.isArray(data) || !Number.isInteger(count) || count !== data.length || data.some(row => !batch.includes(row.work_item_id))) throw new Error('Creative report is incomplete. Please refresh or contact the administrator.');
       rows.push(...data);
     }
-    // Sequential bounded reads avoid both full-year history scans and request fan-out.
-    for (let offset = 0; offset < ids.length; offset += 40) await loadBatch(ids.slice(offset, offset + 40));
+    // Overlap only two bounded reads. A failure stops queued work; timeout
+    // splits stay inside their worker so they cannot create request fan-out.
+    let nextOffset = 0;
+    async function loadWorker() {
+      while (!batchFailure && nextOffset < ids.length) {
+        const offset = nextOffset;
+        nextOffset += 40;
+        try {
+          await loadBatch(ids.slice(offset, offset + 40));
+        } catch (error) {
+          batchFailure = batchFailure || error;
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(2, Math.ceil(ids.length / 40)) }, () => loadWorker()));
+    if (batchFailure) throw batchFailure;
+    checkCancelled();
     rows.sort((a, b) => String(a.work_item_id).localeCompare(String(b.work_item_id)));
     if (new Set(rows.map(r => r.work_item_id)).size !== rows.length) throw new Error('Report data changed during loading. Refresh before exporting.');
     let calendarQuery = root.flowmateSupabase.from('flowmate_non_working_days').select('day', { count: 'exact', head: true })
@@ -127,5 +199,5 @@
     return buildRequesterMonthly(rows);
   }
   root.loadFlowMateRequesterKpiMonthly = loadFlowMateRequesterKpiMonthly;
-  if (typeof module === 'object' && module.exports) module.exports = { loadFlowMateCreativeReport, loadFlowMateRequesterKpiMonthly, buildRequesterMonthly };
+  if (typeof module === 'object' && module.exports) module.exports = { loadFlowMateCreativePeriod, loadFlowMateCreativeReport, loadFlowMateRequesterKpiMonthly, buildRequesterMonthly };
 })(typeof window !== 'undefined' ? window : globalThis);
