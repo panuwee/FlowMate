@@ -2206,6 +2206,9 @@ function TeamMembersScreen() {
   const [domains, setDomains] = useStateB([]);
   const [newDomain, setNewDomain] = useStateB("");
   const admin = window.FLOWMATE_CURRENT_USER?.role === "admin";
+  const memberTeams = [['mkt', 'Marketing'], ['ops', 'Operation'], ['esport', 'eSport'], ['gdve', 'GD/VE']];
+  const teamLabel = code => memberTeams.find(([value]) => value === code)?.[1] || 'ยังไม่ระบุ';
+  const teamSettingReady = rows.some(row => Object.prototype.hasOwnProperty.call(row, 'org_team'));
   const date = value => value ? new Date(value).toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
@@ -2260,11 +2263,12 @@ function TeamMembersScreen() {
   if (!admin) return React.createElement("div", {
     className: "page"
   }, "Admin access required.");
-  const visible = rows.filter(r => (tab !== "creative" || r.creative) && `${r.display_name} ${r.email}`.toLowerCase().includes(query.toLowerCase()) && (status === "all" || (status === "active" ? r.access_active : !r.access_active)));
+  const visible = rows.filter(r => (tab !== "creative" || r.creative) && `${r.display_name} ${r.email} ${teamLabel(r.org_team)}`.toLowerCase().includes(query.toLowerCase()) && (status === "all" || (status === "active" ? r.access_active : !r.access_active)));
   const blank = {
     email: "",
     display_name: "",
     role: "member",
+    org_team: "",
     team_member_code: "",
     new_profile_name: "",
     viewer_teams: [],
@@ -2339,6 +2343,9 @@ function TeamMembersScreen() {
           email: edit.email,
           display_name: edit.display_name,
           role: edit.role,
+          ...(teamSettingReady ? {
+            org_team: edit.org_team || null
+          } : {}),
           team_member_code: edit.team_member_code === '__new__' ? null : edit.team_member_code || null,
           new_profile_name: edit.team_member_code === '__new__' ? edit.new_profile_name : null,
           viewer_teams: edit.role === 'viewer' ? edit.viewer_teams || [] : [],
@@ -2455,7 +2462,7 @@ function TeamMembersScreen() {
     className: "tm-table-wrap"
   }, React.createElement("table", {
     className: "tbl tm-table"
-  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), tab === 'creative' ? React.createElement(React.Fragment, null, React.createElement("th", null, "Skills"), React.createElement("th", null, "Capacity / day"), React.createElement("th", null, "WIP limit")) : React.createElement(React.Fragment, null, React.createElement("th", null, "Role"), React.createElement("th", null, "Access"), React.createElement("th", null, "Assignment"), React.createElement("th", null, "Last day")), React.createElement("th", null, React.createElement("span", {
+  }, React.createElement("thead", null, React.createElement("tr", null, React.createElement("th", null, "Member"), tab === 'creative' ? React.createElement(React.Fragment, null, React.createElement("th", null, "Skills"), React.createElement("th", null, "Capacity / day"), React.createElement("th", null, "WIP limit")) : React.createElement(React.Fragment, null, React.createElement("th", null, "Team"), React.createElement("th", null, "Role"), React.createElement("th", null, "Access"), React.createElement("th", null, "Assignment"), React.createElement("th", null, "Last day")), React.createElement("th", null, React.createElement("span", {
     className: "muted"
   }, "Manage")))), React.createElement("tbody", null, !loading && visible.map(r => React.createElement("tr", {
     key: r.email
@@ -2467,7 +2474,7 @@ function TeamMembersScreen() {
     className: "tm-skills"
   }, (r.skills || []).slice(0, 2).map(s => React.createElement("span", {
     key: s
-  }, s)), r.skills?.length > 2 && React.createElement("span", null, "+", r.skills.length - 2))), React.createElement("td", null, r.capacity_per_day, " pt"), React.createElement("td", null, r.wip_limit)) : React.createElement(React.Fragment, null, React.createElement("td", null, r.role === 'admin' ? 'Admin' : r.role === 'viewer' ? 'Viewer' : 'Member'), React.createElement("td", null, React.createElement("span", {
+  }, s)), r.skills?.length > 2 && React.createElement("span", null, "+", r.skills.length - 2))), React.createElement("td", null, r.capacity_per_day, " pt"), React.createElement("td", null, r.wip_limit)) : React.createElement(React.Fragment, null, React.createElement("td", null, teamLabel(r.org_team)), React.createElement("td", null, r.role === 'admin' ? 'Admin' : r.role === 'viewer' ? 'Viewer' : 'Member'), React.createElement("td", null, React.createElement("span", {
     className: `tm-status ${r.access_active ? 'is-active' : ''}`
   }, r.access_active ? 'Active' : 'Inactive')), React.createElement("td", null, !r.creative ? '—' : React.createElement("span", {
     className: `tm-status ${r.assignment_active ? 'is-active' : ''}`
@@ -2476,7 +2483,7 @@ function TeamMembersScreen() {
     "aria-label": `Manage ${r.display_name}`,
     onClick: () => open(r)
   }, "Manage")))), (loading || !visible.length) && React.createElement("tr", null, React.createElement("td", {
-    colSpan: tab === 'creative' ? 5 : 6,
+    colSpan: tab === 'creative' ? 5 : 7,
     className: "tm-empty"
   }, loading ? 'Loading members…' : error ? 'Members unavailable' : 'No members found'))))), React.createElement("div", {
     className: "tm-footer"
@@ -2548,6 +2555,20 @@ function TeamMembersScreen() {
     value: edit.display_name,
     onChange: e => change('display_name', e.target.value)
   })), React.createElement("label", {
+    className: "field"
+  }, React.createElement("span", null, "Team"), React.createElement("select", {
+    className: "select",
+    disabled: !teamSettingReady,
+    value: edit.org_team || '',
+    onChange: e => change('org_team', e.target.value)
+  }, React.createElement("option", {
+    value: ""
+  }, "ยังไม่ระบุ"), memberTeams.map(([code, label]) => React.createElement("option", {
+    key: code,
+    value: code
+  }, label))), React.createElement("small", {
+    className: "muted"
+  }, teamSettingReady ? 'สังกัด 1 ทีม ใช้แสดงข้อมูลเท่านั้น ไม่เปลี่ยนสิทธิ์เข้าถึงงาน' : 'ต้องติดตั้งการตั้งค่าทีมในฐานข้อมูลก่อนใช้งาน แล้วกด Refresh')), React.createElement("label", {
     className: "field"
   }, React.createElement("span", null, "Team Profile"), React.createElement("select", {
     className: "select",
