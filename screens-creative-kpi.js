@@ -1,4 +1,82 @@
 /* AUTO-GENERATED from screens-creative-kpi.jsx by build-github.cjs. Do not edit; edit the .jsx and re-run `npm run build:github`. */
+window.FlowMateCreativeKpiTiming = (() => {
+  if (!/(?:^|[?&])kpiTiming=1(?:&|$)/.test(window.location?.search || '') || !window.performance?.now) return null;
+  const clock = () => Math.round(window.performance.now() * 10) / 10;
+  const boot = {
+    screenScriptMs: clock()
+  };
+  return {
+    markBoot(name) {
+      if (['authStartMs', 'authResolvedMs', 'authFailedMs'].includes(name)) boot[name] = clock();
+    },
+    begin(element) {
+      let stopped = false;
+      const frames = new Set();
+      const data = {
+        version: 1,
+        clock: 'navigation',
+        marks: {
+          ...boot,
+          screenEffectMs: clock()
+        },
+        calculations: {},
+        cache: {}
+      };
+      const sync = () => {
+        if (!stopped && element) element.setAttribute('data-kpi-timing', JSON.stringify(data));
+      };
+      const recorder = {
+        mark(name) {
+          if (!stopped) {
+            data.marks[name] = clock();
+            sync();
+          }
+        },
+        cached(scope) {
+          if (!stopped) {
+            data.cache[scope] = true;
+            sync();
+          }
+        },
+        measure(scope, calculate) {
+          const start = clock();
+          try {
+            return calculate();
+          } finally {
+            if (!stopped) {
+              data.calculations[scope] = Math.round((clock() - start) * 10) / 10;
+            }
+          }
+        },
+        rendered(scope) {
+          if (stopped) return;
+          const commitKey = scope + 'CommitMs',
+            paintKey = scope + 'PaintOpportunityMs';
+          if (data.marks[commitKey] !== undefined) return;
+          recorder.mark(commitKey);
+          if (!window.requestAnimationFrame || window.document?.hidden) return;
+          const frame = callback => {
+            const id = window.requestAnimationFrame(() => {
+              frames.delete(id);
+              if (!stopped) callback();
+            });
+            frames.add(id);
+          };
+          frame(() => frame(() => {
+            if (!window.document?.hidden) recorder.mark(paintKey);
+          }));
+        },
+        stop() {
+          stopped = true;
+          frames.forEach(id => window.cancelAnimationFrame(id));
+          frames.clear();
+        }
+      };
+      sync();
+      return recorder;
+    }
+  };
+})();
 function FlowMateCreativeReportScreen({
   requesterView: RequesterView
 }) {
@@ -15,6 +93,8 @@ function FlowMateCreativeReportScreen({
     [annualRetry, setAnnualRetry] = React.useState(0);
   const annualCache = React.useRef(null),
     periodCache = React.useRef(null);
+  const reportElement = React.useRef(null),
+    timingRef = React.useRef(null);
   const currentLoad = loadState.year === year && loadState.refresh === refresh && (loadState.snapshot?.scope === 'year' || loadState.month === month);
   const snapshot = currentLoad ? loadState.snapshot : null;
   const error = currentLoad ? loadState.error : '';
@@ -27,6 +107,8 @@ function FlowMateCreativeReportScreen({
   React.useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    const timing = window.FlowMateCreativeKpiTiming?.begin(reportElement.current);
+    timingRef.current = timing;
     const matches = cache => cache?.year === year && cache.refresh === refresh;
     const publish = state => {
       if (active) setLoadState({
@@ -38,27 +120,32 @@ function FlowMateCreativeReportScreen({
     };
     const annual = annualCache.current;
     if (matches(annual)) {
+      timing?.cached('year');
       publish({
         snapshot: annual.data
       });
       return () => {
         active = false;
         controller.abort();
+        timing?.stop();
       };
     }
     let monthly = matches(periodCache.current) && periodCache.current.month === month ? periodCache.current.data : null;
+    if (monthly) timing?.cached('month');
     publish({
       snapshot: monthly
     });
     (async () => {
       if (month && !monthly) {
         try {
+          timing?.mark('monthRequestStartMs');
           monthly = await window.loadFlowMateCreativePeriod({
             year,
             month,
             signal: controller.signal
           });
           if (!active) return;
+          timing?.mark('monthResponseValidatedMs');
           periodCache.current = {
             year,
             month,
@@ -70,6 +157,7 @@ function FlowMateCreativeReportScreen({
           });
         } catch (e) {
           if (!active) return;
+          timing?.mark('monthFailedMs');
           periodCache.current = null;
           publish({
             error: e.message || 'โหลดข้อมูลเดือนที่เลือกไม่สำเร็จ'
@@ -78,12 +166,14 @@ function FlowMateCreativeReportScreen({
         }
       }
       try {
+        timing?.mark('yearRequestStartMs');
         const data = await window.loadFlowMateCreativePeriod({
           year,
           month: null,
           signal: controller.signal
         });
         if (!active) return;
+        timing?.mark('yearResponseValidatedMs');
         annualCache.current = {
           year,
           refresh,
@@ -94,6 +184,7 @@ function FlowMateCreativeReportScreen({
         });
       } catch (e) {
         if (!active) return;
+        timing?.mark('yearFailedMs');
         if (e.accessDenied) {
           annualCache.current = null;
           periodCache.current = null;
@@ -111,9 +202,11 @@ function FlowMateCreativeReportScreen({
     return () => {
       active = false;
       controller.abort();
+      timing?.stop();
     };
   }, [year, month, refresh, annualRetry]);
-  const fullReport = React.useMemo(() => snapshot?.year === year ? model.buildReport(snapshot.rows, {
+  const measureReport = (scope, calculate) => timingRef.current ? timingRef.current.measure(scope, calculate) : calculate();
+  const fullReport = React.useMemo(() => snapshot?.year === year ? measureReport(snapshot.scope, () => model.buildReport(snapshot.rows, {
     year,
     month,
     coverage: snapshot.scope,
@@ -122,15 +215,18 @@ function FlowMateCreativeReportScreen({
     workType,
     asOf: snapshot.asOf,
     calendarActiveN: snapshot.calendarActiveN
-  }) : null, [snapshot, year, month, role, personId, workType]);
-  const report = React.useMemo(() => fullReport && timingGroup ? model.buildReport(snapshot.rows, {
+  })) : null, [snapshot, year, month, role, personId, workType]);
+  const report = React.useMemo(() => fullReport && timingGroup ? measureReport(snapshot.scope + 'Filtered', () => model.buildReport(snapshot.rows, {
     ...fullReport.filters,
     coverage: snapshot.scope,
     timingSource: context,
     timingGroup,
     asOf: snapshot.asOf,
     calendarActiveN: snapshot.calendarActiveN
-  }) : fullReport, [fullReport, timingGroup, context, snapshot]);
+  })) : fullReport, [fullReport, timingGroup, context, snapshot]);
+  React.useLayoutEffect(() => {
+    if (report) timingRef.current?.rendered(snapshot.scope);
+  }, [report, snapshot]);
   const s = report?.selected,
     previous = month > 1 ? report?.monthly?.[month - 2] : null;
   const volume = v => !s?.activityN || s.periodStatus === 'Future period' ? '—' : fmt(v);
@@ -156,6 +252,7 @@ function FlowMateCreativeReportScreen({
     requesterOnly: true
   }));
   return React.createElement("div", {
+    ref: reportElement,
     className: "page creative-report",
     "data-testid": "creative-year-end-report",
     "data-coverage": snapshot?.scope || 'loading'

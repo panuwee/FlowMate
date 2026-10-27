@@ -771,10 +771,15 @@ function App() {
         user: null
       });
     }, 5000);
-    Promise.resolve().then(() => window.flowmateInitAuth()).catch(error => {
+    Promise.resolve().then(() => {
+      window.FlowMateCreativeKpiTiming?.markBoot('authStartMs');
+      return window.flowmateInitAuth();
+    }).catch(error => {
+      window.FlowMateCreativeKpiTiming?.markBoot('authFailedMs');
       console.error("[FlowMate Auth] init failed:", error);
       return null;
     }).then(realUser => {
+      window.FlowMateCreativeKpiTiming?.markBoot('authResolvedMs');
       decided = true;
       window.flowmateInitialAuthSettled = true;
       if (!alive) return;
