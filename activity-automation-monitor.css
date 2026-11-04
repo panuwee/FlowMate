@@ -19,3 +19,4 @@
 ::selection{background:#cbdced;color:#20252b}input,textarea{caret-color:#20252b}a{text-underline-offset:3px}.am-table{font-variant-numeric:tabular-nums}
 @media(max-width:767px){.am-scan-row{grid-template-columns:1fr;gap:6px}.am-drawer-head{top:-18px}.am-statline{gap:8px 16px}.am-task-row a{display:inline-block;padding:6px 0}}
 .am-source-status{display:grid;gap:4px;overflow-wrap:anywhere}
+.am-row-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.am-row-actions>small{flex-basis:100%}.am-row-actions>button:first-of-type:not(:only-of-type){background:var(--am-accent);color:#fff}
