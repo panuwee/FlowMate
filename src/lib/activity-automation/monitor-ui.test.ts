@@ -19,6 +19,48 @@ async function page(options:any={}){
  w.eval(script);await tick();return {w,calls,auth:(event:string,session:any)=>callback(event,session),$: (id:string)=>w.document.getElementById(id)};
 }
 afterEach(async()=>{await Promise.all(windows.splice(0).map(w=>w.happyDOM.close()));});
+it('creates December work only after explicit preview and confirmation, with duplicate clicks fenced',async()=>{
+ const code='261204_Golden Spin (27 Asian Cup)';let queued=false;
+ const p=await page({query:'?month=2026-12',rpc:(name:string)=>name.endsWith('_access')?envelope({sharedRead:true,battlePassRead:true,battlePassControls:true}):name.endsWith('_summary')?envelope({...summary(),outputs:[],activities:[{...activity,key:'golden_spin',manualMode:true,projects:[{projectCode:code,period:'2026-12',manualMode:true,manualJob:queued?{status:'queued'}:null,lastSourceCheck:{period:'2026-12',projectCode:code,code:'manual_ready'}}]}]}):undefined});
+ const invoke=vi.fn(async(_name:string,args:any)=>({data:args.body.action==='preview'?{status:'preview',hash:'a'.repeat(64),period:'2026-12',projectCode:code,workingSheetUrl:'https://docs.google.com/spreadsheets/d/loot/edit'}:(queued=true,{status:'accepted',job:{status:'queued'}})}));p.w.flowmateSupabase.functions={invoke};
+ expect(invoke).not.toHaveBeenCalled();const start=[...p.$('am-content').querySelectorAll('button')].find((b:any)=>b.textContent==='ตรวจและสร้างงาน');start.focus();start.click();await tick();expect(invoke).not.toHaveBeenCalled();
+ const buttons=()=>[...p.$('am-detail').querySelectorAll('button')];expect(buttons().find((b:any)=>b.textContent==='ยืนยันสร้างงาน').disabled).toBe(true);
+ buttons().find((b:any)=>b.textContent==='ตรวจข้อมูลก่อนสร้าง').click();await tick();const create=buttons().find((b:any)=>b.textContent==='ยืนยันสร้างงาน');expect(create.disabled).toBe(false);create.click();create.click();await tick();
+ expect(invoke.mock.calls.map((c:any)=>[c[0],c[1].body.action])).toEqual([['activity-brief-runner/generation','preview'],['activity-brief-runner/generation','create']]);
+ expect(p.$('am-content').textContent).toContain('รอเริ่มสร้างงาน');
+ expect(p.$('am-detail').textContent).toContain('รับคำขอแล้ว');
+ expect(buttons().find((b:any)=>b.textContent==='ยืนยันสร้างงาน')).toBeUndefined();
+ buttons().find((b:any)=>b.textContent==='ตรวจผล').click();await tick();
+ expect(p.$('am-detail').querySelector('.am-current-phase').textContent).toContain('รอเริ่มสร้างงาน');
+ expect(invoke.mock.calls).toHaveLength(2);
+ p.$('am-close').click();expect(p.w.document.activeElement).toBe(p.$('am-refresh'));
+});
+it('puts all five actionable projects before metrics without reading Google on arrival',async()=>{
+ const keys=['battle_pass','membership','conqueror_crate','golden_spin','topup_promotion'];
+ const p=await page({query:'?month=2026-12',rpc:(name:string,args:any)=>name.endsWith('_access')?envelope({sharedRead:true,battlePassRead:true,battlePassControls:true}):name.endsWith('_summary')?envelope({cards:{complete:true},outputs:[],activities:keys.map(key=>({key,label:key,manualMode:true,projects:[{projectCode:'261201_'+key,period:args.p_month,manualMode:true,lastSourceCheck:{period:args.p_month,code:key==='golden_spin'?'source_identity_invalid':'manual_ready'}}]}))}):undefined});
+ const queue=p.$('am-content').firstElementChild;
+ expect(queue.classList.contains('am-action-queue')).toBe(true);
+ expect(queue.querySelectorAll('.am-task-row')).toHaveLength(5);
+ expect(queue.querySelector('.am-task-row').textContent).toContain('261201_golden_spin');
+ expect(queue.querySelectorAll('button')).toHaveLength(9);
+ expect(p.calls.every(call=>call.name.startsWith('activity_automation_')&&!call.name.endsWith('_enqueue'))).toBe(true);
+ expect([...p.$('am-content').querySelectorAll('.am-upcoming')].every((d:any)=>!d.open)).toBe(true);
+});
+it('keeps Battle Pass tools inside project details and preserves the actual legacy nodes on close and reopen',async()=>{
+ const p=await page({query:'?month=2026-11',rpc:(name:string,args:any)=>name.endsWith('_access')?envelope({sharedRead:true,battlePassRead:true}):name.endsWith('_summary')?envelope({cards:{},outputs:[],activities:[{key:'battle_pass',label:'Battle Pass',lastSourceCheck:{period:args.p_month,projectCode:'261111_Battle Pass (Nov 2026)',sourceReady:true,confirmed:true}}]}):undefined});
+ const legacy=p.$('am-legacy'),control=p.$('op-run');await openActivity(p);
+ expect(p.$('am-detail').querySelector('.am-admin-tools #am-legacy')).toBe(legacy);
+ expect(p.$('am-detail').textContent).toContain('ไม่ได้กรองตามเดือนด้านบน');
+ expect(p.$('am-detail').querySelector('.am-confirmation')).toBeNull();
+ p.$('am-close').click();expect(p.$('am-admin-parking').contains(legacy)).toBe(true);
+ await openActivity(p);expect(p.$('op-run')).toBe(control);
+ p.auth('SIGNED_OUT',null);expect(p.$('am-admin-parking').contains(legacy)).toBe(true);expect(legacy.hidden).toBe(true);
+});
+it('opens old tools deep links in the guarded project drawer rather than a separate page',async()=>{
+ const p=await page({query:'?view=tools&activity=battle_pass&month=2026-11',rpc:(name:string)=>name.endsWith('_access')?envelope({battlePassRead:true,battlePassControls:true}):undefined});
+ expect(p.$('am-drawer').open).toBe(true);expect(p.$('am-detail').querySelector('.am-admin-tools').open).toBe(true);
+ expect(p.$('am-tools-link').hidden).toBe(true);p.$('am-close').click();expect(p.w.location.search).toContain('view=overview');
+});
 it('labels Battle Pass source evidence and outputs while retaining the CR link',async()=>{
  const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{...activity,key:'battle_pass',label:'Battle Pass',lastSourceCheck:{period:'2026-11',sourceReady:false,confirmed:false}}],outputs:[{...output,activity:'battle_pass',source:'battle_pass',projectCode:null,outputId:'production:2026-10',displayId:'CR-1326',campaignStart:'2026-10-12',campaignEnd:'2026-11-10'}]}):undefined});
  const text=p.$('am-content').textContent;
@@ -39,7 +81,7 @@ it('uses the Battle Pass output period even when its start date is in another mo
 it('shows completed and waiting Golden Spin projects separately',async()=>{
  const projects=[{projectCode:'261005_Golden Spin (No.7)',lastRun:{projectCode:'261005_Golden Spin (No.7)',status:'complete',eventAt:'2026-10-01T05:00Z'},lastSourceCheck:{projectCode:'261005_Golden Spin (No.7)',code:'source_ready',checkedAt:'2026-10-01T04:00Z'}},{projectCode:'261019_Golden Spin (LE)',lastRun:null,lastSourceCheck:{projectCode:'261019_Golden Spin (LE)',code:'waiting_confirmation',confirmed:false}}];
  const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{...activity,key:'golden_spin',projects}]}):undefined});
- const text=p.$('am-content').textContent;expect(text).toContain('261005_Golden Spin (No.7)');expect(text).toContain('Done — สร้างแล้ว');expect(text).toContain('261019_Golden Spin (LE)');expect(text).toContain('รอยืนยันต้นทาง');
+ const text=p.$('am-content').textContent;expect(text).toContain('261005_Golden Spin (No.7)');expect(text).toContain('สร้างชุดงานครบ');expect(text).toContain('261019_Golden Spin (LE)');expect(text).toContain('รอยืนยันต้นทาง');
 });
 const diagnosisRun='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 it.each([['2026-10-06T05:00:00Z','Oct 2026','Nov 2026'],['2026-11-01T00:00:00Z','Nov 2026','Dec 2026']])('defaults to the current Bangkok month and following month on %s',async(date,current,next)=>{
@@ -53,20 +95,20 @@ it('shows next-month source checks for every activity without borrowing complete
  const p=await page({query:'?month=2026-10',rpc:(name:string,args:any)=>name.endsWith('_summary')?envelope({cards:{},outputs:[],activities:keys.map(key=>({...activity,key,label:key,lastRun:{status:'complete',period:'2026-10'},lastSourceCheck:{period:args.p_month,projectCode:key==='battle_pass'?'261111_Battle Pass (Nov 2026)':`261101_${key}`,code:'waiting_confirmation',confirmed:false,checkedAt:'2026-10-06T05:00Z'}}))}):undefined});
  const panel=[...p.$('am-content').querySelectorAll('.am-panel')].find((x:any)=>x.querySelector('h2')?.textContent==='สถานะกิจกรรม · Nov 2026') as any;
  expect(panel).toBeTruthy();expect(panel.querySelectorAll('tbody tr')).toHaveLength(5);
- expect(panel.textContent).toContain('261111_Battle Pass (Nov 2026)');expect(panel.textContent).not.toContain('Done');
+ expect(panel.textContent).toContain('261111_Battle Pass (Nov 2026)');expect(panel.textContent).not.toContain('สร้างชุดงานครบ');
  expect(panel.querySelectorAll('.am-source-evidence')).toHaveLength(5);
  expect(p.calls.filter(x=>x.name.endsWith('_summary')).map(x=>x.args.p_month)).toEqual(['2026-10','2026-11']);
 });
 it('keeps next-month completed outputs separate and rolls December into January',async()=>{
  const p=await page({query:'?month=2026-12',rpc:(name:string,args:any)=>name.endsWith('_summary')?envelope({cards:{},outputs:[{...output,activity:'battle_pass',mode:'production',period:'2027-01',projectCode:'270111_Battle Pass (Jan 2027)',complete:true,generationState:'complete',workItemId:'cr',workItemUrl:output.crUrl}],activities:[{...activity,key:'battle_pass',lastRun:null,lastSourceCheck:null}]}):undefined});
  const panels=[...p.$('am-content').querySelectorAll('.am-panel')];const january=panels.find((x:any)=>x.querySelector('h2')?.textContent==='สถานะกิจกรรม · Jan 2027') as any;
- expect(january.textContent).toContain('270111_Battle Pass (Jan 2027)');expect(january.textContent).toContain('Done');
+ expect(january.textContent).toContain('270111_Battle Pass (Jan 2027)');expect(january.textContent).toContain('สร้างชุดงานครบ');
  expect(p.calls.filter(x=>x.name.endsWith('_summary')).map(x=>x.args.p_month)).toEqual(['2026-12','2027-01']);
 });
 it('shows missing next-month evidence instead of reusing another month',async()=>{
  const p=await page({query:'?month=2026-10',rpc:(name:string)=>name.endsWith('_summary')?envelope({cards:{},outputs:[],activities:[{...activity,key:'battle_pass',lastRun:{status:'complete',period:'2026-10'},lastSourceCheck:{period:'2026-12',code:'waiting_confirmation',projectCode:'261211_Battle Pass (Dec 2026)'}}]}):undefined});
  const panel=[...p.$('am-content').querySelectorAll('.am-panel')].find((x:any)=>x.querySelector('h2')?.textContent==='สถานะกิจกรรม · Nov 2026') as any;
- expect(panel.textContent).toContain('ยังไม่มีข้อมูล');expect(panel.textContent).not.toContain('261211_');expect(panel.textContent).not.toContain('Done');
+ expect(panel.textContent).toContain('ยังไม่มีข้อมูล');expect(panel.textContent).not.toContain('261211_');expect(panel.textContent).not.toContain('สร้างชุดงานครบ');
 });
 it('retains the selected month when the next-month read fails',async()=>{
  const p=await page({query:'?month=2026-10',rpc:(name:string,args:any)=>name.endsWith('_summary')?(args.p_month==='2026-11'?{error:{code:'UNAVAILABLE'}}:envelope(summary())):undefined});
@@ -84,13 +126,13 @@ it.each([false,true])('merges repeated source checks by project and hides checks
  const rows=[...table.querySelectorAll('tbody tr')];expect(rows).toHaveLength(3);
  rows.forEach((row:any,index)=>{
   expect(row.textContent).toContain(codes[index]);
-  if(index<2){expect(row.textContent).toContain('Done — สร้างแล้ว');expect(row.querySelector('.am-source-evidence')).toBeNull();expect(row.children[2].textContent).toBe('—');}
+  if(index<2){expect(row.textContent).toContain('สร้างชุดงานครบ');expect(row.querySelector('.am-source-evidence')).toBeNull();expect(row.children[2].textContent).toBe('—');}
   else{expect(row.textContent).toContain('รอยืนยันต้นทาง');expect(row.querySelectorAll('.am-source-evidence')).toHaveLength(1);expect(row.children[2].textContent).toContain('11:00');expect(row.children[2].textContent).not.toContain('16:30');}
  });
 });
 it('shows a linked existing activity Done without stale source readiness warnings',async()=>{
  const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{...activity,key:'membership',projects:[{projectCode:'261001_Membership (Oct 2026)',lastRun:null,lastSourceCheck:{projectCode:'261001_Membership (Oct 2026)',code:'existing_output_complete',sourceReady:false,checkedAt:'2026-10-01T05:00Z'}}]}]}):undefined});
- const text=p.$('am-content').textContent;expect(text).toContain('Done — สร้างแล้ว');expect(text).toContain('ชุดงานครบแล้ว');
+ const text=p.$('am-content').textContent;expect(text).toContain('สร้างชุดงานครบ');expect(text).toContain('สร้างชุดงานครบ');
  expect(text).not.toContain('ต้นทางยังไม่พร้อม');
 });
 const integrationEvidence=(mode='test')=>({
@@ -101,7 +143,7 @@ const integrationEvidence=(mode='test')=>({
   {component:'seatalk',availability:'available',latestStatus:'delivered',latestAt:'2026-09-18T04:00:00Z',timeMeaning:'record_updated',lastSuccessAt:'2026-09-18T04:00:00Z'},
  ],
 });
-async function openActivity(p:any){[...p.$('am-content').querySelectorAll('button')].find((b:any)=>b.textContent==='ดูรายละเอียด').click();await tick();}
+async function openActivity(p:any){[...p.$('am-content').querySelectorAll('button')].find((b:any)=>b.textContent==='รายละเอียดและหลักฐาน').click();await tick();}
 describe('Production monitor drawer',()=>{
  const prodId='a0000000-0000-4000-8000-000000000002';
  const prodRun={source:'shared',entityType:'production_run',mode:'production',id:prodId,activity:'golden_spin',
@@ -150,11 +192,11 @@ describe('Production monitor drawer',()=>{
     await openActivity(p);expect(p.$('am-detail').textContent).toContain('พักอยู่ · */30 * * * *');
   });
   it('shows an activated automation and the latest SSoT evidence without claiming a new scan',async()=>{
-    const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{
+    const p=await page({query:'?month=2026-10',rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{
       ...activity,key:'battle_pass',label:'Battle Pass',sourceSystem:'battle_pass',configurationScope:'battle_pass',
       schedulerState:'active',schedule:'*/30 * * * *',notifierEnabled:true,
       lastRun:{status:'waiting_confirmation',projectCode:'Battle Pass (Oct 2026)',period:'2026-10',eventAt:'2026-09-22T11:30:00Z'},
-      lastSourceCheck:{sourceReady:false,workingSheetLinked:true,confirmed:false,sourceCheckedAt:'2026-09-22T11:30:00Z'},
+      lastSourceCheck:{period:'2026-10',sourceReady:false,workingSheetLinked:true,confirmed:false,sourceCheckedAt:'2026-09-22T11:30:00Z'},
     }]}):undefined});
     const text=p.$('am-content').textContent;
     expect(text).toContain('ระบบตรวจอัตโนมัติเปิดอยู่');
@@ -288,13 +330,14 @@ describe('Workspace incident actions',()=>{
  });
  it('gives verified Done precedence over a historical held run',async()=>{
   const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{...activity,key:'golden_spin',projects:[{projectCode:issue.projectCode,lastRun:issue,lastSourceCheck:{projectCode:issue.projectCode,code:'existing_output_complete',checkedAt:'2026-10-01T06:00Z'}}]}]}):undefined});
-  const row=p.$('am-content').querySelector('tbody tr');expect(row.textContent).toContain('Done');expect(row.textContent).not.toContain('พักไว้ให้คนตรวจ');
+  const row=p.$('am-content').querySelector('tbody tr');expect(row.textContent).toContain('สร้างชุดงานครบ');expect(row.textContent).not.toContain('พักไว้ให้คนตรวจ');
  });
 });
 describe('Monitor browser contract',()=>{
  it('preserves one instance of every legacy ID and never grants BP access from shared permission',async()=>{
-  const p=await page({query:'?view=activities'});const ids=[...p.w.document.querySelectorAll('[id]')].map((x:any)=>x.id);expect(new Set(ids).size).toBe(ids.length);expect(p.$('monitor').hidden).toBe(true);expect(p.$('am-legacy').hidden).toBe(true);expect(p.$('am-content').textContent).toContain('Membership · Golden Spin · Conqueror · Topup');expect(p.$('am-content').textContent).toContain('สร้างบรีฟแล้ว');expect(p.$('am-content').textContent).toContain('รอยืนยันบรีฟ');expect(p.$('am-content').textContent).toContain('มอบหมายแล้ว');expect(p.calls.map(x=>x.name)).toEqual(['activity_automation_monitor_access','activity_automation_monitor_workspace_summary','activity_automation_monitor_workspace_summary']);
+  const p=await page({query:'?view=activities&month=2026-10'});const ids=[...p.w.document.querySelectorAll('[id]')].map((x:any)=>x.id);expect(new Set(ids).size).toBe(ids.length);expect(p.$('monitor').hidden).toBe(true);expect(p.$('am-legacy').hidden).toBe(true);expect(p.$('am-content').textContent).toContain('Membership · Golden Spin · Conqueror · Topup');expect(p.$('am-content').textContent).toContain('สร้างบรีฟแล้ว');expect(p.$('am-content').textContent).toContain('รอยืนยันบรีฟ');expect(p.$('am-content').textContent).toContain('มอบหมายแล้ว');expect(p.calls.map(x=>x.name)).toEqual(['activity_automation_monitor_access','activity_automation_monitor_workspace_summary','activity_automation_monitor_workspace_summary']);
  });
+// secretlint-disable-next-line @secretlint/secretlint-rule-basicauth -- Intentional non-secret URL userinfo fixture tests credential-bearing URL rejection.
  it('defaults to production and rejects invalid URLs and filters',async()=>{const p=await page({query:'?mode=bad&view=bad&month=1999-13'});const api=p.w.ActivityAutomationMonitor;expect(p.$('am-mode').value).toBe('production');expect(p.$('am-month').value).toMatch(/^20\d{2}-\d{2}$/);for(const url of ['javascript:alert(1)','https://docs.google.com.evil/presentation/d/abc','https://name:pass@docs.google.com/presentation/d/abc','https://evil.test/','https://docs.google.com/presentation/d/a.b'])expect(api.safeUrl(url)).toBeNull();expect(api.safeUrl(output.briefUrl)).toBe(output.briefUrl);expect(p.$('am-status').tagName).toBe('SELECT');});
  it('never calls a read API signed out',async()=>{const p=await page({signedOut:true});expect(p.calls).toEqual([]);expect(p.$('am-content').textContent).toContain('เข้าสู่ระบบ');});
  it('distinguishes authenticated denied account from signed out',async()=>{const p=await page({rpc:()=>({error:{code:'42501'}})});expect(p.$('am-account').textContent).toBe('เข้าสู่ระบบแล้ว · ไม่มีสิทธิ์');expect(p.$('am-content').textContent).toBe('');});
@@ -308,7 +351,7 @@ describe('Monitor browser contract',()=>{
  it('back navigation preserves incoming URL when closing a run deep link',async()=>{const p=await page({query:'?view=runs&mode=test&run=r1&source=shared&entity=run'});await tick();expect(p.$('am-detail').textContent).toContain('การสร้าง (เวลาอัปเดตล่าสุด)');p.w.history.replaceState({},'','?view=activities&mode=production&month=2026-10');p.w.dispatchEvent(new p.w.PopStateEvent('popstate'));await tick();expect(p.w.location.search).toContain('view=activities');expect(p.$('am-mode').value).toBe('production');expect(p.$('am-month').value).toBe('2026-10');expect(p.$('am-drawer').open).toBe(false);});
  it('pagination uses opaque cursor and resets when scope changes',async()=>{const p=await page({query:'?view=runs',rpc:(name:string)=>name.endsWith('_history')?envelope({rows:[],hasMore:true,nextCursor:'opaque-v1'}):undefined});p.$('am-next').click();await tick();expect(p.calls.filter(x=>x.name.endsWith('_history')).at(-1).args.p_cursor).toBe('opaque-v1');p.$('am-mode').value='test';p.$('am-mode').dispatchEvent(new p.w.Event('change'));await tick();expect(p.calls.filter(x=>x.name.endsWith('_history')).at(-1).args.p_cursor).toBeNull();expect(p.$('am-prev').disabled).toBe(true);});
  it('mobile nav toggles aria-expanded',async()=>{const p=await page();p.$('am-menu').click();expect(p.$('am-menu').getAttribute('aria-expanded')).toBe('true');p.$('am-menu').click();expect(p.$('am-menu').getAttribute('aria-expanded')).toBe('false');});
- it('never shows production BP controls under TEST even with verified BP permission',async()=>{const p=await page({query:'?view=tools&mode=test',rpc:(name:string)=>name.endsWith('_access')?envelope({sharedRead:true,battlePassRead:true,battlePassControls:true}):undefined});p.w.dispatchEvent(new p.w.CustomEvent('flowmate:bp-monitor-access',{detail:true}));expect(p.$('am-legacy').hidden).toBe(true);p.$('am-mode').value='production';p.$('am-mode').dispatchEvent(new p.w.Event('change'));await tick();expect(p.$('am-legacy').hidden).toBe(false);});
+ it('never shows production BP controls under TEST even with verified BP permission',async()=>{const p=await page({query:'?view=tools&mode=test',rpc:(name:string)=>name.endsWith('_access')?envelope({sharedRead:true,battlePassRead:true,battlePassControls:true}):undefined});p.w.dispatchEvent(new p.w.CustomEvent('flowmate:bp-monitor-access',{detail:true}));expect(p.$('am-legacy').hidden).toBe(true);p.$('am-mode').value='production';p.$('am-mode').dispatchEvent(new p.w.Event('change'));await tick();expect(p.$('am-legacy').hidden).toBe(true);});
  it('health evidence stays local and actual readiness booleans distinguish checked from ready',async()=>{const p=await page({rpc:(name:string)=>name.endsWith('_summary')?envelope({...summary(),activities:[{...activity,lastSourceCheck:{status:'readiness_checked',sourceReady:false,googleReady:true,databaseReady:true,sourceCheckedAt:'2026-09-18T04:00:00Z',issues:['source_waiting']}}],attention:[{source:'battle_pass',entityType:'health',id:'health-bp',activity:'battle_pass',status:'stale',eventAt:'2026-09-18T04:00:00Z'}]}):undefined});expect(p.$('am-content').textContent).toContain('ต้นทางยังไม่พร้อม');p.$('am-content').querySelector('button').click();expect(p.$('am-drawer-title').textContent).toContain('สถานะที่ต้องตรวจสอบ');expect(p.calls.some(x=>x.name.endsWith('_run'))).toBe(false);});
  it('late run detail cannot overwrite a newly opened local evidence drawer',async()=>{let finish:any;const p=await page({query:'?view=overview&run=r1&source=shared',rpc:(name:string)=>name.endsWith('_run')?new Promise(r=>{finish=r;}):name.endsWith('_summary')?envelope({...summary(),attention:[{source:'shared',entityType:'notification',id:'n1',activity:'membership',status:'uncertain'}]}):undefined});p.$('am-content').querySelector('button').click();finish(envelope({run:{id:'OLD RUN'},outputs:[],timeline:[]}));await tick();expect(p.$('am-drawer-title').textContent).toBe('รายละเอียดการแจ้งเตือน');expect(p.$('am-detail').textContent).not.toContain('OLD RUN');});
 });

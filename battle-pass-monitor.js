@@ -7,7 +7,9 @@
     complete: "สร้างชุดงานแล้ว", review_required: "ต้องตรวจการเปลี่ยนแปลง",
     failed: "ทำงานไม่สำเร็จ", disabled: "พักการทำงาน",
     readiness_checked: "ตรวจความพร้อมแล้ว", google_write_checked: "ทดสอบเขียน Google แล้ว",
-    ready: "พร้อมดำเนินการ", resume: "รอดำเนินการต่อ"
+    ready: "พร้อมดำเนินการ", resume: "รอดำเนินการต่อ",
+    manual_generation_required: "รอเริ่มสร้างจากหน้ากิจกรรม · ใช้ปุ่มตรวจและสร้างงาน",
+    existing: "พบชุดงานเดิมแล้ว", held: "พักไว้ให้ตรวจหลักฐาน", source_ready: "ผ่านการตรวจ SSoT"
   };
   const kinds = { production: "รอบทำงาน", readiness: "ตรวจความพร้อม", probe: "ทดสอบ Google", unknown: "ไม่ระบุประเภท" };
   const stages = { start: "เริ่มทำงาน", google_auth: "เชื่อม Google", inventory: "ตรวจงานเดิม",
