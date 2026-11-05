@@ -2009,6 +2009,16 @@ async function loadFlowMateActiveCreativeMembers() {
     .filter((member) => window.isFlowMateGdVeMember ? window.isFlowMateGdVeMember(member) : /gd\/?ve/i.test(member.discipline || ""));
 }
 
+// Gantt visibility follows account Access, independently of accepting new work.
+async function loadFlowMateGanttMembers() {
+  if (!window.flowmateSupabase) throw new Error("Supabase client is not ready.");
+  const { data, error } = await window.flowmateSupabase.rpc("flowmate_gantt_members");
+  if (error) throw error;
+  syncFlowMateMembers(data || []);
+  return (data || []).map(member => ({ ...normalizeFlowMateMember(member), active: true }));
+}
+
+window.loadFlowMateGanttMembers = loadFlowMateGanttMembers;
 window.loadFlowMateListRows = loadFlowMateListRows;
 window.loadFlowMateNavigationRows = loadFlowMateNavigationRows;
 window.loadFlowMateSearchRows = loadFlowMateSearchRows;

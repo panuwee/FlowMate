@@ -2861,7 +2861,7 @@ function TeamGanttScreen({ onOpen, product = "flowmate" }) {
       try {
         const [rows, memberRows] = await Promise.all([
           taskLoader(),
-          !isTaskAssignProduct && window.loadFlowMateActiveCreativeMembers ? window.loadFlowMateActiveCreativeMembers() : Promise.resolve([]),
+          isTaskAssignProduct ? Promise.resolve([]) : (window.loadFlowMateGanttMembers ? window.loadFlowMateGanttMembers() : Promise.reject(new Error("Gantt Access roster loader is not ready."))),
         ]);
         if (!alive) return;
         setSourceRows(rows || []);

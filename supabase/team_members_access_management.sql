@@ -279,7 +279,7 @@ declare path text:=current_setting('request.path',true); method text:=current_se
  if exists(select 1 from public.users where id=auth.uid() and role='viewer') then
  if path like '/rpc/%' then
  if substring(path from 6) <> all(array[
- 'flowmate_board_summary','flowmate_list_delivered_history','flowmate_creative_brief',
+ 'flowmate_gantt_members','flowmate_board_summary','flowmate_list_delivered_history','flowmate_creative_brief',
  'battle_pass_review_status','product_book_list_patches','product_book_list_revisions',
  'marketing_campaign_planner_can_manage','flowmate_board_summary_by_function','task_assign_list','task_assign_members','ot_get_access_context','ot_get_my_dashboard',
  'ot_list_my_requests','ot_get_manager_dashboard','ot_list_eligible_approvers','ot_list_people_for_event'])
