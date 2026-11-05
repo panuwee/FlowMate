@@ -29,7 +29,7 @@
 .am-action-queue .am-row-actions{max-width:270px;justify-content:flex-end}
 .am-action-queue .am-row-actions>:first-child{background:var(--am-accent);border-color:var(--am-accent);color:#fff}
 .am-action-queue .am-row-actions>:first-child:hover{background:#39414b}
-.am-upcoming{margin:20px 0}.am-upcoming>summary,.am-admin-tools>summary{cursor:pointer;padding:14px 0;font-weight:600;min-height:44px}
+.am-upcoming{margin:20px 0;width:100%;max-width:none;min-width:0}.am-upcoming>summary,.am-admin-tools>summary{cursor:pointer;padding:14px 0;font-weight:600;min-height:44px}
 .am-current-phase{padding:16px 0;border-bottom:1px solid var(--am-line);margin-bottom:16px}.am-current-phase strong{font-size:18px}.am-current-phase p{line-height:1.7}.am-current-phase small{color:var(--am-muted)}
 .am-admin-tools{margin-top:20px;border-top:1px solid var(--am-line)}.am-admin-context{font-weight:600;overflow-wrap:anywhere}
 #am-drawer .am-legacy{border:0;margin-top:12px;padding-top:0}#am-drawer .am-legacy .summary{display:block}#am-drawer .am-legacy .card{margin:12px 0;min-width:0}#am-drawer .am-legacy .section-head{flex-wrap:wrap;gap:12px}#am-drawer .am-legacy button{min-height:44px}
