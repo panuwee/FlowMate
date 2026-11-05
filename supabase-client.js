@@ -3,6 +3,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 // Explicit read RPCs. Unknown RPCs fail closed for Viewer, including GET RPC calls.
 window.FLOWMATE_VIEWER_READ_RPCS = new Set([
+  "flowmate_gantt_members",
   "flowmate_board_summary", "flowmate_list_delivered_history", "flowmate_creative_brief",
   "battle_pass_review_status", "product_book_list_patches", "product_book_list_revisions",
   "marketing_campaign_planner_can_manage", "ot_get_access_context", "ot_get_my_dashboard",
