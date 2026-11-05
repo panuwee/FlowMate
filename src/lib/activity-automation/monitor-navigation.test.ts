@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 // Exercise the actual effect without rendering the unrelated application tree.
-const app = readFileSync('app.jsx', 'utf8');
+const app = readFileSync('app.jsx', 'utf8').replace(/\r\n/g, '\n');
 const declarationStart = app.indexOf('  const [automationAccess, setAutomationAccess]');
 const start = app.indexOf('  useEffectApp(() => {\n    let cancelled = false;', declarationStart);
 const end = app.indexOf('  const [realtimeState', start);

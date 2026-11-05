@@ -16,23 +16,23 @@ async function page(outputs:any[],month='2026-10'){
   }:{rows:[]}}};
  }};
  w.eval(script);await new Promise(r=>setTimeout(r,35));
- return {text:w.document.getElementById('am-content').textContent,calls};
+ return {text:w.document.getElementById('am-content').textContent,currentText:w.document.querySelector('.am-table').textContent,calls};
 }
 it('shows completed October output Done despite old No readiness and latest November tick',async()=>{
  const p=await page([output]);
- expect(p.text).toContain('Done');
- expect(p.text).toContain('Done — มี Working Sheet, CR และ Brief Link แล้ว');
- expect(p.text).toContain('Loot Confirmed? (ผลตรวจเดิม): No');
+ expect(p.text).toContain('สร้างชุดงานครบ');
+ expect(p.text).toContain('สร้างชุดงานครบ · รอตรวจบรีฟ');
+ expect(p.text).toContain('ตรวจบรีฟ');
  expect(p.text).not.toContain('ต้นทางยังไม่พร้อม');
  expect(p.text).toContain('รอยืนยันบรีฟ');
  expect(p.calls.every(name=>name.startsWith('activity_automation_monitor_'))).toBe(true);
 });
 it.each([{complete:false},{generationState:'held'},{briefUrl:null},{workItemId:null},{crUrl:null},{mode:'test'},{outputId:'production:2026-11'}])('does not infer Done from incomplete or wrong-scope evidence: %j',async delta=>{
  const p=await page([{...output,...delta}]);
- expect(p.text).not.toContain('Done — มี Working Sheet, CR และ Brief Link แล้ว');
+ expect(p.currentText).not.toContain('สร้างชุดงานครบ');
  expect(p.text).toContain('ต้นทางยังไม่พร้อม');
 });
 it('does not mark November Done because October has completed',async()=>{
  const p=await page([output],'2026-11');
- expect(p.text).not.toContain('Done — มี Working Sheet, CR และ Brief Link แล้ว');
+ expect(p.currentText).not.toContain('สร้างชุดงานครบ');
 });

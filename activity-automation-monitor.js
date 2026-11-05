@@ -2,21 +2,59 @@
   'use strict';
   // Source renames must be reconciled with the existing work before any new generation.
   const labels={battle_pass:'Battle Pass',membership:'Membership',conqueror_crate:'Conqueror Crate',golden_spin:'Golden Spin',topup_promotion:'Topup Promotion'};
-  const views={overview:'ภาพรวมระบบอัตโนมัติกิจกรรม',activities:'กิจกรรม',runs:'ประวัติการทำงาน',notifications:'การแจ้งเตือน',tools:'เครื่องมือผู้ดูแล · Battle Pass'};
+  const views={overview:'งานที่ต้องทำ',activities:'ทุกกิจกรรม',runs:'ประวัติการทำงาน',notifications:'การแจ้งเตือน',tools:'เครื่องมือผู้ดูแล · Battle Pass'};
   const statuses={existing:'Done — สร้างแล้ว',done:'Done — สร้างแล้ว',existing_output_complete:'Done — สร้างแล้ว',complete:'สร้างสำเร็จ',succeeded:'สำเร็จ',assigned:'มอบหมายแล้ว',accepted:'ยืนยันแล้ว',pending:'รอดำเนินการ',submitted:'รอยืนยัน',pending_acceptance:'รอยืนยัน',failed:'ล้มเหลว',uncertain:'ยังยืนยันผลไม่ได้',cancelled:'ยกเลิก',processing:'กำลังดำเนินการ',retryable:'รอลองใหม่',delivered:'API รับข้อความแล้ว',blocked:'ติดเงื่อนไข',review_required:'ต้องตรวจสอบ',running:'กำลังทำงาน',disabled:'ปิดอยู่',enabled:'เปิดอยู่',unavailable:'อ่านสถานะไม่ได้',unknown:'ยังไม่มีข้อมูล',waiting_confirmation:'รอยืนยันต้นทาง',source_ready:'ผ่านการตรวจ SSoT',working_sheet_invalid:'Working Sheet ยังไม่พร้อม',source_dates_invalid:'วันกิจกรรมยังไม่พร้อม',project_code_missing:'ยังไม่มี Project Code',source_ambiguous:'พบข้อมูลต้นทางซ้ำ',item_name_missing:'ข้อมูลชื่อไอเทมใน Loot ไม่ครบ',loot_dates_mismatch:'วันที่ Loot ไม่ตรงกับ SSoT'};
   Object.assign(statuses,{not_submitted:'ยังไม่ส่งบรีฟ',ready_for_review:'สร้างบรีฟแล้ว',generating:'กำลังสร้างบรีฟ',discovered:'พบกิจกรรมแล้ว',dispatching:'กำลังส่งงาน',resolution_unknown:'ยังไม่ทราบว่าแก้ไขแล้วหรือยัง',pending_acceptance:'รอยืนยันบรีฟ',stale:'ข้อมูลรันเกินช่วงที่คาด',held:'พักไว้ให้คนตรวจ',readiness_checked:'ตรวจต้นทางแล้ว',no_pending_month:'ไม่มีรอบที่รอดำเนินการ'});
   Object.assign(statuses,{claimed:'รับงานแล้ว',source_validated:'ตรวจต้นทางผ่านแล้ว',generation_pending:'อยู่ในขั้นสร้าง Slides',unassigned:'ยังไม่มอบหมาย',ready:'ผ่าน ณ เวลาตรวจ',not_ready:'ไม่ผ่าน ณ เวลาตรวจ',ambiguous:'พบตารางเวลาซ้ำ'});
   Object.assign(statuses,{manual_ready:'รอกดสร้างงาน',manual_catalog_needed:'ยังไม่มีรายการล่าสุด',manual_existing:'พบงานเดิมแล้ว',queued:'รอเริ่มสร้างงาน',source_identity_changed:'ข้อมูลกิจกรรมเปลี่ยน ต้องตรวจงานเดิมก่อนสร้างต่อ'});
   Object.assign(statuses,{source_identity_invalid:'ชื่อกิจกรรมต้นทางไม่ตรงรูปแบบที่รองรับ',source_period_invalid:'เดือนต้นทางไม่ตรงกับกิจกรรม',waiting:'รอข้อมูลต้นทาง',rejected:'ต้นทางไม่ผ่านการตรวจ'});
+  Object.assign(statuses,{existing:'พบงานเดิมแล้ว',done:'สร้างชุดงานครบ',existing_output_complete:'สร้างชุดงานครบ'});
   const recoveryLabels={in_progress:'ยังอยู่ในช่วงเวลารัน',lease_expired:'หมดช่วงเวลารันก่อนสร้าง Slides',generation_not_started:'ยังไม่มีหลักฐานเริ่มสร้าง Slides',copy_result_unknown:'ยังยืนยันผลคัดลอก Slides ไม่ได้',copied_pending_population:'มีสำเนา Slides แล้ว ยังไม่ยืนยันการเขียนเนื้อหา',populate_result_unknown:'ยังยืนยันผลเขียน Slides ไม่ได้',verified_pending_finalize:'ตรวจ Slides ผ่านแล้ว รอจบงานใน FlowMate',held:'พักงานไว้ให้ตรวจสอบ',complete:'จบงานแล้ว'};
   function month(){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Bangkok',year:'numeric',month:'2-digit'}).formatToParts(new Date());return parts.find(p=>p.type==='year').value+'-'+parts.find(p=>p.type==='month').value;}
   function filters(search){const p=new URLSearchParams(search);return {view:views[p.get('view')]?p.get('view'):'overview',mode:p.get('mode')==='test'?'test':'production',activity:labels[p.get('activity')]?p.get('activity'):'all',month:/^20\d{2}-(0[1-9]|1[0-2])$/.test(p.get('month')||'')?p.get('month'):month(),search:(p.get('search')||'').slice(0,120),status:/^[a-z_]{1,80}$/.test(p.get('status')||'')?p.get('status'):'',history:['significant','scans','creation','all'].includes(p.get('history'))?p.get('history'):'significant',run:p.get('run')||'',source:p.get('source')||'',entityType:p.get('entity')||'run'};}
   function time(value){const d=new Date(value);return value&&Number.isFinite(d.getTime())?new Intl.DateTimeFormat('th-TH',{timeZone:'Asia/Bangkok',dateStyle:'medium',timeStyle:'short'}).format(d):'ไม่มีข้อมูล';}
   function safeUrl(value){try{const u=new URL(value,root.location?.href||'https://panuwee.github.io/FlowMate/');if(u.username||u.password)return null;if(u.protocol!=='https:'&&u.protocol!=='http:')return null;if(u.hostname==='docs.google.com'&&u.protocol==='https:'&&/^\/(presentation|spreadsheets|document)\/d\/[\w-]+(?:\/|$)/.test(u.pathname))return u.href;if((u.origin===(root.location?.origin||'https://panuwee.github.io')||u.origin==='https://panuwee.github.io')&&u.pathname.startsWith('/FlowMate/'))return u.href;return null;}catch{return null;}}
-  root.ActivityAutomationMonitor={filters,time,safeUrl,labels,statuses};
+  // A single read-only policy for every activity. Native worker identities, leases,
+  // validation and permissions remain authoritative; this never dispatches work.
+  function generationComplete(a){return a.manualJob?.status==='complete'||!!a.completedOutput||a.lastSourceCheck?.code==='existing_output_complete'||a.lastRun?.status==='complete';}
+  function jobBusy(a,now=Date.now()){const j=a.manualJob;if(!['queued','running'].includes(j?.status))return false;const at=Date.parse(j.updatedAt);return !Number.isFinite(at)||now-at<(j.status==='queued'?2:10)*60*1000;}
+  function workflow(a,context={}){
+    const c=a.lastSourceCheck,r=a.lastRun,j=a.manualJob,o=a.workflowOutput||a.completedOutput||a.existingOutput;
+    const canConfirm=context.mode==='production'&&context.controls===true;
+    const result=(phase,label,reason,action='details',cta='รายละเอียดและหลักฐาน',priority=3,owner='ผู้ดูแล')=>({phase,label,reason,action,cta,priority,owner});
+    if(a.availability&&a.availability!=='ok')return result('unavailable','ยังยืนยันสถานะไม่ได้','อ่านข้อมูลไม่ได้หรือไม่มีสิทธิ์ในกิจกรรมนี้');
+    if(generationComplete(a)){
+      if(['pending','pending_acceptance','submitted'].includes(o?.briefState))return result('review','สร้างชุดงานครบ · รอตรวจบรีฟ','รอ Operation ตรวจบรีฟและยืนยันพร้อมคอมเมนต์','review','ตรวจบรีฟ',1,'Operation');
+      if(o?.assignmentState==='unassigned')return result('assignment','สร้างชุดงานครบ · รอมอบหมาย','ให้ผู้มีสิทธิ์ตรวจและมอบหมายใน CR','review','เปิด CR เพื่อมอบหมาย',1,'ผู้มีสิทธิ์มอบหมาย');
+      return result('generated','สร้างชุดงานครบ','ชุดงานครบแล้ว · ตรวจหลักฐานบรีฟและการมอบหมายก่อนสรุปว่าจบทุกขั้น','details','รายละเอียดและหลักฐาน',4,'Operation');
+    }
+    if(j?.status==='existing')return result('existing','พบงานเดิมแล้ว','ตรวจงานเดิมก่อนสร้างต่อ ระบบไม่สร้างซ้ำ','details','ตรวจงานเดิม',0);
+    if(j&&!['queued','running','complete','existing','held','failed'].includes(j.status))return result('unknown','ยังยืนยันสถานะคำขอไม่ได้','พบสถานะที่ยังไม่รองรับ ให้ตรวจหลักฐานก่อนเริ่มคำขอใหม่','details','ตรวจหลักฐาน',0);
+    if(jobBusy(a,context.now))return result('running',j.status==='queued'?'รอเริ่มสร้างงาน':'กำลังสร้างงาน','รับคำขอแล้ว · ตรวจผลได้โดยไม่เริ่มสร้างซ้ำ','refresh','ตรวจผล',2,'ระบบ');
+    const currentRun=r&&(!c||!c.checkedAt||!r.eventAt||Date.parse(r.eventAt)>=Date.parse(c.checkedAt));
+    const reason=j?.code||(currentRun?r.code:c?.code);
+    const blockers={source_identity_invalid:'ตรวจชื่อกิจกรรมและ Tier ใน SSoT',source_identity_changed:'ตรวจงานเดิมที่ใช้วันเริ่มหรือ Working Sheet เดียวกัน',source_period_invalid:'ตรวจเดือน วันเริ่ม และรหัสโครงการให้ตรงกัน',source_ambiguous:'ตรวจรหัสโครงการซ้ำใน SSoT',source_dates_invalid:'ตรวจวันและเวลากิจกรรมใน SSoT',loot_dates_mismatch:'ตรวจวันที่ใน Loot ให้ตรงกับ SSoT',manual_output_requires_review:'ตรวจว่า Working Sheet เชื่อม CR และ Brief ของโครงการนี้ถูกต้อง'};
+    if(j?.status==='held'||r?.status==='held'||reason==='source_identity_changed'||reason==='manual_output_requires_review')return result('held','พักไว้ให้ตรวจสอบ',blockers[reason]||'ตรวจเหตุการณ์ที่พักไว้ก่อนสร้างต่อ','details','ตรวจหลักฐานงานเดิม',0);
+    if(['uncertain','review_required'].includes(r?.status))return result('held','ต้องตรวจสอบผลเดิม','ยังยืนยันผลเดิมไม่ได้ ให้ตรวจหลักฐานก่อนลองใหม่','details','ตรวจหลักฐานงานเดิม',0);
+    if(blockers[reason])return result('blocked',statuses[reason]||'ต้นทางไม่ผ่านเงื่อนไข',blockers[reason],'details','ตรวจข้อมูลที่ต้องแก้',0,'Operation');
+    if(reason==='confirmation_stale')return result('confirmation','ข้อมูลเปลี่ยน ต้องยืนยัน Loot ใหม่','ข้อมูลเปลี่ยนแล้ว กรุณาตรวจและยืนยัน Loot ใหม่',canConfirm?'confirm':'details',canConfirm?'ตรวจและยืนยันใหม่':'รายละเอียดและหลักฐาน',1,'Operation');
+    if(reason==='working_sheet_invalid'||c?.workingSheetLinked===false)return result('sheet','Working Sheet ยังไม่พร้อม','ระบุลิงก์ Working Sheet ที่ถูกต้อง แล้วตรวจข้อมูลอีกครั้ง',canConfirm?'confirm':'details',canConfirm?'ตรวจ Working Sheet':'รายละเอียดและหลักฐาน',1,'Operation');
+    if(['queued','running'].includes(j?.status))return result('uncertain','ยังยืนยันผลคำขอไม่ได้','คำขอเกินช่วงเวลาที่คาด ให้ตรวจผลและหลักฐานก่อนสร้างต่อ','refresh','ตรวจผล',0);
+    if(j?.status==='failed'||(currentRun&&['failed','blocked'].includes(r?.status)))return result('failed','ต้องตรวจสาเหตุที่หยุด',statuses[reason]||'ตรวจหลักฐานรันล่าสุดและงานที่อาจสร้างไว้ก่อนลองใหม่','details','ตรวจสาเหตุและหลักฐาน',0);
+    if(!j&&currentRun&&['running','processing','claimed','source_validated','generation_pending','generating'].includes(r?.status))return result('running','กำลังสร้างงาน','ระบบกำลังทำงาน · ตรวจผลโดยไม่เริ่มคำขอใหม่','refresh','ตรวจผล',2,'ระบบ');
+    if(reason&&!['manual_ready','source_ready','waiting_confirmation','existing_output_complete'].includes(reason))return result('blocked',statuses[reason]||'ต้นทางต้องตรวจสอบ','ตรวจหลักฐานต้นทางก่อนสร้างงาน · รหัส '+reason,'details','ตรวจข้อมูลที่ต้องแก้',0,'Operation');
+    if(a.manualMode&&!a.projectCode)return result('catalog','ยังไม่มีรายการล่าสุด','อัปเดตรายการกิจกรรมเพื่ออ่านโครงการเดือนนี้',canConfirm?'catalog':'details',canConfirm?'อัปเดตรายการกิจกรรม':'รายละเอียดและหลักฐาน',1,'Operation');
+    if(!a.manualMode&&c?.sourceReady===true)return result('waiting_system','ผ่านการตรวจ SSoT','ผ่านต้นทาง ณ เวลาตรวจ · รอระบบตรวจ Loot และสร้างงานตามเงื่อนไข','refresh','ตรวจผล',2,'ระบบ');
+    if(a.manualMode)return result('ready','รอกดสร้างงาน','ตรวจข้อมูลและ Loot ล่าสุดก่อนยืนยันสร้างงาน',canConfirm?'confirm':'details',canConfirm?'ตรวจและสร้างงาน':'รายละเอียดและหลักฐาน',1,'Operation');
+    if(c?.confirmed===false||reason==='waiting_confirmation')return result('confirmation','รอยืนยันต้นทาง','ตรวจและยืนยัน Loot',canConfirm?'confirm':'details',canConfirm?'ตรวจและยืนยัน Loot':'รายละเอียดและหลักฐาน',1,'Operation');
+    if(c?.confirmed===true)return result('waiting_system','รอตรวจ Loot ล่าสุด','SSoT บันทึกว่ายืนยัน Loot แล้ว · ยังไม่มีหลักฐานว่าตัวสร้างตรวจครบ','refresh','ตรวจผล',2,'ระบบ');
+    return result('unknown','ยังไม่มีข้อมูลเพียงพอ','ตรวจข้อมูลต้นทางและเวลาของหลักฐานก่อนดำเนินการ');
+  }
+  root.ActivityAutomationMonitor={filters,time,safeUrl,labels,statuses,workflow};
   if(!root.document?.getElementById('am-shell'))return;
   const $=id=>root.document.getElementById(id),doc=root.document,client=root.flowmateSupabase;
   let state=filters(root.location.search),generation=0,detailGeneration=0,capabilities={},cursor=null,nextCursor=null,cursors=[],snapshot=false,opener=null,authUser=null,searchTimer,legacyAllowed=$('monitor')?.hidden===false,workspaceAvailable=false;
+  let lastProjects=[];
   const n=(tag,text,cls)=>{const el=doc.createElement(tag);if(text!=null)el.textContent=String(text);if(cls)el.className=cls;return el;};
   function status(value){return statuses[value]|| (value?'สถานะใหม่ที่ยังไม่รองรับ ('+String(value)+')':'ไม่มีข้อมูล');}
   function scheduleText(a){const names={not_configured:'ยังไม่ตั้งเวลา',unknown:'อ่านตารางเวลาไม่ได้',unavailable:'อ่านตารางเวลาไม่ได้',active:'เปิดอยู่',paused:'พักอยู่',ambiguous:'พบตารางเวลาซ้ำ ต้องตรวจสอบ'};return (a.availability==='unavailable'?'อ่านตารางเวลาไม่ได้':names[a.schedulerState]||'ยังไม่มีข้อมูล')+(a.schedule?' · '+a.schedule:'');}
@@ -44,20 +82,8 @@
     return /^20\d{2}-\d{2}-\d{2}$/.test(start||'')?start.slice(2).replaceAll('-','')+'_'+name:name;
   }
   function currentStatus(a){
-    if(a.manualJob){const wrap=n('div');wrap.append(n('span','Current Status: '+(a.projectCode||a.label)+' — '+status(a.manualJob.status==='existing'?'manual_existing':a.manualJob.status)));return wrap;}
-    if(a.completedOutput){const done=n('div');done.append(n('span','Current Status: '+battlePassProject(a.completedOutput)+' — Done — สร้างแล้ว'));return done;}
-    if(a.projects?.length){const list=n('div');for(const project of a.projects)list.append(currentStatus({...a,projects:null,lastRun:project.lastRun,lastSourceCheck:project.lastSourceCheck}));return list;}
-    if(a.lastSourceCheck?.code==='existing_output_complete'){const done=n('div');done.append(n('span','Current Status: '+(a.lastSourceCheck.projectCode||a.projectCode||a.label)+' — Done — สร้างแล้ว'));return done;}
-    const wrap=n('div'),check=a.lastSourceCheck,run=a.lastRun?.status!=='complete'&&check&&new Date(check.checkedAt)>new Date(a.lastRun?.eventAt)?null:a.lastRun;
-    if(run){
-      const identity=run.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(run.period)?' ('+periodLabel(run.period)+')':''));
-      wrap.append(n('span','Current Status: '+identity+' — '+(run.status==='complete'?'Done — ':'')+status(run.status)));
-      if(run.eventAt)wrap.append(n('small',time(run.eventAt)));
-    }else if(check){
-      const identity=check.projectCode||((a.label||labels[a.key||a.activity]||'กิจกรรม')+(periodLabel(check.period)?' ('+periodLabel(check.period)+')':''));
-      wrap.append(n('span','Current Status: '+identity+' — '+(check.code==='existing_output_complete'?'Done — สร้างแล้ว':status(check.code||check.status))));
-    }
-    else wrap.append(n('span','Current Status: รอผลตรวจต้นทางครั้งแรก'));
+    const wrap=n('div',null,'am-current-phase'),flow=projectWorkflow(a);
+    wrap.append(n('strong',flow.label),n('p',flow.reason),n('small','ขั้นต่อไป: '+flow.owner));
     return wrap;
   }
   function sourceStatus(a){
@@ -65,7 +91,7 @@
     const source=n('div',null,'am-source-status'),check=a.lastSourceCheck;
     if(a.completedOutput){
       const output=a.completedOutput;
-      source.append(n('strong',battlePassProject(output)),n('span','Done — มี Working Sheet, CR และ Brief Link แล้ว'),n('small','ข้ามรายการนี้และตรวจรอบถัดไป'));
+      source.append(n('strong',battlePassProject(output)),n('span','มี Working Sheet, CR และ Brief Link แล้ว'),n('small','ตรวจบรีฟและการมอบหมายจาก CR'));
       source.append(link('เปิด '+output.displayId+' เพื่อตรวจบรีฟ',output.crUrl||output.workItemUrl));
       if(check?.period===(output.period||output.outputId?.match(/(?:^|:)(20\d{2}-\d{2})$/)?.[1])){
         source.append(n('small','ผลตรวจต้นทางที่บันทึกไว้: '+time(check.checkedAt)));
@@ -77,7 +103,7 @@
     if((a.key||a.activity)==='battle_pass'&&check){const identity=battlePassProject(check);if(identity)source.append(n('strong',identity));}
     if(a.manualJob&&['complete','existing'].includes(a.manualJob.status)){source.append(n('span',a.manualJob.status==='complete'?'สร้าง Working Sheet และ Brief สำเร็จแล้ว':'พบงานเดิม ระบบไม่สร้างซ้ำ กรุณาตรวจหลักฐานงานเดิม'));if(a.manualJob.result?.slideUrl)source.append(link('เปิด Brief',a.manualJob.result.slideUrl));return source;}
     if(check?.code==='existing_output_complete'){
-      source.append(n('span','Done — มี Working Sheet, CR และ Brief Link แล้ว'),n('small','ข้ามรายการนี้และตรวจรอบถัดไป'),n('small',time(check.checkedAt)));
+      source.append(n('span','มี Working Sheet, CR และ Brief Link แล้ว'),n('small','ตรวจบรีฟและการมอบหมายจาก CR'),n('small',time(check.checkedAt)));
       if(a.existingOutput?.crUrl)source.append(link('เปิด '+a.existingOutput.displayId+' เพื่อตรวจงานเดิม',a.existingOutput.crUrl));
       return source;
     }
@@ -93,13 +119,23 @@
   function panel(title){const p=n('section',null,'am-panel');p.append(n('h2',title));return p;}
   function empty(parent,text='ยังไม่มีข้อมูลในช่วงที่เลือก'){parent.append(n('p',text,'am-empty'));}
   function table(parent,heads,rows,render){if(!rows?.length){empty(parent);return;}const wrap=n('div',null,'am-table-wrap'),t=n('table',null,'am-table'),thead=n('thead'),tr=n('tr');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',heads.join(' · '));heads.forEach(h=>{const th=n('th',h);th.scope='col';tr.append(th);});thead.append(tr);t.append(thead);const body=n('tbody');for(const row of rows){const r=n('tr');render(row).forEach((value,i)=>{const td=n('td');td.dataset.label=heads[i];td.append(value?.nodeType?value:doc.createTextNode(String(value??'—')));r.append(td);});body.append(r);}t.append(body);wrap.append(t);parent.append(wrap);}
-  function sync(){const options=state.view==='notifications'?['pending','dispatching','processing','retryable','delivered','failed','uncertain','cancelled']:['discovered','generating','ready_for_review','claimed','source_validated','generation_pending','held','complete','failed','blocked','review_required','waiting_confirmation'];$('am-status').replaceChildren(n('option','ทุกสถานะ'));$('am-status').firstChild.value='';if(state.status&&!options.includes(state.status))options.push(state.status);for(const value of options){const option=n('option',status(value));option.value=value;$('am-status').append(option);}for(const [key,id]of [['mode','am-mode'],['activity','am-activity'],['month','am-month'],['search','am-search'],['status','am-status']])$(id).value=state[key];$('am-view-title').textContent=views[state.view];doc.querySelectorAll('[data-am-view]').forEach(a=>{if(a.dataset.amView===state.view)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});$('am-test').hidden=state.mode!=='test';$('am-search-label').hidden=state.view!=='runs';$('am-status-label').hidden=!['runs','notifications'].includes(state.view);$('am-month-note').textContent=['runs','notifications'].includes(state.view)?'เดือนที่เกิดเหตุการณ์ · เวลาประเทศไทย (Asia/Bangkok)':'เดือนเริ่มกิจกรรม · ผลตรวจต้นทางเป็นผลที่บันทึกไว้ล่าสุด';$('am-legacy').hidden=!((capabilities.battlePassRead||legacyAllowed)&&state.mode==='production'&&state.view==='tools');$('am-history-label').hidden=state.view!=='runs';$('am-history').value=state.history;$('am-tools-link').hidden=!(capabilities.battlePassRead||legacyAllowed)||state.mode!=='production';}
+  function sync(){
+    const options=state.view==='notifications'?['pending','dispatching','processing','retryable','delivered','failed','uncertain','cancelled']:['discovered','generating','ready_for_review','claimed','source_validated','generation_pending','held','complete','failed','blocked','review_required','waiting_confirmation'];
+    $('am-status').replaceChildren(n('option','ทุกสถานะ'));$('am-status').firstChild.value='';if(state.status&&!options.includes(state.status))options.push(state.status);
+    for(const value of options){const option=n('option',status(value));option.value=value;$('am-status').append(option);}
+    for(const [key,id]of [['mode','am-mode'],['activity','am-activity'],['month','am-month'],['search','am-search'],['status','am-status']])$(id).value=state[key];
+    $('am-view-title').textContent=views[state.view];doc.querySelectorAll('[data-am-view]').forEach(a=>{if(a.dataset.amView===(state.view==='tools'?'overview':state.view))a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
+    $('am-test').hidden=state.mode!=='test';$('am-search-label').hidden=state.view!=='runs';$('am-status-label').hidden=!['runs','notifications'].includes(state.view);
+    $('am-month-note').textContent=['runs','notifications'].includes(state.view)?'เดือนที่เกิดเหตุการณ์ · เวลาประเทศไทย (Asia/Bangkok)':'เดือนเริ่มกิจกรรม · ผลตรวจต้นทางเป็นผลที่บันทึกไว้ล่าสุด';
+    if(!((capabilities.battlePassRead||legacyAllowed)&&state.mode==='production'))parkTools();
+    $('am-history-label').hidden=state.view!=='runs';$('am-history').value=state.history;$('am-tools-link').hidden=true;
+  }
   function url(replace=false){const p=new URLSearchParams();for(const key of ['view','mode','activity','month','history'])p.set(key,state[key]);if(state.search)p.set('search',state.search);if(state.status)p.set('status',state.status);if(state.run){p.set('run',state.run);p.set('source',state.source);p.set('entity',state.entityType);}root.history[replace?'replaceState':'pushState']({},'',root.location.pathname+'?'+p);}
-  function normalize(data,selectedMonth=state.month){data.outputs=(data.outputs||[]).filter(o=>!o.archivedAt);for(const a of data.activities||[]){if(a.configurationScope==='shared_4_activities')a.configurationScope='shared';if(a.lastSourceCheck)a.lastSourceCheck.checkedAt=a.lastSourceCheck.sourceCheckedAt??a.lastSourceCheck.checkedAt??null;
+  function normalize(data,selectedMonth=state.month){data.outputs=(data.outputs||[]).filter(o=>!o.archivedAt);for(const a of data.activities||[]){a.period=selectedMonth;a.availableOutputs=data.outputs.filter(o=>o.activity===a.key&&(!o.mode||o.mode===state.mode));if(a.configurationScope==='shared_4_activities')a.configurationScope='shared';if(a.lastSourceCheck)a.lastSourceCheck.checkedAt=a.lastSourceCheck.sourceCheckedAt??a.lastSourceCheck.checkedAt??null;
     if(a.key==='battle_pass')a.completedOutput=(data.outputs||[]).find(o=>o.activity==='battle_pass'&&o.mode===state.mode&&o.complete===true&&o.generationState==='complete'&&(o.period||o.outputId?.match(/(?:^|:)(20\d{2}-\d{2})$/)?.[1])===selectedMonth&&o.workItemId&&o.displayId&&o.briefUrl&&(o.crUrl||o.workItemUrl)&&safeUrl(o.briefUrl)&&safeUrl(o.crUrl||o.workItemUrl))||null;
   }for(const r of [...(data.rows||[]),...(data.attention||[])]){r.attempts=r.attemptCount;r.kind=r.eventKind||r.kind;if(r.entityType==='production_run'&&r.recoveryState)r.message=recoveryLabels[r.recoveryState]||r.code;}for(const t of data.timeline||[])t.label=t.step==='generation'?'การสร้าง (เวลาอัปเดตล่าสุด)':t.step;return data;}
   async function rpc(name,args){let timer;try{const method=name==='activity_automation_monitor_workspace_summary'&&args?.p_mode==='production'&&args.p_month>='2026-12'?'activity_automation_manual_summary':name;const result=await Promise.race([client.rpc(method,args),new Promise((_,reject)=>{timer=root.setTimeout(()=>reject({code:'TIMEOUT'}),15000);})]);if(result.error)throw result.error;if(result.data?.version!==1||!result.data?.data)throw {code:'CONTRACT'};result.data.data=normalize(result.data.data,args?.p_month||state.month);return result.data;}finally{root.clearTimeout(timer);}}
-  function clear(){++generation;++detailGeneration;capabilities={};legacyAllowed=false;snapshot=false;cursor=null;cursors=[];$('am-content').replaceChildren();$('am-detail').replaceChildren();$('am-observed').textContent='';$('am-pagination').hidden=true;$('am-account').textContent='ยังไม่ได้เข้าสู่ระบบ';$('am-legacy').hidden=true;if($('am-drawer').open)$('am-drawer').close();}
+  function clear(){++generation;++detailGeneration;capabilities={};legacyAllowed=false;snapshot=false;cursor=null;cursors=[];parkTools();$('am-content').replaceChildren();$('am-detail').replaceChildren();$('am-observed').textContent='';$('am-pagination').hidden=true;$('am-account').textContent='ยังไม่ได้เข้าสู่ระบบ';if($('am-drawer').open)$('am-drawer').close();}
   function outputs(parent,rows){if(!rows?.length){empty(parent,'ยังไม่มีชุดงานในช่วงที่เลือก');return;}const list=n('ul',null,'am-list');for(const o of rows){const li=n('li');li.append(n('strong',o.projectCode||(o.activity==='battle_pass'?battlePassProject(o):null)||o.displayId||labels[o.activity]||'ชุดงาน'));li.append(n('p',(o.campaignStart||'ไม่ทราบวันเริ่ม')+' — '+(o.campaignEnd||'ไม่ทราบวันสิ้นสุด'),'am-muted'));const states=n('p');states.append('การสร้าง: ',badge(o.generationState),' · บรีฟ: ',badge(o.briefState==='pending'?'pending_acceptance':o.briefState),' · มอบหมาย: ',badge(o.assignmentState));li.append(states);if(o.marketingWorkingSheetLinked!=null)li.append(n('p','Working Sheet ใน Marketing Plan: '+(o.marketingWorkingSheetLinked?'เชื่อมกับ CR แล้ว':'ยังยืนยันการเชื่อมไม่ได้')));if(o.briefUrl)li.append(link('เปิด Brief',o.briefUrl));if(o.workingSheetUrl)li.append(link(o.mode==='production'&&o.source==='shared'?'ต้นทาง Working Sheet':'Working Sheet',o.workingSheetUrl));const cr=o.workItemUrl||o.crUrl;if(cr)li.append(link('เปิด '+(o.displayId||'CR')+' เพื่อตรวจบรีฟ',cr));list.append(li);}parent.append(list);}
   function projectRows(rows){
     const result=[],byProject=new Map();
@@ -113,9 +149,15 @@
       if(a.lastRun&&(!previous.lastRun||Date.parse(a.lastRun.eventAt)>Date.parse(previous.lastRun.eventAt)))previous.lastRun=a.lastRun;
       if(done){previous.completedOutput=done.completedOutput||previous.completedOutput;previous.lastRun=done.lastRun?.status==='complete'?done.lastRun:{...previous.lastRun,status:'complete'};}
     }
+    for(const a of result){
+      a.period=a.period||a.lastSourceCheck?.period||a.lastRun?.period||state.month;
+      a.workflowOutput=(a.availableOutputs||[]).find(o=>o.activity===a.key&&
+        (o.projectCode&&o.projectCode===a.projectCode||(a.key==='battle_pass'&&!o.projectCode&&(o.period||o.outputId?.match(/(?:^|:)(20\d{2}-\d{2})$/)?.[1])===a.period)));
+    }
     return result;
   }
-  function isDone(a){return a.manualJob?.status==='complete'||!!a.completedOutput||a.lastSourceCheck?.code==='existing_output_complete'||a.lastRun?.status==='complete';}
+  function isDone(a){return generationComplete(a);}
+  function projectWorkflow(a){return workflow(a,{mode:state.mode,controls:capabilities.battlePassControls===true});}
   function followingMonth(value){const [year,month]=value.split('-').map(Number);return month===12?`${year+1}-01`:`${year}-${String(month+1).padStart(2,'0')}`;}
   function monthActivities(data,period){
     const matches=row=>{if(!row)return false;const identityPeriod=row.period||row.projectCode?.match(/^(\d{2})(\d{2})\d{2}_/)?.slice(1).map((v,i)=>i===0?'20'+v:v).join('-');return identityPeriod===period;};
@@ -126,21 +168,18 @@
       return row;
     });
   }
-  function businessStatus(a){if(isDone(a))return badge('done');if(a.manualJob)return badge(a.manualJob.status==='existing'?'manual_existing':a.manualJob.status);if(a.manualMode)return badge(a.projectCode?'manual_ready':'manual_catalog_needed');const c=a.lastSourceCheck,r=a.lastRun;
-    return badge(r&&(!c||!c.checkedAt||new Date(r.eventAt)>=new Date(c.checkedAt))?r.status:c?.code||c?.status||'unknown');}
+  function businessStatus(a){const flow=projectWorkflow(a),b=n('span',flow.label,'am-badge');b.dataset.tone=['generated'].includes(flow.phase)?'good':['failed','blocked','unavailable'].includes(flow.phase)?'bad':['held','uncertain','confirmation','sheet','review','assignment'].includes(flow.phase)?'warn':'';return b;}
   Object.assign(statuses,{confirmation_stale:'ข้อมูลเปลี่ยน ต้องยืนยัน Loot ใหม่',confirmation_invalid:'ข้อมูลยืนยันไม่สมบูรณ์'});
-  function nextAction(a){if(isDone(a))return 'ชุดงานครบแล้ว';if(a.manualJob?.status==='existing')return 'ตรวจงานเดิมก่อนสร้างต่อ';if(a.manualMode&&!a.projectCode)return 'อัปเดตรายการกิจกรรม';if(a.manualMode)return manualBusy(a)?'กำลังสร้างงาน':a.manualJob?.status==='held'?'ตรวจงานเดิมก่อนสร้างต่อ':'ตรวจข้อมูลและกดสร้างเมื่อพร้อม';const c=a.lastSourceCheck,r=a.lastRun;const reason=r?.code&&(!c?.checkedAt||Date.parse(r.eventAt)>=Date.parse(c.checkedAt))?r.code:c?.code||r?.code;
-    if(reason==='source_identity_invalid')return 'ตรวจชื่อกิจกรรมและ Tier ใน SSoT';
-    if(reason==='source_identity_changed')return 'ตรวจงานเดิมที่ใช้วันเริ่มหรือ Working Sheet เดียวกัน';
-    if(reason==='source_period_invalid')return 'ตรวจเดือน วันเริ่ม และรหัสโครงการให้ตรงกัน';
-    if(reason==='confirmation_stale')return 'ข้อมูลเปลี่ยนแล้ว กรุณาตรวจและยืนยัน Loot ใหม่';
-    if(reason==='source_ambiguous')return 'ตรวจรหัสโครงการซ้ำใน SSoT';
-    if(a.lastRun?.status==='held')return 'ตรวจเหตุการณ์ที่พักไว้';
-    if(c?.workingSheetLinked===false)return 'ระบุลิงก์ Working Sheet';if(c?.confirmed===false)return 'ตรวจและยืนยัน Loot';return c?.sourceReady===true?'รอระบบสร้างงาน':'ตรวจข้อมูลต้นทาง';}
+  function nextAction(a){return projectWorkflow(a).reason;}
+  function projectAction(a){const flow=projectWorkflow(a),o=a.workflowOutput||a.completedOutput||a.existingOutput;
+    if(flow.action==='review'&&safeUrl(o?.crUrl||o?.workItemUrl))return link(flow.cta,o.crUrl||o.workItemUrl);
+    return button(flow.cta,()=>flow.action==='refresh'?refreshProject(a):flow.action==='catalog'?catalogRefresh(a.period||state.month):activityDetail(a));
+  }
+  async function refreshProject(a){const token=detailGeneration;const loaded=await load(false);if(loaded&&token===detailGeneration&&$('am-drawer').open){const updated=lastProjects.find(row=>row.key===a.key&&row.projectCode===a.projectCode&&row.period===a.period);if(updated)activityDetail(updated);}}
   function activities(parent,rows){
     table(parent,['กิจกรรม / โครงการ','สถานะงาน','ตรวจต้นทางล่าสุด','สิ่งที่ต้องทำ'],projectRows(rows),a=>{
       const name=n('div');name.append(n('strong',a.projectCode||a.label||labels[a.key]));if(a.projectCode)name.append(n('small',a.label||labels[a.key]));
-      const action=n('div',null,'am-row-actions');action.append(n('small',nextAction(a)));if(state.mode==='production'&&a.manualMode&&capabilities.battlePassControls&&a.projectCode&&!isDone(a)){const running=manualBusy(a);const create=button(running?'กำลังสร้างงาน…':a.manualJob?'สร้างต่อ':'สร้างงาน',()=>activityDetail(a));create.disabled=running||['held','existing'].includes(a.manualJob?.status);action.append(create);if(running)action.append(button('ตรวจผล',()=>load(false)));}action.append(button('ดูรายละเอียด',()=>activityDetail(a)));
+       const action=n('div',null,'am-row-actions'),flow=projectWorkflow(a);action.append(n('small',nextAction(a)),projectAction(a));if(flow.action!=='details')action.append(button('รายละเอียดและหลักฐาน',()=>activityDetail(a)));
       const evidence=isDone(a)?n('span','—'):n('details',null,'am-source-evidence');if(!isDone(a))evidence.append(n('summary',time(a.lastSourceCheck?.sourceCheckedAt||a.lastSourceCheck?.checkedAt)),sourceStatus(a));
       return [name,businessStatus(a),evidence,action];
     });
@@ -148,8 +187,6 @@
     if(historical.length){const history=n('details');history.append(n('summary','ประวัติต้นทางที่ไม่อยู่ในรอบตรวจล่าสุด ('+historical.length+')'));table(history,['โครงการเดิม','ผลตรวจเดิม','เวลา'],historical,p=>[p.projectCode,status(p.lastSourceCheck?.code),time(p.lastSourceCheck?.checkedAt)]);parent.append(history);}
   }
   function technical(parent,title='ข้อมูลเทคนิค'){const d=n('details',null,'am-technical');d.append(n('summary',title));const body=n('div');d.append(body);parent.append(d);return body;}
-  function tools(){closeDrawer();state.view='tools';state.activity='battle_pass';url();sync();load();}
-  function manualBusy(a){const j=a.manualJob;if(!['queued','running'].includes(j?.status))return false;const at=Date.parse(j.updatedAt);return !Number.isFinite(at)||Date.now()-at<(j.status==='queued'?2:10)*60*1000;}
   function scanCoverage(parent,data){
     if(state.mode==='production'&&data.manualMode){const manual=panel('สร้างงานเมื่อพร้อม');manual.append(n('p','กิจกรรมเดือนนี้เริ่มสร้างเมื่อกดปุ่มสร้างงาน · การแจ้งเตือนยังใช้ขั้นตอนเดิม'));parent.append(manual);return;}
     const box=panel('ระบบตรวจอัตโนมัติ');const scans=data.scanners||[];
@@ -169,21 +206,34 @@
     box.append(n('small','รอ Confirm Loot เป็นความพร้อมของต้นทาง ไม่ใช่ระบบตรวจขัดข้อง · เวลารอบตรวจครอบคลุมหลายเดือน','am-muted'));parent.append(box);
   }
   function dl(parent,items){const list=n('dl');for(const [label,value]of items){list.append(n('dt',label),n('dd',value??'ไม่มีข้อมูล'));}parent.append(list);}
-  function openDrawer(title){++detailGeneration;opener=doc.activeElement;$('am-drawer-title').textContent=title;$('am-detail').replaceChildren();if(!$('am-drawer').open)$('am-drawer').showModal();$('am-close').focus();}
+  function parkTools(){const legacy=$('am-legacy');if(legacy){legacy.hidden=true;$('am-admin-parking')?.append(legacy);}}
+  function openDrawer(title){++detailGeneration;if(!$('am-drawer').open)opener=doc.activeElement;parkTools();$('am-drawer-title').textContent=title;$('am-detail').replaceChildren();if(!$('am-drawer').open)$('am-drawer').showModal();$('am-close').focus();}
+  function adminTools(parent,a,expanded=false){
+    if(a.key!=='battle_pass'||state.mode!=='production'||!(capabilities.battlePassRead||legacyAllowed))return;
+    const section=n('details',null,'am-admin-tools'),heading=n('summary','เครื่องมือผู้ดูแล · Battle Pass');
+    section.append(heading,n('p','บริบทโครงการ: '+(a.projectCode||'Battle Pass')+' · เดือน '+(a.period||state.month),'am-admin-context'),
+      n('p','เครื่องมือเดิมด้านล่างแสดงข้อมูลหลายรอบ ไม่ได้กรองตามเดือนด้านบน · ตรวจเดือนและเวลาที่แนบกับแต่ละผลก่อนสั่งงาน โดยเฉพาะผลตรวจความพร้อมเก่า','am-banner'));
+    const legacy=$('am-legacy');section.append(legacy);legacy.hidden=false;section.open=expanded;parent.append(section);
+  }
+  function openTools(a={key:'battle_pass',period:state.month}){openDrawer('เครื่องมือผู้ดูแล · Battle Pass');if(state.mode==='production'&&(capabilities.battlePassRead||legacyAllowed))adminTools($('am-detail'),a,true);else $('am-detail').append(n('p','ไม่มีสิทธิ์ใช้เครื่องมือ Battle Pass ในสภาพแวดล้อมนี้'));}
   function activityDetail(a){
     openDrawer(a.projectCode||a.label||labels[a.key||a.activity]||'กิจกรรม');
     if(a.manualJob?.code)$('am-detail').append(n('p','เหตุที่หยุด: '+issueMessage(a.manualJob),'am-banner'));
-    const main=$('am-detail');main.append(currentStatus(a),n('p',nextAction(a)));
+    const main=$('am-detail'),flow=projectWorkflow(a);main.append(n('p','กิจกรรม '+(a.label||labels[a.key||a.activity])+' · เดือน '+(a.period||state.month),'am-muted'),currentStatus(a));
     main.append(sourceStatus(a));
     const checkedAt=a.lastSourceCheck?.checkedAt||a.lastSourceCheck?.sourceCheckedAt;
     if(checkedAt&&Date.now()-Date.parse(checkedAt)>65*60*1000)main.append(n('p','ผลตรวจนี้เก่ากว่า 65 นาที ไม่ใช่สถานะต้นทางล่าสุด','am-muted'));
-    if(state.mode==='production'&&capabilities.battlePassControls&&!isDone(a))confirmationPanel(main,a,detailGeneration);
+    if(flow.action==='confirm')confirmationPanel(main,a,detailGeneration);
+    if(flow.action==='refresh')main.append(button(flow.cta,()=>refreshProject(a)));
+    if(flow.action==='catalog')main.append(button(flow.cta,()=>catalogRefresh(a.period||state.month)));
+    if(flow.action==='review')main.append(projectAction(a));
+    if(flow.phase==='failed'&&a.manualMode&&state.mode==='production'&&capabilities.battlePassControls){const retry=button('ตรวจข้อมูลก่อนสร้างต่อ',()=>{retry.disabled=true;confirmationPanel(main,a,detailGeneration);});main.append(retry);}
     if(a.existingOutput){const out=a.existingOutput;main.append(link('เปิด CR '+(out.displayId||''),out.crUrl),link('เปิด Brief',out.briefUrl));}
     if(a.completedOutput)main.append(link('เปิด CR เพื่อตรวจบรีฟ',a.completedOutput.crUrl||a.completedOutput.workItemUrl));
     if(a.lastRun?.entityType==='production_run')main.append(button('ดูรัน production ล่าสุด',()=>detail(a.lastRun)));
-    if(a.key==='battle_pass'&&capabilities.battlePassRead&&state.mode==='production')main.append(button('จัดการ Battle Pass',tools));
     const tech=technical(main);dl(tech,[['ระบบ',a.sourceSystem||a.source],['Runner',a.runnerEnabled==null?'อ่านสถานะไม่ได้':a.runnerEnabled?'เปิด':'ปิด'],['Scheduler',scheduleText(a)],['SeaTalk notifier',a.notifierEnabled==null?'อ่านสถานะไม่ได้':a.notifierEnabled?'เปิด':'ปิด'],['ขอบเขต',a.configurationScope==='shared'?'ใช้ร่วมกับ 4 กิจกรรม':'เฉพาะ Battle Pass']]);
     if(['membership','conqueror_crate','golden_spin','topup_promotion'].includes(a.key||a.activity))integrationPanel(a.key||a.activity,state.mode,detailGeneration,tech);
+    adminTools(main,a);
   }
   function confirmationPanel(parent,a,token){
     const manual=a.manualMode===true;const box=panel(manual?'ตรวจข้อมูลและสร้างงาน':'ยืนยัน Loot เพื่อเข้าคิวสร้างงาน');box.classList.add('am-confirmation');box.setAttribute('aria-live','polite');
@@ -203,7 +253,7 @@
         if(token!==detailGeneration)return;
         const d=response.data;
         if(response.error||d?.error){let error=d?.error;try{error=error||(await response.error?.context?.json())?.error;}catch{}throw Error(error||'confirmation_unavailable');}
-        if(save){if(d?.status!==(manual?'accepted':'confirmed'))throw Error('confirmation_unavailable');preview=null;previewBox.replaceChildren();result.textContent=manual?'รับคำขอสร้างงานแล้ว กดตรวจผลหรือรีเฟรชเพื่อดูสถานะล่าสุด':'ยืนยันแล้ว ระบบจะตรวจข้อมูลซ้ำและสร้างงานในรอบอัตโนมัติถัดไป หากระบบพักอยู่ งานจะรอจนเปิดใช้งาน';await load(false);}
+        if(save){if(d?.status!==(manual?'accepted':'confirmed'))throw Error('confirmation_unavailable');preview=null;previewBox.replaceChildren();result.textContent=manual?'รับคำขอสร้างงานแล้ว กดตรวจผลเพื่อดูสถานะล่าสุด':'ยืนยันแล้ว ระบบจะตรวจข้อมูลซ้ำและสร้างงานในรอบอัตโนมัติถัดไป หากระบบพักอยู่ งานจะรอจนเปิดใช้งาน';if(manual)box.replaceChildren(n('h2','รับคำขอแล้ว'),result,button('ตรวจผล',()=>refreshProject({...a,projectCode:code.value.trim(),period})));await load(false);}
         else {if(d?.status!=='preview'||!/^[a-f0-9]{64}$/.test(d.hash)||d.projectCode!==code.value.trim()||d.period!==period)throw Error('confirmation_unavailable');preview=d;previewBox.replaceChildren(n('p','โครงการ: '+d.projectCode+' · เดือน: '+d.period),link('เปิด Working Sheet เพื่อตรวจ Loot',d.workingSheetUrl));result.textContent='ตรวจข้อมูลผ่านแล้ว กรุณาตรวจ Loot ในลิงก์ก่อนกดยืนยัน';}
       }catch(e){if(token===detailGeneration){preview=null;previewBox.replaceChildren();const messages={production_disabled:'ระบบสร้างงานถูกพักอยู่ กรุณาติดต่อผู้ดูแล',manual_dispatch_unavailable:'ยังเริ่มสร้างงานไม่ได้ กรุณาติดต่อผู้ดูแล',loot_stage_invalid:'ข้อมูลไอเทมใน Loot ยังไม่ครบ กรุณาตรวจ Item ID และจำนวน',manual_output_requires_review:'พบงานเดิมที่ต้องตรวจสอบก่อนสร้างต่อ',confirmation_stale:'ข้อมูลเปลี่ยนหลังตรวจ กรุณาตรวจใหม่ก่อนยืนยัน',confirmation_access_denied:'บัญชีนี้ไม่มีสิทธิ์ยืนยัน Loot',working_sheet_invalid:'กรุณาใส่ลิงก์ Working Sheet ที่ถูกต้อง',source_ambiguous:'ไม่พบรหัสโครงการที่ไม่ซ้ำ กรุณาตรวจ SSoT',source_identity_invalid:'ชื่อกิจกรรมหรือ Tier ไม่ตรงรูปแบบ',source_period_invalid:'เดือนหรือวันเริ่มไม่ตรงกับโครงการ'};result.textContent=messages[e.message]||'ยังยืนยันผลไม่ได้ กรุณาตรวจข้อมูลอีกครั้งก่อนลองยืนยันซ้ำ';}}
       finally{busy=false;if(token===detailGeneration){inspect.disabled=code.disabled=sheet.disabled=false;confirm.disabled=!preview;}}
@@ -249,27 +299,44 @@
     }
   }
   function issueMessage(r){const messages={loot_stage_invalid:'ข้อมูลไอเทมใน Loot ยังไม่ครบ',manual_output_requires_review:'ต้องตรวจว่า Working Sheet เชื่อม CR และ Brief ของโครงการนี้ถูกต้อง',validation_failed:'ข้อมูลต้นทางไม่ผ่านเงื่อนไข ต้องตรวจวันที่และรอบกิจกรรม',loot_not_confirmed:'Loot ยังไม่ยืนยัน',source_identity_invalid:'ชื่อหรือวันที่ต้นทางไม่ตรงกับโครงการ'};return messages[r.code]||r.message||(statuses[r.code]?status(r.code):status(r.status));}
+  function actionQueue(parent,data){
+    const queue=panel('งานที่ต้องทำตอนนี้');queue.classList.add('am-action-queue');const representedOutputs=new Set(),representedIssues=new Set();
+    const rows=projectRows(data.activities||[]).map(a=>({a,flow:projectWorkflow(a)})).filter(x=>x.flow.priority<3).sort((x,y)=>x.flow.priority-y.flow.priority);
+    for(const {a,flow} of rows){
+      const row=n('div',null,'am-task-row'),body=n('div'),actions=n('div',null,'am-row-actions');row.dataset.phase=flow.phase;
+      body.append(n('strong',a.projectCode||a.label||labels[a.key]),n('small',(periodLabel(a.period)||a.period)+' · '+flow.owner),businessStatus(a),n('p',flow.reason));
+      actions.append(projectAction(a));if(flow.action!=='details')actions.append(button('รายละเอียดและหลักฐาน',()=>activityDetail(a)));
+      for(const issue of data.attention||[])if(issue.projectCode&&issue.projectCode===a.projectCode&&(!issue.period||issue.period===a.period)){body.append(n('p',issueMessage(issue),'am-muted'));if(issue.id&&issue.source)actions.append(button('ดูหลักฐานเหตุการณ์',()=>detail(issue)));representedIssues.add(issue);}
+      row.append(body,actions);queue.append(row);if(a.workflowOutput)representedOutputs.add(a.workflowOutput);
+    }
+    for(const issue of data.attention||[]){if(representedIssues.has(issue))continue;const row=n('div',null,'am-task-row'),body=n('div');body.append(n('strong',issue.projectCode||labels[issue.activity]||'ระบบ'),n('p',issueMessage(issue)),n('small','เกิดเมื่อ '+time(issue.eventAt)+' · '+(issue.period||'ยังไม่ผูกเดือน')));if(issue.review?.state==='acknowledged')body.append(n('small','รับทราบแล้ว · '+issue.review.comment));row.append(body);if(issue.id&&issue.source)row.append(button('ดูหลักฐาน',()=>detail(issue)));queue.append(row);}
+    for(const o of data.outputs||[])if(o.briefState==='pending'&&!representedOutputs.has(o)){const row=n('div',null,'am-task-row');row.append(n('strong',o.projectCode||(o.activity==='battle_pass'?battlePassProject(o):null)||o.displayId),n('p','รอ Operation ตรวจบรีฟและยืนยันพร้อมคอมเมนต์'),link('เปิด '+o.displayId+' เพื่อตรวจบรีฟ',o.crUrl||o.workItemUrl));queue.append(row);}
+    if(!queue.querySelector('.am-task-row'))queue.append(n('p',data.cards?.complete===false?'ยังสรุปงานที่ต้องทำไม่ได้ เพราะข้อมูลไม่ครบ':'ไม่มีงานที่ต้องทำในข้อมูลที่อ่านได้ · ตรวจทุกกิจกรรมและเวลาของหลักฐานได้ด้านล่าง','am-muted'));
+    parent.append(queue);
+  }
   function renderSummary(data,next){
     const area=$('am-content');workspaceAvailable=data.issueReviewAvailable===true;if(data.cards?.complete===false)area.append(n('p','ข้อมูลไม่ครบ · แสดงเฉพาะจำนวนและสถานะที่อ่านได้','am-muted'));
-    if(state.view==='tools'){scanCoverage(area,data);area.append(n('p','เครื่องมือด้านล่างมีผลเฉพาะ Battle Pass · เดือนที่ตัวตรวจพบอาจเป็นรอบถัดไป'));if($('am-legacy').hidden)empty(area,'ไม่มีสิทธิ์ใช้เครื่องมือ Battle Pass ในสภาพแวดล้อมนี้');return;}
-    if(state.view==='overview'){
-      const stats=n('p',null,'am-statline');stats.append(n('span','ชุดงานครบ: '+projectRows(data.activities||[]).filter(isDone).length),n('span','สร้างใหม่: '+(data.cards?.outputs??'—')),n('span','บรีฟรอยืนยัน: '+(data.cards?.pendingBriefs??'—')),n('span','เหตุการณ์รอตรวจ: '+(data.cards?.attention??'—')));area.append(stats);
-      const queue=panel('งานที่ต้องทำตอนนี้');for(const o of data.outputs||[])if(o.briefState==='pending'){const row=n('div',null,'am-task-row');row.append(n('strong',o.projectCode||battlePassProject(o)||o.displayId),n('p','รอ Operation ตรวจบรีฟและยืนยันพร้อมคอมเมนต์'),link('เปิด '+o.displayId+' เพื่อตรวจบรีฟ',o.crUrl||o.workItemUrl));queue.append(row);}
-      if(!queue.querySelector('.am-task-row'))empty(queue,'ไม่มีบรีฟที่รอยืนยันในชุดข้อมูลที่อ่านได้');area.append(queue);
-      const attention=panel('เหตุการณ์ที่ยังไม่สรุปผล');for(const a of data.attention||[]){const item=n('div',null,'am-task-row');item.append(n('strong',a.projectCode||labels[a.activity]||a.activity||'ระบบ'),n('p',issueMessage(a)),n('small','เกิดเมื่อ '+time(a.eventAt)+' · '+(a.period||'ยังไม่ผูกเดือน')));
-        if(a.review?.state==='acknowledged')item.append(n('small','รับทราบแล้ว · '+a.review.comment));
-        if(a.id&&a.source)item.append(button('ดูหลักฐาน',()=>detail(a)));attention.append(item);}
-      if(!attention.querySelector('.am-task-row'))empty(attention,'ไม่มีเหตุการณ์เปิดในข้อมูลที่อ่านได้');area.append(attention);
+    if(['overview','tools'].includes(state.view)){
+      actionQueue(area,data);
+      const stats=n('p',null,'am-statline');stats.append(n('span','สร้างชุดงานครบ: '+projectRows(data.activities||[]).filter(isDone).length),n('span','สร้างใหม่: '+(data.cards?.outputs??'—')),n('span','บรีฟรอยืนยัน: '+(data.cards?.pendingBriefs??'—')),n('span','เหตุการณ์รอตรวจ: '+(data.cards?.attention??'—')));area.append(stats);
       if(data.reviewHistory?.length){const history=technical(area,'เหตุการณ์ที่ปิดแล้ว ('+data.reviewHistory.length+')');for(const r of data.reviewHistory)history.append(n('p',(r.projectCode||labels[r.activity])+' · '+(r.review.state==='resolved'?'ตรวจหลักฐานว่าแก้แล้ว':'เก็บเป็นประวัติ')+' · '+r.review.comment));}
     }
     const ap=panel('สถานะกิจกรรม · '+periodLabel(state.month)+(state.month===month()?' (ปัจจุบัน)':''));manualCatalogButton(ap,state.month);activities(ap,(data.activities||[]).map(a=>a.key==='battle_pass'?monthActivities({activities:[a]},state.month)[0]:a));area.append(ap);
-    if(next){const upcoming=panel('สถานะกิจกรรม · '+periodLabel(next.month));manualCatalogButton(upcoming,next.month);upcoming.append(n('p','ผลตรวจต้นทางของเดือนถัดไป · แสดงเฉพาะหลักฐานของเดือนนี้','am-muted'));if(next.result){activities(upcoming,monthActivities(next.result.data,next.month));if(next.result.sources?.some(s=>s.status!=='ok'))upcoming.append(n('p','ข้อมูลเดือนถัดไปไม่ครบ บางระบบอ่านสถานะไม่ได้','am-muted'));}else empty(upcoming,'อ่านผลตรวจเดือนถัดไปไม่ได้ กรุณารีเฟรชเพื่อตรวจซ้ำ');area.append(upcoming);}
+    if(next){const disclosure=n('details',null,'am-upcoming');disclosure.append(n('summary','กิจกรรมเดือนถัดไป · '+periodLabel(next.month)));const upcoming=panel('สถานะกิจกรรม · '+periodLabel(next.month));manualCatalogButton(upcoming,next.month);upcoming.append(n('p','ผลตรวจต้นทางของเดือนถัดไป · แสดงเฉพาะหลักฐานของเดือนนี้','am-muted'));if(next.result){activities(upcoming,monthActivities(next.result.data,next.month));if(next.result.sources?.some(s=>s.status!=='ok'))upcoming.append(n('p','ข้อมูลเดือนถัดไปไม่ครบ บางระบบอ่านสถานะไม่ได้','am-muted'));}else{disclosure.open=true;empty(upcoming,'อ่านผลตรวจเดือนถัดไปไม่ได้ กรุณารีเฟรชเพื่อตรวจซ้ำ');}disclosure.append(upcoming);area.append(disclosure);}
     const op=technical(area,'ชุดงานที่ Automation สร้างในเดือนนี้');outputs(op,data.outputs);scanCoverage(area,data);
+    if(state.view==='tools')openTools(projectRows(data.activities||[]).find(a=>a.key==='battle_pass'));
+  }
+  const catalogBusy=new Set();
+  async function catalogRefresh(period){
+    if(catalogBusy.has(period)||state.mode!=='production'||period<'2026-12'||!capabilities.battlePassControls)return;
+    catalogBusy.add(period);const token=generation;note('กำลังอ่านรายการกิจกรรมเดือน '+period+'…');
+    try{const result=await client.functions.invoke('activity-brief-runner/generation',{body:{action:'catalog',period}});if(result.error||result.data?.status!=='catalog_updated')throw Error();if(token===generation)await load(false);}
+    catch{if(token===generation)note('อัปเดตรายการไม่สำเร็จ กรุณาลองใหม่',true);}finally{catalogBusy.delete(period);}
   }
   function manualCatalogButton(parent,period){
     if(state.mode!=='production'||period<'2026-12'||!capabilities.battlePassControls)return;
     const hint=n('p','กดสร้างงานเมื่อพร้อม · รายการจะอัปเดตเมื่อคุณกดเท่านั้น','am-muted');let busy=false;
-    const refresh=button('อัปเดตรายการกิจกรรม',async()=>{if(busy)return;busy=true;refresh.disabled=true;hint.textContent='กำลังอ่านรายการล่าสุด…';try{const result=await client.functions.invoke('activity-brief-runner/generation',{body:{action:'catalog',period}});if(result.error||result.data?.status!=='catalog_updated')throw Error();await load(false);}catch{hint.textContent='อัปเดตรายการไม่สำเร็จ กรุณาลองใหม่';}finally{busy=false;refresh.disabled=false;}});
+    const refresh=button('อัปเดตรายการกิจกรรม',async()=>{if(busy)return;busy=true;refresh.disabled=true;try{await catalogRefresh(period);}finally{busy=false;refresh.disabled=false;}});
     parent.append(hint,refresh);
   }
   function renderRows(data){
@@ -355,7 +422,7 @@
     }
     await read();
   }
-  function closeDrawer(updateUrl=true){++detailGeneration;if($('am-drawer').open)$('am-drawer').close();if(state.run){state.run='';state.source='';if(updateUrl)url(true);}opener?.focus?.();}
+  function closeDrawer(updateUrl=true){++detailGeneration;parkTools();if($('am-drawer').open)$('am-drawer').close();if(state.run||state.view==='tools'){state.run='';state.source='';if(state.view==='tools')state.view='overview';if(updateUrl)url(true);}if(opener?.isConnected)opener.focus?.();else $('am-refresh').focus();}
   async function load(refreshDetail=true){
     const token=++generation;sync();$('am-pagination').hidden=true;$('am-content').setAttribute('aria-busy','true');if(!snapshot)$('am-content').replaceChildren(n('div',null,'am-skeleton'));note('กำลังอ่านข้อมูล…');
     try{
@@ -370,19 +437,21 @@
       let result;let fallback=false;try{result=await rpc(name,args);}catch(e){if(e.code!=='PGRST202')throw e;fallback=true;const oldArgs={...args};delete oldArgs.p_history;result=await rpc(state.view==='runs'?'activity_automation_monitor_runs':'activity_automation_monitor_summary',oldArgs);}if(token!==generation)return;
       let next=null;if(['overview','activities'].includes(state.view)){const period=followingMonth(args.p_month);next={month:period,result:null};try{next.result=await rpc(fallback?'activity_automation_monitor_summary':name,{...args,p_month:period});}catch{}if(token!==generation)return;}
       $('am-content').replaceChildren();if(['overview','activities','tools'].includes(state.view))renderSummary(result.data,next);else renderRows(result.data);snapshot=true;
+      lastProjects=projectRows(result.data.activities||[]);if(next?.result)lastProjects.push(...projectRows(monthActivities(next.result.data,next.month)));
       $('am-observed').textContent='ข้อมูล ณ '+time(result.observedAt);const missing=(result.sources||[]).filter(s=>s.status!=='ok');
       note(fallback?'กำลังแสดงข้อมูลจาก Monitor รุ่นเดิม · ยังไม่มีข้อมูลรอบตรวจรวมและการปิดเหตุการณ์':missing.length?'ข้อมูลไม่ครบ: '+missing.map(s=>(s.source||'ระบบ')+' — '+(s.status==='forbidden'?'ไม่มีสิทธิ์':'อ่านไม่ได้')).join(' · '):'');
       if(refreshDetail&&state.run&&state.source)detail({id:state.run,source:state.source,entityType:state.entityType},false);
+      return true;
     }catch(e){
       if(token!==generation)return;
       if(e.code==='42501'){clear();$('am-account').textContent=authUser?'เข้าสู่ระบบแล้ว · ไม่มีสิทธิ์':'ยังไม่ได้เข้าสู่ระบบ';note('ไม่มีสิทธิ์อ่านข้อมูล Activity Automation',true);}
       else note(snapshot?'ข้อมูลเดิม — รีเฟรชไม่สำเร็จ กรุณาลองใหม่':e.code==='PGRST202'?'ยังไม่ได้ติดตั้ง Monitor API · ส่วน Battle Pass เดิมยังใช้สิทธิ์เดิม':'อ่านข้อมูลไม่สำเร็จ กรุณารีเฟรชอีกครั้ง',true);
-      if(!snapshot)$('am-content').replaceChildren();
+      if(!snapshot){$('am-content').replaceChildren();if(state.view==='tools'&&legacyAllowed&&state.mode==='production')openTools();}
     }finally{if(token===generation)$('am-content').setAttribute('aria-busy','false');}
   }
-  function change(){state.mode=$('am-mode').value;state.activity=$('am-activity').value;state.month=/^20\d{2}-(0[1-9]|1[0-2])$/.test($('am-month').value)?$('am-month').value:month();state.search=$('am-search').value.slice(0,120);state.status=$('am-status').value.slice(0,80);state.history=$('am-history').value;state.run='';cursor=null;cursors=[];snapshot=false;url();load();}
-  doc.querySelectorAll('[data-am-view]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();state.view=a.dataset.amView;state.run='';cursor=null;cursors=[];snapshot=false;url();load();}));
-  ['am-mode','am-activity','am-month','am-status','am-history'].forEach(id=>$(id).addEventListener('change',change));$('am-search').addEventListener('input',()=>{root.clearTimeout(searchTimer);searchTimer=root.setTimeout(change,300);});$('am-refresh').addEventListener('click',()=>load());$('am-next').addEventListener('click',()=>{cursors.push(cursor);cursor=nextCursor;load();});$('am-prev').addEventListener('click',()=>{cursor=cursors.pop()??null;load();});$('am-close').addEventListener('click',()=>closeDrawer());$('am-drawer').addEventListener('cancel',e=>{e.preventDefault();closeDrawer();});root.addEventListener('popstate',()=>{closeDrawer(false);state=filters(root.location.search);cursor=null;cursors=[];snapshot=false;load();});root.addEventListener('flowmate:bp-monitor-access',event=>{legacyAllowed=event.detail===true;sync();});
+  function change(){closeDrawer();state.mode=$('am-mode').value;state.activity=$('am-activity').value;state.month=/^20\d{2}-(0[1-9]|1[0-2])$/.test($('am-month').value)?$('am-month').value:month();state.search=$('am-search').value.slice(0,120);state.status=$('am-status').value.slice(0,80);state.history=$('am-history').value;state.run='';cursor=null;cursors=[];snapshot=false;url();load();}
+  doc.querySelectorAll('[data-am-view]').forEach(a=>a.addEventListener('click',e=>{e.preventDefault();closeDrawer();state.view=a.dataset.amView;state.run='';cursor=null;cursors=[];snapshot=false;url();load();}));
+  ['am-mode','am-activity','am-month','am-status','am-history'].forEach(id=>$(id).addEventListener('change',change));$('am-search').addEventListener('input',()=>{root.clearTimeout(searchTimer);searchTimer=root.setTimeout(change,300);});$('am-refresh').addEventListener('click',()=>load());$('am-next').addEventListener('click',()=>{cursors.push(cursor);cursor=nextCursor;load();});$('am-prev').addEventListener('click',()=>{cursor=cursors.pop()??null;load();});$('am-close').addEventListener('click',()=>closeDrawer());$('am-drawer').addEventListener('cancel',e=>{e.preventDefault();closeDrawer();});root.addEventListener('popstate',()=>{closeDrawer(false);state=filters(root.location.search);cursor=null;cursors=[];snapshot=false;load();});root.addEventListener('flowmate:bp-monitor-access',event=>{legacyAllowed=event.detail===true;sync();if(legacyAllowed&&state.view==='tools'&&!snapshot&&state.mode==='production')openTools();});
   client?.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){authUser=null;clear();note('กรุณาเข้าสู่ระบบ FlowMate ก่อนดูข้อมูล');}else if(event==='SIGNED_IN'||event==='USER_UPDATED'){if(!session?.user?.id||session.user.id!==authUser){clear();load();}}});
   $('am-menu').addEventListener('click',()=>{const expanded=$('am-menu').getAttribute('aria-expanded')==='true';$('am-menu').setAttribute('aria-expanded',String(!expanded));$('am-nav').classList.toggle('am-nav-open',!expanded);});
   sync();load();
