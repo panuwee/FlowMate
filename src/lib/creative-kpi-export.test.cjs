@@ -25,3 +25,20 @@ test('long context text has room to wrap in the workbook',()=>{
  const height=Number(xml.match(/<row r="2" ht="(\d+)"/)[1]);
  assert.ok(height>100);
 });
+
+test('skill workbook serializes requested quantities as numbers and unverified output as text',()=>{
+ const kpi=require('../../creative-kpi-report.js');
+ const report=kpi.buildReport([{work_item_id:'a',title:'=HYPERLINK("unsafe")',owner_member_id_at_start:'p',owner_name_at_start:'Creative',owner_member_code:'ploy',asset_type:'static-graphic',asset_subtype:'kv-design',asset_count:'2',asset_type_2:'static-graphic',asset_subtype_2:'resize',asset_count_2:null,status:'delivered',created_at:'2026-08-01T00:00:00Z',delivered_at:'2026-08-02T00:00:00Z'}],{year:2026,asOf:'2026-11-11T00:00:00Z'});
+ const context=exporter();
+ for(const sheet of kpi.buildWorkbook(report)){
+  const xml=context.flowmateXlsxWorksheetXml(sheet);
+  assert.doesNotMatch(xml,/<f>/);
+  assert.match(xml,/<\/worksheet>$/);
+  if(sheet.name==='CR Type Skill detail'){
+   assert.match(xml,/<c r="M2" s="4"><v>2<\/v>/);
+   assert.match(xml,/<c r="M3" s="3"\/>/);
+   assert.match(xml,/Not verified \/ not collected/);
+   assert.match(xml,/t="inlineStr"><is><t xml:space="preserve">=HYPERLINK/);
+  }
+ }
+});

@@ -37,7 +37,7 @@ test('short timestamps, missing values and cancellation are separate',()=>{
 });
 test('workbook and screen share the exact report summary and task scope',()=>{
  const r=build([row('a',{ai_tags:['AI']})]);const sheets=kpi.buildWorkbook(r);
- assert.deepEqual(sheets.map(s=>s.name),['Read me','Annual summary','Monthly detail','Task evidence','AI tasks','Selected summary','Timing context','Quality & context','Lead evaluation']);
+ assert.deepEqual(sheets.map(s=>s.name),['Read me','Annual summary','Monthly detail','Task evidence','AI tasks','Selected summary','Timing context','Quality & context','Lead evaluation','CR Type Skill detail','Monthly skill summary','Self evaluation']);
  assert.equal(sheets[1].rows[1][4],r.people[0].annual.deliveredN);
  assert.equal(sheets[4].rows.length,2);assert.equal(sheets[3].rows.length,2);
 });
