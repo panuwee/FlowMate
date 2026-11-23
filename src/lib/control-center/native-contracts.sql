@@ -57,7 +57,7 @@ begin
  from public.marketing_channel_placements cp where cp.content_item_id=m.id
  order by cp.publish_date nulls last,cp.publish_time nulls last,cp.channel limit 1;
  launch:=coalesce(m.source_start_date,launch,p_launch);at_time:=coalesce(m.source_start_time,at_time,p_time);
- if launch is distinct from p_launch or at_time is distinct from p_time then
+ if at_time is distinct from p_time then
   raise exception 'Working Sheet source schedule requires review';
  end if;
  if p_creative is not null and p_inherit_creative then

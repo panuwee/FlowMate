@@ -1,0 +1,167 @@
+Apply from the backend source root with git apply --unidiff-zero.
+Generated bundles are included. Apply the tracked native-contracts.sql change via the release branch.
+
+diff --git a/src/lib/activity-automation/adapters.test.ts b/src/lib/activity-automation/adapters.test.ts
+--- a/src/lib/activity-automation/adapters.test.ts
++++ b/src/lib/activity-automation/adapters.test.ts
+@@ -7 +7 @@
+-export function crateRows(n=4){const rows:Row[]=[];for(let i=1;i<=n;i++)rows.push(row({1:`box${i}`,3:`[25UCL, FAC+8 & No.7+10] กล่องผู้พิชิต (${i}) (ก.ย. 2569)`,10:i*250}),row({3:'Itemid',4:'itemname',7:'$per%',8:'ItemvalueTH'}),row({0:1,3:500000001,4:'First',7:.25,8:10}),row({0:2,3:500000002,4:'Higher',7:.75,8:20}),row({0:'Sum'}));return rows;}
++export function crateRows(n=4){const rows:Row[]=[];for(let i=1;i<=n;i++)rows.push(row({1:`box${i}`,3:`[25UCL, FAC+8 & No.7+10] กล่องผู้พิชิต (${i}) (ก.ย. 2569)`,10:i*250}),row({3:'Itemid',4:'itemname',7:'$per%',8:'ItemvalueTH'}),row({0:1,3:500000001,4:'First',7:.25,8:10}),row({0:2,3:500000002,4:'Higher',7:.75,8:20}),row({0:'Sum'}));return rows;}
+@@ -16,2 +16,2 @@
+- it.each([[4,2,2],[5,3,2],[6,3,3]])('%i boxes split correctly',(n,a,b)=>{const m=conqueror(source(),crateRows(n));expect(m.pages[1].lines.filter(x=>x.includes('กล่องผู้พิชิต'))).toHaveLength(a);expect(m.pages[2].lines.filter(x=>x.includes('กล่องผู้พิชิต'))).toHaveLength(b);expect(m.theme).toBe('25UCL, FAC+8 & No.7+10');expect(m.boxes.map(b=>b.best.id)).toEqual(Array(n).fill('500000001'));expect(m.boxes.map(b=>b.priceFC)).toEqual(Array.from({length:n},(_,i)=>(i+1)*25000));expect(m.creative.count).toBe(5);});
+- it('converts the confirmed Column K example: 500 THB equals 50,000 FC',()=>{const m=conqueror(source(),crateRows());expect(m.boxes[1].priceTHB).toBe(500);expect(m.boxes[1].priceFC).toBe(50000);expect(m.pages[0].lines.join('\n')).toContain('กล่อง 2 / ราคา 50,000 FC');});
++ it.each([[4,2,2],[5,3,2],[6,3,3]])('%i boxes split correctly',(n,a,b)=>{const m=conqueror(source(),crateRows(n));expect(m.pages[1].lines.filter(x=>x.includes('กล่องผู้พิชิต'))).toHaveLength(a);expect(m.pages[2].lines.filter(x=>x.includes('กล่องผู้พิชิต'))).toHaveLength(b);expect(m.theme).toBe('25UCL, FAC+8 & No.7+10');expect(m.boxes.map(b=>b.best.id)).toEqual(Array(n).fill('500000001'));expect(m.boxes.map(b=>b.priceFC)).toEqual(Array.from({length:n},(_,i)=>(i+1)*25000));expect(m.creative.count).toBe(5);});
++ it('converts the confirmed Column K example: 500 THB equals 50,000 FC',()=>{const m=conqueror(source(),crateRows());expect(m.boxes[1].priceTHB).toBe(500);expect(m.boxes[1].priceFC).toBe(50000);expect(m.pages[0].lines.join('\n')).toContain('กล่อง 2 / ราคา 50,000 FC');});
+@@ -21,6 +21,6 @@
+-describe('Conqueror first reward rule',()=>{
+- it('uses No.1 even when rows are reordered or values tie',()=>{const r=crateRows();r[2][8]=20;[r[2],r[3]]=[r[3],r[2]];const m=conqueror(source(),r);expect(m.boxes[0].best.id).toBe('500000001');expect(m.pages[0].lines[2]).toContain('500000001');});
+- it.each(['', '2'])('rejects missing No.1 (%s)',n=>{const r=crateRows();r[2][0]=n;expect(()=>conqueror(source(),r)).toThrow('conqueror_first_reward_invalid');});
+- it('rejects duplicate No.1 rather than guessing',()=>{const r=crateRows();r[3][0]=1;expect(()=>conqueror(source(),r)).toThrow('conqueror_first_reward_invalid');});
+- it.each([undefined,0,-1])('rejects an invalid box price (%s)',price=>{const r=crateRows();r[0][10]=price as any;expect(()=>conqueror(source(),r)).toThrow(price===undefined?'numeric_value_invalid':'conqueror_price_invalid');});
+-});
++describe('Conqueror first reward rule',()=>{
++ it('uses No.1 even when rows are reordered or values tie',()=>{const r=crateRows();r[2][8]=20;[r[2],r[3]]=[r[3],r[2]];const m=conqueror(source(),r);expect(m.boxes[0].best.id).toBe('500000001');expect(m.pages[0].lines[2]).toContain('500000001');});
++ it.each(['', '2'])('rejects missing No.1 (%s)',n=>{const r=crateRows();r[2][0]=n;expect(()=>conqueror(source(),r)).toThrow('conqueror_first_reward_invalid');});
++ it('rejects duplicate No.1 rather than guessing',()=>{const r=crateRows();r[3][0]=1;expect(()=>conqueror(source(),r)).toThrow('conqueror_first_reward_invalid');});
++ it.each([undefined,0,-1])('rejects an invalid box price (%s)',price=>{const r=crateRows();r[0][10]=price as any;expect(()=>conqueror(source(),r)).toThrow(price===undefined?'numeric_value_invalid':'conqueror_price_invalid');});
++});
+@@ -46 +46,2 @@
+- it('rejects missing S2, duplicated10 and date mismatch',()=>{const r=rows();r[6]=[];expect(()=>golden(s,r)).toThrow('golden_item_missing');const d=rows();d.splice(12,0,d[11]);expect(()=>golden(s,d)).toThrow('golden_item_missing');expect(()=>golden({...s,endDate:'2026-09-29'},rows())).toThrow('loot_dates_mismatch');});
++ it('accepts a different Golden Spin end date',()=>{expect(golden({...s,endDate:'2026-09-29'},rows()).items).toHaveLength(3);});
++ it('rejects missing S2 and duplicate hurdle 10',()=>{const r=rows();r[6]=[];expect(()=>golden(s,r)).toThrow('golden_item_missing');const d=rows();d.splice(12,0,d[11]);expect(()=>golden(s,d)).toThrow('golden_item_missing');});
+@@ -50,0 +52,5 @@
++ it('accepts separate website, top-up and campaign dates',()=>{
++  const r=rows();
++  r[1][2]='2026-09-08';r[2][2]='2026-09-20';r[3][2]='2026-09-29';
++  expect(membership(source('membership'),r).boxes).toHaveLength(6);
++ });
+diff --git a/src/lib/activity-automation/adapters.ts b/src/lib/activity-automation/adapters.ts
+--- a/src/lib/activity-automation/adapters.ts
++++ b/src/lib/activity-automation/adapters.ts
+@@ -1 +1 @@
+-import {sourceDate,sourceTime} from '../battle-pass-source';
++import {sourceTime} from '../battle-pass-source';
+@@ -14 +13,0 @@
+-function checkDates(rows:Row[],s:Source,start:[number,number],end:[number,number]){requireValue(sourceDate(rows[start[0]]?.[start[1]])===s.startDate&&sourceDate(rows[end[0]]?.[end[1]])===s.endDate,'loot_dates_mismatch');}
+@@ -32,3 +31,3 @@
+-  const id=str(rows[i][1]);requireValue(id&&!boxIds.has(id),'box_id_duplicate',`Random Box!B${i+1}`);boxIds.add(id);
+-  const priceTHB=number(rows[i][10],`Random Box!K${i+1}`);requireValue(priceTHB>0,'conqueror_price_invalid',`Random Box!K${i+1}`);
+-  const next=all.find(n=>n>i)??rows.length;const items=reward(rows,i,next,{id:3,name:4,p:7,value:8,ordinal:0},'Random Box');
++  const id=str(rows[i][1]);requireValue(id&&!boxIds.has(id),'box_id_duplicate',`Random Box!B${i+1}`);boxIds.add(id);
++  const priceTHB=number(rows[i][10],`Random Box!K${i+1}`);requireValue(priceTHB>0,'conqueror_price_invalid',`Random Box!K${i+1}`);
++  const next=all.find(n=>n>i)??rows.length;const items=reward(rows,i,next,{id:3,name:4,p:7,value:8,ordinal:0},'Random Box');
+@@ -36 +35 @@
+-  return {name,number:Number(match[2]),theme:match[1].trim(),items,best:featured[0],priceTHB,priceFC:priceTHB*100,cell:`Random Box!D${i+1}`};
++  return {name,number:Number(match[2]),theme:match[1].trim(),items,best:featured[0],priceTHB,priceFC:priceTHB*100,cell:`Random Box!D${i+1}`};
+@@ -40 +39 @@
+- m.pages=[{role:'overview',title:`กล่องผู้พิชิต — ${m.theme}`,lines:[dateLine(s),'การ์ดที่ดีที่สุดของแต่ละกล่อง',...m.boxes.map(b=>`กล่อง ${b.number} / ราคา ${b.priceFC!.toLocaleString('en-US')} FC: ${itemLine({...b.best,probability:undefined})}`)]},
++ m.pages=[{role:'overview',title:`กล่องผู้พิชิต — ${m.theme}`,lines:[dateLine(s),'การ์ดที่ดีที่สุดของแต่ละกล่อง',...m.boxes.map(b=>`กล่อง ${b.number} / ราคา ${b.priceFC!.toLocaleString('en-US')} FC: ${itemLine({...b.best,probability:undefined})}`)]},
+@@ -43 +42 @@
+- m.evidence=m.boxes.flatMap(b=>[b.cell,`Random Box!K${b.cell.replace(/^Random Box!D/,'')}`,...b.items.map(x=>x.cell)]);return m;
++ m.evidence=m.boxes.flatMap(b=>[b.cell,`Random Box!K${b.cell.replace(/^Random Box!D/,'')}`,...b.items.map(x=>x.cell)]);return m;
+@@ -48 +47 @@
+- checkDates(rows,s,[2,2],[3,2]);requireValue(sourceDate(rows[1]?.[2])===s.startDate&&sourceTime(rows[1]?.[3])===s.startTime,'membership_website_mismatch');
++ requireValue(sourceTime(rows[1]?.[3])===s.startTime,'membership_website_mismatch');
+@@ -64 +63 @@
+- const m=base(s);checkDates(rows,s,[2,4],[3,4]);const theme=/^(.+?)\s*\+\d+(?:\s*\([^()]+\))?$/.exec(s.themeRaw);requireValue(theme?.[1]?.trim(),'golden_theme_requires_mapping');m.theme=theme![1].trim();
++ const m=base(s);const theme=/^(.+?)\s*\+\d+(?:\s*\([^()]+\))?$/.exec(s.themeRaw);requireValue(theme?.[1]?.trim(),'golden_theme_requires_mapping');m.theme=theme![1].trim();
+@@ -80 +79 @@
+- const m=base(s);const format=Number(rows[0]?.[5]);requireValue(format===2||format===3,'topup_format_invalid','5.Promotion!F1');checkDates(rows,s,[2,0],[2,1]);
++ const m=base(s);const format=Number(rows[0]?.[5]);requireValue(format===2||format===3,'topup_format_invalid','5.Promotion!F1');
+diff --git a/src/lib/activity-automation/confirmation-source.test.ts b/src/lib/activity-automation/confirmation-source.test.ts
+--- a/src/lib/activity-automation/confirmation-source.test.ts
++++ b/src/lib/activity-automation/confirmation-source.test.ts
+@@ -34 +34 @@
+-it('preview still enforces dates and full Loot validation',async()=>{const h=fixture();h.loot[2][1]='2026-11-29';await expect(h.read({preview:true,workingSheetUrl:'https://docs.google.com/spreadsheets/d/nov-loot/edit'})).rejects.toThrow('loot_dates_mismatch');});
++it('previews Topup with a different Loot end date',async()=>{const h=fixture();h.loot[2][1]='2026-11-29';await expect(h.read({preview:true,workingSheetUrl:'https://docs.google.com/spreadsheets/d/nov-loot/edit'})).resolves.toMatchObject({model:{source:{endDate:'2026-11-30'}}});});
+diff --git a/src/lib/activity-automation/production-finalizer.test.ts b/src/lib/activity-automation/production-finalizer.test.ts
+--- a/src/lib/activity-automation/production-finalizer.test.ts
++++ b/src/lib/activity-automation/production-finalizer.test.ts
+@@ -358 +358 @@
+-it.each(['duplicate','brief_link','wrong_campaign','source_date','other_hold'])('does not adopt an existing Working Sheet when %s requires review',async issue=>{
++it.each(['duplicate','brief_link','wrong_campaign','source_time','other_hold'])('does not adopt an existing Working Sheet when %s requires review',async issue=>{
+@@ -363 +363 @@
+- if(issue==='source_date')await db.exec("update marketing_content_items set source_start_date='2026-10-20'");
++ if(issue==='source_time')await db.exec("update marketing_content_items set source_start_time='12:00'");
+@@ -422 +422 @@
+- await db.query("insert into marketing_channel_placements values($1,'instagram','2026-10-09','11:00','planned','Keep placement')",[uid(90)]);
++ await db.query("insert into marketing_channel_placements values($1,'instagram','2026-10-10','11:00','planned','Keep placement')",[uid(90)]);
+@@ -424 +424 @@
+- expect(await q('select to_jsonb(w) v from work_items w')).toMatchObject({title:'[9 Oct 2026][Operations][Revenue][Membership (Oct 2026)]',campaign_name:'Revenue',description:'Human album context'});
++ expect(await q('select to_jsonb(w) v from work_items w')).toMatchObject({title:'[10 Oct 2026][Operations][Revenue][Membership (Oct 2026)]',campaign_name:'Revenue',description:'Human album context'});
+@@ -431 +431 @@
+- await db.query('insert into marketing_channel_placements values($1,$2,$3,\'11:00\',\'planned\',\'Keep placement\')',[uid(90),conflict==='channel'?'unsupported':'facebook',conflict==='schedule'?'2026-10-10':'2026-10-09']);
++ await db.query('insert into marketing_channel_placements values($1,$2,\'2026-10-09\',$3,\'planned\',\'Keep placement\')',[uid(90),conflict==='channel'?'unsupported':'facebook',conflict==='schedule'?'12:00':'11:00']);
+diff --git a/src/lib/battle-pass-inspect.test.ts b/src/lib/battle-pass-inspect.test.ts
+--- a/src/lib/battle-pass-inspect.test.ts
++++ b/src/lib/battle-pass-inspect.test.ts
+@@ -95 +95 @@
+-  it('rejects conflicting SSoT and Loot dates',async()=>{const f=fixture(true);f.lootRows[3][9]=46218;expect((await(await f.run('valid','POST','jul-preview')).json()).state).toBe('loot_dates_mismatch');});
++  it('accepts different SSoT and Loot dates',async()=>{const f=fixture(true);f.lootRows[3][9]=46218;expect((await(await f.run('valid','POST','jul-preview')).json()).state).toBe('jul_draft_preview');});
+diff --git a/supabase/activity_automation_creative_inheritance.sql b/supabase/activity_automation_creative_inheritance.sql
+--- a/supabase/activity_automation_creative_inheritance.sql
++++ b/supabase/activity_automation_creative_inheritance.sql
+@@ -28 +28 @@
+- if launch is distinct from p_launch or at_time is distinct from p_time then
++ if at_time is distinct from p_time then
+diff --git a/supabase/activity_automation_creative_inheritance_helpers.sql b/supabase/activity_automation_creative_inheritance_helpers.sql
+--- a/supabase/activity_automation_creative_inheritance_helpers.sql
++++ b/supabase/activity_automation_creative_inheritance_helpers.sql
+@@ -27 +27 @@
+- if launch is distinct from p_launch or at_time is distinct from p_time then
++ if at_time is distinct from p_time then
+diff --git a/supabase/activity_automation_production_reuse_working_sheet.sql b/supabase/activity_automation_production_reuse_working_sheet.sql
+--- a/supabase/activity_automation_production_reuse_working_sheet.sql
++++ b/supabase/activity_automation_production_reuse_working_sheet.sql
+@@ -29 +28,0 @@
+- and (m.source_start_date is null or m.source_start_date=(src->>'startDate')::date)
+diff --git a/supabase/battle_pass_creative_inheritance.sql b/supabase/battle_pass_creative_inheritance.sql
+--- a/supabase/battle_pass_creative_inheritance.sql
++++ b/supabase/battle_pass_creative_inheritance.sql
+@@ -65 +64,0 @@
+-  and (m.source_start_date is null or m.source_start_date=d)
+diff --git a/supabase/battle_pass_production_reuse_working_sheet.sql b/supabase/battle_pass_production_reuse_working_sheet.sql
+--- a/supabase/battle_pass_production_reuse_working_sheet.sql
++++ b/supabase/battle_pass_production_reuse_working_sheet.sql
+@@ -28 +27,0 @@
+-  and (m.source_start_date is null or m.source_start_date=d)
+diff --git a/supabase/functions/activity-brief-runner/deploy.js b/supabase/functions/activity-brief-runner/deploy.js
+--- a/supabase/functions/activity-brief-runner/deploy.js
++++ b/supabase/functions/activity-brief-runner/deploy.js
+@@ -149,3 +148,0 @@
+-function checkDates(rows, s, start, end) {
+-  requireValue(sourceDate(rows[start[0]]?.[start[1]]) === s.startDate && sourceDate(rows[end[0]]?.[end[1]]) === s.endDate, "loot_dates_mismatch");
+-}
+@@ -216,2 +213 @@
+-  checkDates(rows, s, [2, 2], [3, 2]);
+-  requireValue(sourceDate(rows[1]?.[2]) === s.startDate && sourceTime(rows[1]?.[3]) === s.startTime, "membership_website_mismatch");
++  requireValue(sourceTime(rows[1]?.[3]) === s.startTime, "membership_website_mismatch");
+@@ -271 +266,0 @@
+-  checkDates(rows, s, [2, 4], [3, 4]);
+@@ -324 +318,0 @@
+-  checkDates(rows, s, [2, 0], [2, 1]);
+@@ -1037 +1031 @@
+-  if (sourceDate(raw.rows[3]?.[9]) !== startDate || sourceTime(raw.rows[3]?.[10]) !== startTime || sourceDate(raw.rows[4]?.[9]) !== endDate) throw Error("loot_dates_mismatch");
++  if (sourceTime(raw.rows[3]?.[10]) !== startTime) throw Error("loot_dates_mismatch");
+diff --git a/supabase/functions/battle-pass-google-oauth/deploy.js b/supabase/functions/battle-pass-google-oauth/deploy.js
+--- a/supabase/functions/battle-pass-google-oauth/deploy.js
++++ b/supabase/functions/battle-pass-google-oauth/deploy.js
+@@ -391 +391 @@
+-    if (sourceDate(lootRows[3]?.[9]) !== startDate || sourceTime(lootRows[3]?.[10]) !== startTime || sourceDate(lootRows[4]?.[9]) !== endDate) return { state: "loot_dates_mismatch" };
++    if (sourceTime(lootRows[3]?.[10]) !== startTime) return { state: "loot_dates_mismatch" };
+@@ -712 +712 @@
+-  if (sourceDate(raw.rows[3]?.[9]) !== startDate || sourceTime(raw.rows[3]?.[10]) !== startTime || sourceDate(raw.rows[4]?.[9]) !== endDate) throw Error("loot_dates_mismatch");
++  if (sourceTime(raw.rows[3]?.[10]) !== startTime) throw Error("loot_dates_mismatch");
+diff --git a/supabase/functions/battle-pass-google-oauth/inspect.ts b/supabase/functions/battle-pass-google-oauth/inspect.ts
+--- a/supabase/functions/battle-pass-google-oauth/inspect.ts
++++ b/supabase/functions/battle-pass-google-oauth/inspect.ts
+@@ -111,2 +111 @@
+-    if (sourceDate(lootRows[3]?.[9]) !== startDate || sourceTime(lootRows[3]?.[10]) !== startTime
+-      || sourceDate(lootRows[4]?.[9]) !== endDate) return {state:'loot_dates_mismatch'};
++    if (sourceTime(lootRows[3]?.[10]) !== startTime) return {state:'loot_dates_mismatch'};
+diff --git a/supabase/functions/battle-pass-google-oauth/production-google.ts b/supabase/functions/battle-pass-google-oauth/production-google.ts
+--- a/supabase/functions/battle-pass-google-oauth/production-google.ts
++++ b/supabase/functions/battle-pass-google-oauth/production-google.ts
+@@ -98 +98 @@
+-  if(sourceDate(raw.rows[3]?.[9])!==startDate||sourceTime(raw.rows[3]?.[10])!==startTime||sourceDate(raw.rows[4]?.[9])!==endDate)throw Error('loot_dates_mismatch');
++  if(sourceTime(raw.rows[3]?.[10])!==startTime)throw Error('loot_dates_mismatch');
