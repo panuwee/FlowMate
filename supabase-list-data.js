@@ -503,6 +503,10 @@ async function loadFlowMateWorkItemsForListUncached(options = {}) {
   const workType = isTaskAssignProduct ? "quick_task" : "creative_request";
   const activeTeam = window.getFlowMateActiveTeam ? window.getFlowMateActiveTeam() : "";
   const isGdveCreativeWorkspace = activeTeam === "gdve";
+  const requiresOwningTeam = isTaskAssignProduct && options.allTaskTeams !== true && options.profile !== "my-work";
+  if (requiresOwningTeam && !activeTeam) {
+    return { data: null, error: { message: "Select a team workspace to load its tasks." } };
+  }
   const actorUserId = window.FLOWMATE_CURRENT_USER?.id;
   const actorMemberId = window.FLOWMATE_CURRENT_USER?.team_member_id;
   const ownerFilters = options.profile === "my-work" ? [
@@ -515,12 +519,20 @@ async function loadFlowMateWorkItemsForListUncached(options = {}) {
     .is("archived_at", null)
     .eq("work_type", workType)
     .order("due_date", { ascending: true });
-  if (!isTaskAssignProduct && !isGdveCreativeWorkspace && activeTeam) {
+  if (requiresOwningTeam || (!isTaskAssignProduct && !isGdveCreativeWorkspace && activeTeam)) {
     query = query.eq("owning_team_code", activeTeam);
   }
-  if (isTaskAssignProduct && activeTeam && !options.allTaskTeams && options.profile !== "my-work") query = query.eq("owning_team_code", activeTeam);
   if (ownerFilters.length) query = query.or(ownerFilters.join(","));
   let result = await query;
+
+  if (requiresOwningTeam && result.error) {
+    const missingTeamColumn = ["42703", "PGRST204"].includes(result.error.code)
+      && /\bowning_team_code\b/i.test(result.error.message || "");
+    if (missingTeamColumn) {
+      return { data: null, error: { ...result.error, message: "The team workspace is unavailable. Please contact your administrator." } };
+    }
+    return result;
+  }
 
   // Allow the frontend bundle to be uploaded before the SQL migration.
   if (result.error && /owning_team_code|column/i.test(result.error.message || "")) {
